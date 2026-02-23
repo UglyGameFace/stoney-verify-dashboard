@@ -1,6 +1,9 @@
+// app/api/approve/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+
+export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -8,37 +11,58 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await req.json();
-  const token = body?.token;
+  // ✅ Compatibility: support either session.userId or legacy session.id/sub
+  const actorId = String((session as any).userId || (session as any).id || (session as any).sub || "");
+  const actorName = String((session as any).username || "");
 
+  if (!actorId || !actorName) {
+    return NextResponse.json({ error: "Invalid session" }, { status: 401 });
+  }
+
+  let body: any = null;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const token = String(body?.token || "").trim();
   if (!token) {
     return NextResponse.json({ error: "Missing token" }, { status: 400 });
   }
 
   const sb = getSupabaseAdmin();
+  if (!sb) {
+    return NextResponse.json({ error: "Supabase admin not configured" }, { status: 500 });
+  }
 
-  const { error } = await sb
+  const { error: updErr } = await sb
     .from("verification_tokens")
     .update({
       decision: "APPROVED",
-      decided_by: session.userId,
+      decided_by: actorId,
       decided_at: new Date().toISOString(),
     })
     .eq("token", token);
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (updErr) {
+    return NextResponse.json({ error: updErr.message }, { status: 500 });
   }
 
-  await sb.from("audit_logs").insert([
-    {
-      at: new Date().toISOString(),
-      actor_id: session.userId,
-      actor_name: session.username,
-      action: "approve_token",
-      meta: { token },
-    },
-  ]);
+  // ✅ Audit log is best-effort (don’t break approve if audit insert fails)
+  try {
+    await sb.from("audit_logs").insert([
+      {
+        at: new Date().toISOString(),
+        actor_id: actorId,
+        actor_name: actorName,
+        action: "approve_token",
+        meta: { token },
+      },
+    ]);
+  } catch {
+    // ignore audit failures
+  }
 
   return NextResponse.json({ success: true });
 }
