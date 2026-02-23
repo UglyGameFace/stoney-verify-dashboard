@@ -1,4 +1,3 @@
-// app/api/auth/callback/route.ts
 import { NextResponse } from "next/server";
 import { mustGet } from "@/lib/env";
 import { setSession } from "@/lib/session";
@@ -51,16 +50,15 @@ async function fetchDiscordUser(accessToken: string): Promise<DiscordUser> {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
-
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
     throw new Error(`Fetch user failed: ${res.status} ${txt}`);
   }
-
   return (await res.json()) as DiscordUser;
 }
 
 async function fetchMemberRoles(accessToken: string, guildId: string): Promise<string[]> {
+  // Requires OAuth2 scope: guilds.members.read
   const res = await fetch(`https://discord.com/api/users/@me/guilds/${guildId}/member`, {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
@@ -73,6 +71,7 @@ async function fetchMemberRoles(accessToken: string, guildId: string): Promise<s
 
 function parseAllowedRoleIds(): string[] {
   const raw = (process.env.STAFF_ROLE_IDS || "").trim();
+  if (!raw) return [];
   return raw
     .split(",")
     .map((s) => s.trim())
@@ -89,6 +88,7 @@ export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
     const error = url.searchParams.get("error");
 
     if (error) {
@@ -98,19 +98,20 @@ export async function GET(req: Request) {
       return NextResponse.redirect(new URL(`/login?err=${encodeURIComponent("missing_code")}`, url.origin));
     }
 
-    const token = await exchangeCodeForToken(code);
-    const user = await fetchDiscordUser(token.access_token);
-
+    // ✅ require guild id (your Vercel error shows this is missing)
     const guildId = mustGet("DISCORD_GUILD_ID");
     const allowedStaffRoleIds = parseAllowedRoleIds();
     if (!allowedStaffRoleIds.length) {
-      return NextResponse.redirect(new URL(`/login?err=${encodeURIComponent("no_staff_roles_configured")}`, url.origin));
+      return NextResponse.redirect(new URL(`/login?err=${encodeURIComponent("staff_roles_not_configured")}`, url.origin));
     }
 
+    const token = await exchangeCodeForToken(code);
+    const user = await fetchDiscordUser(token.access_token);
     const memberRoles = await fetchMemberRoles(token.access_token, guildId);
 
     if (!isStaffByRoles(memberRoles, allowedStaffRoleIds)) {
-      return NextResponse.redirect(new URL(`/login?err=${encodeURIComponent("not_staff")}`, url.origin));
+      // keep this err stable: notstaff
+      return NextResponse.redirect(new URL(`/login?err=${encodeURIComponent("notstaff")}`, url.origin));
     }
 
     await setSession({
@@ -121,17 +122,16 @@ export async function GET(req: Request) {
       guildId,
     });
 
-    // ✅ audit (matches YOUR schema)
+    // Optional audit log (matches your schema)
     try {
       const sb = getSupabaseAdmin();
       if (sb) {
         await sb.from("audit_logs").insert([
           {
             action: "staff_login",
-            token: null,
             staff_id: user.id,
-            meta: { username: user.global_name || user.username },
-            // created_at is defaulted by DB, but leaving it out is fine
+            token: null,
+            meta: { state: state || null },
           },
         ]);
       }
