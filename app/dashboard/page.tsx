@@ -1,23 +1,38 @@
-import { redirect } from "next/navigation";
-import DashboardClient from "./DashboardClient";
+"use client";
+
+import { useEffect, useState } from "react";
 import { getSession } from "@/lib/session";
 
-export const dynamic = "force-dynamic";
+export default function Dashboard() {
+  const [session, setSession] = useState<any>(null);
 
-export default async function DashboardPage() {
-  const s = await getSession();
-  if (!s) redirect("/login");
+  useEffect(() => {
+    async function loadSession() {
+      const res = await fetch("/api/session");
+      if (res.ok) setSession(await res.json());
+    }
+    loadSession();
+  }, []);
 
   return (
-    <div style={{ padding: 24 }}>
-      <DashboardClient
-        staffUser={{
-          id: s.userId, // ✅ FIX: was s.sub in older broken builds
-          username: s.username,
-          roles: s.roles ?? [],
-          guildId: s.guildId ?? null,
-        }}
-      />
+    <div style={{ padding: "32px", fontFamily: "Arial, sans-serif" }}>
+      <h1>Stoney Verify Dashboard</h1>
+      {session ? (
+        <>
+          <p>Welcome, {session.username}!</p>
+          <div style={{ marginTop: "24px" }}>
+            <h2>📊 Panels</h2>
+            <ul>
+              <li>🔍 Token Viewer</li>
+              <li>📝 Audit Logs</li>
+              <li>📡 Real-Time Monitor</li>
+              <li>🕒 Kick Timers</li>
+            </ul>
+          </div>
+        </>
+      ) : (
+        <p>Loading...</p>
+      )}
     </div>
   );
 }
