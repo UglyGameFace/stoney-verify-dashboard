@@ -5,7 +5,6 @@ import DashboardUI from "./ui";
 export default async function DashboardPage() {
   const session = await getSession();
 
-  // If not logged in, redirect to login
   if (!session) {
     redirect("/login");
   }
@@ -13,7 +12,7 @@ export default async function DashboardPage() {
   return (
     <DashboardUI
       staffUser={{
-        userId: session.userId,
+        id: session.userId,           // ✅ FIXED: use id not userId
         username: session.username,
         roles: session.roles,
         avatar: session.avatar ?? null,
