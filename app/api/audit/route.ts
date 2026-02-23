@@ -1,46 +1,34 @@
 // app/api/audit/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
-export const dynamic = "force-dynamic";
-
-export async function GET(req: NextRequest) {
+export async function GET() {
   const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const sb = getSupabaseAdmin();
-  if (!sb) {
-    return NextResponse.json({ error: "Supabase admin not configured" }, { status: 500 });
-  }
+  if (!sb) return NextResponse.json({ error: "Supabase admin not configured" }, { status: 500 });
 
-  const url = new URL(req.url);
+  const { data, error } = await sb
+    .from("audit_logs")
+    .select("id, action, token, staff_id, meta, created_at")
+    .order("created_at", { ascending: false })
+    .limit(200);
 
-  // optional query params
-  const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") || 50)));
-  const offset = Math.max(0, Number(url.searchParams.get("offset") || 0));
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Optional filters (safe to ignore if you don’t use them yet)
-  const actorId = (url.searchParams.get("actor_id") || "").trim();
-  const action = (url.searchParams.get("action") || "").trim();
+  // Map DB rows -> UI-friendly shape (keeps your existing UI stable)
+  const rows =
+    (data || []).map((r: any) => ({
+      id: r.id,
+      at: r.created_at, // ✅ UI expects "at"
+      actor_id: r.staff_id, // ✅ UI expects "actor_id"
+      actor_name: (r.meta?.username ?? r.meta?.actor_name ?? null) as string | null,
+      action: r.action,
+      token: r.token ?? null,
+      meta: r.meta ?? null,
+    })) ?? [];
 
-  let q = sb.from("audit_logs").select("*").order("at", { ascending: false }).range(offset, offset + limit - 1);
-
-  if (actorId) q = q.eq("actor_id", actorId);
-  if (action) q = q.eq("action", action);
-
-  const { data, error } = await q;
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  return NextResponse.json({
-    ok: true,
-    data: data || [],
-    limit,
-    offset,
-  });
+  return NextResponse.json({ rows });
 }
