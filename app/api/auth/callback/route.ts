@@ -1,3 +1,4 @@
+// app/api/auth/callback/route.ts
 import { NextResponse } from "next/server";
 import { mustGet } from "@/lib/env";
 import { setSession } from "@/lib/session";
@@ -60,28 +61,18 @@ async function fetchDiscordUser(accessToken: string): Promise<DiscordUser> {
 }
 
 async function fetchMemberRoles(accessToken: string, guildId: string): Promise<string[]> {
-  const res = await fetch(
-    `https://discord.com/api/users/@me/guilds/${guildId}/member`,
-    {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      cache: "no-store",
-    }
-  );
+  const res = await fetch(`https://discord.com/api/users/@me/guilds/${guildId}/member`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
 
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    console.error("Member fetch failed:", res.status, txt);
-    return [];
-  }
-
+  if (!res.ok) return [];
   const data = (await res.json()) as { roles?: string[] };
   return Array.isArray(data.roles) ? data.roles.map(String) : [];
 }
 
 function parseAllowedRoleIds(): string[] {
   const raw = (process.env.STAFF_ROLE_IDS || "").trim();
-  if (!raw) return [];
-
   return raw
     .split(",")
     .map((s) => s.trim())
@@ -90,8 +81,8 @@ function parseAllowedRoleIds(): string[] {
 
 function isStaffByRoles(memberRoleIds: string[], allowedStaffRoleIds: string[]): boolean {
   if (!allowedStaffRoleIds.length) return false;
-  const memberSet = new Set(memberRoleIds.map(String));
-  return allowedStaffRoleIds.some((rid) => memberSet.has(String(rid)));
+  const set = new Set(memberRoleIds.map(String));
+  return allowedStaffRoleIds.some((rid) => set.has(String(rid)));
 }
 
 export async function GET(req: Request) {
@@ -103,9 +94,8 @@ export async function GET(req: Request) {
     if (error) {
       return NextResponse.redirect(new URL(`/login?err=${encodeURIComponent(error)}`, url.origin));
     }
-
     if (!code) {
-      return NextResponse.redirect(new URL(`/login?err=missing_code`, url.origin));
+      return NextResponse.redirect(new URL(`/login?err=${encodeURIComponent("missing_code")}`, url.origin));
     }
 
     const token = await exchangeCodeForToken(code);
@@ -113,15 +103,14 @@ export async function GET(req: Request) {
 
     const guildId = mustGet("DISCORD_GUILD_ID");
     const allowedStaffRoleIds = parseAllowedRoleIds();
+    if (!allowedStaffRoleIds.length) {
+      return NextResponse.redirect(new URL(`/login?err=${encodeURIComponent("no_staff_roles_configured")}`, url.origin));
+    }
 
     const memberRoles = await fetchMemberRoles(token.access_token, guildId);
 
-    console.log("User:", user.id);
-    console.log("Member roles:", memberRoles);
-    console.log("Allowed staff roles:", allowedStaffRoleIds);
-
     if (!isStaffByRoles(memberRoles, allowedStaffRoleIds)) {
-      return NextResponse.redirect(new URL(`/login?err=not_staff`, url.origin));
+      return NextResponse.redirect(new URL(`/login?err=${encodeURIComponent("not_staff")}`, url.origin));
     }
 
     await setSession({
@@ -132,28 +121,27 @@ export async function GET(req: Request) {
       guildId,
     });
 
+    // ✅ audit (matches YOUR schema)
     try {
       const sb = getSupabaseAdmin();
       if (sb) {
         await sb.from("audit_logs").insert([
           {
-            at: new Date().toISOString(),
-            actor_id: user.id,
-            actor_name: user.global_name || user.username,
             action: "staff_login",
-            meta: {},
+            token: null,
+            staff_id: user.id,
+            meta: { username: user.global_name || user.username },
+            // created_at is defaulted by DB, but leaving it out is fine
           },
         ]);
       }
-    } catch (err) {
-      console.warn("Audit insert failed:", err);
+    } catch {
+      // ignore audit failures
     }
 
     return NextResponse.redirect(new URL("/dashboard", url.origin));
   } catch (e: any) {
-    console.error("OAuth callback error:", e);
-    return NextResponse.redirect(
-      new URL(`/login?err=${encodeURIComponent(e?.message || "callback_error")}`, new URL(req.url).origin)
-    );
+    const msg = encodeURIComponent(String(e?.message || e || "callback_error"));
+    return NextResponse.redirect(new URL(`/login?err=${msg}`, new URL(req.url).origin));
   }
 }
