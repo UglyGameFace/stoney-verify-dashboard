@@ -1,26 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-type StaffUser = { id: string; username: string };
+export type StaffUser = {
+  id: string;
+  username: string;
+  roles: string[];
+  guildId: string | null;
+};
 
 type TokenRow = {
   token: string;
-  guild_id?: string | null;
-  channel_id?: string | null;
-  requester_id?: string | null;
-  expires_at?: string | null;
-  used?: boolean;
-  submitted?: boolean;
-  decision?: string | null;
-  decided_by?: string | null;
-  decided_at?: string | null;
-  created_at?: string | null;
-  submitted_at?: string | null;
-  owner_display_name?: string | null;
-  owner_username?: string | null;
-  owner_tag?: string | null;
+  guild_id: string | null;
+  channel_id: string | null;
+  requester_id: string | null;
+  expires_at: string;
+  used: boolean;
+  submitted: boolean;
+  decision: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  created_at: string;
+  webhook_url: string;
 };
 
 type KickTimerRow = {
@@ -29,307 +30,444 @@ type KickTimerRow = {
   owner_id: string;
   started_at: string;
   hours: number;
-  started_by?: string | null;
+  started_by: string | null;
 };
 
-function badge(decision?: string | null, used?: boolean) {
-  const d = (decision || "PENDING").toUpperCase();
-  if (d.startsWith("APPROVED")) return <span className="badge badge-ok">APPROVED</span>;
-  if (d.startsWith("DENIED")) return <span className="badge badge-bad">DENIED</span>;
-  if (d.includes("RESUBMIT")) return <span className="badge badge-warn">RESUBMIT</span>;
-  if (used) return <span className="badge badge-warn">USED</span>;
-  return <span className="badge">PENDING</span>;
+type AuditRow = {
+  id?: string;
+  at: string;
+  actor_id: string | null;
+  actor_name: string | null;
+  action: string;
+  meta: any;
+};
+
+type LiveEvent = {
+  ts: number;
+  type: string;
+  payload: any;
+};
+
+function fmtIso(iso?: string | null) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
 }
 
-export default function DashboardClient({ staffUser }: { staffUser: StaffUser }) {
-  const [tab, setTab] = useState<"monitor"|"tokens"|"timers"|"audit">("monitor");
+function badge(text: string) {
+  return (
+    <span
+      style={{
+        fontSize: 12,
+        padding: "2px 8px",
+        borderRadius: 999,
+        border: "1px solid rgba(255,255,255,0.2)",
+        background: "rgba(255,255,255,0.06)",
+        marginRight: 6,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+      }}
+    >
+      {text}
+    </span>
+  );
+}
+
+async function jget<T>(url: string): Promise<T> {
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return (await r.json()) as T;
+}
+
+async function jpost<T>(url: string, body: any): Promise<T> {
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+    cache: "no-store",
+  });
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return (await r.json()) as T;
+}
+
+export default function DashboardUI({ staffUser }: { staffUser: StaffUser }) {
+  const [tab, setTab] = useState<"monitor" | "tokens" | "timers" | "audit">("monitor");
+
   const [tokens, setTokens] = useState<TokenRow[]>([]);
   const [timers, setTimers] = useState<KickTimerRow[]>([]);
-  const [audit, setAudit] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [monitor, setMonitor] = useState<TokenRow[]>([]);
-  const [filter, setFilter] = useState("");
+  const [audit, setAudit] = useState<AuditRow[]>([]);
+  const [live, setLive] = useState<LiveEvent[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  async function loadTokens() {
-    setLoading(true);
-    try {
-      const r = await fetch("/api/admin/tokens", { cache: "no-store" });
-      const j = await r.json();
-      setTokens(j.data || []);
-    } finally { setLoading(false); }
-  }
+  const liveRef = useRef<EventSource | null>(null);
 
-  async function loadTimers() {
-    setLoading(true);
-    try {
-      const r = await fetch("/api/admin/kick-timers", { cache: "no-store" });
-      const j = await r.json();
-      setTimers(j.data || []);
-    } finally { setLoading(false); }
-  }
+  const staffRoleHint = useMemo(() => {
+    const n = staffUser.roles?.length ?? 0;
+    return n ? `${n} role(s)` : "roles unknown";
+  }, [staffUser.roles]);
 
-  async function loadAudit() {
-    setLoading(true);
+  const refreshTokens = async () => {
+    const data = await jget<{ rows: TokenRow[] }>("/api/tokens");
+    setTokens(data.rows || []);
+  };
+
+  const refreshTimers = async () => {
+    const data = await jget<{ rows: KickTimerRow[] }>("/api/timers");
+    setTimers(data.rows || []);
+  };
+
+  const refreshAudit = async () => {
+    const data = await jget<{ rows: AuditRow[] }>("/api/audit");
+    setAudit(data.rows || []);
+  };
+
+  const refreshAll = async () => {
+    setErr(null);
+    setBusy(true);
     try {
-      const r = await fetch("/api/admin/audit", { cache: "no-store" });
-      const j = await r.json();
-      setAudit(j.data || []);
-    } finally { setLoading(false); }
-  }
+      await Promise.all([refreshTokens(), refreshTimers(), refreshAudit()]);
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const connectLive = () => {
+    try {
+      if (liveRef.current) liveRef.current.close();
+      const es = new EventSource("/api/monitor");
+      liveRef.current = es;
+
+      es.onmessage = (evt) => {
+        try {
+          const payload = JSON.parse(evt.data);
+          const ev: LiveEvent = { ts: Date.now(), type: payload.type || "event", payload };
+          setLive((prev) => [ev, ...prev].slice(0, 200));
+        } catch {
+          // ignore
+        }
+      };
+
+      es.onerror = () => {
+        // Let browser retry; show a tiny hint
+      };
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
-    // initial
-    loadTokens();
-    loadTimers();
-    loadAudit();
-  }, []);
-
-  // realtime monitor: subscribe to verification_tokens changes using anon key (read requires RLS allow; if not, we'll just poll)
-  useEffect(() => {
-    const sb = supabaseBrowser();
-    let alive = true;
-
-    const table = process.env.NEXT_PUBLIC_TOKENS_TABLE || "verification_tokens";
-
-    // Start with last 20 from admin endpoint (server role)
-    (async () => {
-      const r = await fetch("/api/admin/tokens", { cache: "no-store" });
-      const j = await r.json();
-      const recent = (j.data || []).slice(0, 20);
-      if (alive) setMonitor(recent);
-    })().catch(() => {});
-
-    const ch = sb
-      .channel("sv_tokens_realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table }, (payload) => {
-        const row = (payload.new || payload.old) as any;
-        if (!row?.token) return;
-        setMonitor((prev) => {
-          const next = [{ ...row }, ...prev.filter((x) => x.token !== row.token)].slice(0, 50);
-          return next;
-        });
-      })
-      .subscribe();
-
+    refreshAll();
+    connectLive();
     return () => {
-      alive = false;
-      sb.removeChannel(ch);
+      if (liveRef.current) liveRef.current.close();
+      liveRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const filteredTokens = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return tokens;
-    return tokens.filter((t) =>
-      [t.token, t.channel_id, t.requester_id, t.decision, t.owner_display_name, t.owner_username, t.owner_tag]
-        .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(q))
-    );
-  }, [tokens, filter]);
+  const approveToken = async (token: string) => {
+    setErr(null);
+    setBusy(true);
+    try {
+      await jpost("/api/decision", { token, decision: "APPROVED", actorId: staffUser.id, actorName: staffUser.username });
+      await refreshAll();
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
-  async function decide(token: string, decision: string, used: boolean) {
-    await fetch("/api/admin/tokens", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, decision, decided_by: staffUser.id, used }),
-    });
-    await fetch("/api/admin/audit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "token_decision",
-        actor_discord_id: staffUser.id,
-        actor_username: staffUser.username,
-        token,
-        meta: { decision, used },
-      }),
-    }).catch(() => {});
-    await loadTokens();
-  }
+  const denyToken = async (token: string) => {
+    setErr(null);
+    setBusy(true);
+    try {
+      await jpost("/api/decision", { token, decision: "DENIED", actorId: staffUser.id, actorName: staffUser.username });
+      await refreshAll();
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
-  async function clearTimer(channel_id: string) {
-    await fetch(`/api/admin/kick-timers?channel_id=${encodeURIComponent(channel_id)}`, { method: "DELETE" });
-    await fetch("/api/admin/audit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "kick_timer_delete",
-        actor_discord_id: staffUser.id,
-        actor_username: staffUser.username,
-        meta: { channel_id },
-      }),
-    }).catch(() => {});
-    await loadTimers();
-  }
-
-  const TabBtn = ({ id, label }: { id: typeof tab; label: string }) => (
-    <button className={`btn ${tab === id ? "" : "btn-secondary"}`} onClick={() => setTab(id)}>{label}</button>
-  );
+  const deleteTimer = async (channelId: string) => {
+    setErr(null);
+    setBusy(true);
+    try {
+      await jpost("/api/timers/delete", { channel_id: channelId, actorId: staffUser.id, actorName: staffUser.username });
+      await refreshAll();
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
-    <div className="grid" style={{ gap: 12 }}>
-      <div className="row" style={{ flexWrap: "wrap" }}>
-        <TabBtn id="monitor" label="🔔 Live Monitor" />
-        <TabBtn id="tokens" label="🧾 Token Viewer" />
-        <TabBtn id="timers" label="⏳ Kick Timers" />
-        <TabBtn id="audit" label="📜 Audit Logs" />
-        <div style={{ flex: 1 }} />
-        <button className="btn btn-secondary" onClick={() => { loadTokens(); loadTimers(); loadAudit(); }}>
-          {loading ? "Refreshing..." : "Refresh"}
-        </button>
+    <div
+      style={{
+        fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
+        color: "white",
+        background: "#0b0f14",
+        minHeight: "calc(100vh - 48px)",
+        borderRadius: 16,
+        border: "1px solid rgba(255,255,255,0.08)",
+        overflow: "hidden",
+      }}
+    >
+      <div style={{ padding: 16, borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", gap: 12, alignItems: "center" }}>
+        <div style={{ fontWeight: 800, letterSpacing: 0.2 }}>Stoney Verify Dashboard</div>
+        <div style={{ opacity: 0.8, fontSize: 13 }}>
+          Signed in as <b>{staffUser.username}</b> ({staffRoleHint})
+        </div>
+
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <button
+            onClick={refreshAll}
+            disabled={busy}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 12,
+              background: "rgba(255,255,255,0.08)",
+              color: "white",
+              border: "1px solid rgba(255,255,255,0.12)",
+              cursor: busy ? "not-allowed" : "pointer",
+            }}
+          >
+            {busy ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
       </div>
 
-      {tab === "monitor" && (
-        <div className="card">
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <div>
-              <div style={{ fontWeight: 700 }}>Live verification monitor</div>
-              <div className="muted" style={{ marginTop: 6 }}>Updates when tokens are created/updated (via Supabase Realtime if RLS allows).</div>
-            </div>
-            <span className="pill">last {monitor.length}</span>
-          </div>
-          <div className="hr" />
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Token</th>
-                <th>Status</th>
-                <th>Channel</th>
-                <th>Requester</th>
-                <th>Updated</th>
-              </tr>
-            </thead>
-            <tbody>
-              {monitor.map((t) => (
-                <tr key={t.token}>
-                  <td><code>{t.token}</code></td>
-                  <td>{badge(t.decision, t.used)} {t.submitted ? <span className="badge badge-ok">SUBMITTED</span> : <span className="badge">NO SUBMIT</span>}</td>
-                  <td className="muted">{t.channel_id || "-"}</td>
-                  <td className="muted">{t.requester_id || "-"}</td>
-                  <td className="muted">{t.decided_at || t.submitted_at || t.created_at || "-"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {err ? (
+        <div style={{ padding: 12, background: "rgba(255,0,0,0.12)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+          <b>Error:</b> {err}
         </div>
-      )}
+      ) : null}
 
-      {tab === "tokens" && (
-        <div className="card">
-          <div className="row" style={{ justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-            <div>
-              <div style={{ fontWeight: 700 }}>Token viewer</div>
-              <div className="muted" style={{ marginTop: 6 }}>Search + manual approve/deny without touching Discord.</div>
+      <div style={{ display: "flex", gap: 8, padding: 12, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+        {(["monitor", "tokens", "timers", "audit"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 12,
+              background: tab === t ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.06)",
+              color: "white",
+              border: "1px solid rgba(255,255,255,0.12)",
+              cursor: "pointer",
+              textTransform: "capitalize",
+            }}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ padding: 16 }}>
+        {tab === "monitor" ? (
+          <div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+              {badge("🔔 Live verification monitor")}
+              <span style={{ opacity: 0.75, fontSize: 13 }}>Live feed is pushed from /api/monitor (SSE).</span>
             </div>
-            <div className="row" style={{ minWidth: 320, flex: 1, justifyContent: "flex-end" }}>
-              <input className="input" placeholder="Search token / channel / requester / decision / name..." value={filter} onChange={(e) => setFilter(e.target.value)} />
-            </div>
-          </div>
-          <div className="hr" />
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Token</th>
-                <th>Status</th>
-                <th>Owner</th>
-                <th>Channel</th>
-                <th>Expires</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredTokens.map((t) => (
-                <tr key={t.token}>
-                  <td><code>{t.token}</code></td>
-                  <td>
-                    {badge(t.decision, t.used)}{" "}
-                    {t.submitted ? <span className="badge badge-ok">SUBMITTED</span> : <span className="badge">NO SUBMIT</span>}
-                  </td>
-                  <td className="muted">{t.owner_display_name || t.owner_username || t.owner_tag || "-"}</td>
-                  <td className="muted">{t.channel_id || "-"}</td>
-                  <td className="muted">{t.expires_at || "-"}</td>
-                  <td>
-                    <div className="row" style={{ flexWrap: "wrap" }}>
-                      <button className="btn" onClick={() => decide(t.token, "APPROVED (DASHBOARD)", true)}>Approve</button>
-                      <button className="btn btn-secondary" onClick={() => decide(t.token, "RESUBMIT REQUESTED (DASHBOARD)", false)}>Resubmit</button>
-                      <button className="btn btn-secondary" onClick={() => decide(t.token, "DENIED (DASHBOARD)", true)}>Deny</button>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
+              {live.length === 0 ? (
+                <div style={{ opacity: 0.7 }}>No live events yet.</div>
+              ) : (
+                live.map((ev, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid rgba(255,255,255,0.10)",
+                      background: "rgba(255,255,255,0.04)",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                      <div style={{ fontWeight: 700 }}>{ev.type}</div>
+                      <div style={{ opacity: 0.65, fontSize: 12 }}>{new Date(ev.ts).toLocaleTimeString()}</div>
                     </div>
-                  </td>
-                </tr>
-              ))}
-              {!filteredTokens.length && (
-                <tr><td colSpan={6} className="muted">No matching tokens.</td></tr>
+                    <pre style={{ margin: 0, marginTop: 8, whiteSpace: "pre-wrap", wordBreak: "break-word", opacity: 0.9, fontSize: 12 }}>
+                      {JSON.stringify(ev.payload, null, 2)}
+                    </pre>
+                  </div>
+                ))
               )}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {tab === "timers" && (
-        <div className="card">
-          <div style={{ fontWeight: 700 }}>Kick timer manager</div>
-          <div className="muted" style={{ marginTop: 6 }}>View and delete persisted kick timers (your bot will also delete when it cancels).</div>
-          <div className="hr" />
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Channel</th>
-                <th>Owner</th>
-                <th>Started</th>
-                <th>Hours</th>
-                <th>Started by</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {timers.map((t) => (
-                <tr key={t.channel_id}>
-                  <td className="muted">{t.channel_id}</td>
-                  <td className="muted">{t.owner_id}</td>
-                  <td className="muted">{t.started_at}</td>
-                  <td>{t.hours}</td>
-                  <td className="muted">{t.started_by || "-"}</td>
-                  <td><button className="btn btn-secondary" onClick={() => clearTimer(t.channel_id)}>Delete</button></td>
-                </tr>
-              ))}
-              {!timers.length && <tr><td colSpan={6} className="muted">No kick timers found.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {tab === "audit" && (
-        <div className="card">
-          <div style={{ fontWeight: 700 }}>Audit log panel</div>
-          <div className="muted" style={{ marginTop: 6 }}>
-            Writes occur when you take actions in this dashboard. (If the table doesn’t exist yet, the API returns empty.)
+            </div>
           </div>
-          <div className="hr" />
-          <table className="table">
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>Actor</th>
-                <th>Action</th>
-                <th>Token</th>
-                <th>Meta</th>
-              </tr>
-            </thead>
-            <tbody>
-              {audit.map((a, idx) => (
-                <tr key={a.id || idx}>
-                  <td className="muted">{a.created_at || "-"}</td>
-                  <td className="muted">{a.actor_username || a.actor_discord_id || "-"}</td>
-                  <td>{a.action || "-"}</td>
-                  <td className="muted">{a.token || "-"}</td>
-                  <td className="muted"><pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{JSON.stringify(a.meta || {}, null, 2)}</pre></td>
-                </tr>
-              ))}
-              {!audit.length && <tr><td colSpan={5} className="muted">No audit rows (or table not created yet).</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      )}
+        ) : null}
+
+        {tab === "tokens" ? (
+          <div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+              {badge("🛠 Manual approve/deny")}
+              {badge("🧾 Token viewer")}
+              <span style={{ opacity: 0.75, fontSize: 13 }}>Pulled from Supabase table verification_tokens.</span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
+              {tokens.length === 0 ? (
+                <div style={{ opacity: 0.7 }}>No tokens found.</div>
+              ) : (
+                tokens.map((r) => (
+                  <div
+                    key={r.token}
+                    style={{
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid rgba(255,255,255,0.10)",
+                      background: "rgba(255,255,255,0.04)",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                      <div style={{ fontWeight: 800, letterSpacing: 0.2 }}>{r.token}</div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          onClick={() => approveToken(r.token)}
+                          disabled={busy}
+                          style={{
+                            padding: "8px 10px",
+                            borderRadius: 10,
+                            background: "rgba(0,255,0,0.10)",
+                            color: "white",
+                            border: "1px solid rgba(0,255,0,0.25)",
+                            cursor: busy ? "not-allowed" : "pointer",
+                          }}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => denyToken(r.token)}
+                          disabled={busy}
+                          style={{
+                            padding: "8px 10px",
+                            borderRadius: 10,
+                            background: "rgba(255,0,0,0.10)",
+                            color: "white",
+                            border: "1px solid rgba(255,0,0,0.25)",
+                            cursor: busy ? "not-allowed" : "pointer",
+                          }}
+                        >
+                          Deny
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: 10, opacity: 0.85, fontSize: 13, lineHeight: 1.4 }}>
+                      <div>guild: {r.guild_id || "—"} | channel: {r.channel_id || "—"} | requester: {r.requester_id || "—"}</div>
+                      <div>expires: {fmtIso(r.expires_at)} | created: {fmtIso(r.created_at)}</div>
+                      <div>
+                        used: <b>{String(r.used)}</b> | submitted: <b>{String(r.submitted)}</b> | decision: <b>{r.decision || "—"}</b>
+                      </div>
+                      <div>decided_by: {r.decided_by || "—"} | decided_at: {fmtIso(r.decided_at)}</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {tab === "timers" ? (
+          <div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+              {badge("⏳ Kick timer manager")}
+              <span style={{ opacity: 0.75, fontSize: 13 }}>Pulled from Supabase table verification_kick_timers.</span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
+              {timers.length === 0 ? (
+                <div style={{ opacity: 0.7 }}>No timers found.</div>
+              ) : (
+                timers.map((t) => (
+                  <div
+                    key={t.channel_id}
+                    style={{
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid rgba(255,255,255,0.10)",
+                      background: "rgba(255,255,255,0.04)",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      alignItems: "center",
+                    }}
+                  >
+                    <div style={{ opacity: 0.9, fontSize: 13, lineHeight: 1.4 }}>
+                      <div style={{ fontWeight: 800 }}>{t.channel_id}</div>
+                      <div>guild: {t.guild_id} | owner: {t.owner_id} | started_by: {t.started_by || "—"}</div>
+                      <div>started: {fmtIso(t.started_at)} | hours: {t.hours}</div>
+                    </div>
+
+                    <button
+                      onClick={() => deleteTimer(t.channel_id)}
+                      disabled={busy}
+                      style={{
+                        padding: "8px 10px",
+                        borderRadius: 10,
+                        background: "rgba(255,255,255,0.06)",
+                        color: "white",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        cursor: busy ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      Delete Timer
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {tab === "audit" ? (
+          <div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+              {badge("📜 Audit log panel")}
+              <span style={{ opacity: 0.75, fontSize: 13 }}>Pulled from Supabase table audit_logs.</span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
+              {audit.length === 0 ? (
+                <div style={{ opacity: 0.7 }}>No audit logs found.</div>
+              ) : (
+                audit.map((a, idx) => (
+                  <div
+                    key={a.id || idx}
+                    style={{
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid rgba(255,255,255,0.10)",
+                      background: "rgba(255,255,255,0.04)",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                      <div style={{ fontWeight: 800 }}>{a.action}</div>
+                      <div style={{ opacity: 0.65, fontSize: 12 }}>{fmtIso(a.at)}</div>
+                    </div>
+                    <div style={{ marginTop: 6, opacity: 0.85, fontSize: 13 }}>
+                      actor: {a.actor_name || "—"} ({a.actor_id || "—"})
+                    </div>
+                    <pre style={{ margin: 0, marginTop: 8, whiteSpace: "pre-wrap", wordBreak: "break-word", opacity: 0.9, fontSize: 12 }}>
+                      {JSON.stringify(a.meta ?? {}, null, 2)}
+                    </pre>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
