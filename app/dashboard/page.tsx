@@ -11,7 +11,10 @@ export default async function Dashboard() {
 
   return (
     <div className="container">
-      <div className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
+      <div
+        className="row"
+        style={{ justifyContent: "space-between", marginBottom: 12 }}
+      >
         <div>
           <div style={{ fontSize: 22, fontWeight: 700 }}>
             Stoney Verify Dashboard
@@ -20,6 +23,7 @@ export default async function Dashboard() {
             Welcome, {session.username}!
           </div>
         </div>
+
         <div className="row">
           <a className="btn btn-secondary" href="/">
             Home
@@ -32,8 +36,10 @@ export default async function Dashboard() {
 
       <DashboardClient
         staffUser={{
-          id: session.userId,      // ✅ MUST match StaffUser type
+          id: session.userId,
           username: session.username,
+          roles: session.roles ?? [],
+          guildId: session.guildId ?? null,
         }}
       />
     </div>
