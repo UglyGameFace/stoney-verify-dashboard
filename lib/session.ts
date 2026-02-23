@@ -1,4 +1,3 @@
-// lib/session.ts
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { mustGet } from "@/lib/env";
@@ -10,12 +9,10 @@ export type StaffSession = {
   userId: string;
   username: string;
   roles: string[];
+  avatar?: string | null;
   guildId?: string | null;
 
-  // optional extras (safe to keep)
-  avatar?: string | null;
-
-  // legacy aliases (don’t remove; helps stop “breaking things”)
+  // legacy aliases kept for compatibility during iteration
   id?: string;
   sub?: string;
 };
@@ -26,22 +23,16 @@ function secretKey() {
 }
 
 export async function setSession(payload: StaffSession) {
-  const userId = String(payload.userId || payload.id || payload.sub || "");
+  const sub = String(payload.userId || payload.id || payload.sub || "");
   const username = String(payload.username || "");
   const roles = Array.isArray(payload.roles) ? payload.roles.map(String) : [];
-  const guildId = payload.guildId == null ? null : String(payload.guildId);
-  const avatar = payload.avatar == null ? null : String(payload.avatar);
+  const avatar = payload.avatar ?? null;
+  const guildId = payload.guildId ?? null;
 
-  if (!userId) throw new Error("Missing session userId");
+  if (!sub) throw new Error("Missing session subject (discord id)");
   if (!username) throw new Error("Missing session username");
 
-  const token = await new SignJWT({
-    userId,
-    username,
-    roles,
-    guildId,
-    avatar,
-  })
+  const token = await new SignJWT({ sub, username, roles, avatar, guildId })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("8h")
@@ -72,16 +63,24 @@ export async function getSession(): Promise<StaffSession | null> {
   try {
     const { payload } = await jwtVerify(c.value, secretKey());
 
-    const userId = String((payload as any).userId || payload.sub || "");
+    const sub = String(payload.sub || "");
     const username = String((payload as any).username || "");
-    const roles = Array.isArray((payload as any).roles) ? (payload as any).roles.map(String) : [];
-    const guildId = (payload as any).guildId == null ? null : String((payload as any).guildId);
+    const roles = Array.isArray((payload as any).roles) ? ((payload as any).roles as any[]).map(String) : [];
     const avatar = (payload as any).avatar == null ? null : String((payload as any).avatar);
+    const guildId = (payload as any).guildId == null ? null : String((payload as any).guildId);
 
-    if (!userId || !username) return null;
+    if (!sub || !username) return null;
 
-    // include legacy aliases to keep old code paths happy
-    return { userId, username, roles, guildId, avatar, id: userId, sub: userId };
+    return {
+      userId: sub,
+      username,
+      roles,
+      avatar,
+      guildId,
+      // legacy aliases
+      id: sub,
+      sub,
+    };
   } catch {
     return null;
   }
