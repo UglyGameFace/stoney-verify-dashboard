@@ -45,6 +45,7 @@ export async function POST(req: NextRequest) {
   if (!sb) return NextResponse.json({ error: "Supabase admin not configured" }, { status: 500 });
 
   const body = await req.json().catch(() => ({}));
+
   const channel_id = String(body?.channel_id || "").trim();
   const guild_id = String(body?.guild_id || "").trim();
   const owner_id = String(body?.owner_id || "").trim();
@@ -57,26 +58,32 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const startedAt = body?.started_at ? new Date(body.started_at).toISOString() : new Date().toISOString();
+
   const payload = {
     channel_id,
     guild_id,
     owner_id,
     hours: Math.floor(hours),
-    started_at: body?.started_at ? new Date(body.started_at).toISOString() : new Date().toISOString(),
+    started_at: startedAt,
     started_by: String(body?.started_by || session.userId || "").trim() || null,
+    updated_at: new Date().toISOString(),
   };
 
   const { error } = await sb.from("verification_kick_timers").upsert(payload, { onConflict: "channel_id" });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // audit
+  // ✅ audit_logs (MATCH YOUR SCHEMA)
+  // columns: action, token, staff_id, meta, created_at(auto)
   await sb.from("audit_logs").insert([
     {
-      at: new Date().toISOString(),
-      actor_id: session.userId,
-      actor_name: session.username,
       action: "timer_upsert",
-      meta: payload,
+      token: null,
+      staff_id: session.userId,
+      meta: {
+        staff_username: session.username,
+        ...payload,
+      },
     },
   ]);
 
@@ -97,13 +104,16 @@ export async function DELETE(req: NextRequest) {
   const { error } = await sb.from("verification_kick_timers").delete().eq("channel_id", channel_id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  // ✅ audit_logs (MATCH YOUR SCHEMA)
   await sb.from("audit_logs").insert([
     {
-      at: new Date().toISOString(),
-      actor_id: session.userId,
-      actor_name: session.username,
       action: "timer_delete",
-      meta: { channel_id },
+      token: null,
+      staff_id: session.userId,
+      meta: {
+        staff_username: session.username,
+        channel_id,
+      },
     },
   ]);
 
