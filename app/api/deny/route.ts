@@ -11,34 +11,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // ✅ Compatibility: support either session.userId or legacy session.id/sub
-  const actorId = String((session as any).userId || (session as any).id || (session as any).sub || "");
-  const actorName = String((session as any).username || "");
-
-  if (!actorId || !actorName) {
-    return NextResponse.json({ error: "Invalid session" }, { status: 401 });
+  const sbMaybe = getSupabaseAdmin();
+  if (sbMaybe == null) {
+    // ✅ IMPORTANT: must RETURN so TypeScript knows sb is not null below
+    return NextResponse.json({ error: "Supabase admin not configured" }, { status: 500 });
   }
 
-  let body: any = null;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  // ✅ Now TS knows this is non-null
+  const sb = sbMaybe;
 
+  const body = await req.json().catch(() => ({}));
   const token = String(body?.token || "").trim();
+
   if (!token) {
     return NextResponse.json({ error: "Missing token" }, { status: 400 });
   }
 
-  const sb = getSupabaseAdmin();
+  const decided_at = new Date().toISOString();
 
   const { error: updErr } = await sb
     .from("verification_tokens")
     .update({
       decision: "DENIED",
-      decided_by: actorId,
-      decided_at: new Date().toISOString(),
+      decided_by: session.userId, // your session type uses userId
+      decided_at,
+      used: true,
     })
     .eq("token", token);
 
@@ -46,13 +43,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: updErr.message }, { status: 500 });
   }
 
-  // ✅ Audit log is best-effort (don’t break deny if audit insert fails)
+  // audit log (best effort)
   try {
     await sb.from("audit_logs").insert([
       {
-        at: new Date().toISOString(),
-        actor_id: actorId,
-        actor_name: actorName,
+        at: decided_at,
+        actor_id: session.userId,
+        actor_name: session.username,
         action: "deny_token",
         meta: { token },
       },
@@ -61,5 +58,5 @@ export async function POST(req: NextRequest) {
     // ignore audit failures
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ ok: true });
 }
