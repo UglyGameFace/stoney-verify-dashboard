@@ -58,12 +58,10 @@ async function fetchDiscordUser(accessToken: string): Promise<DiscordUser> {
 }
 
 async function fetchMemberRoles(accessToken: string, guildId: string): Promise<string[]> {
-  // Requires OAuth2 scope: guilds.members.read
   const res = await fetch(`https://discord.com/api/users/@me/guilds/${guildId}/member`, {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
-
   if (!res.ok) return [];
   const data = (await res.json()) as { roles?: string[] };
   return Array.isArray(data.roles) ? data.roles.map(String) : [];
@@ -84,11 +82,25 @@ function isStaffByRoles(memberRoleIds: string[], allowedStaffRoleIds: string[]):
   return allowedStaffRoleIds.some((rid) => set.has(String(rid)));
 }
 
+async function auditStaffLogin(userId: string, token?: string | null) {
+  const sb = getSupabaseAdmin();
+  if (!sb) return;
+
+  // Your schema: audit_logs(action, token, staff_id, meta, created_at)
+  await sb.from("audit_logs").insert([
+    {
+      action: "staff_login",
+      token: token ?? null,
+      staff_id: userId,
+      meta: {},
+    },
+  ]);
+}
+
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const code = url.searchParams.get("code");
-    const state = url.searchParams.get("state");
     const error = url.searchParams.get("error");
 
     if (error) {
@@ -98,11 +110,10 @@ export async function GET(req: Request) {
       return NextResponse.redirect(new URL(`/login?err=${encodeURIComponent("missing_code")}`, url.origin));
     }
 
-    // ✅ require guild id (your Vercel error shows this is missing)
     const guildId = mustGet("DISCORD_GUILD_ID");
     const allowedStaffRoleIds = parseAllowedRoleIds();
     if (!allowedStaffRoleIds.length) {
-      return NextResponse.redirect(new URL(`/login?err=${encodeURIComponent("staff_roles_not_configured")}`, url.origin));
+      return NextResponse.redirect(new URL(`/login?err=${encodeURIComponent("notstaff")}`, url.origin));
     }
 
     const token = await exchangeCodeForToken(code);
@@ -110,7 +121,6 @@ export async function GET(req: Request) {
     const memberRoles = await fetchMemberRoles(token.access_token, guildId);
 
     if (!isStaffByRoles(memberRoles, allowedStaffRoleIds)) {
-      // keep this err stable: notstaff
       return NextResponse.redirect(new URL(`/login?err=${encodeURIComponent("notstaff")}`, url.origin));
     }
 
@@ -119,25 +129,12 @@ export async function GET(req: Request) {
       username: user.global_name || user.username,
       roles: memberRoles,
       avatar: user.avatar ?? null,
-      guildId,
+      guildId: guildId || null,
+      id: user.id,
+      sub: user.id,
     });
 
-    // Optional audit log (matches your schema)
-    try {
-      const sb = getSupabaseAdmin();
-      if (sb) {
-        await sb.from("audit_logs").insert([
-          {
-            action: "staff_login",
-            staff_id: user.id,
-            token: null,
-            meta: { state: state || null },
-          },
-        ]);
-      }
-    } catch {
-      // ignore audit failures
-    }
+    await auditStaffLogin(user.id, null);
 
     return NextResponse.redirect(new URL("/dashboard", url.origin));
   } catch (e: any) {
