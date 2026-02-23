@@ -18,11 +18,6 @@ type DiscordUser = {
   avatar?: string | null;
 };
 
-type DiscordGuildRole = {
-  id: string;
-  name: string;
-};
-
 async function exchangeCodeForToken(code: string): Promise<DiscordTokenResponse> {
   const clientId = mustGet("DISCORD_CLIENT_ID");
   const clientSecret = mustGet("DISCORD_CLIENT_SECRET");
@@ -55,19 +50,30 @@ async function fetchDiscordUser(accessToken: string): Promise<DiscordUser> {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
+
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
     throw new Error(`Fetch user failed: ${res.status} ${txt}`);
   }
+
   return (await res.json()) as DiscordUser;
 }
 
 async function fetchMemberRoles(accessToken: string, guildId: string): Promise<string[]> {
-  const res = await fetch(`https://discord.com/api/users/@me/guilds/${guildId}/member`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-    cache: "no-store",
-  });
-  if (!res.ok) return [];
+  const res = await fetch(
+    `https://discord.com/api/users/@me/guilds/${guildId}/member`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+    }
+  );
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    console.error("Member fetch failed:", res.status, txt);
+    return [];
+  }
+
   const data = (await res.json()) as { roles?: string[] };
   return Array.isArray(data.roles) ? data.roles.map(String) : [];
 }
@@ -75,6 +81,7 @@ async function fetchMemberRoles(accessToken: string, guildId: string): Promise<s
 function parseAllowedRoleIds(): string[] {
   const raw = (process.env.STAFF_ROLE_IDS || "").trim();
   if (!raw) return [];
+
   return raw
     .split(",")
     .map((s) => s.trim())
@@ -83,50 +90,48 @@ function parseAllowedRoleIds(): string[] {
 
 function isStaffByRoles(memberRoleIds: string[], allowedStaffRoleIds: string[]): boolean {
   if (!allowedStaffRoleIds.length) return false;
-  const set = new Set(memberRoleIds.map(String));
-  return allowedStaffRoleIds.some((rid) => set.has(String(rid)));
+  const memberSet = new Set(memberRoleIds.map(String));
+  return allowedStaffRoleIds.some((rid) => memberSet.has(String(rid)));
 }
 
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const code = url.searchParams.get("code");
-    const state = url.searchParams.get("state"); // optional
     const error = url.searchParams.get("error");
 
     if (error) {
       return NextResponse.redirect(new URL(`/login?err=${encodeURIComponent(error)}`, url.origin));
     }
+
     if (!code) {
-      return NextResponse.redirect(new URL(`/login?err=${encodeURIComponent("missing_code")}`, url.origin));
+      return NextResponse.redirect(new URL(`/login?err=missing_code`, url.origin));
     }
 
     const token = await exchangeCodeForToken(code);
     const user = await fetchDiscordUser(token.access_token);
 
-    const guildId = (process.env.DISCORD_GUILD_ID || "").trim();
+    const guildId = mustGet("DISCORD_GUILD_ID");
     const allowedStaffRoleIds = parseAllowedRoleIds();
 
-    let memberRoles: string[] = [];
-    if (guildId) {
-      memberRoles = await fetchMemberRoles(token.access_token, guildId);
+    const memberRoles = await fetchMemberRoles(token.access_token, guildId);
+
+    console.log("User:", user.id);
+    console.log("Member roles:", memberRoles);
+    console.log("Allowed staff roles:", allowedStaffRoleIds);
+
+    if (!isStaffByRoles(memberRoles, allowedStaffRoleIds)) {
+      return NextResponse.redirect(new URL(`/login?err=not_staff`, url.origin));
     }
 
-    // Gate: must be staff via discord roles
-    if (!guildId || !allowedStaffRoleIds.length || !isStaffByRoles(memberRoles, allowedStaffRoleIds)) {
-      return NextResponse.redirect(new URL(`/login?err=${encodeURIComponent("not_staff")}`, url.origin));
-    }
-
-    // Save staff session cookie
     await setSession({
       userId: user.id,
       username: user.global_name || user.username,
       roles: memberRoles,
       avatar: user.avatar ?? null,
-      guildId: guildId || null,
+      guildId,
     });
 
-    // Optional audit log
     try {
       const sb = getSupabaseAdmin();
       if (sb) {
@@ -136,17 +141,19 @@ export async function GET(req: Request) {
             actor_id: user.id,
             actor_name: user.global_name || user.username,
             action: "staff_login",
-            meta: { state: state || null },
+            meta: {},
           },
         ]);
       }
-    } catch {
-      // ignore audit failures
+    } catch (err) {
+      console.warn("Audit insert failed:", err);
     }
 
     return NextResponse.redirect(new URL("/dashboard", url.origin));
   } catch (e: any) {
-    const msg = encodeURIComponent(String(e?.message || e || "callback_error"));
-    return NextResponse.redirect(new URL(`/login?err=${msg}`, new URL(req.url).origin));
+    console.error("OAuth callback error:", e);
+    return NextResponse.redirect(
+      new URL(`/login?err=${encodeURIComponent(e?.message || "callback_error")}`, new URL(req.url).origin)
+    );
   }
 }
