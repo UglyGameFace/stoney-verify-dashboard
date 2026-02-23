@@ -1,22 +1,37 @@
+// app/dashboard/page.tsx
 import { getSession } from "@/lib/session";
-import DashboardClient from "./ui";
+import DashboardClient from "./DashboardClient";
 
-export default async function Dashboard() {
+export default async function DashboardPage() {
   const s = await getSession();
-  if (!s) return null; // middleware redirects anyway
-  return (
-    <div className="container">
-      <div className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
-        <div>
-          <div style={{ fontSize: 22, fontWeight: 700 }}>Staff Dashboard</div>
-          <div className="muted" style={{ marginTop: 6 }}>Signed in as {s.username}</div>
-        </div>
-        <div className="row">
-          <a className="btn btn-secondary" href="/">Home</a>
-          <a className="btn btn-secondary" href="/api/auth/logout">Logout</a>
-        </div>
+
+  if (!s) {
+    return (
+      <div style={{ padding: 24 }}>
+        <h1 style={{ fontSize: 20, fontWeight: 700 }}>Not logged in</h1>
+        <p style={{ marginTop: 8 }}>
+          Your session cookie is missing or expired. Click login:
+        </p>
+        <p style={{ marginTop: 12 }}>
+          <a href="/api/auth/login" style={{ textDecoration: "underline" }}>
+            Login with Discord
+          </a>
+        </p>
       </div>
-      <DashboardClient staffUser={{ id: s.sub, username: s.username }} />
+    );
+  }
+
+  return (
+    <div style={{ padding: 24 }}>
+      <DashboardClient
+        staffUser={{
+          id: s.userId,        // ✅ FIX: was s.sub
+          username: s.username,
+          avatar: s.avatar ?? null,
+          roles: s.roles ?? [],
+          guildId: s.guildId ?? null,
+        }}
+      />
     </div>
   );
 }
