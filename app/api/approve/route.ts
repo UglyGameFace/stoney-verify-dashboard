@@ -2,67 +2,94 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
-
-export const dynamic = "force-dynamic";
+import { postToDiscordWebhook, buildDecisionEmbed } from "@/lib/discordWebhook";
+import { notifyBotDecision } from "@/lib/botBridge";
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // ✅ Compatibility: support either session.userId or legacy session.id/sub
-  const actorId = String((session as any).userId || (session as any).id || (session as any).sub || "");
-  const actorName = String((session as any).username || "");
-
-  if (!actorId || !actorName) {
-    return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-  }
-
-  let body: any = null;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const token = String(body?.token || "").trim();
-  if (!token) {
-    return NextResponse.json({ error: "Missing token" }, { status: 400 });
-  }
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const sb = getSupabaseAdmin();
-  if (!sb) {
-    return NextResponse.json({ error: "Supabase admin not configured" }, { status: 500 });
-  }
+  if (!sb) return NextResponse.json({ error: "Supabase admin not configured" }, { status: 500 });
+
+  const body = await req.json().catch(() => ({}));
+  const token = String(body?.token || "").trim();
+  if (!token) return NextResponse.json({ error: "Missing token" }, { status: 400 });
+
+  // Pull token row (we need webhook_url + scopes)
+  const { data: rows, error: readErr } = await sb
+    .from("verification_tokens")
+    .select("*")
+    .eq("token", token)
+    .limit(1);
+
+  if (readErr) return NextResponse.json({ error: readErr.message }, { status: 500 });
+  const row: any = Array.isArray(rows) && rows.length ? rows[0] : null;
+  if (!row) return NextResponse.json({ error: "Token not found" }, { status: 404 });
+
+  const now = new Date().toISOString();
 
   const { error: updErr } = await sb
     .from("verification_tokens")
     .update({
       decision: "APPROVED",
-      decided_by: actorId,
-      decided_at: new Date().toISOString(),
+      decided_by: session.userId,
+      decided_at: now,
+      used: true,
+      updated_at: now,
     })
     .eq("token", token);
 
-  if (updErr) {
-    return NextResponse.json({ error: updErr.message }, { status: 500 });
-  }
+  if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
 
-  // ✅ Audit log is best-effort (don’t break approve if audit insert fails)
-  try {
-    await sb.from("audit_logs").insert([
-      {
-        at: new Date().toISOString(),
-        actor_id: actorId,
-        actor_name: actorName,
-        action: "approve_token",
-        meta: { token },
+  // audit_logs (YOUR SCHEMA)
+  await sb.from("audit_logs").insert([
+    {
+      action: "approve_token",
+      token,
+      staff_id: session.userId,
+      meta: {
+        staff_username: session.username,
+        guild_id: row.guild_id ?? null,
+        channel_id: row.channel_id ?? null,
+        requester_id: row.requester_id ?? row.user_id ?? null,
       },
-    ]);
-  } catch {
-    // ignore audit failures
+    },
+  ]);
+
+  // Post into ticket via webhook_url (TicketTool-style feedback)
+  const webhookUrl = String(row.webhook_url || "").trim();
+  let webhookResult: any = null;
+
+  if (webhookUrl) {
+    const embed = buildDecisionEmbed({
+      decision: "APPROVED",
+      token,
+      staffName: session.username,
+      staffId: session.userId,
+      userId: row.requester_id ?? row.user_id ?? null,
+      channelId: row.channel_id ?? null,
+      guildId: row.guild_id ?? null,
+    });
+
+    webhookResult = await postToDiscordWebhook(webhookUrl, {
+      content: "✅ **Approved.** Staff decision recorded and actions are running now.",
+      embeds: [embed],
+      allowed_mentions: { parse: [] },
+    });
   }
 
-  return NextResponse.json({ success: true });
+  // Notify bot to do real Discord actions (roles/close/kick/cancel timers/etc)
+  const botResult = await notifyBotDecision({
+    token,
+    decision: "APPROVED",
+    staffId: session.userId,
+    staffName: session.username,
+  });
+
+  return NextResponse.json({
+    ok: true,
+    webhook: webhookResult,
+    bot: botResult,
+  });
 }
