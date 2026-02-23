@@ -30,7 +30,7 @@ function normalizeSession(raw: any): StaffSession | null {
 }
 
 function secretKey() {
-  const secret = mustGet("SESSION_SECRET");
+  const secret = mustGet("JWT_SECRET");
   return new TextEncoder().encode(secret);
 }
 
