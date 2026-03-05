@@ -14,8 +14,25 @@ export function getSupabaseAdmin(): SupabaseClient | null {
 
   _client = createClient(url, key, {
     auth: { persistSession: false },
-    global: { headers: { "X-Client-Info": "stoney-verify-dashboard-admin" } },
+    global: {
+      headers: { "X-Client-Info": "stoney-verify-dashboard-admin" },
+    },
   });
 
   return _client;
+}
+
+/**
+ * Helper for API routes so they can safely require the admin client.
+ */
+export function requireSupabaseAdmin(): SupabaseClient {
+  const sb = getSupabaseAdmin();
+
+  if (!sb) {
+    throw new Error(
+      "Supabase admin not configured. Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY."
+    );
+  }
+
+  return sb;
 }
