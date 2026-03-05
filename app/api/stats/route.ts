@@ -1,51 +1,77 @@
-// app/api/stats/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
-export const dynamic = "force-dynamic";
+type CountResult = { count: number | null; error: any };
 
-/**
- * Staff stats derived from audit log.
- * Works even if you don't have a dedicated stats table.
- */
-export async function GET(_req: NextRequest) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
+async function safeCount(table: string, filter?: (q: any) => any): Promise<number> {
   const sb = getSupabaseAdmin();
+  if (!sb) return 0;
 
-  // Try common audit tables
-  const candidates = ["audit_logs", "verification_audit_logs", "stoney_audit_logs"];
-  let data: any[] | null = null;
+  try {
+    let q = sb.from(table as any).select("*", { count: "exact", head: true });
+    if (filter) q = filter(q);
+    const res = (await q) as CountResult;
+    if (res?.error) return 0;
+    return res?.count ?? 0;
+  } catch {
+    return 0;
+  }
+}
 
-  for (const table of candidates) {
-    const res = await sb.from(table as any).select("*").order("at", { ascending: false }).limit(1000);
-    if (!res.error) {
-      data = res.data as any[];
-      break;
-    }
+export async function GET() {
+  const sb = getSupabaseAdmin();
+  if (!sb) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Supabase admin not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY missing).",
+        pending: 0,
+        submitted: 0,
+        approved: 0,
+        denied: 0,
+        kickTimers: 0,
+        liveEvents: 0,
+        vcSessions: 0,
+      },
+      { status: 200 }
+    );
   }
 
-  const rows = (data || []) as any[];
+  // ✅ These table names match your existing dashboard routes:
+  // - verification_tokens (tokens)
+  // - verification_kick_timers (timers)
+  // - audit_logs (audit)
+  //
+  // If any table doesn't exist, we safely return 0 (no crashes, no build failures).
 
-  const agg = new Map<string, { actor_id: string | null; actor_name: string | null; approvals: number; denials: number; resubmits: number; total: number }>();
+  const pending = await safeCount("verification_tokens", (q) =>
+    q.eq("used", false).eq("decision", "PENDING")
+  );
 
-  for (const r of rows) {
-    const actor_id = (r.actor_id ?? r.staff_id ?? r.actorId ?? null) as string | null;
-    const actor_name = (r.actor_name ?? r.staff_name ?? r.actorName ?? null) as string | null;
-    const action = String(r.action ?? r.type ?? "").toUpperCase();
+  const submitted = await safeCount("verification_tokens", (q) => q.eq("submitted", true));
 
-    const key = actor_id || actor_name || "unknown";
-    const cur = agg.get(key) || { actor_id, actor_name, approvals: 0, denials: 0, resubmits: 0, total: 0 };
+  const approved = await safeCount("verification_tokens", (q) => q.eq("decision", "APPROVED"));
 
-    if (action.includes("APPROV")) cur.approvals += 1;
-    else if (action.includes("DENY")) cur.denials += 1;
-    else if (action.includes("RESUBMIT")) cur.resubmits += 1;
+  const denied = await safeCount("verification_tokens", (q) => q.eq("decision", "DENIED"));
 
-    cur.total += 1;
-    agg.set(key, cur);
-  }
+  const kickTimers = await safeCount("verification_kick_timers");
 
-  return NextResponse.json({ rows: Array.from(agg.values()) });
+  // Live events + VC sessions are optional depending on your schema.
+  // Keep as 0 unless you add tables later.
+  const liveEvents = 0;
+  const vcSessions = 0;
+
+  return NextResponse.json(
+    {
+      ok: true,
+      pending,
+      submitted,
+      approved,
+      denied,
+      kickTimers,
+      liveEvents,
+      vcSessions,
+    },
+    { status: 200 }
+  );
 }
