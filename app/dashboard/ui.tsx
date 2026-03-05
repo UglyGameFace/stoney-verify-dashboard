@@ -1,19 +1,13 @@
-/* app/dashboard/ui.tsx */
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type StaffUser = {
+export type StaffUser = {
   id: string;
   username: string;
   roles: string[];
   guildId: string | null;
 };
-
-type DashboardUIProps = {
-  staffUser?: StaffUser | null;
-};
-
 
 type TokenRow = {
   token: string;
@@ -61,7 +55,6 @@ type Stats = {
 type ModuleKey =
   | "overview"
   | "verifications"
-  | "tokens"
   | "kickTimers"
   | "audit"
   | "liveMonitor"
@@ -108,7 +101,7 @@ function pillClass(label: string) {
 
 async function apiGet<T>(url: string): Promise<T> {
   const r = await fetch(url, { cache: "no-store" });
-  return await r.json();
+  return (await r.json()) as T;
 }
 
 async function apiPost<T>(url: string, body: any): Promise<T> {
@@ -117,13 +110,26 @@ async function apiPost<T>(url: string, body: any): Promise<T> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  return await r.json();
+  return (await r.json()) as T;
 }
 
-export default function DashboardUI({ staffUser }: DashboardUIProps) {
-  const [me, setMe] = useState<StaffUser | null>(staffUser ?? null);
+function useIsMobile(bp = 920) {
+  const [mobile, setMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width:${bp}px)`);
+    const on = () => setMobile(mq.matches);
+    on();
+    mq.addEventListener?.("change", on);
+    return () => mq.removeEventListener?.("change", on);
+  }, [bp]);
+  return mobile;
+}
+
+export default function DashboardUI(props: { staffUser?: StaffUser }) {
+  const isMobile = useIsMobile(920);
+
+  const [me, setMe] = useState<StaffUser | null>(props.staffUser ?? null);
   const [mod, setMod] = useState<ModuleKey>("verifications");
-  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const [stats, setStats] = useState<Stats>({
     pending: 0,
@@ -142,30 +148,31 @@ export default function DashboardUI({ staffUser }: DashboardUIProps) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string>("");
 
-  // Queue UI
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState<"pending" | "submitted" | "approved" | "denied" | "used">(
-    "pending"
-  );
+  const [status, setStatus] = useState<"pending" | "submitted" | "approved" | "denied" | "used">("pending");
   const [selected, setSelected] = useState<Record<string, boolean>>({});
 
-  // Live monitor (SSE)
   const [events, setEvents] = useState<any[]>([]);
   const sseRef = useRef<EventSource | null>(null);
 
-  // Modal
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [modal, setModal] = useState<{ title: string; body: any } | null>(null);
 
-  const nav = useMemo(
+  const primaryNav = useMemo(
     () => [
-      { k: "overview" as const, label: "🏠 Overview" },
-      { k: "verifications" as const, label: "🧾 Verifications" },
-      { k: "tokens" as const, label: "🔑 Tokens" },
-      { k: "kickTimers" as const, label: "⏳ Kick Timers" },
+      { k: "overview" as const, label: "Home", ico: "🏠" },
+      { k: "verifications" as const, label: "Queue", ico: "🧾" },
+      { k: "kickTimers" as const, label: "Timers", ico: "⏳" },
+      { k: "audit" as const, label: "Audit", ico: "🧷" },
+      { k: "liveMonitor" as const, label: "Live", ico: "📡" },
+    ],
+    []
+  );
+
+  const drawerNav = useMemo(
+    () => [
       { k: "vcSessions" as const, label: "🎙️ VC Sessions" },
       { k: "transcripts" as const, label: "📜 Transcripts" },
-      { k: "audit" as const, label: "🧷 Audit Log" },
-      { k: "liveMonitor" as const, label: "📡 Live Monitor" },
       { k: "settings" as const, label: "⚙ Settings" },
     ],
     []
@@ -175,15 +182,10 @@ export default function DashboardUI({ staffUser }: DashboardUIProps) {
     setLoading(true);
     setErr("");
     try {
-      if (!staffUser) {
-        const meRes = await apiGet<any>("/api/auth/me");
-        if (meRes?.error) throw new Error(meRes.error);
-        setMe(meRes as StaffUser);
-      } else {
-        setMe(staffUser);
-      }
+      const meRes = await apiGet<any>("/api/auth/me");
+      if (meRes?.error) throw new Error(meRes.error);
+      setMe(meRes as StaffUser);
 
-      // Stats (optional)
       try {
         const st = await apiGet<any>("/api/stats");
         if (st?.ok) {
@@ -194,18 +196,15 @@ export default function DashboardUI({ staffUser }: DashboardUIProps) {
         // ignore
       }
 
-      // Tokens
-      const t = await apiGet<any>(`/api/tokens?limit=80&status=${status}`);
+      const t = await apiGet<any>(`/api/tokens?limit=160&status=${status}`);
       if (t?.error) throw new Error(t.error);
       setTokens((t?.rows || t?.data || []) as TokenRow[]);
 
-      // Timers
-      const kt = await apiGet<any>("/api/timers?limit=80");
+      const kt = await apiGet<any>("/api/timers?limit=160");
       if (kt?.error) throw new Error(kt.error);
       setTimers((kt?.rows || kt?.data || []) as KickTimerRow[]);
 
-      // Audit
-      const au = await apiGet<any>("/api/audit?limit=80");
+      const au = await apiGet<any>("/api/audit?limit=160");
       if (au?.error) throw new Error(au.error);
       setAudit((au?.rows || au?.data || []) as AuditRow[]);
     } catch (e: any) {
@@ -221,27 +220,21 @@ export default function DashboardUI({ staffUser }: DashboardUIProps) {
   }, []);
 
   useEffect(() => {
-    // when status filter changes, refresh tokens
     (async () => {
       try {
-        const t = await apiGet<any>(`/api/tokens?limit=120&status=${status}`);
+        const t = await apiGet<any>(`/api/tokens?limit=200&status=${status}`);
         if (!t?.error) setTokens((t?.rows || t?.data || []) as TokenRow[]);
-      } catch {
-        // ignore
-      }
+      } catch {}
     })();
     setSelected({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
-  // SSE live monitor (only attach when viewing live)
   useEffect(() => {
     if (mod !== "liveMonitor") return;
 
     if (sseRef.current) {
-      try {
-        sseRef.current.close();
-      } catch {}
+      try { sseRef.current.close(); } catch {}
       sseRef.current = null;
     }
 
@@ -262,22 +255,14 @@ export default function DashboardUI({ staffUser }: DashboardUIProps) {
     };
 
     return () => {
-      try {
-        es.close();
-      } catch {}
+      try { es.close(); } catch {}
       sseRef.current = null;
     };
-  }, [mod]);
-
-  // Close drawer when switching tabs
-  useEffect(() => {
-    setDrawerOpen(false);
   }, [mod]);
 
   const filteredTokens = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return tokens;
-
     return tokens.filter((r) => {
       const st = decisionLabel(r.decision, r.used, r.submitted).toLowerCase();
       return (
@@ -306,9 +291,7 @@ export default function DashboardUI({ staffUser }: DashboardUIProps) {
     setLoading(true);
     setErr("");
     try {
-      for (const row of items) {
-        await setDecision(row.token, decision);
-      }
+      for (const row of items) await setDecision(row.token, decision);
       await refreshEverything();
       setSelected({});
     } catch (e: any) {
@@ -332,394 +315,378 @@ export default function DashboardUI({ staffUser }: DashboardUIProps) {
     }
   }
 
-  function Header() {
-    return (
-      <div className="sb-topbar">
-        <div className="sb-row" style={{ justifyContent: "space-between", width: "100%" }}>
-          <div className="sb-row" style={{ gap: 10 }}>
-            <button
-              className="sb-btn sb-btn-ghost sb-only-mobile"
-              onClick={() => setDrawerOpen(true)}
-              aria-label="Open menu"
-              title="Menu"
-            >
-              ☰
-            </button>
+  const MobileTop = () => (
+    <div className="sb-mtop">
+      <div className="row">
+        <div className="brand">
+          <div className="h">Stoney Verify</div>
+          <div className="sub">
+            {me ? `${me.username} • ${(me.roles?.length || 0)} role(s)` : "Loading…"}
+          </div>
+        </div>
+        <div className="sb-row">
+          <button className="sb-btn sb-btn-ghost" onClick={refreshEverything} disabled={loading} title="Refresh">
+            ⟳
+          </button>
+          <button className="sb-btn sb-btn-ghost" onClick={() => setDrawerOpen(true)} title="More">
+            ⋯
+          </button>
+        </div>
+      </div>
+      {!!err && (
+        <div className="sb-row" style={{ marginTop: 8 }}>
+          <span className="sb-pill bad">⚠ {err}</span>
+        </div>
+      )}
+    </div>
+  );
 
-            <div className="sb-title">
-              <div className="h">Stoney Verify Dashboard</div>
-              <div className="sub">
-                Welcome, <b>{me?.username || "…"}</b> — Stoney Baloney Edition
+  const KPIs = () => (
+    <div className="sb-card">
+      <div className="sb-kpis">
+        <div className="sb-kpi"><div className="k">Pending</div><div className="v">{stats.pending ?? 0}</div><div className="glow" /></div>
+        <div className="sb-kpi"><div className="k">Submitted</div><div className="v">{stats.submitted ?? 0}</div><div className="glow" /></div>
+        <div className="sb-kpi"><div className="k">Approved</div><div className="v">{stats.approved ?? 0}</div><div className="glow" /></div>
+        <div className="sb-kpi"><div className="k">Denied</div><div className="v">{stats.denied ?? 0}</div><div className="glow" /></div>
+        <div className="sb-kpi"><div className="k">Kick Timers</div><div className="v">{stats.kickTimers ?? 0}</div><div className="glow" /></div>
+        <div className="sb-kpi"><div className="k">VC Sessions</div><div className="v">{stats.vcSessions ?? 0}</div><div className="glow" /></div>
+      </div>
+      <div className="sb-row" style={{ marginTop: 12 }}>
+        <span className="sb-pill blue">💡 Tip: “submitted” = waiting on staff</span>
+      </div>
+    </div>
+  );
+
+  const QueueCards = () => (
+    <div className="sb-card">
+      <div className="sb-row" style={{ justifyContent: "space-between" }}>
+        <div>
+          <div style={{ fontWeight: 900, fontSize: 16 }}>Verification Queue</div>
+          <div className="sb-muted" style={{ marginTop: 4, fontSize: 12 }}>
+            Mobile-first: cards + sticky actions
+          </div>
+        </div>
+      </div>
+
+      <div className="sb-row" style={{ marginTop: 12, flexWrap: "wrap" }}>
+        <input
+          className="sb-input"
+          placeholder="Search token / user / channel / status…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          style={{ flex: "1 1 220px" }}
+        />
+        <select
+          className="sb-select"
+          value={status}
+          onChange={(e) => setStatus(e.target.value as any)}
+          title="Status"
+          style={{ flex: "0 0 180px" }}
+        >
+          <option value="pending">Pending</option>
+          <option value="submitted">Submitted</option>
+          <option value="approved">Approved</option>
+          <option value="denied">Denied</option>
+          <option value="used">Used</option>
+        </select>
+      </div>
+
+      <div className="sb-mcards" style={{ marginTop: 12 }}>
+        {filteredTokens.length === 0 ? (
+          <div className="sb-muted">No results.</div>
+        ) : (
+          filteredTokens.map((r) => {
+            const st = decisionLabel(r.decision, r.used, r.submitted);
+            return (
+              <div className="sb-mcard" key={r.token}>
+                <div className="top">
+                  <div className="sb-row" style={{ gap: 10 }}>
+                    <input
+                      type="checkbox"
+                      checked={!!selected[r.token]}
+                      onChange={(e) => setSelected((p) => ({ ...p, [r.token]: e.target.checked }))}
+                      aria-label="Select"
+                    />
+                    <div className="mono">{r.token}</div>
+                  </div>
+                  <span className={pillClass(st)}>{st}</span>
+                </div>
+
+                <div className="grid">
+                  <div><span>User</span>{r.requester_id ? `@${shortId(r.requester_id)}` : "—"}</div>
+                  <div><span>Ticket</span>{r.channel_id ? `#${shortId(r.channel_id)}` : "—"}</div>
+                  <div><span>Created</span>{fmt(r.created_at)}</div>
+                  <div><span>Expires</span>{fmt(r.expires_at)}</div>
+                </div>
+
+                <div className="actions">
+                  <button
+                    className="sb-btn sb-btn-green"
+                    disabled={loading}
+                    onClick={async () => {
+                      setLoading(true);
+                      setErr("");
+                      try { await setDecision(r.token, "APPROVED"); await refreshEverything(); }
+                      catch (e: any) { setErr(String(e?.message || e)); }
+                      finally { setLoading(false); }
+                    }}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    className="sb-btn sb-btn-red"
+                    disabled={loading}
+                    onClick={async () => {
+                      setLoading(true);
+                      setErr("");
+                      try { await setDecision(r.token, "DENIED"); await refreshEverything(); }
+                      catch (e: any) { setErr(String(e?.message || e)); }
+                      finally { setLoading(false); }
+                    }}
+                  >
+                    Deny
+                  </button>
+                  <button className="sb-btn" disabled={loading} onClick={() => setModal({ title: "Token row", body: r })}>
+                    View
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+
+  const KickTimersCards = () => (
+    <div className="sb-card">
+      <div style={{ fontWeight: 900, fontSize: 16 }}>Kick Timers</div>
+      <div className="sb-muted" style={{ marginTop: 4, fontSize: 12 }}>Active verification kick timers</div>
+
+      <div className="sb-mcards" style={{ marginTop: 12 }}>
+        {timers.length === 0 ? (
+          <div className="sb-muted">No timers found.</div>
+        ) : (
+          timers.map((t) => (
+            <div className="sb-mcard" key={t.channel_id}>
+              <div className="top">
+                <div style={{ fontWeight: 900 }}>#{shortId(t.channel_id)}</div>
+                <span className="sb-pill warn">⏳ {t.hours}h</span>
+              </div>
+              <div className="grid">
+                <div><span>Owner</span>@{shortId(t.owner_id)}</div>
+                <div><span>Started</span>{fmt(t.started_at)}</div>
+                <div><span>Started by</span>{t.started_by ? `@${shortId(t.started_by)}` : "—"}</div>
+                <div><span>Guild</span>{shortId(t.guild_id)}</div>
+              </div>
+              <div className="actions">
+                <button className="sb-btn sb-btn-red" disabled={loading} onClick={() => cancelTimer(t.channel_id)}>
+                  Cancel
+                </button>
+                <button className="sb-btn" onClick={() => setModal({ title: "Timer row", body: t })}>
+                  View
+                </button>
+                <button className="sb-btn sb-btn-green" onClick={() => setMod("verifications")}>
+                  Go Queue
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
+  const AuditCards = () => (
+    <div className="sb-card">
+      <div style={{ fontWeight: 900, fontSize: 16 }}>Audit Log</div>
+      <div className="sb-muted" style={{ marginTop: 4, fontSize: 12 }}>Recent staff actions</div>
+
+      <div className="sb-mcards" style={{ marginTop: 12 }}>
+        {audit.length === 0 ? (
+          <div className="sb-muted">No audit logs found.</div>
+        ) : (
+          audit.map((a, idx) => (
+            <div className="sb-mcard" key={(a.id || "") + idx}>
+              <div className="top">
+                <div style={{ fontWeight: 900 }}>{a.action}</div>
+                <span className="sb-pill">{fmt(a.at)}</span>
+              </div>
+              <div className="grid">
+                <div><span>Actor</span>{a.actor_name || (a.actor_id ? `@${shortId(a.actor_id)}` : "—")}</div>
+                <div><span>ID</span>{a.actor_id ? shortId(a.actor_id) : "—"}</div>
+              </div>
+              <div className="actions">
+                <button className="sb-btn" onClick={() => setModal({ title: "Audit meta", body: a.meta })}>
+                  Meta
+                </button>
+                <button className="sb-btn" onClick={() => setModal({ title: "Audit row", body: a })}>
+                  Row
+                </button>
+                <button className="sb-btn sb-btn-green" onClick={() => setMod("liveMonitor")}>
+                  Live
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
+  const LiveMonitor = () => (
+    <div className="sb-card">
+      <div style={{ fontWeight: 900, fontSize: 16 }}>Live Monitor</div>
+      <div className="sb-muted" style={{ marginTop: 4, fontSize: 12 }}>
+        Real-time events from <code>/api/monitor</code>
+      </div>
+
+      <div style={{ marginTop: 12 }} className="sb-card2">
+        {events.length === 0 ? (
+          <div className="sb-muted">No live events yet…</div>
+        ) : (
+          <div style={{ display: "grid", gap: 10 }}>
+            {events.map((e, i) => (
+              <div key={i} className="sb-pre">{JSON.stringify(e, null, 2)}</div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const Placeholder = (name: string, tip: string) => (
+    <div className="sb-card">
+      <div style={{ fontWeight: 900, fontSize: 16 }}>{name}</div>
+      <div className="sb-muted" style={{ marginTop: 6 }}>{tip}</div>
+      <div className="sb-muted" style={{ marginTop: 12, fontSize: 12 }}>
+        Next: username/avatar resolver so IDs become real names + avatars everywhere.
+      </div>
+    </div>
+  );
+
+  const stickyVisible = isMobile && selectedTokens.length > 0;
+
+  return (
+    <>
+      <MobileTop />
+
+      {drawerOpen && (
+        <>
+          <div className="sb-drawer-backdrop" onClick={() => setDrawerOpen(false)} />
+          <div className="sb-drawer" role="dialog" aria-modal="true">
+            <div className="head">
+              <div style={{ fontWeight: 950 }}>More</div>
+              <button className="sb-btn sb-btn-ghost" onClick={() => setDrawerOpen(false)}>Close</button>
+            </div>
+            <div className="body">
+              {drawerNav.map((n) => (
+                <button
+                  key={n.k}
+                  className={"sb-navbtn" + (mod === n.k ? " active" : "")}
+                  onClick={() => { setMod(n.k); setDrawerOpen(false); }}
+                >
+                  {n.label}
+                </button>
+              ))}
+              <div className="sb-row" style={{ justifyContent: "space-between" }}>
+                <a className="sb-btn sb-btn-ghost" href="/">Home</a>
+                <a className="sb-btn sb-btn-ghost" href="/api/auth/logout">Logout</a>
               </div>
             </div>
           </div>
+        </>
+      )}
 
-          <div className="sb-actions sb-only-desktop">
-            {me && (
-              <span className="sb-pill">
-                🧑‍🚀 {me.username} • {me.roles?.length || 0} role(s)
-              </span>
-            )}
-            <button className="sb-btn sb-btn-green" onClick={refreshEverything} disabled={loading}>
-              ⟳ Refresh
-            </button>
-            <a className="sb-btn sb-btn-ghost" href="/">
-              Home
-            </a>
-            <a className="sb-btn sb-btn-ghost" href="/api/auth/logout">
-              Logout
-            </a>
+      <div className="sb-shell">
+        <aside className="sb-sidebar">
+          <div className="sb-brand">
+            <h1>Stoney Verify</h1>
+            <p>Mega TicketTool-style control panel — Stoney Baloney themed</p>
+          </div>
+          <div className="sb-nav">
+            <button className={"sb-navbtn" + (mod === "overview" ? " active" : "")} onClick={() => setMod("overview")}>🏠 Overview</button>
+            <button className={"sb-navbtn" + (mod === "verifications" ? " active" : "")} onClick={() => setMod("verifications")}>🧾 Verifications</button>
+            <button className={"sb-navbtn" + (mod === "kickTimers" ? " active" : "")} onClick={() => setMod("kickTimers")}>⏳ Kick Timers</button>
+            <button className={"sb-navbtn" + (mod === "audit" ? " active" : "")} onClick={() => setMod("audit")}>🧷 Audit Log</button>
+            <button className={"sb-navbtn" + (mod === "liveMonitor" ? " active" : "")} onClick={() => setMod("liveMonitor")}>📡 Live Monitor</button>
+            <button className={"sb-navbtn" + (mod === "settings" ? " active" : "")} onClick={() => setMod("settings")}>⚙ Settings</button>
+          </div>
+        </aside>
+
+        <main className="sb-main">
+          <KPIs />
+
+          {mod === "overview" && (
+            <div className="sb-card">
+              <div style={{ fontWeight: 950, fontSize: 16 }}>🔥 Hot Queue</div>
+              <div className="sb-muted" style={{ marginTop: 6 }}>Newest pending verifications (quick actions)</div>
+              <div style={{ marginTop: 12 }} className="sb-row">
+                <button className="sb-btn sb-btn-green" onClick={() => setMod("verifications")}>Open queue →</button>
+                <button className="sb-btn" onClick={() => setStatus("submitted")}>Show submitted</button>
+              </div>
+            </div>
+          )}
+
+          {mod === "verifications" && <QueueCards />}
+          {mod === "kickTimers" && <KickTimersCards />}
+          {mod === "audit" && <AuditCards />}
+          {mod === "liveMonitor" && <LiveMonitor />}
+
+          {mod === "vcSessions" && Placeholder("VC Sessions", "Hook this to /api/vc-sessions (already supported).")}
+          {mod === "transcripts" && Placeholder("Transcripts", "Hook this to /api/transcripts + /api/transcripts/view.")}
+          {mod === "settings" && Placeholder("Settings", "Server config, role mappings, staff perms, theme toggles, etc.")}
+        </main>
+
+        <div className="sb-bottomnav" aria-label="Bottom navigation">
+          <div className="grid">
+            {primaryNav.map((n) => (
+              <button
+                key={n.k}
+                className={"item" + (mod === n.k ? " active" : "")}
+                onClick={() => setMod(n.k)}
+              >
+                <div className="ico">{n.ico}</div>
+                <span>{n.label}</span>
+              </button>
+            ))}
           </div>
         </div>
 
-        <div className="sb-row sb-only-mobile" style={{ marginTop: 10, justifyContent: "space-between" }}>
-          <button className="sb-btn sb-btn-green" onClick={refreshEverything} disabled={loading}>
-            ⟳ Refresh
-          </button>
-          <div className="sb-row">
-            <a className="sb-btn sb-btn-ghost" href="/">
-              Home
-            </a>
-            <a className="sb-btn sb-btn-ghost" href="/api/auth/logout">
-              Logout
-            </a>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  function KPIs() {
-    return (
-      <div className="sb-card">
-        <div className="sb-kpis">
-          <div className="sb-kpi">
-            <div className="k">Pending</div>
-            <div className="v">{stats.pending ?? 0}</div>
-            <div className="glow" />
-          </div>
-          <div className="sb-kpi">
-            <div className="k">Submitted</div>
-            <div className="v">{stats.submitted ?? 0}</div>
-            <div className="glow" />
-          </div>
-          <div className="sb-kpi">
-            <div className="k">Approved</div>
-            <div className="v">{stats.approved ?? 0}</div>
-            <div className="glow" />
-          </div>
-          <div className="sb-kpi">
-            <div className="k">Denied</div>
-            <div className="v">{stats.denied ?? 0}</div>
-            <div className="glow" />
-          </div>
-          <div className="sb-kpi">
-            <div className="k">Kick Timers</div>
-            <div className="v">{stats.kickTimers ?? 0}</div>
-            <div className="glow" />
-          </div>
-          <div className="sb-kpi">
-            <div className="k">VC Sessions</div>
-            <div className="v">{stats.vcSessions ?? 0}</div>
-            <div className="glow" />
-          </div>
-        </div>
-        <div className="sb-row" style={{ marginTop: 12 }}>
-          <span className="sb-pill blue">💡 Tip: filter “submitted” to find users waiting on staff</span>
-          {!!err && <span className="sb-pill bad">⚠ {err}</span>}
-        </div>
-      </div>
-    );
-  }
-
-  function Queue() {
-    return (
-      <div className="sb-card">
-        <div className="sb-row" style={{ justifyContent: "space-between" }}>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 16 }}>Verification Queue</div>
-            <div className="sb-muted" style={{ marginTop: 4, fontSize: 12 }}>
-              Search, filter, bulk actions — Stoney staff control hub
+        {stickyVisible && (
+          <div className="sb-stickybar">
+            <div className="sb-row" style={{ justifyContent: "space-between" }}>
+              <span className="sb-pill">Selected: <b>{selectedTokens.length}</b></span>
+              <button className="sb-btn" onClick={() => setSelected({})}>Clear</button>
+            </div>
+            <div className="row" style={{ marginTop: 8 }}>
+              <button className="sb-btn sb-btn-green" onClick={() => bulkDecision("APPROVED")} disabled={loading}>
+                ✅ Approve selected
+              </button>
+              <button className="sb-btn sb-btn-red" onClick={() => bulkDecision("DENIED")} disabled={loading}>
+                ⛔ Deny selected
+              </button>
+              <button className="sb-btn" onClick={() => bulkDecision("RESUBMIT")} disabled={loading}>
+                🔁 Resubmit selected
+              </button>
             </div>
           </div>
+        )}
 
-          <div className="sb-row mobile-stack">
-            <input
-              className="sb-input"
-              placeholder="Search token / user / channel / status…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-            <select
-              className="sb-select"
-              value={status}
-              onChange={(e) => setStatus(e.target.value as any)}
-              title="Status"
-            >
-              <option value="pending">Pending</option>
-              <option value="submitted">Submitted</option>
-              <option value="approved">Approved</option>
-              <option value="denied">Denied</option>
-              <option value="used">Used</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="sb-row sb-only-desktop" style={{ marginTop: 12 }}>
-          <button
-            className="sb-btn sb-btn-green"
-            onClick={() => bulkDecision("APPROVED")}
-            disabled={loading || selectedTokens.length === 0}
-          >
-            ✅ Approve selected
-          </button>
-          <button
-            className="sb-btn sb-btn-red"
-            onClick={() => bulkDecision("DENIED")}
-            disabled={loading || selectedTokens.length === 0}
-          >
-            ⛔ Deny selected
-          </button>
-          <button
-            className="sb-btn"
-            onClick={() => bulkDecision("RESUBMIT")}
-            disabled={loading || selectedTokens.length === 0}
-          >
-            🔁 Resubmit selected
-          </button>
-
-          <span className="sb-pill">
-            Selected: <b>{selectedTokens.length}</b>
-          </span>
-        </div>
-
-        {/* Desktop table */}
-        <div className="sb-only-desktop" style={{ marginTop: 12 }}>
-          <div className="sb-tablewrap">
-            <table className="sb-table">
-              <thead>
-                <tr>
-                  <th style={{ width: 40 }}>
-                    <input
-                      type="checkbox"
-                      checked={
-                        filteredTokens.length > 0 &&
-                        filteredTokens.every((t) => !!selected[t.token])
-                      }
-                      onChange={(e) => {
-                        const on = e.target.checked;
-                        const next: Record<string, boolean> = { ...selected };
-                        for (const t of filteredTokens) next[t.token] = on;
-                        setSelected(next);
-                      }}
-                    />
-                  </th>
-                  <th>Token</th>
-                  <th>User</th>
-                  <th>Ticket</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th>Expires</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredTokens.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="sb-muted">
-                      No results.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredTokens.map((r) => {
-                    const st = decisionLabel(r.decision, r.used, r.submitted);
-                    return (
-                      <tr key={r.token}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={!!selected[r.token]}
-                            onChange={(e) =>
-                              setSelected((prev) => ({
-                                ...prev,
-                                [r.token]: e.target.checked,
-                              }))
-                            }
-                          />
-                        </td>
-                        <td style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
-                          {r.token}
-                        </td>
-                        <td title={r.requester_id || ""}>
-                          {r.requester_id ? `@${shortId(r.requester_id)}` : "—"}
-                        </td>
-                        <td title={r.channel_id || ""}>
-                          {r.channel_id ? `#${shortId(r.channel_id)}` : "—"}
-                        </td>
-                        <td>
-                          <span className={pillClass(st)}>{st}</span>
-                        </td>
-                        <td className="sb-muted">{fmt(r.created_at)}</td>
-                        <td className="sb-muted">{fmt(r.expires_at)}</td>
-                        <td className="sb-row">
-                          <button
-                            className="sb-btn sb-btn-green"
-                            disabled={loading}
-                            onClick={async () => {
-                              setLoading(true);
-                              setErr("");
-                              try {
-                                await setDecision(r.token, "APPROVED");
-                                await refreshEverything();
-                              } catch (e: any) {
-                                setErr(String(e?.message || e));
-                              } finally {
-                                setLoading(false);
-                              }
-                            }}
-                          >
-                            Approve
-                          </button>
-                          <button
-                            className="sb-btn sb-btn-red"
-                            disabled={loading}
-                            onClick={async () => {
-                              setLoading(true);
-                              setErr("");
-                              try {
-                                await setDecision(r.token, "DENIED");
-                                await refreshEverything();
-                              } catch (e: any) {
-                                setErr(String(e?.message || e));
-                              } finally {
-                                setLoading(false);
-                              }
-                            }}
-                          >
-                            Deny
-                          </button>
-                          <button className="sb-btn" disabled={loading} onClick={() => setModal({ title: "Token row", body: r })}>
-                            View
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Mobile cards */}
-        <div className="sb-only-mobile" style={{ marginTop: 12 }}>
-          <div className="sb-mcards">
-            {filteredTokens.length === 0 ? (
-              <div className="sb-muted">No results.</div>
-            ) : (
-              filteredTokens.map((r) => {
-                const st = decisionLabel(r.decision, r.used, r.submitted);
-                return (
-                  <div className="sb-mcard" key={r.token}>
-                    <div className="top">
-                      <div className="sb-row" style={{ gap: 10 }}>
-                        <input
-                          type="checkbox"
-                          checked={!!selected[r.token]}
-                          onChange={(e) =>
-                            setSelected((prev) => ({
-                              ...prev,
-                              [r.token]: e.target.checked,
-                            }))
-                          }
-                          aria-label="Select"
-                        />
-                        <div className="mono">{r.token}</div>
-                      </div>
-                      <span className={pillClass(st)}>{st}</span>
-                    </div>
-
-                    <div className="grid">
-                      <div>
-                        <span>User</span>
-                        {r.requester_id ? `@${shortId(r.requester_id)}` : "—"}
-                      </div>
-                      <div>
-                        <span>Ticket</span>
-                        {r.channel_id ? `#${shortId(r.channel_id)}` : "—"}
-                      </div>
-                      <div>
-                        <span>Created</span>
-                        {fmt(r.created_at)}
-                      </div>
-                      <div>
-                        <span>Expires</span>
-                        {fmt(r.expires_at)}
-                      </div>
-                    </div>
-
-                    <div className="actions">
-                      <button
-                        className="sb-btn sb-btn-green"
-                        disabled={loading}
-                        onClick={async () => {
-                          setLoading(true);
-                          setErr("");
-                          try {
-                            await setDecision(r.token, "APPROVED");
-                            await refreshEverything();
-                          } catch (e: any) {
-                            setErr(String(e?.message || e));
-                          } finally {
-                            setLoading(false);
-                          }
-                        }}
-                      >
-                        Approve
-                      </button>
-                      <button
-                        className="sb-btn sb-btn-red"
-                        disabled={loading}
-                        onClick={async () => {
-                          setLoading(true);
-                          setErr("");
-                          try {
-                            await setDecision(r.token, "DENIED");
-                            await refreshEverything();
-                          } catch (e: any) {
-                            setErr(String(e?.message || e));
-                          } finally {
-                            setLoading(false);
-                          }
-                        }}
-                      >
-                        Deny
-                      </button>
-                      <button className="sb-btn" disabled={loading} onClick={() => setModal({ title: "Token row", body: r })}>
-                        View
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  function KickTimers() {
-    return (
-      <div className="sb-card">
-        <div className="sb-row" style={{ justifyContent: "space-between" }}>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 16 }}>Kick Timers</div>
-            <div className="sb-muted" style={{ marginTop: 4, fontSize: 12 }}>
-              Active verification kick timers from Supabase
+        {modal && (
+          <div className="sb-modal-backdrop" onClick={() => setModal(null)}>
+            <div className="sb-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="head">
+                <div style={{ fontWeight: 950 }}>{modal.title}</div>
+                <button className="sb-btn" onClick={() => setModal(null)}>Close</button>
+              </div>
+              <div className="body">
+                <div className="sb-pre">{JSON.stringify(modal.body, null, 2)}</div>
+              </div>
             </div>
           </div>
-        </div>
-
-        <div className="sb-only-desktop" style={{ marginTop: 12 }}>
-          <div className="sb-tablewrap">
+        )}
+      </div>
+    </>
+  );
+}
