@@ -1,19 +1,17 @@
-import { getSession } from "@/lib/session";
-import DashboardClient from "./DashboardClient";
 import { redirect } from "next/navigation";
+import { getSession } from "@/lib/session";
 
-export default async function Dashboard() {
+/**
+ * Home route.
+ * Keep this tiny: send staff straight to the dashboard,
+ * otherwise send to login.
+ */
+export default async function Home() {
   const session = await getSession();
-  if (!session) redirect("/login");
 
-  return (
-    <DashboardClient
-      staffUser={{
-        id: session.userId,
-        username: session.username,
-        roles: session.roles ?? [],
-        guildId: session.guildId ?? null,
-      }}
-    />
-  );
+  if (!session) {
+    redirect("/login");
+  }
+
+  redirect("/dashboard");
 }
