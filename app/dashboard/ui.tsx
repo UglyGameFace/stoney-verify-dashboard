@@ -2,7 +2,19 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type StaffUser = {
+/**
+ * Stoney Verify Dashboard — Mega TicketTool-style UI (Stoney Baloney Edition)
+ * - Sidebar nav
+ * - Overview KPIs + Hot Queue
+ * - Verification queue with bulk approve/deny
+ * - Tokens, Kick Timers
+ * - VC Sessions
+ * - Transcript viewer (best-effort)
+ * - Staff stats (from audit log)
+ * - Live monitor (SSE)
+ */
+
+export type StaffUser = {
   id: string;
   username: string;
   roles: string[];
@@ -22,6 +34,7 @@ type TokenRow = {
   decided_at: string | null;
   created_at: string;
   webhook_url: string;
+  ai_status?: string | null;
 };
 
 type KickTimerRow = {
@@ -42,744 +55,1175 @@ type AuditRow = {
   meta: any;
 };
 
-type Stats = {
-  pending: number;
-  submitted: number;
-  approved: number;
-  denied: number;
-  kickTimers: number;
-  liveEvents: number;
-  vcSessions: number;
+type LiveEvent = { ts: number; type: string; payload: any };
+
+type VcSessionRow = {
+  id?: string;
+  guild_id?: string | null;
+  channel_id?: string | null;
+  requester_id?: string | null;
+  started_by?: string | null;
+  started_at?: string | null;
+  status?: string | null; // ACTIVE/ENDED/etc
+  meta?: any;
 };
 
-type ModuleKey =
+type StaffStatRow = {
+  actor_id: string | null;
+  actor_name: string | null;
+  approvals: number;
+  denials: number;
+  resubmits: number;
+  total: number;
+};
+
+type TranscriptRow = {
+  id?: string;
+  channel_id?: string | null;
+  guild_id?: string | null;
+  ticket_no?: string | null;
+  url?: string | null;
+  created_at?: string | null;
+  meta?: any;
+};
+
+type Tab =
   | "overview"
   | "verifications"
   | "tokens"
-  | "kickTimers"
-  | "audit"
-  | "liveMonitor"
-  | "vcSessions"
+  | "timers"
+  | "vc"
   | "transcripts"
+  | "audit"
+  | "stats"
+  | "monitor"
   | "settings";
 
-function fmt(ts?: string | null) {
-  if (!ts) return "";
-  try {
-    const d = new Date(ts);
-    return d.toLocaleString();
-  } catch {
-    return String(ts);
-  }
+function fmtIso(iso?: string | null) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+}
+function relTime(iso?: string | null) {
+  if (!iso) return "—";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "—";
+  const diff = t - Date.now();
+  const s = Math.round(Math.abs(diff) / 1000);
+  const sign = diff < 0 ? "ago" : "from now";
+  if (s < 60) return `${s}s ${sign}`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ${sign}`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `${h}h ${sign}`;
+  const d = Math.round(h / 24);
+  return `${d}d ${sign}`;
+}
+function shortId(id?: string | null) {
+  if (!id) return "—";
+  if (id.length <= 10) return id;
+  return `${id.slice(0, 4)}…${id.slice(-4)}`;
+}
+function discordChannelLink(guildId?: string | null, channelId?: string | null) {
+  if (!guildId || !channelId) return null;
+  return `https://discord.com/channels/${guildId}/${channelId}`;
+}
+function discordUserLink(userId?: string | null) {
+  if (!userId) return null;
+  return `https://discord.com/users/${userId}`;
 }
 
-function shortId(x?: string | null) {
-  if (!x) return "";
-  const s = String(x);
-  if (s.length <= 10) return s;
-  return s.slice(0, 4) + "…" + s.slice(-4);
-}
-
-function decisionLabel(decision: string | null, used: boolean, submitted: boolean) {
-  const d = (decision || "").toUpperCase();
-  if (used) return "USED";
-  if (d.includes("APPROVED")) return "APPROVED";
-  if (d.includes("DENIED")) return "DENIED";
-  if (d.includes("RESUBMIT")) return "RESUBMIT";
-  if (submitted) return "SUBMITTED";
-  return "PENDING";
-}
-
-function pillClass(label: string) {
-  const s = label.toUpperCase();
-  if (s.includes("APPROV")) return "sb-pill ok";
-  if (s.includes("DENY")) return "sb-pill bad";
-  if (s.includes("RESUB")) return "sb-pill warn";
-  if (s.includes("SUBMIT")) return "sb-pill blue";
-  if (s.includes("USED")) return "sb-pill";
-  return "sb-pill";
-}
-
-async function apiGet<T>(url: string): Promise<T> {
+async function jget<T>(url: string): Promise<T> {
   const r = await fetch(url, { cache: "no-store" });
-  const j = await r.json();
-  return j;
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return (await r.json()) as T;
 }
-
-async function apiPost<T>(url: string, body: any): Promise<T> {
+async function jpost<T>(url: string, body: any): Promise<T> {
   const r = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+    cache: "no-store",
   });
-  const j = await r.json();
-  return j;
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return (await r.json()) as T;
 }
 
-export default function DashboardUI() {
-  const [me, setMe] = useState<StaffUser | null>(null);
-  const [mod, setMod] = useState<ModuleKey>("verifications");
+function Tag({
+  kind,
+  children,
+}: {
+  kind?: "green" | "red" | "amber" | "gray";
+  children: any;
+}) {
+  const cls =
+    kind === "green"
+      ? "sb-tag sb-tagGreen"
+      : kind === "red"
+      ? "sb-tag sb-tagRed"
+      : kind === "amber"
+      ? "sb-tag sb-tagAmber"
+      : "sb-tag sb-tagGray";
+  return <span className={cls}>{children}</span>;
+}
 
-  const [stats, setStats] = useState<Stats>({
-    pending: 0,
-    submitted: 0,
-    approved: 0,
-    denied: 0,
-    kickTimers: 0,
-    liveEvents: 0,
-    vcSessions: 0,
-  });
+function Btn({
+  children,
+  onClick,
+  disabled,
+  kind,
+  title,
+}: {
+  children: any;
+  onClick?: () => void;
+  disabled?: boolean;
+  kind?: "primary" | "danger" | "ghost";
+  title?: string;
+}) {
+  const cls =
+    kind === "danger"
+      ? "sb-btn sb-btnDanger"
+      : kind === "ghost"
+      ? "sb-btn sb-btnGhost"
+      : "sb-btn sb-btnPrimary";
+  return (
+    <button className={cls} onClick={onClick} disabled={disabled} title={title}>
+      {children}
+    </button>
+  );
+}
+
+function Input({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <input
+      className="sb-input"
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
+}
+
+function Select({
+  value,
+  onChange,
+  options,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <select className="sb-select" value={value} onChange={(e) => onChange(e.target.value)}>
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function Modal({
+  title,
+  open,
+  onClose,
+  children,
+}: {
+  title: string;
+  open: boolean;
+  onClose: () => void;
+  children: any;
+}) {
+  if (!open) return null;
+  return (
+    <div className="sb-modalOverlay" role="dialog" aria-modal="true">
+      <div className="sb-modal">
+        <div className="sb-modalHeader">
+          <div className="sb-modalTitle">{title}</div>
+          <Btn kind="ghost" onClick={onClose}>
+            ✕
+          </Btn>
+        </div>
+        <div className="sb-modalBody">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function Sidebar({
+  tab,
+  setTab,
+}: {
+  tab: Tab;
+  setTab: (t: Tab) => void;
+}) {
+  const items: { id: Tab; label: string; icon: string }[] = [
+    { id: "overview", label: "Overview", icon: "🏠" },
+    { id: "verifications", label: "Verifications", icon: "🎫" },
+    { id: "tokens", label: "Tokens", icon: "🔑" },
+    { id: "timers", label: "Kick Timers", icon: "⏳" },
+    { id: "vc", label: "VC Sessions", icon: "🎙️" },
+    { id: "transcripts", label: "Transcripts", icon: "🧾" },
+    { id: "audit", label: "Audit Log", icon: "📋" },
+    { id: "stats", label: "Staff Stats", icon: "📈" },
+    { id: "monitor", label: "Live Monitor", icon: "📡" },
+    { id: "settings", label: "Settings", icon: "⚙️" },
+  ];
+
+  return (
+    <aside className="sb-sidebar">
+      <div className="sb-brand">
+        <div className="sb-brandLogo">SB</div>
+        <div className="sb-brandText">
+          <div className="sb-brandTitle">Stoney Verify</div>
+          <div className="sb-brandSub">Mega TicketTool Dashboard</div>
+        </div>
+      </div>
+
+      <nav className="sb-nav">
+        {items.map((it) => (
+          <button
+            key={it.id}
+            className={it.id === tab ? "sb-navItem sb-navItemActive" : "sb-navItem"}
+            onClick={() => setTab(it.id)}
+          >
+            <span className="sb-navIcon">{it.icon}</span>
+            <span>{it.label}</span>
+          </button>
+        ))}
+      </nav>
+
+      <div className="sb-sidebarFooter">
+        <div className="sb-muted">Stoney Baloney Edition</div>
+      </div>
+    </aside>
+  );
+}
+
+function kpiCard(title: string, value: any, sub?: any) {
+  return (
+    <div className="sb-card">
+      <div className="sb-kpiTitle">{title}</div>
+      <div className="sb-kpiValue">{value}</div>
+      <div className="sb-muted">{sub ?? "\u00A0"}</div>
+    </div>
+  );
+}
+
+function tokenStatusTag(t: TokenRow) {
+  const d = (t.decision || "").toUpperCase();
+  if (d === "APPROVED") return <Tag kind="green">APPROVED</Tag>;
+  if (d === "DENIED") return <Tag kind="red">DENIED</Tag>;
+  if (d.includes("RESUBMIT")) return <Tag kind="amber">RESUBMIT</Tag>;
+  if (t.submitted) return <Tag kind="amber">SUBMITTED</Tag>;
+  if (t.used) return <Tag kind="gray">USED</Tag>;
+  return <Tag kind="gray">PENDING</Tag>;
+}
+
+export default function DashboardUI({ staffUser }: { staffUser: StaffUser }) {
+  const [tab, setTab] = useState<Tab>("overview");
 
   const [tokens, setTokens] = useState<TokenRow[]>([]);
   const [timers, setTimers] = useState<KickTimerRow[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
+  const [live, setLive] = useState<LiveEvent[]>([]);
+  const [vc, setVc] = useState<VcSessionRow[]>([]);
+  const [stats, setStats] = useState<StaffStatRow[]>([]);
+  const [transcripts, setTranscripts] = useState<TranscriptRow[]>([]);
 
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string>("");
+  const [err, setErr] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  // Queue UI
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState<"pending" | "submitted" | "approved" | "denied" | "used">(
-    "pending"
-  );
+  const [tokenFilter, setTokenFilter] = useState<
+    "all" | "pending" | "approved" | "denied" | "submitted"
+  >("pending");
+
   const [selected, setSelected] = useState<Record<string, boolean>>({});
-
-  // Live monitor (SSE)
-  const [events, setEvents] = useState<any[]>([]);
-  const sseRef = useRef<EventSource | null>(null);
-
-  // Modal
-  const [modal, setModal] = useState<{ title: string; body: any } | null>(null);
-
-  const nav = useMemo(
-    () => [
-      { k: "overview" as const, label: "🏠 Overview" },
-      { k: "verifications" as const, label: "🧾 Verifications" },
-      { k: "tokens" as const, label: "🔑 Tokens" },
-      { k: "kickTimers" as const, label: "⏳ Kick Timers" },
-      { k: "vcSessions" as const, label: "🎙️ VC Sessions" },
-      { k: "transcripts" as const, label: "📜 Transcripts" },
-      { k: "audit" as const, label: "🧷 Audit Log" },
-      { k: "liveMonitor" as const, label: "📡 Live Monitor" },
-      { k: "settings" as const, label: "⚙ Settings" },
-    ],
-    []
+  const selectedTokens = useMemo(
+    () => Object.keys(selected).filter((k) => selected[k]),
+    [selected]
   );
 
-  async function refreshEverything() {
-    setLoading(true);
-    setErr("");
-    try {
-      const meRes = await apiGet<any>("/api/auth/me");
-      if (meRes?.error) throw new Error(meRes.error);
-      setMe(meRes as StaffUser);
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const [transcriptHtml, setTranscriptHtml] = useState<string>("");
+  const [transcriptTitle, setTranscriptTitle] = useState<string>("Transcript");
 
-      // Stats (optional)
-      try {
-        const st = await apiGet<any>("/api/stats");
-        if (st?.ok) setStats((prev) => ({ ...prev, ...st }));
-      } catch {
-        // ignore if route missing
-      }
+  const liveRef = useRef<EventSource | null>(null);
 
-      // Tokens
-      const t = await apiGet<any>(`/api/tokens?limit=80&status=${status}`);
-      if (t?.error) throw new Error(t.error);
-      setTokens((t?.rows || t?.data || []) as TokenRow[]);
-
-      // Timers
-      const kt = await apiGet<any>("/api/timers?limit=80");
-      if (kt?.error) throw new Error(kt.error);
-      setTimers((kt?.rows || kt?.data || []) as KickTimerRow[]);
-
-      // Audit
-      const au = await apiGet<any>("/api/audit?limit=80");
-      if (au?.error) throw new Error(au.error);
-      setAudit((au?.rows || au?.data || []) as AuditRow[]);
-    } catch (e: any) {
-      setErr(String(e?.message || e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    refreshEverything();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    // when status filter changes, refresh tokens
-    (async () => {
-      try {
-        const t = await apiGet<any>(`/api/tokens?limit=120&status=${status}`);
-        if (!t?.error) setTokens((t?.rows || t?.data || []) as TokenRow[]);
-      } catch {
-        // ignore
-      }
-    })();
-    setSelected({});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status]);
-
-  // SSE live monitor (only attach when viewing live)
-  useEffect(() => {
-    if (mod !== "liveMonitor") return;
-
-    if (sseRef.current) {
-      try {
-        sseRef.current.close();
-      } catch {}
-      sseRef.current = null;
-    }
-
-    const es = new EventSource("/api/monitor");
-    sseRef.current = es;
-
-    es.onmessage = (ev) => {
-      try {
-        const j = JSON.parse(ev.data);
-        setEvents((prev) => [j, ...prev].slice(0, 100));
-      } catch {
-        setEvents((prev) => [{ raw: ev.data }, ...prev].slice(0, 100));
-      }
-    };
-
-    es.onerror = () => {
-      setEvents((prev) => [{ type: "error", message: "monitor disconnected" }, ...prev].slice(0, 100));
-    };
-
-    return () => {
-      try {
-        es.close();
-      } catch {}
-      sseRef.current = null;
-    };
-  }, [mod]);
+  const roleHint = useMemo(() => {
+    const n = staffUser.roles?.length ?? 0;
+    return n ? `${n} role(s)` : "roles unknown";
+  }, [staffUser.roles]);
 
   const filteredTokens = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    if (!needle) return tokens;
+    const qq = q.trim().toLowerCase();
+    let arr = tokens.slice();
 
-    return tokens.filter((r) => {
-      const st = decisionLabel(r.decision, r.used, r.submitted).toLowerCase();
-      return (
-        (r.token || "").toLowerCase().includes(needle) ||
-        (r.requester_id || "").toLowerCase().includes(needle) ||
-        (r.channel_id || "").toLowerCase().includes(needle) ||
-        st.includes(needle)
-      );
-    });
-  }, [q, tokens]);
+    if (tokenFilter !== "all") {
+      arr = arr.filter((t) => {
+        const d = (t.decision || "").toUpperCase();
+        if (tokenFilter === "pending") return !d && !t.used;
+        if (tokenFilter === "submitted") return t.submitted && !d;
+        if (tokenFilter === "approved") return d === "APPROVED";
+        if (tokenFilter === "denied") return d === "DENIED";
+        return true;
+      });
+    }
 
-  const selectedTokens = useMemo(() => {
-    const set = new Set(Object.keys(selected).filter((k) => selected[k]));
-    return filteredTokens.filter((t) => set.has(t.token));
-  }, [selected, filteredTokens]);
+    if (qq) {
+      arr = arr.filter((t) => {
+        return (
+          (t.token || "").toLowerCase().includes(qq) ||
+          (t.requester_id || "").toLowerCase().includes(qq) ||
+          (t.channel_id || "").toLowerCase().includes(qq) ||
+          (t.guild_id || "").toLowerCase().includes(qq) ||
+          (t.decision || "").toLowerCase().includes(qq) ||
+          (t.ai_status || "").toLowerCase().includes(qq)
+        );
+      });
+    }
 
-  async function setDecision(token: string, decision: "APPROVED" | "DENIED" | "RESUBMIT") {
-    const res = await apiPost<any>("/api/decision", { token, decision });
-    if (res?.error) throw new Error(res.error);
+    // newest first
+    arr.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+    return arr;
+  }, [tokens, q, tokenFilter]);
+
+  const pendingQueue = useMemo(() => {
+    // “Hot queue” = submitted or pending (not decided), newest first
+    const arr = tokens
+      .filter((t) => !t.decision && !t.used)
+      .slice()
+      .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+    return arr.slice(0, 8);
+  }, [tokens]);
+
+  const kpis = useMemo(() => {
+    const pending = tokens.filter((t) => !t.decision && !t.used).length;
+    const submitted = tokens.filter((t) => t.submitted && !t.decision).length;
+    const approved = tokens.filter((t) => (t.decision || "").toUpperCase() === "APPROVED").length;
+    const denied = tokens.filter((t) => (t.decision || "").toUpperCase() === "DENIED").length;
+    const activeTimers = timers.length;
+    const liveCount = live.length;
+    const activeVc = vc.filter((s) => (s.status || "").toUpperCase().includes("ACTIVE")).length;
+    return { pending, submitted, approved, denied, activeTimers, liveCount, activeVc };
+  }, [tokens, timers, live, vc]);
+
+  async function refreshAll() {
+    setErr(null);
+    try {
+      const [toks, ks, au, vcRows, st, tr] = await Promise.all([
+        jget<{ rows: TokenRow[] }>("/api/tokens"),
+        jget<{ rows: KickTimerRow[] }>("/api/timers"),
+        jget<{ rows: AuditRow[] }>("/api/audit"),
+        jget<{ rows: VcSessionRow[] }>("/api/vc-sessions"),
+        jget<{ rows: StaffStatRow[] }>("/api/stats"),
+        jget<{ rows: TranscriptRow[] }>("/api/transcripts"),
+      ]);
+      setTokens(toks.rows || []);
+      setTimers(ks.rows || []);
+      setAudit(au.rows || []);
+      setVc(vcRows.rows || []);
+      setStats(st.rows || []);
+      setTranscripts(tr.rows || []);
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    }
   }
 
-  async function bulkDecision(decision: "APPROVED" | "DENIED" | "RESUBMIT") {
-    const items = selectedTokens;
-    if (!items.length) return;
-
-    setLoading(true);
-    setErr("");
+  async function actDecision(token: string, decision: string) {
+    setBusy(true);
+    setErr(null);
     try {
-      // sequential to avoid spamming
-      for (const row of items) {
-        await setDecision(row.token, decision);
-      }
-      await refreshEverything();
+      await jpost("/api/decision", { token, decision });
+      setToast(`${decision} → ${token}`);
+      await refreshAll();
     } catch (e: any) {
       setErr(String(e?.message || e));
     } finally {
-      setLoading(false);
+      setBusy(false);
+    }
+  }
+
+  async function bulkDecision(decision: string) {
+    const list = selectedTokens.slice();
+    if (!list.length) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      // Fire sequentially to keep your bot endpoint from getting slammed
+      for (const token of list) {
+        await jpost("/api/decision", { token, decision });
+      }
+      setToast(`${decision} → ${list.length} token(s)`);
+      setSelected({});
+      await refreshAll();
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setBusy(false);
     }
   }
 
   async function cancelTimer(channel_id: string) {
-    setLoading(true);
-    setErr("");
+    setBusy(true);
+    setErr(null);
     try {
-      const res = await apiPost<any>("/api/timers/delete", { channel_id });
-      if (res?.error) throw new Error(res.error);
-      await refreshEverything();
+      await jpost("/api/timers/delete", { channel_id });
+      setToast(`Timer cancelled for ${channel_id}`);
+      await refreshAll();
     } catch (e: any) {
       setErr(String(e?.message || e));
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   }
 
-  function Header() {
-    return (
-      <div className="sb-topbar">
-        <div className="sb-title">
-          <div className="h">Stoney Verify Dashboard</div>
-          <div className="sub">
-            Welcome, <b>{me?.username || "…"}</b> — Stoney Baloney Edition
-          </div>
-        </div>
+  async function openTranscript(tr: TranscriptRow) {
+    setTranscriptTitle(tr.ticket_no ? `Transcript • #${tr.ticket_no}` : "Transcript");
+    setTranscriptHtml("");
+    setTranscriptOpen(true);
 
-        <div className="sb-actions">
-          {me && (
-            <span className="sb-pill">
-              🧑‍🚀 {me.username} • {me.roles?.length || 0} role(s)
-            </span>
-          )}
-          <button className="sb-btn sb-btn-green" onClick={refreshEverything} disabled={loading}>
-            ⟳ Refresh
-          </button>
-          <a className="sb-btn sb-btn-ghost" href="/">
-            Home
-          </a>
-          <a className="sb-btn sb-btn-ghost" href="/api/auth/logout">
-            Logout
-          </a>
-        </div>
-      </div>
-    );
+    try {
+      const r = await jpost<{ html?: string; url?: string; error?: string }>("/api/transcripts/view", {
+        channel_id: tr.channel_id,
+        url: tr.url,
+        ticket_no: tr.ticket_no,
+      });
+      if (r.html) setTranscriptHtml(r.html);
+      else if (r.url) setTranscriptHtml(`<p><a href="${r.url}" target="_blank" rel="noreferrer">Open transcript link</a></p>`);
+      else setTranscriptHtml(`<p class="sb-muted">No transcript HTML available.</p>`);
+    } catch (e: any) {
+      setTranscriptHtml(`<p class="sb-muted">Failed to load transcript: ${String(e?.message || e)}</p>`);
+    }
   }
 
-  function KPIs() {
-    return (
-      <div className="sb-card">
-        <div className="sb-kpis">
-          <div className="sb-kpi">
-            <div className="k">Pending</div>
-            <div className="v">{stats.pending ?? 0}</div>
-            <div className="glow" />
-          </div>
-          <div className="sb-kpi">
-            <div className="k">Submitted</div>
-            <div className="v">{stats.submitted ?? 0}</div>
-            <div className="glow" />
-          </div>
-          <div className="sb-kpi">
-            <div className="k">Approved</div>
-            <div className="v">{stats.approved ?? 0}</div>
-            <div className="glow" />
-          </div>
-          <div className="sb-kpi">
-            <div className="k">Denied</div>
-            <div className="v">{stats.denied ?? 0}</div>
-            <div className="glow" />
-          </div>
-          <div className="sb-kpi">
-            <div className="k">Kick Timers</div>
-            <div className="v">{stats.kickTimers ?? 0}</div>
-            <div className="glow" />
-          </div>
-          <div className="sb-kpi">
-            <div className="k">VC Sessions</div>
-            <div className="v">{stats.vcSessions ?? 0}</div>
-            <div className="glow" />
-          </div>
-        </div>
-        <div className="sb-row" style={{ marginTop: 12 }}>
-          <span className="sb-pill blue">💡 Tip: filter “submitted” to find users waiting on staff</span>
-          {!!err && <span className="sb-pill bad">⚠ {err}</span>}
-        </div>
-      </div>
-    );
+  function startLive() {
+    if (liveRef.current) return;
+    try {
+      const es = new EventSource("/api/monitor");
+      liveRef.current = es;
+
+      es.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          setLive((prev) => {
+            const next = [{ ts: Date.now(), type: data?.type || "event", payload: data }, ...prev];
+            return next.slice(0, 250);
+          });
+        } catch {
+          // ignore
+        }
+      };
+
+      es.onerror = () => {
+        // auto-close; user can re-open
+        try {
+          es.close();
+        } catch {}
+        liveRef.current = null;
+      };
+    } catch (e) {
+      // ignore
+    }
   }
 
-  function Queue() {
-    return (
-      <div className="sb-card">
-        <div className="sb-row" style={{ justifyContent: "space-between" }}>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 16 }}>Verification Queue</div>
-            <div className="sb-muted" style={{ marginTop: 4, fontSize: 12 }}>
-              Search, filter, bulk actions — Stoney staff control hub
-            </div>
+  function stopLive() {
+    if (!liveRef.current) return;
+    try {
+      liveRef.current.close();
+    } catch {}
+    liveRef.current = null;
+  }
+
+  useEffect(() => {
+    refreshAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (tab === "monitor") startLive();
+    else stopLive();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const content = (
+    <div className="sb-content">
+      <header className="sb-topbar">
+        <div className="sb-topLeft">
+          <div className="sb-h1">Control Hub</div>
+          <div className="sb-muted">
+            Signed in as <span className="sb-mono">{staffUser.username}</span> •{" "}
+            <span className="sb-mono">{shortId(staffUser.id)}</span> • {roleHint}
+          </div>
+        </div>
+
+        <div className="sb-topRight">
+          <Btn kind="ghost" onClick={() => refreshAll()} disabled={busy} title="Refresh">
+            ↻ Refresh
+          </Btn>
+        </div>
+      </header>
+
+      {err ? (
+        <div className="sb-alert sb-alertRed">
+          <strong>Oops:</strong> <span className="sb-mono">{err}</span>
+        </div>
+      ) : null}
+
+      {toast ? (
+        <div className="sb-toast">
+          <span>{toast}</span>
+        </div>
+      ) : null}
+
+      {tab === "overview" ? (
+        <div className="sb-grid">
+          <div className="sb-kpis">
+            {kpiCard("Pending", kpis.pending, "not decided")}
+            {kpiCard("Submitted", kpis.submitted, "awaiting staff")}
+            {kpiCard("Approved", kpis.approved, "decided")}
+            {kpiCard("Denied", kpis.denied, "decided")}
+            {kpiCard("Kick Timers", kpis.activeTimers, "active")}
+            {kpiCard("VC Sessions", kpis.activeVc, "active")}
+            {kpiCard("Live Events", kpis.liveCount, "cached")}
           </div>
 
           <div className="sb-row">
-            <input
-              className="sb-input"
-              placeholder="Search token / user / channel / status…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-            <select
-              className="sb-select"
-              value={status}
-              onChange={(e) => setStatus(e.target.value as any)}
-              title="Status"
-            >
-              <option value="pending">Pending</option>
-              <option value="submitted">Submitted</option>
-              <option value="approved">Approved</option>
-              <option value="denied">Denied</option>
-              <option value="used">Used</option>
-            </select>
+            <div className="sb-card sb-span2">
+              <div className="sb-cardHeader">
+                <div>
+                  <div className="sb-cardTitle">🔥 Hot Queue</div>
+                  <div className="sb-muted">Newest pending verifications</div>
+                </div>
+                <div className="sb-actions">
+                  <Btn kind="ghost" onClick={() => setTab("verifications")}>
+                    Open queue →
+                  </Btn>
+                </div>
+              </div>
+
+              <div className="sb-tableWrap">
+                <table className="sb-table">
+                  <thead>
+                    <tr>
+                      <th>Token</th>
+                      <th>User</th>
+                      <th>Ticket</th>
+                      <th>Status</th>
+                      <th>Expires</th>
+                      <th style={{ textAlign: "right" }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingQueue.length ? (
+                      pendingQueue.map((t) => {
+                        const u = discordUserLink(t.requester_id);
+                        const ch = discordChannelLink(t.guild_id, t.channel_id);
+                        return (
+                          <tr key={t.token}>
+                            <td className="sb-mono">{t.token}</td>
+                            <td>
+                              {u ? (
+                                <a className="sb-link" href={u} target="_blank" rel="noreferrer">
+                                  {shortId(t.requester_id)}
+                                </a>
+                              ) : (
+                                <span className="sb-mono">{shortId(t.requester_id)}</span>
+                              )}
+                            </td>
+                            <td>
+                              {ch ? (
+                                <a className="sb-link" href={ch} target="_blank" rel="noreferrer">
+                                  {shortId(t.channel_id)}
+                                </a>
+                              ) : (
+                                <span className="sb-mono">{shortId(t.channel_id)}</span>
+                              )}
+                            </td>
+                            <td>{tokenStatusTag(t)}</td>
+                            <td>
+                              <span className="sb-mono">{relTime(t.expires_at)}</span>
+                            </td>
+                            <td style={{ textAlign: "right" }}>
+                              <div className="sb-actions">
+                                <Btn kind="primary" disabled={busy} onClick={() => actDecision(t.token, "APPROVED")}>
+                                  Approve
+                                </Btn>
+                                <Btn kind="danger" disabled={busy} onClick={() => actDecision(t.token, "DENIED")}>
+                                  Deny
+                                </Btn>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={6} className="sb-muted">
+                          No pending tokens 🎉
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="sb-card">
+              <div className="sb-cardHeader">
+                <div>
+                  <div className="sb-cardTitle">Quick Jump</div>
+                  <div className="sb-muted">Pick a module</div>
+                </div>
+              </div>
+              <div className="sb-stack">
+                <Btn kind="ghost" onClick={() => setTab("verifications")}>
+                  🎫 Verifications
+                </Btn>
+                <Btn kind="ghost" onClick={() => setTab("tokens")}>
+                  🔑 Tokens
+                </Btn>
+                <Btn kind="ghost" onClick={() => setTab("timers")}>
+                  ⏳ Kick Timers
+                </Btn>
+                <Btn kind="ghost" onClick={() => setTab("vc")}>
+                  🎙️ VC Sessions
+                </Btn>
+                <Btn kind="ghost" onClick={() => setTab("transcripts")}>
+                  🧾 Transcripts
+                </Btn>
+                <Btn kind="ghost" onClick={() => setTab("audit")}>
+                  📋 Audit Log
+                </Btn>
+                <Btn kind="ghost" onClick={() => setTab("stats")}>
+                  📈 Staff Stats
+                </Btn>
+                <Btn kind="ghost" onClick={() => setTab("monitor")}>
+                  📡 Live Monitor
+                </Btn>
+              </div>
+            </div>
           </div>
         </div>
+      ) : null}
 
-        <div className="sb-row" style={{ marginTop: 12 }}>
-          <button
-            className="sb-btn sb-btn-green"
-            onClick={() => bulkDecision("APPROVED")}
-            disabled={loading || selectedTokens.length === 0}
-          >
-            ✅ Approve selected
-          </button>
-          <button
-            className="sb-btn sb-btn-red"
-            onClick={() => bulkDecision("DENIED")}
-            disabled={loading || selectedTokens.length === 0}
-          >
-            ⛔ Deny selected
-          </button>
-          <button
-            className="sb-btn"
-            onClick={() => bulkDecision("RESUBMIT")}
-            disabled={loading || selectedTokens.length === 0}
-          >
-            🔁 Resubmit selected
-          </button>
+      {tab === "verifications" || tab === "tokens" ? (
+        <div className="sb-card">
+          <div className="sb-cardHeader">
+            <div>
+              <div className="sb-cardTitle">{tab === "verifications" ? "Verification Queue" : "Token Manager"}</div>
+              <div className="sb-muted">
+                Search, filter, bulk actions • Tip: use “submitted” to find people waiting on staff
+              </div>
+            </div>
+            <div className="sb-actions">
+              <Input value={q} onChange={setQ} placeholder="Search token / user / channel / status…" />
+              <Select
+                value={tokenFilter}
+                onChange={(v) => setTokenFilter(v as any)}
+                options={[
+                  { value: "pending", label: "Pending" },
+                  { value: "submitted", label: "Submitted" },
+                  { value: "approved", label: "Approved" },
+                  { value: "denied", label: "Denied" },
+                  { value: "all", label: "All" },
+                ]}
+              />
+              <Btn kind="primary" disabled={busy || !selectedTokens.length} onClick={() => bulkDecision("APPROVED")}>
+                Approve selected
+              </Btn>
+              <Btn kind="danger" disabled={busy || !selectedTokens.length} onClick={() => bulkDecision("DENIED")}>
+                Deny selected
+              </Btn>
+            </div>
+          </div>
 
-          <span className="sb-pill">
-            Selected: <b>{selectedTokens.length}</b>
-          </span>
-        </div>
-
-        <div style={{ marginTop: 12 }} className="sb-tablewrap">
-          <table className="sb-table">
-            <thead>
-              <tr>
-                <th style={{ width: 40 }}>
-                  <input
-                    type="checkbox"
-                    checked={
-                      filteredTokens.length > 0 &&
-                      filteredTokens.every((t) => !!selected[t.token])
-                    }
-                    onChange={(e) => {
-                      const on = e.target.checked;
-                      const next: Record<string, boolean> = { ...selected };
-                      for (const t of filteredTokens) next[t.token] = on;
-                      setSelected(next);
-                    }}
-                  />
-                </th>
-                <th>Token</th>
-                <th>User</th>
-                <th>Ticket</th>
-                <th>Status</th>
-                <th>Created</th>
-                <th>Expires</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredTokens.length === 0 ? (
+          <div className="sb-tableWrap">
+            <table className="sb-table">
+              <thead>
                 <tr>
-                  <td colSpan={8} className="sb-muted">
-                    No results.
-                  </td>
+                  <th style={{ width: 40 }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedTokens.length > 0 && selectedTokens.length === filteredTokens.length}
+                      onChange={(e) => {
+                        const v = e.target.checked;
+                        const next: Record<string, boolean> = {};
+                        for (const t of filteredTokens) next[t.token] = v;
+                        setSelected(next);
+                      }}
+                    />
+                  </th>
+                  <th>Token</th>
+                  <th>User</th>
+                  <th>Ticket</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                  <th>Expires</th>
+                  <th style={{ textAlign: "right" }}>Actions</th>
                 </tr>
-              ) : (
-                filteredTokens.map((r) => {
-                  const st = decisionLabel(r.decision, r.used, r.submitted);
-                  return (
-                    <tr key={r.token}>
+              </thead>
+              <tbody>
+                {filteredTokens.length ? (
+                  filteredTokens.map((t) => {
+                    const u = discordUserLink(t.requester_id);
+                    const ch = discordChannelLink(t.guild_id, t.channel_id);
+                    return (
+                      <tr key={t.token}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={!!selected[t.token]}
+                            onChange={(e) => setSelected((prev) => ({ ...prev, [t.token]: e.target.checked }))}
+                          />
+                        </td>
+                        <td className="sb-mono">{t.token}</td>
+                        <td>
+                          {u ? (
+                            <a className="sb-link" href={u} target="_blank" rel="noreferrer">
+                              {shortId(t.requester_id)}
+                            </a>
+                          ) : (
+                            <span className="sb-mono">{shortId(t.requester_id)}</span>
+                          )}
+                        </td>
+                        <td>
+                          {ch ? (
+                            <a className="sb-link" href={ch} target="_blank" rel="noreferrer">
+                              {shortId(t.channel_id)}
+                            </a>
+                          ) : (
+                            <span className="sb-mono">{shortId(t.channel_id)}</span>
+                          )}
+                        </td>
+                        <td>{tokenStatusTag(t)}</td>
+                        <td>
+                          <span className="sb-mono">{relTime(t.created_at)}</span>
+                        </td>
+                        <td>
+                          <span className="sb-mono">{relTime(t.expires_at)}</span>
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <div className="sb-actions">
+                            <Btn kind="primary" disabled={busy} onClick={() => actDecision(t.token, "APPROVED")}>
+                              Approve
+                            </Btn>
+                            <Btn kind="danger" disabled={busy} onClick={() => actDecision(t.token, "DENIED")}>
+                              Deny
+                            </Btn>
+                            <Btn kind="ghost" disabled={busy} onClick={() => actDecision(t.token, "RESUBMIT REQUESTED")}>
+                              Resubmit
+                            </Btn>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={8} className="sb-muted">
+                      No results.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "timers" ? (
+        <div className="sb-card">
+          <div className="sb-cardHeader">
+            <div>
+              <div className="sb-cardTitle">Kick Timers</div>
+              <div className="sb-muted">Cancel a timer if a user is verified or you need to stop an auto-kick.</div>
+            </div>
+          </div>
+          <div className="sb-tableWrap">
+            <table className="sb-table">
+              <thead>
+                <tr>
+                  <th>Owner</th>
+                  <th>Ticket</th>
+                  <th>Hours</th>
+                  <th>Started</th>
+                  <th style={{ textAlign: "right" }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {timers.length ? (
+                  timers.map((t) => {
+                    const u = discordUserLink(t.owner_id);
+                    const ch = discordChannelLink(t.guild_id, t.channel_id);
+                    return (
+                      <tr key={t.channel_id}>
+                        <td>
+                          {u ? (
+                            <a className="sb-link" href={u} target="_blank" rel="noreferrer">
+                              {shortId(t.owner_id)}
+                            </a>
+                          ) : (
+                            <span className="sb-mono">{shortId(t.owner_id)}</span>
+                          )}
+                        </td>
+                        <td>
+                          {ch ? (
+                            <a className="sb-link" href={ch} target="_blank" rel="noreferrer">
+                              {shortId(t.channel_id)}
+                            </a>
+                          ) : (
+                            <span className="sb-mono">{shortId(t.channel_id)}</span>
+                          )}
+                        </td>
+                        <td className="sb-mono">{t.hours}</td>
+                        <td className="sb-mono">
+                          {fmtIso(t.started_at)} • {relTime(t.started_at)}
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <Btn kind="danger" disabled={busy} onClick={() => cancelTimer(t.channel_id)}>
+                            Cancel
+                          </Btn>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="sb-muted">
+                      No active kick timers.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "vc" ? (
+        <div className="sb-card">
+          <div className="sb-cardHeader">
+            <div>
+              <div className="sb-cardTitle">VC Sessions</div>
+              <div className="sb-muted">
+                Best-effort view (table names vary). If it shows empty, we’ll map it to your exact Supabase table name.
+              </div>
+            </div>
+          </div>
+          <div className="sb-tableWrap">
+            <table className="sb-table">
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>User</th>
+                  <th>Channel</th>
+                  <th>Started</th>
+                  <th>Meta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {vc.length ? (
+                  vc.map((s, idx) => {
+                    const u = discordUserLink(s.requester_id || null);
+                    const ch = discordChannelLink(s.guild_id || null, s.channel_id || null);
+                    return (
+                      <tr key={String(s.id || idx)}>
+                        <td>
+                          <Tag kind={(s.status || "").toUpperCase().includes("ACTIVE") ? "green" : "gray"}>
+                            {(s.status || "—").toString()}
+                          </Tag>
+                        </td>
+                        <td>
+                          {u ? (
+                            <a className="sb-link" href={u} target="_blank" rel="noreferrer">
+                              {shortId(s.requester_id || "")}
+                            </a>
+                          ) : (
+                            <span className="sb-mono">{shortId(s.requester_id || "")}</span>
+                          )}
+                        </td>
+                        <td>
+                          {ch ? (
+                            <a className="sb-link" href={ch} target="_blank" rel="noreferrer">
+                              {shortId(s.channel_id || "")}
+                            </a>
+                          ) : (
+                            <span className="sb-mono">{shortId(s.channel_id || "")}</span>
+                          )}
+                        </td>
+                        <td className="sb-mono">{fmtIso(s.started_at || null)}</td>
+                        <td>
+                          <details>
+                            <summary className="sb-link">view</summary>
+                            <pre className="sb-pre">{JSON.stringify(s.meta ?? {}, null, 2)}</pre>
+                          </details>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="sb-muted">
+                      No VC sessions found.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "transcripts" ? (
+        <div className="sb-card">
+          <div className="sb-cardHeader">
+            <div>
+              <div className="sb-cardTitle">Transcripts</div>
+              <div className="sb-muted">
+                Shows transcript links/rows if present. You can open them in a modal (HTML) or as a link.
+              </div>
+            </div>
+          </div>
+          <div className="sb-tableWrap">
+            <table className="sb-table">
+              <thead>
+                <tr>
+                  <th>Ticket</th>
+                  <th>Channel</th>
+                  <th>Created</th>
+                  <th>Link</th>
+                  <th style={{ textAlign: "right" }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transcripts.length ? (
+                  transcripts.map((tr, idx) => {
+                    const ch = discordChannelLink(tr.guild_id || null, tr.channel_id || null);
+                    return (
+                      <tr key={String(tr.id || idx)}>
+                        <td className="sb-mono">{tr.ticket_no || "—"}</td>
+                        <td>
+                          {ch ? (
+                            <a className="sb-link" href={ch} target="_blank" rel="noreferrer">
+                              {shortId(tr.channel_id || "")}
+                            </a>
+                          ) : (
+                            <span className="sb-mono">{shortId(tr.channel_id || "")}</span>
+                          )}
+                        </td>
+                        <td className="sb-mono">{fmtIso(tr.created_at || null)}</td>
+                        <td className="sb-mono">
+                          {tr.url ? (
+                            <a className="sb-link" href={tr.url} target="_blank" rel="noreferrer">
+                              open
+                            </a>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <Btn kind="ghost" onClick={() => openTranscript(tr)}>
+                            View
+                          </Btn>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="sb-muted">
+                      No transcripts found.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "audit" ? (
+        <div className="sb-card">
+          <div className="sb-cardHeader">
+            <div>
+              <div className="sb-cardTitle">Audit Log</div>
+              <div className="sb-muted">Recent staff actions. Expand meta to see full context.</div>
+            </div>
+          </div>
+          <div className="sb-tableWrap">
+            <table className="sb-table">
+              <thead>
+                <tr>
+                  <th>At</th>
+                  <th>Actor</th>
+                  <th>Action</th>
+                  <th>Meta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {audit.length ? (
+                  audit.map((a, idx) => (
+                    <tr key={String(a.id || idx)}>
+                      <td className="sb-mono">{fmtIso(a.at)}</td>
+                      <td className="sb-mono">{a.actor_name || shortId(a.actor_id)}</td>
                       <td>
-                        <input
-                          type="checkbox"
-                          checked={!!selected[r.token]}
-                          onChange={(e) =>
-                            setSelected((prev) => ({
-                              ...prev,
-                              [r.token]: e.target.checked,
-                            }))
-                          }
-                        />
+                        <Tag kind={a.action.toUpperCase().includes("DENY") ? "red" : a.action.toUpperCase().includes("APPROV") ? "green" : "gray"}>
+                          {a.action}
+                        </Tag>
                       </td>
-                      <td style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
-                        {r.token}
-                      </td>
-                      <td title={r.requester_id || ""}>
-                        {r.requester_id ? `@${shortId(r.requester_id)}` : "—"}
-                      </td>
-                      <td title={r.channel_id || ""}>{r.channel_id ? `#${shortId(r.channel_id)}` : "—"}</td>
                       <td>
-                        <span className={pillClass(st)}>{st}</span>
-                      </td>
-                      <td className="sb-muted">{fmt(r.created_at)}</td>
-                      <td className="sb-muted">{fmt(r.expires_at)}</td>
-                      <td className="sb-row">
-                        <button
-                          className="sb-btn sb-btn-green"
-                          disabled={loading}
-                          onClick={async () => {
-                            setLoading(true);
-                            setErr("");
-                            try {
-                              await setDecision(r.token, "APPROVED");
-                              await refreshEverything();
-                            } catch (e: any) {
-                              setErr(String(e?.message || e));
-                            } finally {
-                              setLoading(false);
-                            }
-                          }}
-                        >
-                          Approve
-                        </button>
-                        <button
-                          className="sb-btn sb-btn-red"
-                          disabled={loading}
-                          onClick={async () => {
-                            setLoading(true);
-                            setErr("");
-                            try {
-                              await setDecision(r.token, "DENIED");
-                              await refreshEverything();
-                            } catch (e: any) {
-                              setErr(String(e?.message || e));
-                            } finally {
-                              setLoading(false);
-                            }
-                          }}
-                        >
-                          Deny
-                        </button>
-                        <button
-                          className="sb-btn"
-                          disabled={loading}
-                          onClick={() => setModal({ title: "Token row", body: r })}
-                        >
-                          View
-                        </button>
+                        <details>
+                          <summary className="sb-link">view</summary>
+                          <pre className="sb-pre">{JSON.stringify(a.meta ?? {}, null, 2)}</pre>
+                        </details>
                       </td>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={4} className="sb-muted">
+                      No audit entries found.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
-    );
-  }
+      ) : null}
 
-  function KickTimers() {
-    return (
-      <div className="sb-card">
-        <div className="sb-row" style={{ justifyContent: "space-between" }}>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 16 }}>Kick Timers</div>
-            <div className="sb-muted" style={{ marginTop: 4, fontSize: 12 }}>
-              Active verification kick timers from Supabase
+      {tab === "stats" ? (
+        <div className="sb-card">
+          <div className="sb-cardHeader">
+            <div>
+              <div className="sb-cardTitle">Staff Stats</div>
+              <div className="sb-muted">Based on audit log entries (approvals/denials/resubmits).</div>
+            </div>
+          </div>
+          <div className="sb-tableWrap">
+            <table className="sb-table">
+              <thead>
+                <tr>
+                  <th>Staff</th>
+                  <th>Approvals</th>
+                  <th>Denials</th>
+                  <th>Resubmits</th>
+                  <th>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.length ? (
+                  stats
+                    .slice()
+                    .sort((a, b) => b.total - a.total)
+                    .map((s, idx) => (
+                      <tr key={`${s.actor_id || "x"}-${idx}`}>
+                        <td className="sb-mono">{s.actor_name || shortId(s.actor_id)}</td>
+                        <td className="sb-mono">{s.approvals}</td>
+                        <td className="sb-mono">{s.denials}</td>
+                        <td className="sb-mono">{s.resubmits}</td>
+                        <td className="sb-mono">{s.total}</td>
+                      </tr>
+                    ))
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="sb-muted">
+                      No stats yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "monitor" ? (
+        <div className="sb-card">
+          <div className="sb-cardHeader">
+            <div>
+              <div className="sb-cardTitle">Live Monitor</div>
+              <div className="sb-muted">SSE event feed from /api/monitor. Auto-reconnects when you re-open this tab.</div>
+            </div>
+            <div className="sb-actions">
+              <Btn kind="ghost" onClick={() => setLive([])}>
+                Clear
+              </Btn>
+            </div>
+          </div>
+          <div className="sb-feed">
+            {live.length ? (
+              live.map((e, idx) => (
+                <div className="sb-feedItem" key={idx}>
+                  <div className="sb-feedTop">
+                    <span className="sb-mono">{new Date(e.ts).toLocaleTimeString()}</span>
+                    <Tag kind="gray">{e.type}</Tag>
+                  </div>
+                  <pre className="sb-pre">{JSON.stringify(e.payload ?? {}, null, 2)}</pre>
+                </div>
+              ))
+            ) : (
+              <div className="sb-muted">No live events yet. Leave this tab open while actions happen.</div>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "settings" ? (
+        <div className="sb-card">
+          <div className="sb-cardHeader">
+            <div>
+              <div className="sb-cardTitle">Settings</div>
+              <div className="sb-muted">This panel is intentionally safe — secrets stay in Vercel env vars.</div>
+            </div>
+          </div>
+          <div className="sb-stack">
+            <div className="sb-card sb-cardInset">
+              <div className="sb-muted">
+                <strong>BOT_ACTIONS_URL</strong> and <strong>BOT_ACTIONS_SECRET</strong> power staff decisions.
+              </div>
+              <div className="sb-muted">
+                <strong>Supabase</strong> keys power tokens/timers/audit.
+              </div>
+            </div>
+            <div className="sb-card sb-cardInset">
+              <div className="sb-muted">
+                Want usernames/avatars like TicketTool? Add an optional lookup endpoint in the bot and we’ll wire a bulk user cache.
+              </div>
             </div>
           </div>
         </div>
+      ) : null}
 
-        <div style={{ marginTop: 12 }} className="sb-tablewrap">
-          <table className="sb-table">
-            <thead>
-              <tr>
-                <th>Ticket</th>
-                <th>Owner</th>
-                <th>Started</th>
-                <th>Hours</th>
-                <th>Started by</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {timers.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="sb-muted">
-                    No timers found.
-                  </td>
-                </tr>
-              ) : (
-                timers.map((t) => (
-                  <tr key={t.channel_id}>
-                    <td title={t.channel_id}>#{shortId(t.channel_id)}</td>
-                    <td title={t.owner_id}>@{shortId(t.owner_id)}</td>
-                    <td className="sb-muted">{fmt(t.started_at)}</td>
-                    <td>{t.hours}</td>
-                    <td title={t.started_by || ""}>{t.started_by ? `@${shortId(t.started_by)}` : "—"}</td>
-                    <td className="sb-row">
-                      <button
-                        className="sb-btn sb-btn-red"
-                        disabled={loading}
-                        onClick={() => cancelTimer(t.channel_id)}
-                      >
-                        Cancel
-                      </button>
-                      <button className="sb-btn" onClick={() => setModal({ title: "Timer row", body: t })}>
-                        View
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  }
-
-  function AuditLog() {
-    return (
-      <div className="sb-card">
-        <div style={{ fontWeight: 800, fontSize: 16 }}>Audit Log</div>
-        <div className="sb-muted" style={{ marginTop: 4, fontSize: 12 }}>
-          Recent staff actions
-        </div>
-
-        <div style={{ marginTop: 12 }} className="sb-tablewrap">
-          <table className="sb-table">
-            <thead>
-              <tr>
-                <th>At</th>
-                <th>Actor</th>
-                <th>Action</th>
-                <th>Meta</th>
-              </tr>
-            </thead>
-            <tbody>
-              {audit.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="sb-muted">
-                    No audit logs found.
-                  </td>
-                </tr>
-              ) : (
-                audit.map((a, idx) => (
-                  <tr key={(a.id || "") + idx}>
-                    <td className="sb-muted">{fmt(a.at)}</td>
-                    <td title={a.actor_id || ""}>{a.actor_name || (a.actor_id ? `@${shortId(a.actor_id)}` : "—")}</td>
-                    <td>{a.action}</td>
-                    <td>
-                      <button className="sb-btn" onClick={() => setModal({ title: "Audit meta", body: a.meta })}>
-                        View
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  }
-
-  function LiveMonitor() {
-    return (
-      <div className="sb-card">
-        <div style={{ fontWeight: 800, fontSize: 16 }}>Live Monitor</div>
-        <div className="sb-muted" style={{ marginTop: 4, fontSize: 12 }}>
-          Real-time events from <code>/api/monitor</code>
-        </div>
-
-        <div style={{ marginTop: 12 }} className="sb-card2">
-          {events.length === 0 ? (
-            <div className="sb-muted">No live events yet…</div>
-          ) : (
-            <div style={{ display: "grid", gap: 10 }}>
-              {events.map((e, i) => (
-                <div key={i} className="sb-pre">
-                  {JSON.stringify(e, null, 2)}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  function Placeholder(name: string, tip: string) {
-    return (
-      <div className="sb-card">
-        <div style={{ fontWeight: 800, fontSize: 16 }}>{name}</div>
-        <div className="sb-muted" style={{ marginTop: 6 }}>
-          {tip}
-        </div>
-        <div className="sb-muted" style={{ marginTop: 12, fontSize: 12 }}>
-          If you want this tab fully wired (VC Sessions + Transcripts + Username/Avatar resolution),
-          I’ll give you the exact bot/dashboard endpoints next.
-        </div>
-      </div>
-    );
-  }
+      <Modal title={transcriptTitle} open={transcriptOpen} onClose={() => setTranscriptOpen(false)}>
+        <div className="sb-transcript" dangerouslySetInnerHTML={{ __html: transcriptHtml || "<p class='sb-muted'>Loading…</p>" }} />
+      </Modal>
+    </div>
+  );
 
   return (
     <div className="sb-shell">
-      <aside className="sb-sidebar">
-        <div className="sb-brand">
-          <h1>Stoney Verify</h1>
-          <p>Mega TicketTool-style control panel — Stoney Baloney themed</p>
-        </div>
-        <div className="sb-nav">
-          {nav.map((n) => (
-            <button
-              key={n.k}
-              className={"sb-navbtn" + (mod === n.k ? " active" : "")}
-              onClick={() => setMod(n.k)}
-            >
-              {n.label}
-            </button>
-          ))}
-        </div>
-      </aside>
-
-      <main className="sb-main">
-        <Header />
-        <KPIs />
-
-        {mod === "overview" && (
-          <div className="sb-card">
-            <div style={{ fontWeight: 900, fontSize: 16 }}>🔥 Hot Queue</div>
-            <div className="sb-muted" style={{ marginTop: 6 }}>
-              Newest pending verifications (quick actions)
-            </div>
-            <div style={{ marginTop: 12 }}>
-              <button className="sb-btn sb-btn-green" onClick={() => setMod("verifications")}>
-                Open queue →
-              </button>
-            </div>
-          </div>
-        )}
-
-        {mod === "verifications" && <Queue />}
-        {mod === "tokens" && <Queue />}
-        {mod === "kickTimers" && <KickTimers />}
-        {mod === "audit" && <AuditLog />}
-        {mod === "liveMonitor" && <LiveMonitor />}
-
-        {mod === "vcSessions" && Placeholder("VC Sessions", "Hook this to /api/vc-sessions (you mentioned you added it).")}
-        {mod === "transcripts" && Placeholder("Transcripts", "Hook this to /api/transcripts + /api/transcripts/view.")}
-        {mod === "settings" && Placeholder("Settings", "Server config, role mappings, staff perms, theme toggles, etc.")}
-      </main>
-
-      {modal && (
-        <div className="sb-modal-backdrop" onClick={() => setModal(null)}>
-          <div className="sb-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="head">
-              <div style={{ fontWeight: 900 }}>{modal.title}</div>
-              <button className="sb-btn" onClick={() => setModal(null)}>
-                Close
-              </button>
-            </div>
-            <div className="body">
-              <div className="sb-pre">{JSON.stringify(modal.body, null, 2)}</div>
-            </div>
-          </div>
-        </div>
-      )}
+      <Sidebar tab={tab} setTab={setTab} />
+      {content}
     </div>
   );
 }
