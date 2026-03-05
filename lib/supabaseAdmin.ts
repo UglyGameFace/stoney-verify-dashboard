@@ -3,13 +3,15 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 let _client: SupabaseClient | null = null;
 
+/**
+ * Returns the Supabase admin client or null if env vars are missing.
+ */
 export function getSupabaseAdmin(): SupabaseClient | null {
   if (_client) return _client;
 
   const url = (process.env.SUPABASE_URL || "").trim();
   const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
 
-  // Service role must NEVER be used client-side; this module is server-only.
   if (!url || !key) return null;
 
   _client = createClient(url, key, {
@@ -23,7 +25,7 @@ export function getSupabaseAdmin(): SupabaseClient | null {
 }
 
 /**
- * Helper for API routes so they can safely require the admin client.
+ * Strict version used by API routes.
  */
 export function requireSupabaseAdmin(): SupabaseClient {
   const sb = getSupabaseAdmin();
