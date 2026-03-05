@@ -1,31 +1,14 @@
-import { NextResponse } from "next/server";
-import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { withAdmin } from "@/lib/api";
 
 const TABLE_CANDIDATES = [
   "vc_sessions",
   "verification_vc_sessions",
-  "stoney_vc_sessions",
-  "vc_verify_sessions",
 ];
 
 export async function GET() {
-  const sb = getSupabaseAdmin();
+  return withAdmin(async (sb) => {
 
-  // ✅ Null-safe: do not crash build or runtime if env vars are missing
-  if (!sb) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "Supabase admin not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY missing).",
-        table: null,
-        rows: [],
-      },
-      { status: 200 }
-    );
-  }
-
-  for (const table of TABLE_CANDIDATES) {
-    try {
+    for (const table of TABLE_CANDIDATES) {
       const { data, error } = await sb
         .from(table as any)
         .select("*")
@@ -41,19 +24,15 @@ export async function GET() {
           guild_id: r.guild_id ?? null,
           ticket_channel_id: r.ticket_channel_id ?? r.channel_id ?? null,
           vc_channel_id: r.vc_channel_id ?? null,
-          status: r.status ?? r.state ?? "active",
-          started_at: r.started_at ?? r.created_at ?? null,
+          status: r.status ?? "active",
+          started_at: r.started_at ?? null,
           ended_at: r.ended_at ?? null,
-          meta: r.meta ?? r,
         }));
 
-        return NextResponse.json({ ok: true, table, rows }, { status: 200 });
+        return { table, rows };
       }
-    } catch {
-      // ignore and try next table name
     }
-  }
 
-  // none of the candidate tables exist
-  return NextResponse.json({ ok: true, table: null, rows: [] }, { status: 200 });
+    return { table: null, rows: [] };
+  });
 }
