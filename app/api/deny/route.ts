@@ -1,4 +1,3 @@
-// app/api/deny/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
@@ -32,7 +31,11 @@ export async function POST(req: NextRequest) {
     .from("verification_tokens")
     .update({
       decision: "DENIED",
+      status: "denied",
+      expected_role_state: "unverified_only",
       decided_by: session.userId,
+      decided_by_display_name: session.username,
+      decided_by_username: session.username,
       decided_at: now,
       used: true,
       updated_at: now,
@@ -48,6 +51,8 @@ export async function POST(req: NextRequest) {
       staff_id: session.userId,
       meta: {
         staff_username: session.username,
+        decision: "DENIED",
+        status: "denied",
         guild_id: row.guild_id ?? null,
         channel_id: row.channel_id ?? null,
         requester_id: row.requester_id ?? row.user_id ?? null,
@@ -83,9 +88,5 @@ export async function POST(req: NextRequest) {
     staffName: session.username,
   });
 
-  return NextResponse.json({
-    ok: true,
-    webhook: webhookResult,
-    bot: botResult,
-  });
+  return NextResponse.json({ ok: true, webhook: webhookResult, bot: botResult });
 }
