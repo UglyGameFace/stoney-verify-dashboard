@@ -29,6 +29,7 @@ export async function GET() {
     ]);
 
     return {
+      ok: true,
       pending: pending.count ?? 0,
       submitted: submitted.count ?? 0,
       approved: approved.count ?? 0,
