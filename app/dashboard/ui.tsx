@@ -113,6 +113,83 @@ async function apiPost<T>(url: string, body: any): Promise<T> {
   return (await r.json()) as T;
 }
 
+type RoleInfo = { id: string; name: string; color?: number | null };
+
+type ResolvedUser = {
+  id: string;
+  displayName: string;
+  username?: string | null;
+  avatarUrl?: string | null;
+  roleIds: string[];
+  roles: RoleInfo[];
+};
+
+type ResolveResponse = {
+  ok: boolean;
+  guildId?: string | null;
+  roles?: RoleInfo[];
+  users?: Record<string, ResolvedUser>;
+  error?: string;
+};
+
+// Small client-side cache so we don’t spam the API on scroll / refresh
+const _resolveCache: Record<string, ResolvedUser> = {};
+
+function bestName(u?: ResolvedUser | null) {
+  return u?.displayName || u?.username || (u?.id ? `@${shortId(u.id)}` : "—");
+}
+
+function avatarFallback(id: string) {
+  // Discord default avatar (rough fallback). We don’t know discriminator in the dashboard, so just use embed avatar style.
+  return `https://cdn.discordapp.com/embed/avatars/${Number(id) % 6}.png`;
+}
+
+async function resolveDiscordUsers(ids: string[], guildId?: string | null): Promise<Record<string, ResolvedUser>> {
+  const unique = Array.from(new Set(ids.filter(Boolean)));
+  const missing = unique.filter((id) => !_resolveCache[id]);
+  if (missing.length === 0) {
+    const out: Record<string, ResolvedUser> = {};
+    for (const id of unique) out[id] = _resolveCache[id];
+    return out;
+  }
+
+  const res = await apiPost<ResolveResponse>("/api/discord/resolve", { ids: missing, guildId: guildId || null });
+  if (res?.ok && res.users) {
+    for (const [id, u] of Object.entries(res.users)) _resolveCache[id] = u;
+  }
+
+  const out: Record<string, ResolvedUser> = {};
+  for (const id of unique) {
+    out[id] =
+      _resolveCache[id] ||
+      ({
+        id,
+        displayName: `@${shortId(id)}`,
+        username: null,
+        avatarUrl: avatarFallback(id),
+        roleIds: [],
+        roles: [],
+      } as ResolvedUser);
+  }
+  return out;
+}
+
+function RoleChips({ roles }: { roles: RoleInfo[] }) {
+  if (!roles?.length) return null;
+  return (
+    <div className="sb-rolewrap" aria-label="roles">
+      {roles.slice(0, 6).map((r) => (
+        <span key={r.id} className="sb-role">
+          {r.name}
+        </span>
+      ))}
+      {roles.length > 6 && <span className="sb-role more">+{roles.length - 6}</span>}
+    </div>
+  );
+}
+
+
+
 function useIsMobile(bp = 920) {
   const [mobile, setMobile] = useState(false);
   useEffect(() => {
@@ -144,6 +221,9 @@ export default function DashboardUI(props: { staffUser?: StaffUser }) {
   const [tokens, setTokens] = useState<TokenRow[]>([]);
   const [timers, setTimers] = useState<KickTimerRow[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
+
+  // Discord user resolution (usernames/avatars/roles)
+  const [resolved, setResolved] = useState<Record<string, ResolvedUser>>({});
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string>("");
@@ -198,7 +278,19 @@ export default function DashboardUI(props: { staffUser?: StaffUser }) {
 
       const t = await apiGet<any>(`/api/tokens?limit=160&status=${status}`);
       if (t?.error) throw new Error(t.error);
-      setTokens((t?.rows || t?.data || []) as TokenRow[]);
+      const tokenRows = (t?.rows || t?.data || []) as TokenRow[];
+      setTokens(tokenRows);
+
+      // Resolve display names/avatars/roles for staff + users in the queue
+      try {
+        const idsToResolve = [String((meRes as any)?.id || (meRes as any)?.userId || "")]
+          .concat(tokenRows.map((r) => String(r.requester_id || "")))
+          .concat(tokenRows.map((r) => String(r.decided_by || "")));
+        const map = await resolveDiscordUsers(idsToResolve, (meRes as any)?.guildId || null);
+        setResolved(map);
+      } catch {
+        // non-fatal
+      }
 
       const kt = await apiGet<any>("/api/timers?limit=160");
       if (kt?.error) throw new Error(kt.error);
@@ -220,17 +312,35 @@ export default function DashboardUI(props: { staffUser?: StaffUser }) {
   }, []);
 
   useEffect(() => {
+    // When status filter changes, refresh tokens + resolve user display names/roles
     (async () => {
       try {
-        const t = await apiGet<any>(`/api/tokens?limit=200&status=${status}`);
-        if (!t?.error) setTokens((t?.rows || t?.data || []) as TokenRow[]);
-      } catch {}
+        const t = await apiGet<any>(`/api/tokens?limit=120&status=${status}`);
+        if (!t?.error) {
+          const tokenRows = (t?.rows || t?.data || []) as TokenRow[];
+          setTokens(tokenRows);
+
+          try {
+            const idsToResolve = [String(me?.id || "")]
+              .concat(tokenRows.map((r) => String(r.requester_id || "")))
+              .concat(tokenRows.map((r) => String(r.decided_by || "")));
+            const map = await resolveDiscordUsers(idsToResolve, me?.guildId || null);
+            // merge so we don't wipe any previously resolved users
+            setResolved((prev) => ({ ...prev, ...map }));
+          } catch {
+            // ignore
+          }
+        }
+      } catch {
+        // ignore
+      }
     })();
+
     setSelected({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
-  useEffect(() => {
+useEffect(() => {
     if (mod !== "liveMonitor") return;
 
     if (sseRef.current) {
@@ -321,8 +431,11 @@ export default function DashboardUI(props: { staffUser?: StaffUser }) {
         <div className="brand">
           <div className="h">Stoney Verify</div>
           <div className="sub">
-            {me ? `${me.username} • ${(me.roles?.length || 0)} role(s)` : "Loading…"}
+            {me ? `${bestName(resolved[String(me.id)] || null)} • ${(resolved[String(me.id)]?.roles?.length ?? me.roles?.length ?? 0)} role(s)` : "Loading…"}
           </div>
+          {me && resolved[String(me.id)]?.roles?.length ? (
+            <div className="sb-mroles"><RoleChips roles={resolved[String(me.id)].roles} /></div>
+          ) : null}
         </div>
         <div className="sb-row">
           <button className="sb-btn sb-btn-ghost" onClick={refreshEverything} disabled={loading} title="Refresh">
@@ -413,7 +526,10 @@ export default function DashboardUI(props: { staffUser?: StaffUser }) {
                 </div>
 
                 <div className="grid">
-                  <div><span>User</span>{r.requester_id ? `@${shortId(r.requester_id)}` : "—"}</div>
+                  <div><span>User</span>{r.requester_id ? bestName(resolved[String(r.requester_id)] || null) : "—"}</div>
+                  {r.requester_id && (resolved[String(r.requester_id)]?.roles?.length ? (
+                    <div><span>Roles</span><RoleChips roles={resolved[String(r.requester_id)].roles} /></div>
+                  ) : null)}
                   <div><span>Ticket</span>{r.channel_id ? `#${shortId(r.channel_id)}` : "—"}</div>
                   <div><span>Created</span>{fmt(r.created_at)}</div>
                   <div><span>Expires</span>{fmt(r.expires_at)}</div>
