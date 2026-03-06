@@ -185,7 +185,7 @@ function roleStateClass(state?: string | null) {
   const s = String(state || "").toLowerCase();
   if (s === "verified_ok" || s === "staff_ok") return "sb-pill ok";
   if (s.includes("conflict")) return "sb-pill bad";
-  if (s === "missing_verified_role" || s === "missing_unverified") return "sb-pill warn";
+  if (s === "missing_verified_role") return "sb-pill warn";
   if (s === "booster_only") return "sb-pill blue";
   if (s === "unverified_only") return "sb-pill";
   if (s === "left_guild") return "sb-pill bad";
@@ -204,8 +204,6 @@ function roleStateLabel(state?: string | null) {
       return "Staff Conflict";
     case "missing_verified_role":
       return "Missing Verified Role";
-    case "missing_unverified":
-      return "Missing Unverified";
     case "booster_only":
       return "Booster Only";
     case "unverified_only":
@@ -841,7 +839,6 @@ export default function DashboardUI(props: { staffUser?: StaffUser }) {
       <div className="sb-row" style={{ marginTop: 12, flexWrap: "wrap" }}>
         <span className="sb-pill blue">Role Conflicts: {stats.roleConflicts ?? 0}</span>
         <span className="sb-pill warn">Missing Verified: {stats.missingVerifiedRole ?? 0}</span>
-        <span className="sb-pill warn">Missing Unverified: {stats.missingUnverified ?? 0}</span>
         <span className="sb-pill blue">Booster Only: {stats.boosterOnly ?? 0}</span>
         <span className="sb-pill bad">Staff Conflicts: {stats.staffConflicts ?? 0}</span>
       </div>
@@ -1068,7 +1065,6 @@ export default function DashboardUI(props: { staffUser?: StaffUser }) {
           <option value="staff_ok">Staff</option>
           <option value="staff_conflict">Staff Conflict</option>
           <option value="missing_verified_role">Missing Verified</option>
-          <option value="missing_unverified">Missing Unverified</option>
           <option value="booster_only">Booster Only</option>
           <option value="left_guild">Left Guild</option>
           <option value="unknown">Unknown</option>
@@ -1400,7 +1396,6 @@ export default function DashboardUI(props: { staffUser?: StaffUser }) {
               <div className="sb-row" style={{ marginTop: 12, flexWrap: "wrap" }}>
                 <span className="sb-pill bad">Role Conflicts: {stats.roleConflicts ?? 0}</span>
                 <span className="sb-pill warn">Missing Verified: {stats.missingVerifiedRole ?? 0}</span>
-                <span className="sb-pill warn">Missing Unverified: {stats.missingUnverified ?? 0}</span>
                 <span className="sb-pill blue">Booster Only: {stats.boosterOnly ?? 0}</span>
                 <span className="sb-pill bad">Staff Conflicts: {stats.staffConflicts ?? 0}</span>
               </div>
