@@ -10,7 +10,7 @@ const VALID_STATUSES = new Set([
   "expired",
 ]);
 
-function normalizeLegacyStatus(row: any) {
+function normalizeTokenStatus(row: any) {
   const explicit = String(row?.status || "").trim().toLowerCase();
   if (VALID_STATUSES.has(explicit)) return explicit;
 
@@ -30,25 +30,37 @@ function normalizeLegacyStatus(row: any) {
 
 export async function GET() {
   return withAdmin(async (sb) => {
-    const [tokensRes, timersRes, membersRes, vcSessionsRes] = await Promise.all([
-      sb.from("verification_tokens").select("token,status,decision,used,submitted,expires_at"),
-      sb.from("verification_kick_timers").select("channel_id"),
-      sb.from("guild_members").select("role_state"),
-      sb.from("vc_verify_sessions").select("token,status"),
+    const [tokensRes, kickTimersRes, membersRes, vcSessionsRes] = await Promise.all([
+      sb
+        .from("verification_tokens")
+        .select("token,status,decision,used,submitted,expires_at"),
+      sb
+        .from("verification_kick_timers")
+        .select("channel_id"),
+      sb
+        .from("guild_members")
+        .select("role_state"),
+      sb
+        .from("vc_verify_sessions")
+        .select("token,status"),
     ]);
 
     if (tokensRes.error) throw new Error(tokensRes.error.message);
-    if (timersRes.error) throw new Error(timersRes.error.message);
+    if (kickTimersRes.error) throw new Error(kickTimersRes.error.message);
     if (membersRes.error) throw new Error(membersRes.error.message);
     if (vcSessionsRes.error) throw new Error(vcSessionsRes.error.message);
+
+    const tokens = tokensRes.data || [];
+    const members = membersRes.data || [];
+    const vcSessions = vcSessionsRes.data || [];
 
     let pending = 0;
     let submitted = 0;
     let approved = 0;
     let denied = 0;
 
-    for (const row of tokensRes.data || []) {
-      const status = normalizeLegacyStatus(row);
+    for (const row of tokens) {
+      const status = normalizeTokenStatus(row);
       if (status === "pending") pending += 1;
       if (status === "submitted") submitted += 1;
       if (status === "approved") approved += 1;
@@ -61,8 +73,9 @@ export async function GET() {
     let boosterOnly = 0;
     let staffConflicts = 0;
 
-    for (const row of membersRes.data || []) {
-      const roleState = String(row?.role_state || "").toLowerCase();
+    for (const member of members) {
+      const roleState = String(member?.role_state || "").toLowerCase();
+
       if (roleState === "verified_conflict") roleConflicts += 1;
       if (roleState === "missing_verified_role") missingVerifiedRole += 1;
       if (roleState === "missing_unverified") missingUnverified += 1;
@@ -70,19 +83,20 @@ export async function GET() {
       if (roleState === "staff_conflict") staffConflicts += 1;
     }
 
-    const vcSessions = (vcSessionsRes.data || []).filter((row: any) => {
-      const status = String(row?.status || "").toUpperCase();
-      return status === "PENDING" || status === "ACTIVE";
+    const activeVcSessions = vcSessions.filter((row) => {
+      const s = String(row?.status || "").toUpperCase();
+      return s === "PENDING" || s === "ACTIVE";
     }).length;
 
     return {
+      ok: true,
       pending,
       submitted,
       approved,
       denied,
-      kickTimers: (timersRes.data || []).length,
+      kickTimers: (kickTimersRes.data || []).length,
       liveEvents: 0,
-      vcSessions,
+      vcSessions: activeVcSessions,
       roleConflicts,
       missingVerifiedRole,
       missingUnverified,
