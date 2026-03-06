@@ -1,4 +1,3 @@
-// app/api/approve/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
@@ -16,7 +15,6 @@ export async function POST(req: NextRequest) {
   const token = String(body?.token || "").trim();
   if (!token) return NextResponse.json({ error: "Missing token" }, { status: 400 });
 
-  // Pull token row (we need webhook_url + scopes)
   const { data: rows, error: readErr } = await sb
     .from("verification_tokens")
     .select("*")
@@ -33,7 +31,11 @@ export async function POST(req: NextRequest) {
     .from("verification_tokens")
     .update({
       decision: "APPROVED",
+      status: "approved",
+      expected_role_state: "verified_ok",
       decided_by: session.userId,
+      decided_by_display_name: session.username,
+      decided_by_username: session.username,
       decided_at: now,
       used: true,
       updated_at: now,
@@ -42,7 +44,6 @@ export async function POST(req: NextRequest) {
 
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
 
-  // audit_logs (YOUR SCHEMA)
   await sb.from("audit_logs").insert([
     {
       action: "approve_token",
@@ -50,6 +51,8 @@ export async function POST(req: NextRequest) {
       staff_id: session.userId,
       meta: {
         staff_username: session.username,
+        decision: "APPROVED",
+        status: "approved",
         guild_id: row.guild_id ?? null,
         channel_id: row.channel_id ?? null,
         requester_id: row.requester_id ?? row.user_id ?? null,
@@ -57,7 +60,6 @@ export async function POST(req: NextRequest) {
     },
   ]);
 
-  // Post into ticket via webhook_url (TicketTool-style feedback)
   const webhookUrl = String(row.webhook_url || "").trim();
   let webhookResult: any = null;
 
@@ -79,7 +81,6 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Notify bot to do real Discord actions (roles/close/kick/cancel timers/etc)
   const botResult = await notifyBotDecision({
     token,
     decision: "APPROVED",
@@ -87,9 +88,5 @@ export async function POST(req: NextRequest) {
     staffName: session.username,
   });
 
-  return NextResponse.json({
-    ok: true,
-    webhook: webhookResult,
-    bot: botResult,
-  });
+  return NextResponse.json({ ok: true, webhook: webhookResult, bot: botResult });
 }
