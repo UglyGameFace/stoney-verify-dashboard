@@ -21,6 +21,13 @@ function auditActionFromDecision(decision: string) {
   return "set_decision";
 }
 
+function statusFromDecision(decision: string) {
+  if (decision.startsWith("APPROVED")) return "approved";
+  if (decision.startsWith("DENIED")) return "denied";
+  if (decision.startsWith("RESUBMIT")) return "resubmit";
+  return "pending";
+}
+
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -45,12 +52,18 @@ export async function POST(req: NextRequest) {
 
   const now = new Date().toISOString();
   const isFinal = decision.startsWith("APPROVED") || decision.startsWith("DENIED");
+  const status = statusFromDecision(decision);
+  const expectedRoleState = status === "approved" ? "verified_ok" : "unverified_only";
 
   const { error: updErr } = await sb
     .from("verification_tokens")
     .update({
       decision,
+      status,
+      expected_role_state: expectedRoleState,
       decided_by: session.userId,
+      decided_by_display_name: session.username,
+      decided_by_username: session.username,
       decided_at: now,
       used: isFinal ? true : false,
       updated_at: now,
@@ -67,6 +80,7 @@ export async function POST(req: NextRequest) {
       meta: {
         staff_username: session.username,
         decision,
+        status,
         guild_id: row.guild_id ?? null,
         channel_id: row.channel_id ?? null,
         requester_id: row.requester_id ?? row.user_id ?? null,
