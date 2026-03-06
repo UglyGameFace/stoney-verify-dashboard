@@ -17,7 +17,7 @@ export async function GET() {
     id: session.userId,
     username: session.username,
     roles: session.roles ?? [],
-    avatar: session.avatar ?? null,
+    avatar: (session as any).avatar ?? null,
     guildId: session.guildId ?? null,
     session,
   });
