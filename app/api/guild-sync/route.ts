@@ -30,7 +30,6 @@ type RoleState =
   | "verified_conflict"
   | "staff_ok"
   | "staff_conflict"
-  | "missing_unverified"
   | "missing_verified_role"
   | "booster_only"
   | "left_guild"
@@ -52,58 +51,36 @@ function avatarUrlFor(id: string, avatarHash?: string | null) {
 }
 
 async function discordGET(path: string, botToken: string) {
-  const response = await fetch(`https://discord.com/api/v10${path}`, {
+  return fetch(`https://discord.com/api/v10${path}`, {
     headers: {
       authorization: `Bot ${botToken}`,
       "user-agent": "stoney-verify-dashboard",
     },
     cache: "no-store",
   });
-  return response;
 }
 
 function normalizeRoleName(name: string) {
   return String(name || "").trim().toLowerCase();
 }
 
-function buildRulesFromRoleNames(roleNames: string[]) {
+function evaluateRoleState(roleNames: string[]) {
   const normalized = roleNames.map(normalizeRoleName);
 
   const has = (name: string) => normalized.includes(normalizeRoleName(name));
 
-  return {
-    unverifiedNames: ["Unverified"].filter(has),
-    verifiedNames: ["Verified", "Resident", "Stoner", "Drunken"].filter(has),
-    secondaryVerifiedNames: ["NFSW"].filter(has),
-    staffNames: ["DickHeads"].filter(has),
-    adminNames: ["perm"].filter(has),
-    cosmeticNames: ["BOOSTER", "Server Booster"].filter(has),
-  };
-}
+  const hasUnverified = has("Unverified");
+  const hasVerifiedRole =
+    has("Verified") || has("Resident") || has("Stoner") || has("Drunken");
 
-function evaluateRoleState(roleNames: string[]): {
-  roleState: RoleState;
-  reason: string;
-  hasAnyRole: boolean;
-  hasUnverified: boolean;
-  hasVerifiedRole: boolean;
-  hasSecondaryVerifiedRole: boolean;
-  hasStaffRole: boolean;
-  hasCosmeticOnly: boolean;
-} {
-  const normalizedNames = roleNames.map(normalizeRoleName);
-  const rules = buildRulesFromRoleNames(roleNames);
-
-  const hasAnyRole = normalizedNames.length > 0;
-  const hasUnverified = rules.unverifiedNames.length > 0;
-  const hasVerifiedRole = rules.verifiedNames.length > 0;
-  const hasSecondaryVerifiedRole = rules.secondaryVerifiedNames.length > 0;
-  const hasStaffRole = rules.staffNames.length > 0 || rules.adminNames.length > 0;
-  const hasCosmeticRole = rules.cosmeticNames.length > 0;
+  const hasSecondaryVerifiedRole = has("NFSW");
+  const hasStaffRole = has("DickHeads") || has("perm");
+  const hasCosmeticRole = has("BOOSTER") || has("Server Booster");
+  const hasAnyRole = normalized.length > 0;
 
   if (hasStaffRole && hasUnverified) {
     return {
-      roleState: "staff_conflict",
+      roleState: "staff_conflict" as RoleState,
       reason: "Staff/admin still has Unverified",
       hasAnyRole,
       hasUnverified,
@@ -116,8 +93,8 @@ function evaluateRoleState(roleNames: string[]): {
 
   if (hasStaffRole) {
     return {
-      roleState: "staff_ok",
-      reason: "Staff/admin role is present and valid",
+      roleState: "staff_ok" as RoleState,
+      reason: "Staff/admin role is correct",
       hasAnyRole,
       hasUnverified,
       hasVerifiedRole,
@@ -129,7 +106,7 @@ function evaluateRoleState(roleNames: string[]): {
 
   if (hasVerifiedRole && hasUnverified) {
     return {
-      roleState: "verified_conflict",
+      roleState: "verified_conflict" as RoleState,
       reason: "Verified member still has Unverified",
       hasAnyRole,
       hasUnverified,
@@ -142,8 +119,8 @@ function evaluateRoleState(roleNames: string[]): {
 
   if (hasVerifiedRole) {
     return {
-      roleState: "verified_ok",
-      reason: "Verified/member role is present and Unverified is removed",
+      roleState: "verified_ok" as RoleState,
+      reason: "Verified/member role is correct",
       hasAnyRole,
       hasUnverified,
       hasVerifiedRole,
@@ -155,7 +132,7 @@ function evaluateRoleState(roleNames: string[]): {
 
   if (hasSecondaryVerifiedRole && !hasVerifiedRole) {
     return {
-      roleState: "missing_verified_role",
+      roleState: "missing_verified_role" as RoleState,
       reason: "Has NFSW but no real verified/member role",
       hasAnyRole,
       hasUnverified,
@@ -168,7 +145,7 @@ function evaluateRoleState(roleNames: string[]): {
 
   if (hasUnverified && hasCosmeticRole) {
     return {
-      roleState: "booster_only",
+      roleState: "booster_only" as RoleState,
       reason: "Only Unverified plus cosmetic/booster role",
       hasAnyRole,
       hasUnverified,
@@ -181,7 +158,7 @@ function evaluateRoleState(roleNames: string[]): {
 
   if (hasUnverified) {
     return {
-      roleState: "unverified_only",
+      roleState: "unverified_only" as RoleState,
       reason: "Still in default unverified state",
       hasAnyRole,
       hasUnverified,
@@ -193,8 +170,8 @@ function evaluateRoleState(roleNames: string[]): {
   }
 
   return {
-    roleState: "missing_unverified",
-    reason: "No Unverified and no verified/staff role found",
+    roleState: "unknown" as RoleState,
+    reason: "No recognized workflow role found",
     hasAnyRole,
     hasUnverified,
     hasVerifiedRole,
@@ -253,10 +230,7 @@ export async function POST(req: NextRequest) {
 
   const sb = getSupabaseAdmin();
   if (!sb) {
-    return NextResponse.json(
-      { error: "Supabase admin not configured" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Supabase admin not configured" }, { status: 500 });
   }
 
   const body = await req.json().catch(() => ({}));
@@ -278,14 +252,10 @@ export async function POST(req: NextRequest) {
       sb.from("verification_tokens").select("*").eq("guild_id", guildId),
     ]);
 
-    if (tokensRes.error) {
-      throw new Error(tokensRes.error.message);
-    }
+    if (tokensRes.error) throw new Error(tokensRes.error.message);
 
     const roleById: Record<string, DiscordRole> = {};
-    for (const role of guildRoles) {
-      roleById[role.id] = role;
-    }
+    for (const role of guildRoles) roleById[role.id] = role;
 
     const memberRows = guildMembers.map((member) => {
       const userId = String(member.user?.id || "");
@@ -300,9 +270,6 @@ export async function POST(req: NextRequest) {
         .map((roleId) => roleById[roleId]?.name)
         .filter(Boolean) as string[];
 
-      const highestRoleName = roleNames[0] || null;
-      const highestRoleId = roleIds[0] || null;
-
       const evaluated = evaluateRoleState(roleNames);
 
       return {
@@ -313,8 +280,8 @@ export async function POST(req: NextRequest) {
         avatar_url: avatarUrlFor(userId, member.user?.avatar || null),
         role_ids: roleIds,
         role_names: roleNames,
-        highest_role_id: highestRoleId,
-        highest_role_name: highestRoleName,
+        highest_role_id: roleIds[0] || null,
+        highest_role_name: roleNames[0] || null,
         in_guild: true,
         has_any_role: evaluated.hasAnyRole,
         data_health:
@@ -338,13 +305,9 @@ export async function POST(req: NextRequest) {
     if (memberRows.length) {
       const { error: upsertError } = await sb
         .from("guild_members")
-        .upsert(memberRows, {
-          onConflict: "guild_id,user_id",
-        });
+        .upsert(memberRows, { onConflict: "guild_id,user_id" });
 
-      if (upsertError) {
-        throw new Error(upsertError.message);
-      }
+      if (upsertError) throw new Error(upsertError.message);
     }
 
     const seenIds = new Set(memberRows.map((row) => row.user_id));
@@ -354,9 +317,7 @@ export async function POST(req: NextRequest) {
       .select("guild_id,user_id")
       .eq("guild_id", guildId);
 
-    if (existingError) {
-      throw new Error(existingError.message);
-    }
+    if (existingError) throw new Error(existingError.message);
 
     const leftGuildIds = (existingMembers || [])
       .map((row: any) => String(row.user_id))
@@ -375,12 +336,11 @@ export async function POST(req: NextRequest) {
         .eq("guild_id", guildId)
         .in("user_id", leftGuildIds);
 
-      if (leftGuildError) {
-        throw new Error(leftGuildError.message);
-      }
+      if (leftGuildError) throw new Error(leftGuildError.message);
     }
 
     const tokens = tokensRes.data || [];
+
     for (const token of tokens) {
       const requesterId = String(token.requester_id || token.user_id || "").trim();
       if (!requesterId) continue;
@@ -398,10 +358,9 @@ export async function POST(req: NextRequest) {
           ? actualRoleState === "verified_ok" || actualRoleState === "staff_ok"
           : actualRoleState === "unverified_only";
 
-      const roleSyncReason =
-        roleSyncOk
-          ? "Role state matches workflow expectation"
-          : `Expected ${expectedRoleState} but found ${actualRoleState}`;
+      const roleSyncReason = roleSyncOk
+        ? "Role state matches workflow expectation"
+        : `Expected ${expectedRoleState} but found ${actualRoleState}`;
 
       await sb
         .from("verification_tokens")
@@ -429,9 +388,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (error: any) {
     return NextResponse.json(
-      {
-        error: String(error?.message || error),
-      },
+      { error: String(error?.message || error) },
       { status: 500 }
     );
   }
