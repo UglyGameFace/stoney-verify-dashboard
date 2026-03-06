@@ -15,6 +15,24 @@ const VALID_STATUSES = new Set([
   "expired",
 ]);
 
+function normalizeLegacyStatus(row: any) {
+  const explicit = String(row?.status || "").trim().toLowerCase();
+  if (VALID_STATUSES.has(explicit)) return explicit;
+
+  const decision = String(row?.decision || "").trim().toUpperCase();
+  const used = !!row?.used;
+  const submitted = !!row?.submitted;
+  const expiresAt = row?.expires_at ? new Date(row.expires_at).getTime() : NaN;
+
+  if (used) return "used";
+  if (decision.startsWith("APPROVED")) return "approved";
+  if (decision.startsWith("DENIED")) return "denied";
+  if (decision.startsWith("RESUBMIT")) return "resubmit";
+  if (submitted) return "submitted";
+  if (!Number.isNaN(expiresAt) && expiresAt < Date.now()) return "expired";
+  return "pending";
+}
+
 export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -42,16 +60,28 @@ export async function GET(req: NextRequest) {
   if (channelId) q = q.eq("channel_id", channelId);
   if (requesterId) q = q.eq("requester_id", requesterId);
 
-  if (status && VALID_STATUSES.has(status)) {
+  const canUseExplicitStatus = VALID_STATUSES.has(status);
+
+  if (canUseExplicitStatus) {
     q = q.eq("status", status);
   }
 
   const { data, error } = await q;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  let rows = (data || []).map((row: any) => ({
+    ...row,
+    status: normalizeLegacyStatus(row),
+  }));
+
+  if (status && !canUseExplicitStatus) {
+    rows = rows.filter((row) => row.status === status);
+  }
+
   return NextResponse.json({
     ok: true,
-    data: data || [],
+    data: rows,
+    rows,
     limit,
     offset,
   });
