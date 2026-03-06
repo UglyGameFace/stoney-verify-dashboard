@@ -22,6 +22,24 @@ type TokenRow = {
   decided_at: string | null;
   created_at: string;
   webhook_url: string;
+  submitted_at?: string | null;
+  ai_status?: string | null;
+  owner_display_name?: string | null;
+  owner_username?: string | null;
+  owner_tag?: string | null;
+  status?: string | null;
+  requester_display_name?: string | null;
+  requester_username?: string | null;
+  requester_avatar_url?: string | null;
+  requester_role_ids?: string[] | null;
+  requester_role_names?: string[] | null;
+  expected_role_state?: string | null;
+  actual_role_state?: string | null;
+  role_sync_ok?: boolean | null;
+  role_sync_reason?: string | null;
+  decided_by_display_name?: string | null;
+  decided_by_username?: string | null;
+  decided_by_avatar_url?: string | null;
 };
 
 type KickTimerRow = {
@@ -35,9 +53,11 @@ type KickTimerRow = {
 
 type AuditRow = {
   id?: string;
-  at: string;
-  actor_id: string | null;
-  actor_name: string | null;
+  at?: string;
+  created_at?: string;
+  actor_id?: string | null;
+  actor_name?: string | null;
+  staff_id?: string | null;
   action: string;
   meta: any;
 };
@@ -50,6 +70,11 @@ type Stats = {
   kickTimers: number;
   liveEvents: number;
   vcSessions: number;
+  roleConflicts?: number;
+  missingVerifiedRole?: number;
+  missingUnverified?: number;
+  boosterOnly?: number;
+  staffConflicts?: number;
 };
 
 type ModuleKey =
@@ -89,6 +114,12 @@ function decisionLabel(decision: string | null, used: boolean, submitted: boolea
   return "PENDING";
 }
 
+function effectiveStatus(r: TokenRow) {
+  const explicit = String(r.status || "").trim().toUpperCase();
+  if (explicit) return explicit;
+  return decisionLabel(r.decision, r.used, r.submitted);
+}
+
 function pillClass(label: string) {
   const s = label.toUpperCase();
   if (s.includes("APPROV")) return "sb-pill ok";
@@ -97,6 +128,42 @@ function pillClass(label: string) {
   if (s.includes("SUBMIT")) return "sb-pill blue";
   if (s.includes("USED")) return "sb-pill";
   return "sb-pill";
+}
+
+function roleStateClass(state?: string | null) {
+  const s = String(state || "").toLowerCase();
+  if (s === "verified_ok" || s === "staff_ok") return "sb-pill ok";
+  if (s.includes("conflict")) return "sb-pill bad";
+  if (s === "missing_verified_role" || s === "missing_unverified") return "sb-pill warn";
+  if (s === "booster_only") return "sb-pill blue";
+  if (s === "unverified_only") return "sb-pill";
+  if (s === "left_guild") return "sb-pill bad";
+  return "sb-pill";
+}
+
+function roleStateLabel(state?: string | null) {
+  switch (String(state || "").toLowerCase()) {
+    case "verified_ok":
+      return "Verified";
+    case "staff_ok":
+      return "Staff";
+    case "verified_conflict":
+      return "Verified Conflict";
+    case "staff_conflict":
+      return "Staff Conflict";
+    case "missing_verified_role":
+      return "Missing Verified Role";
+    case "missing_unverified":
+      return "Missing Unverified";
+    case "booster_only":
+      return "Booster Only";
+    case "unverified_only":
+      return "Unverified";
+    case "left_guild":
+      return "Left Guild";
+    default:
+      return "Unknown";
+  }
 }
 
 async function apiGet<T>(url: string): Promise<T> {
@@ -122,6 +189,11 @@ type ResolvedUser = {
   avatarUrl?: string | null;
   roleIds: string[];
   roles: RoleInfo[];
+  roleState?: string;
+  roleStateReason?: string;
+  hasUnverified?: boolean;
+  hasVerifiedRole?: boolean;
+  hasStaffRole?: boolean;
 };
 
 type ResolveResponse = {
@@ -132,7 +204,6 @@ type ResolveResponse = {
   error?: string;
 };
 
-// Small client-side cache so we don’t spam the API on scroll / refresh
 const _resolveCache: Record<string, ResolvedUser> = {};
 
 function bestName(u?: ResolvedUser | null) {
@@ -140,7 +211,6 @@ function bestName(u?: ResolvedUser | null) {
 }
 
 function avatarFallback(id: string) {
-  // Discord default avatar (rough fallback). We don’t know discriminator in the dashboard, so just use embed avatar style.
   return `https://cdn.discordapp.com/embed/avatars/${Number(id) % 6}.png`;
 }
 
@@ -169,6 +239,8 @@ async function resolveDiscordUsers(ids: string[], guildId?: string | null): Prom
         avatarUrl: avatarFallback(id),
         roleIds: [],
         roles: [],
+        roleState: "unknown",
+        roleStateReason: "Not resolved yet",
       } as ResolvedUser);
   }
   return out;
@@ -188,7 +260,30 @@ function RoleChips({ roles }: { roles: RoleInfo[] }) {
   );
 }
 
-
+function UserInline({ user }: { user?: ResolvedUser | null }) {
+  if (!user?.id) return <span>—</span>;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+      <img
+        src={user.avatarUrl || avatarFallback(user.id)}
+        alt={bestName(user)}
+        width={28}
+        height={28}
+        style={{ width: 28, height: 28, borderRadius: 999, objectFit: "cover", flex: "0 0 auto" }}
+      />
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {bestName(user)}
+        </div>
+        {user.username ? (
+          <div className="sb-muted" style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            @{user.username}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 function useIsMobile(bp = 920) {
   const [mobile, setMobile] = useState(false);
@@ -216,13 +311,17 @@ export default function DashboardUI(props: { staffUser?: StaffUser }) {
     kickTimers: 0,
     liveEvents: 0,
     vcSessions: 0,
+    roleConflicts: 0,
+    missingVerifiedRole: 0,
+    missingUnverified: 0,
+    boosterOnly: 0,
+    staffConflicts: 0,
   });
 
   const [tokens, setTokens] = useState<TokenRow[]>([]);
   const [timers, setTimers] = useState<KickTimerRow[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
 
-  // Discord user resolution (usernames/avatars/roles)
   const [resolved, setResolved] = useState<Record<string, ResolvedUser>>({});
 
   const [loading, setLoading] = useState(false);
@@ -281,24 +380,35 @@ export default function DashboardUI(props: { staffUser?: StaffUser }) {
       const tokenRows = (t?.rows || t?.data || []) as TokenRow[];
       setTokens(tokenRows);
 
-      // Resolve display names/avatars/roles for staff + users in the queue
-      try {
-        const idsToResolve = [String((meRes as any)?.id || (meRes as any)?.userId || "")]
-          .concat(tokenRows.map((r) => String(r.requester_id || "")))
-          .concat(tokenRows.map((r) => String(r.decided_by || "")));
-        const map = await resolveDiscordUsers(idsToResolve, (meRes as any)?.guildId || null);
-        setResolved(map);
-      } catch {
-        // non-fatal
-      }
-
       const kt = await apiGet<any>("/api/timers?limit=160");
       if (kt?.error) throw new Error(kt.error);
-      setTimers((kt?.rows || kt?.data || []) as KickTimerRow[]);
+      const timerRows = (kt?.rows || kt?.data || []) as KickTimerRow[];
+      setTimers(timerRows);
 
       const au = await apiGet<any>("/api/audit?limit=160");
       if (au?.error) throw new Error(au.error);
-      setAudit((au?.rows || au?.data || []) as AuditRow[]);
+      const auditRows = (au?.rows || au?.data || []) as AuditRow[];
+      setAudit(auditRows);
+
+      try {
+        const idsToResolve = [String((meRes as any)?.id || (meRes as any)?.userId || "")]
+          .concat(tokenRows.map((r) => String(r.requester_id || "")))
+          .concat(tokenRows.map((r) => String(r.decided_by || "")))
+          .concat(timerRows.map((r) => String(r.owner_id || "")))
+          .concat(timerRows.map((r) => String(r.started_by || "")))
+          .concat(
+            auditRows.flatMap((a) => [
+              String(a.actor_id || ""),
+              String(a.staff_id || ""),
+              String(a?.meta?.actor_discord_id || ""),
+            ])
+          );
+
+        const map = await resolveDiscordUsers(idsToResolve, (meRes as any)?.guildId || null);
+        setResolved(map);
+      } catch {
+        // ignore
+      }
     } catch (e: any) {
       setErr(String(e?.message || e));
     } finally {
@@ -312,7 +422,6 @@ export default function DashboardUI(props: { staffUser?: StaffUser }) {
   }, []);
 
   useEffect(() => {
-    // When status filter changes, refresh tokens + resolve user display names/roles
     (async () => {
       try {
         const t = await apiGet<any>(`/api/tokens?limit=120&status=${status}`);
@@ -325,7 +434,6 @@ export default function DashboardUI(props: { staffUser?: StaffUser }) {
               .concat(tokenRows.map((r) => String(r.requester_id || "")))
               .concat(tokenRows.map((r) => String(r.decided_by || "")));
             const map = await resolveDiscordUsers(idsToResolve, me?.guildId || null);
-            // merge so we don't wipe any previously resolved users
             setResolved((prev) => ({ ...prev, ...map }));
           } catch {
             // ignore
@@ -340,11 +448,13 @@ export default function DashboardUI(props: { staffUser?: StaffUser }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
-useEffect(() => {
+  useEffect(() => {
     if (mod !== "liveMonitor") return;
 
     if (sseRef.current) {
-      try { sseRef.current.close(); } catch {}
+      try {
+        sseRef.current.close();
+      } catch {}
       sseRef.current = null;
     }
 
@@ -365,7 +475,9 @@ useEffect(() => {
     };
 
     return () => {
-      try { es.close(); } catch {}
+      try {
+        es.close();
+      } catch {}
       sseRef.current = null;
     };
   }, [mod]);
@@ -374,15 +486,22 @@ useEffect(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return tokens;
     return tokens.filter((r) => {
-      const st = decisionLabel(r.decision, r.used, r.submitted).toLowerCase();
+      const st = effectiveStatus(r).toLowerCase();
+      const actualRole = String(r.actual_role_state || "").toLowerCase();
+      const expectedRole = String(r.expected_role_state || "").toLowerCase();
+      const requester = resolved[String(r.requester_id || "")];
       return (
         (r.token || "").toLowerCase().includes(needle) ||
         (r.requester_id || "").toLowerCase().includes(needle) ||
         (r.channel_id || "").toLowerCase().includes(needle) ||
-        st.includes(needle)
+        (requester?.displayName || "").toLowerCase().includes(needle) ||
+        (requester?.username || "").toLowerCase().includes(needle) ||
+        st.includes(needle) ||
+        actualRole.includes(needle) ||
+        expectedRole.includes(needle)
       );
     });
-  }, [q, tokens]);
+  }, [q, tokens, resolved]);
 
   const selectedTokens = useMemo(() => {
     const set = new Set(Object.keys(selected).filter((k) => selected[k]));
@@ -434,7 +553,9 @@ useEffect(() => {
             {me ? `${bestName(resolved[String(me.id)] || null)} • ${(resolved[String(me.id)]?.roles?.length ?? me.roles?.length ?? 0)} role(s)` : "Loading…"}
           </div>
           {me && resolved[String(me.id)]?.roles?.length ? (
-            <div className="sb-mroles"><RoleChips roles={resolved[String(me.id)].roles} /></div>
+            <div className="sb-mroles">
+              <RoleChips roles={resolved[String(me.id)].roles} />
+            </div>
           ) : null}
         </div>
         <div className="sb-row">
@@ -464,8 +585,13 @@ useEffect(() => {
         <div className="sb-kpi"><div className="k">Kick Timers</div><div className="v">{stats.kickTimers ?? 0}</div><div className="glow" /></div>
         <div className="sb-kpi"><div className="k">VC Sessions</div><div className="v">{stats.vcSessions ?? 0}</div><div className="glow" /></div>
       </div>
-      <div className="sb-row" style={{ marginTop: 12 }}>
-        <span className="sb-pill blue">💡 Tip: “submitted” = waiting on staff</span>
+
+      <div className="sb-row" style={{ marginTop: 12, flexWrap: "wrap" }}>
+        <span className="sb-pill blue">Role Conflicts: {stats.roleConflicts ?? 0}</span>
+        <span className="sb-pill warn">Missing Verified: {stats.missingVerifiedRole ?? 0}</span>
+        <span className="sb-pill warn">Missing Unverified: {stats.missingUnverified ?? 0}</span>
+        <span className="sb-pill blue">Booster Only: {stats.boosterOnly ?? 0}</span>
+        <span className="sb-pill bad">Staff Conflicts: {stats.staffConflicts ?? 0}</span>
       </div>
     </div>
   );
@@ -509,7 +635,8 @@ useEffect(() => {
           <div className="sb-muted">No results.</div>
         ) : (
           filteredTokens.map((r) => {
-            const st = decisionLabel(r.decision, r.used, r.submitted);
+            const st = effectiveStatus(r);
+            const requester = resolved[String(r.requester_id || "")] || null;
             return (
               <div className="sb-mcard" key={r.token}>
                 <div className="top">
@@ -526,13 +653,42 @@ useEffect(() => {
                 </div>
 
                 <div className="grid">
-                  <div><span>User</span>{r.requester_id ? bestName(resolved[String(r.requester_id)] || null) : "—"}</div>
-                  {r.requester_id && (resolved[String(r.requester_id)]?.roles?.length ? (
-                    <div><span>Roles</span><RoleChips roles={resolved[String(r.requester_id)].roles} /></div>
-                  ) : null)}
+                  <div>
+                    <span>User</span>
+                    <UserInline user={requester} />
+                  </div>
+
+                  {requester?.roles?.length ? (
+                    <div>
+                      <span>Roles</span>
+                      <RoleChips roles={requester.roles} />
+                    </div>
+                  ) : null}
+
+                  <div>
+                    <span>Role Status</span>
+                    <span className={roleStateClass(r.actual_role_state)}>
+                      {roleStateLabel(r.actual_role_state)}
+                    </span>
+                  </div>
+
+                  <div>
+                    <span>Expected</span>
+                    <span className="sb-pill">
+                      {roleStateLabel(r.expected_role_state)}
+                    </span>
+                  </div>
+
                   <div><span>Ticket</span>{r.channel_id ? `#${shortId(r.channel_id)}` : "—"}</div>
                   <div><span>Created</span>{fmt(r.created_at)}</div>
                   <div><span>Expires</span>{fmt(r.expires_at)}</div>
+
+                  {r.role_sync_reason ? (
+                    <div>
+                      <span>Why</span>
+                      {r.role_sync_reason}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="actions">
@@ -542,9 +698,14 @@ useEffect(() => {
                     onClick={async () => {
                       setLoading(true);
                       setErr("");
-                      try { await setDecision(r.token, "APPROVED"); await refreshEverything(); }
-                      catch (e: any) { setErr(String(e?.message || e)); }
-                      finally { setLoading(false); }
+                      try {
+                        await setDecision(r.token, "APPROVED");
+                        await refreshEverything();
+                      } catch (e: any) {
+                        setErr(String(e?.message || e));
+                      } finally {
+                        setLoading(false);
+                      }
                     }}
                   >
                     Approve
@@ -555,14 +716,37 @@ useEffect(() => {
                     onClick={async () => {
                       setLoading(true);
                       setErr("");
-                      try { await setDecision(r.token, "DENIED"); await refreshEverything(); }
-                      catch (e: any) { setErr(String(e?.message || e)); }
-                      finally { setLoading(false); }
+                      try {
+                        await setDecision(r.token, "DENIED");
+                        await refreshEverything();
+                      } catch (e: any) {
+                        setErr(String(e?.message || e));
+                      } finally {
+                        setLoading(false);
+                      }
                     }}
                   >
                     Deny
                   </button>
-                  <button className="sb-btn" disabled={loading} onClick={() => setModal({ title: "Token row", body: r })}>
+                  <button
+                    className="sb-btn"
+                    disabled={loading}
+                    onClick={async () => {
+                      setLoading(true);
+                      setErr("");
+                      try {
+                        await setDecision(r.token, "RESUBMIT");
+                        await refreshEverything();
+                      } catch (e: any) {
+                        setErr(String(e?.message || e));
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                  >
+                    Resubmit
+                  </button>
+                  <button className="sb-btn" onClick={() => setModal({ title: "Token row", body: r })}>
                     View
                   </button>
                 </div>
@@ -583,31 +767,59 @@ useEffect(() => {
         {timers.length === 0 ? (
           <div className="sb-muted">No timers found.</div>
         ) : (
-          timers.map((t) => (
-            <div className="sb-mcard" key={t.channel_id}>
-              <div className="top">
-                <div style={{ fontWeight: 900 }}>#{shortId(t.channel_id)}</div>
-                <span className="sb-pill warn">⏳ {t.hours}h</span>
+          timers.map((t) => {
+            const owner = resolved[String(t.owner_id || "")] || null;
+            const starter = resolved[String(t.started_by || "")] || null;
+
+            return (
+              <div className="sb-mcard" key={t.channel_id}>
+                <div className="top">
+                  <div style={{ fontWeight: 900 }}>#{shortId(t.channel_id)}</div>
+                  <span className="sb-pill warn">⏳ {t.hours}h</span>
+                </div>
+                <div className="grid">
+                  <div>
+                    <span>Owner</span>
+                    <UserInline user={owner} />
+                  </div>
+
+                  {owner?.roles?.length ? (
+                    <div>
+                      <span>Owner Roles</span>
+                      <RoleChips roles={owner.roles} />
+                    </div>
+                  ) : null}
+
+                  <div><span>Started</span>{fmt(t.started_at)}</div>
+
+                  <div>
+                    <span>Started by</span>
+                    <UserInline user={starter} />
+                  </div>
+
+                  {starter?.roles?.length ? (
+                    <div>
+                      <span>Starter Roles</span>
+                      <RoleChips roles={starter.roles} />
+                    </div>
+                  ) : null}
+
+                  <div><span>Guild</span>{shortId(t.guild_id)}</div>
+                </div>
+                <div className="actions">
+                  <button className="sb-btn sb-btn-red" disabled={loading} onClick={() => cancelTimer(t.channel_id)}>
+                    Cancel
+                  </button>
+                  <button className="sb-btn" onClick={() => setModal({ title: "Timer row", body: t })}>
+                    View
+                  </button>
+                  <button className="sb-btn sb-btn-green" onClick={() => setMod("verifications")}>
+                    Go Queue
+                  </button>
+                </div>
               </div>
-              <div className="grid">
-                <div><span>Owner</span>@{shortId(t.owner_id)}</div>
-                <div><span>Started</span>{fmt(t.started_at)}</div>
-                <div><span>Started by</span>{t.started_by ? `@${shortId(t.started_by)}` : "—"}</div>
-                <div><span>Guild</span>{shortId(t.guild_id)}</div>
-              </div>
-              <div className="actions">
-                <button className="sb-btn sb-btn-red" disabled={loading} onClick={() => cancelTimer(t.channel_id)}>
-                  Cancel
-                </button>
-                <button className="sb-btn" onClick={() => setModal({ title: "Timer row", body: t })}>
-                  View
-                </button>
-                <button className="sb-btn sb-btn-green" onClick={() => setMod("verifications")}>
-                  Go Queue
-                </button>
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
@@ -622,29 +834,45 @@ useEffect(() => {
         {audit.length === 0 ? (
           <div className="sb-muted">No audit logs found.</div>
         ) : (
-          audit.map((a, idx) => (
-            <div className="sb-mcard" key={(a.id || "") + idx}>
-              <div className="top">
-                <div style={{ fontWeight: 900 }}>{a.action}</div>
-                <span className="sb-pill">{fmt(a.at)}</span>
+          audit.map((a, idx) => {
+            const actorId = String(a.actor_id || a.staff_id || a?.meta?.actor_discord_id || "").trim();
+            const actor = actorId ? resolved[actorId] || null : null;
+
+            return (
+              <div className="sb-mcard" key={(a.id || "") + idx}>
+                <div className="top">
+                  <div style={{ fontWeight: 900 }}>{a.action}</div>
+                  <span className="sb-pill">{fmt(a.at || a.created_at)}</span>
+                </div>
+                <div className="grid">
+                  <div>
+                    <span>Actor</span>
+                    {actor ? <UserInline user={actor} /> : (a.actor_name || (actorId ? `@${shortId(actorId)}` : "—"))}
+                  </div>
+
+                  {actor?.roles?.length ? (
+                    <div>
+                      <span>Roles</span>
+                      <RoleChips roles={actor.roles} />
+                    </div>
+                  ) : null}
+
+                  <div><span>ID</span>{actorId ? shortId(actorId) : "—"}</div>
+                </div>
+                <div className="actions">
+                  <button className="sb-btn" onClick={() => setModal({ title: "Audit meta", body: a.meta })}>
+                    Meta
+                  </button>
+                  <button className="sb-btn" onClick={() => setModal({ title: "Audit row", body: a })}>
+                    Row
+                  </button>
+                  <button className="sb-btn sb-btn-green" onClick={() => setMod("liveMonitor")}>
+                    Live
+                  </button>
+                </div>
               </div>
-              <div className="grid">
-                <div><span>Actor</span>{a.actor_name || (a.actor_id ? `@${shortId(a.actor_id)}` : "—")}</div>
-                <div><span>ID</span>{a.actor_id ? shortId(a.actor_id) : "—"}</div>
-              </div>
-              <div className="actions">
-                <button className="sb-btn" onClick={() => setModal({ title: "Audit meta", body: a.meta })}>
-                  Meta
-                </button>
-                <button className="sb-btn" onClick={() => setModal({ title: "Audit row", body: a })}>
-                  Row
-                </button>
-                <button className="sb-btn sb-btn-green" onClick={() => setMod("liveMonitor")}>
-                  Live
-                </button>
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
@@ -736,10 +964,18 @@ useEffect(() => {
           {mod === "overview" && (
             <div className="sb-card">
               <div style={{ fontWeight: 950, fontSize: 16 }}>🔥 Hot Queue</div>
-              <div className="sb-muted" style={{ marginTop: 6 }}>Newest pending verifications (quick actions)</div>
+              <div className="sb-muted" style={{ marginTop: 6 }}>Newest pending verifications and role issues</div>
               <div style={{ marginTop: 12 }} className="sb-row">
                 <button className="sb-btn sb-btn-green" onClick={() => setMod("verifications")}>Open queue →</button>
                 <button className="sb-btn" onClick={() => setStatus("submitted")}>Show submitted</button>
+              </div>
+
+              <div className="sb-row" style={{ marginTop: 12, flexWrap: "wrap" }}>
+                <span className="sb-pill bad">Role Conflicts: {stats.roleConflicts ?? 0}</span>
+                <span className="sb-pill warn">Missing Verified: {stats.missingVerifiedRole ?? 0}</span>
+                <span className="sb-pill warn">Missing Unverified: {stats.missingUnverified ?? 0}</span>
+                <span className="sb-pill blue">Booster Only: {stats.boosterOnly ?? 0}</span>
+                <span className="sb-pill bad">Staff Conflicts: {stats.staffConflicts ?? 0}</span>
               </div>
             </div>
           )}
