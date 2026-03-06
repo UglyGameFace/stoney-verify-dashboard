@@ -395,3 +395,74 @@ hr {
 }
 .sb-role.more{ opacity:.85; }
 .sb-mroles{ margin-top:6px; }
+
+
+/* Better mobile spacing + prevent overlap */
+@media (max-width: 920px) {
+  .sb-main {
+    padding-bottom: 110px !important;
+  }
+
+  .sb-bottomnav {
+    z-index: 60;
+    backdrop-filter: blur(14px);
+  }
+
+  .sb-mtop {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: linear-gradient(180deg, rgba(6,12,18,.96), rgba(6,12,18,.84));
+    backdrop-filter: blur(12px);
+    padding-bottom: 10px;
+  }
+
+  .sb-mcards {
+    gap: 14px !important;
+  }
+
+  .sb-mcard {
+    overflow: hidden;
+  }
+
+  .sb-mcard .top {
+    align-items: flex-start;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .sb-mcard .grid {
+    row-gap: 10px;
+  }
+
+  .sb-mcard .actions {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .sb-mcard img {
+    flex-shrink: 0;
+  }
+}
+
+/* Make desktop feel more interactive */
+@media (min-width: 921px) {
+  .sb-mcard {
+    transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+  }
+
+  .sb-mcard:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 40px rgba(0,0,0,.22);
+    border-color: rgba(54, 211, 90, .28);
+  }
+
+  .sb-card {
+    transition: box-shadow .16s ease, border-color .16s ease;
+  }
+
+  .sb-card:hover {
+    border-color: rgba(54, 211, 90, .22);
+    box-shadow: 0 16px 34px rgba(0,0,0,.16);
+  }
+}
