@@ -14,7 +14,7 @@ const VALID_STATUSES = new Set([
   "expired",
 ]);
 
-function normalizeLegacyStatus(row: any) {
+function normalizeTokenStatus(row: any) {
   const explicit = String(row?.status || "").trim().toLowerCase();
   if (VALID_STATUSES.has(explicit)) return explicit;
 
@@ -34,7 +34,9 @@ function normalizeLegacyStatus(row: any) {
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const sb = getSupabaseAdmin();
   if (!sb) {
@@ -46,9 +48,8 @@ export async function GET(req: NextRequest) {
 
   const url = new URL(req.url);
 
-  const limit = Math.max(1, Math.min(500, Number(url.searchParams.get("limit") || 50)));
+  const limit = Math.max(1, Math.min(300, Number(url.searchParams.get("limit") || 120)));
   const offset = Math.max(0, Number(url.searchParams.get("offset") || 0));
-
   const status = String(url.searchParams.get("status") || "").trim().toLowerCase();
   const guildId = String(url.searchParams.get("guild_id") || "").trim();
   const channelId = String(url.searchParams.get("channel_id") || "").trim();
@@ -57,23 +58,27 @@ export async function GET(req: NextRequest) {
   let query = sb
     .from("verification_tokens")
     .select("*")
-    .order("created_at", { ascending: false })
-    .range(offset, offset + limit - 1);
+    .order("created_at", { ascending: false });
 
   if (guildId) query = query.eq("guild_id", guildId);
   if (channelId) query = query.eq("channel_id", channelId);
   if (requesterId) query = query.eq("requester_id", requesterId);
-  if (VALID_STATUSES.has(status)) query = query.eq("status", status);
 
-  const { data, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const { data, error } = await query.range(offset, offset + limit - 1);
 
-  let rows = (data || []).map((row: any) => ({
-    ...row,
-    status: normalizeLegacyStatus(row),
-  }));
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 
-  if (status && !VALID_STATUSES.has(status)) {
+  let rows = (data || []).map((row: any) => {
+    const normalizedStatus = normalizeTokenStatus(row);
+    return {
+      ...row,
+      status: normalizedStatus,
+    };
+  });
+
+  if (status) {
     rows = rows.filter((row) => row.status === status);
   }
 
@@ -81,6 +86,7 @@ export async function GET(req: NextRequest) {
     ok: true,
     rows,
     data: rows,
+    total: rows.length,
     limit,
     offset,
   });
