@@ -1,24 +1,21 @@
 {
-  "name": "stoney-verify-dashboard",
+  "name": "stoney-verify-dashboard-v3-8",
   "private": true,
-  "version": "1.0.0",
+  "version": "3.8.0",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "bot": "node bot/index.js",
+    "migrate": "node scripts/migrate.js",
+    "check-env": "node scripts/check-env.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.49.0",
-    "jose": "^5.2.4",
-    "next": "14.2.35",
-    "react": "18.2.0",
-    "react-dom": "18.2.0"
-  },
-  "devDependencies": {
-    "@types/node": "^20.11.30",
-    "@types/react": "^18.2.79",
-    "@types/react-dom": "^18.2.25",
-    "typescript": "^5.6.3"
+    "@supabase/supabase-js": "^2.49.1",
+    "discord.js": "^14.19.3",
+    "next": "14.2.25",
+    "pg": "^8.13.3",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
   }
 }
