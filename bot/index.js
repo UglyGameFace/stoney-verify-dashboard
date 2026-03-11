@@ -1,7 +1,14 @@
 const { Client, GatewayIntentBits, Partials, ChannelType } = require("discord.js")
 const { createClient } = require("@supabase/supabase-js")
 
-const required = ["NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SERVICE_ROLE", "DISCORD_TOKEN", "GUILD_ID"]
+const required = [
+  "NEXT_PUBLIC_SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE",
+  "DISCORD_TOKEN",
+  "GUILD_ID",
+  "TICKET_CATEGORY_ID"
+]
+
 const missing = required.filter((key) => !process.env[key])
 
 if (missing.length) {
@@ -16,6 +23,7 @@ const supabase = createClient(
 )
 
 const GUILD_ID = process.env.GUILD_ID
+const TICKET_CATEGORY_ID = process.env.TICKET_CATEGORY_ID
 const AUTO_SYNC_ENABLED = String(process.env.BOT_AUTO_SYNC_ENABLED || "true") === "true"
 const AUTO_SYNC_INTERVAL_MINUTES = Number(process.env.BOT_AUTO_SYNC_INTERVAL_MINUTES || 30)
 const AUTO_SYNC_BATCH_LIMIT = Math.min(Math.max(Number(process.env.BOT_AUTO_SYNC_BATCH_LIMIT || 500), 100), 1000)
@@ -23,8 +31,6 @@ const TICKET_PANEL_CHANNEL_IDS = (process.env.TICKET_PANEL_CHANNEL_IDS || "")
   .split(",")
   .map((x) => x.trim())
   .filter(Boolean)
-const TICKET_THREAD_PARENT_ID = process.env.TICKET_THREAD_PARENT_ID || ""
-const TICKET_THREAD_AUTO_ARCHIVE_MINUTES = Number(process.env.TICKET_THREAD_AUTO_ARCHIVE_MINUTES || 1440)
 
 const client = new Client({
   intents: [
@@ -211,59 +217,69 @@ async function fullAutoSync() {
   }
 }
 
-async function getTicketParentChannel(message) {
-  if (TICKET_THREAD_PARENT_ID) {
-    try {
-      const channel = await client.channels.fetch(TICKET_THREAD_PARENT_ID)
-      if (channel) return channel
-    } catch (error) {
-      console.error("Failed to fetch configured ticket parent channel:", error.message || error)
+async function getTicketCategoryChannel(guild) {
+  try {
+    const channel = await guild.channels.fetch(TICKET_CATEGORY_ID)
+    if (!channel) return null
+    if (channel.type !== ChannelType.GuildCategory) {
+      console.warn("Configured TICKET_CATEGORY_ID is not a category channel.")
+      return null
     }
+    return channel
+  } catch (error) {
+    console.error("Failed to fetch configured ticket category:", error.message || error)
+    return null
   }
-
-  if (message.channel && message.channel.isTextBased()) {
-    return message.channel
-  }
-
-  return null
 }
 
-async function createDiscordTicketThread(message, ticket) {
+async function getNextTicketNumber(guild) {
+  const channels = await guild.channels.fetch()
+  let highest = 0
+
+  for (const [, channel] of channels) {
+    if (!channel) continue
+    if (channel.parentId !== TICKET_CATEGORY_ID) continue
+    if (channel.type !== ChannelType.GuildText) continue
+
+    const match = String(channel.name || "").match(/^ticket-(\d{4,})$/i)
+    if (!match) continue
+
+    const value = Number(match[1])
+    if (Number.isFinite(value) && value > highest) {
+      highest = value
+    }
+  }
+
+  return highest + 1
+}
+
+function formatTicketChannelName(number) {
+  return `ticket-${String(number).padStart(4, "0")}`
+}
+
+async function createDiscordTicketChannel(message, ticket) {
   try {
-    const parentChannel = await getTicketParentChannel(message)
-    if (!parentChannel) {
-      console.warn("No parent channel available for ticket thread creation.")
+    const guild = message.guild
+    const category = await getTicketCategoryChannel(guild)
+
+    if (!category) {
+      console.warn("No valid ticket category found for channel creation.")
       return null
     }
 
-    if (
-      parentChannel.type !== ChannelType.GuildText &&
-      parentChannel.type !== ChannelType.GuildAnnouncement
-    ) {
-      console.warn("Configured ticket parent channel does not support threads.")
-      return null
-    }
+    const nextNumber = await getNextTicketNumber(guild)
+    const channelName = formatTicketChannelName(nextNumber)
 
-    const safeCategory = String(ticket.category || "ticket")
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]+/g, "-")
-      .slice(0, 24)
-
-    const safeUser = String(message.author.username || "user")
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]+/g, "-")
-      .slice(0, 20)
-
-    const threadName = `${safeCategory}-${safeUser}-${String(ticket.id).slice(0, 6)}`
-
-    const thread = await parentChannel.threads.create({
-      name: threadName,
-      autoArchiveDuration: TICKET_THREAD_AUTO_ARCHIVE_MINUTES,
-      reason: `Stoney ticket created for ${message.author.tag}`
+    const channel = await guild.channels.create({
+      name: channelName,
+      type: ChannelType.GuildText,
+      parent: category.id,
+      topic: `Stoney Ticket ${ticket.id} | User ${message.author.tag} | Category ${ticket.category || "other"}`
     })
 
     const introLines = [
       "🌿 **Stoney Support Ticket Created**",
+      `**Ticket:** ${channelName}`,
       `**User:** <@${message.author.id}>`,
       `**Category:** ${ticket.category || "other"}`,
       `**Priority:** ${ticket.priority || "medium"}`,
@@ -272,15 +288,16 @@ async function createDiscordTicketThread(message, ticket) {
       ticket.initial_message || "No initial message provided."
     ]
 
-    await thread.send({
+    await channel.send({
       content: introLines.join("\n")
     })
 
     const { error: updateError } = await supabase
       .from("tickets")
       .update({
-        discord_thread_id: thread.id,
-        updated_at: new Date().toISOString()
+        discord_thread_id: channel.id,
+        updated_at: new Date().toISOString(),
+        title: ticket.title || channelName
       })
       .eq("id", ticket.id)
 
@@ -289,26 +306,29 @@ async function createDiscordTicketThread(message, ticket) {
     }
 
     await audit(
-      "Discord ticket thread created",
-      `Created Discord thread ${thread.id} for ticket ${ticket.id}`,
-      "ticket_thread_created",
+      "Discord ticket channel created",
+      `Created Discord channel ${channel.id} (${channelName}) for ticket ${ticket.id}`,
+      "ticket_channel_created",
       ticket.id
     )
 
-    return thread.id
+    return {
+      channelId: channel.id,
+      channelName
+    }
   } catch (error) {
-    console.error("Thread creation failed:", error.message || error)
+    console.error("Ticket channel creation failed:", error.message || error)
     await audit(
-      "Discord ticket thread creation failed",
+      "Discord ticket channel creation failed",
       String(error.message || error),
-      "ticket_thread_create_failed",
+      "ticket_channel_create_failed",
       ticket.id
     )
     return null
   }
 }
 
-async function maybeCreateDiscordTicketThread(message, ticket) {
+async function maybeCreateDiscordTicketChannel(message, ticket) {
   const sourceChannelId = message.channel?.id || ""
   const shouldUseConfiguredPanel =
     TICKET_PANEL_CHANNEL_IDS.length === 0 || TICKET_PANEL_CHANNEL_IDS.includes(sourceChannelId)
@@ -317,7 +337,7 @@ async function maybeCreateDiscordTicketThread(message, ticket) {
     return null
   }
 
-  return createDiscordTicketThread(message, ticket)
+  return createDiscordTicketChannel(message, ticket)
 }
 
 client.once("ready", async () => {
@@ -443,7 +463,7 @@ client.on("messageCreate", async (message) => {
       return
     }
 
-    const threadId = await maybeCreateDiscordTicketThread(message, ticket)
+    const createdChannel = await maybeCreateDiscordTicketChannel(message, ticket)
 
     await Promise.all([
       supabase.from("ticket_messages").insert({
@@ -455,7 +475,7 @@ client.on("messageCreate", async (message) => {
       }),
       audit(
         "Verification ticket created",
-        `${message.author.tag} opened a verification-related ticket${threadId ? ` with thread ${threadId}` : ""}`,
+        `${message.author.tag} opened a verification-related ticket${createdChannel ? ` with channel ${createdChannel.channelId}` : ""}`,
         "ticket_created",
         ticket.id
       )
@@ -476,8 +496,10 @@ client.on("messageCreate", async (message) => {
     }
 
     try {
-      if (threadId) {
-        await message.reply("Your request has been logged for staff review and a support thread has been created.")
+      if (createdChannel) {
+        await message.reply(
+          `Your request has been logged for staff review and a support channel has been created: <#${createdChannel.channelId}>`
+        )
       } else {
         await message.reply("Your request has been logged for staff review.")
       }
