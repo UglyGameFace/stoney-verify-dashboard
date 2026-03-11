@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server"
-import { discordBotFetch } from "@/lib/discord-api"
 import { createServerSupabase } from "@/lib/supabase-server"
 import { env } from "@/lib/env"
 
@@ -9,6 +8,32 @@ export const revalidate = 0
 
 function isoTimeout(minutes) {
   return new Date(Date.now() + minutes * 60 * 1000).toISOString()
+}
+
+async function discordApi(path, { method = "GET", body } = {}) {
+  const token = process.env.DISCORD_TOKEN || env.discordToken || ""
+
+  if (!token) {
+    throw new Error("Missing DISCORD_TOKEN")
+  }
+
+  const res = await fetch(`https://discord.com/api/v10${path}`, {
+    method,
+    headers: {
+      Authorization: `Bot ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: body ? JSON.stringify(body) : undefined,
+    cache: "no-store"
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Discord API ${res.status}: ${text}`)
+  }
+
+  const text = await res.text()
+  return text ? JSON.parse(text) : null
 }
 
 export async function POST(req) {
@@ -21,8 +46,13 @@ export async function POST(req) {
     const action = String(body.action || "").trim().toLowerCase()
     const userId = String(body.user_id || "").trim()
     const reason = String(body.reason || "").trim() || "Action taken from Stoney Verify Dashboard"
-    const minutes = Number(body.minutes || 10)
-    const staffName = session?.user?.username || "Dashboard Staff"
+    const rawMinutes = Number(body.minutes || 10)
+    const timeoutMinutes = Number.isFinite(rawMinutes) ? Math.max(1, Math.min(rawMinutes, 40320)) : 10
+    const staffName =
+      session?.user?.username ||
+      session?.user?.name ||
+      env.defaultStaffName ||
+      "Dashboard Staff"
     const staffId = session?.user?.id || "unknown"
 
     if (!guildId) {
@@ -52,24 +82,22 @@ export async function POST(req) {
     }
 
     if (action === "timeout") {
-      const safeMinutes = Math.max(1, Math.min(minutes, 40320))
-
-      await discordBotFetch(`/guilds/${guildId}/members/${userId}`, {
+      await discordApi(`/guilds/${guildId}/members/${userId}`, {
         method: "PATCH",
         body: {
-          communication_disabled_until: isoTimeout(safeMinutes)
+          communication_disabled_until: isoTimeout(timeoutMinutes)
         }
       })
     }
 
     if (action === "kick") {
-      await discordBotFetch(`/guilds/${guildId}/members/${userId}`, {
+      await discordApi(`/guilds/${guildId}/members/${userId}`, {
         method: "DELETE"
       })
     }
 
     if (action === "ban") {
-      await discordBotFetch(`/guilds/${guildId}/bans/${userId}`, {
+      await discordApi(`/guilds/${guildId}/bans/${userId}`, {
         method: "PUT",
         body: {
           delete_message_seconds: 0
@@ -79,7 +107,10 @@ export async function POST(req) {
 
     await supabase.from("audit_events").insert({
       title: `Member ${action}`,
-      description: `${staffName} performed ${action} on ${userId}${action === "timeout" ? ` for ${minutes} minutes` : ""}. Reason: ${reason}`,
+      description:
+        `${staffName} performed ${action} on ${userId}` +
+        (action === "timeout" ? ` for ${timeoutMinutes} minute(s)` : "") +
+        `. Reason: ${reason}`,
       event_type: `member_${action}`,
       related_id: userId
     })
@@ -88,6 +119,7 @@ export async function POST(req) {
       ok: true,
       action,
       user_id: userId,
+      timeout_minutes: action === "timeout" ? timeoutMinutes : null,
       staff_id: staffId
     })
 
