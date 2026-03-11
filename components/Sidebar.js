@@ -4,33 +4,53 @@ const links = [
   { href: "/#overview", label: "Overview" },
   { href: "/#tickets", label: "Tickets" },
   { href: "/#members", label: "Members" },
-  { href: "/#roles", label: "Roles" },
-  { href: "/#categories", label: "Categories" },
-  { href: "/#timeline", label: "Timeline" }
+  { href: "/#categories", label: "Categories" }
 ]
 
 export default function Sidebar() {
   return (
-    <aside className="sidebar">
+    <aside className="sidebar stoner-sidebar">
       <div className="brand">
-        <div className="brand-badge">SV</div>
+        <div className="brand-badge">🌿</div>
+
         <div>
-          <div style={{ fontWeight: 800 }}>{env.appName}</div>
-          <div className="muted" style={{ fontSize: 13 }}>Premium control center</div>
+          <div style={{ fontWeight: 800 }}>{env.appName || "Stoney Verify"}</div>
+          <div className="muted" style={{ fontSize: 13 }}>
+            Green-room command center
+          </div>
         </div>
       </div>
 
       <nav className="sidebar-nav">
         {links.map((item, index) => (
-          <a key={item.href} href={item.href} className={`sidebar-link ${index === 0 ? "active" : ""}`}>
+          <a
+            key={item.href}
+            href={item.href}
+            className={`sidebar-link ${index === 0 ? "active" : ""}`}
+          >
             {item.label}
           </a>
         ))}
       </nav>
 
-      <div className="card tight" style={{ marginTop: 18 }}>
-        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Guild ID</div>
-        <div style={{ fontWeight: 700 }}>{process.env.GUILD_ID || "Missing GUILD_ID"}</div>
+      <div className="card tight stoner-sidebar-card" style={{ marginTop: 18 }}>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+          Server Session
+        </div>
+
+        <div style={{ fontWeight: 700, overflowWrap: "anywhere" }}>
+          {env.guildId || "Missing guild id"}
+        </div>
+      </div>
+
+      <div className="card tight stoner-sidebar-card" style={{ marginTop: 12 }}>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+          Theme
+        </div>
+
+        <div style={{ fontWeight: 700 }}>
+          Stoney premium / green haze
+        </div>
       </div>
     </aside>
   )
