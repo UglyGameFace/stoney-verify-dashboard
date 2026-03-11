@@ -1,57 +1,200 @@
-function required(name, value) {
-  if (!value) throw new Error(`Missing required environment variable: ${name}`)
-  return value
+import { createServerSupabase } from "@/lib/supabase-server"
+import { env } from "@/lib/env"
+import { sortTickets } from "@/lib/priority"
+
+export const dynamic = "force-dynamic"
+export const revalidate = 0
+
+function debugEnabled() {
+  return String(process.env.DASHBOARD_DEBUG || "").toLowerCase() === "true"
 }
 
-export const env = {
-  appName: process.env.NEXT_PUBLIC_APP_NAME || "Stoney Verify Dashboard V3.8",
-  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "",
-  supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-  supabaseServiceRole:
-    process.env.SUPABASE_SERVICE_ROLE ||
-    process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY ||
-    "",
-  supabaseDbUrl: process.env.SUPABASE_DB_URL || "",
-  discordToken: process.env.DISCORD_TOKEN || "",
-  discordClientId: process.env.DISCORD_CLIENT_ID || "",
-  discordClientSecret: process.env.DISCORD_CLIENT_SECRET || "",
-  discordRedirectUri: process.env.DISCORD_REDIRECT_URI || "",
-  appUrl: process.env.APP_URL || "",
-  guildId: process.env.DISCORD_GUILD_ID || process.env.GUILD_ID || "",
-  staffRoleIds: (process.env.STAFF_ROLE_IDS || "")
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean),
-  staffRoleNames: (process.env.STAFF_ROLE_NAMES || "")
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean),
-  defaultStaffName: process.env.DEFAULT_STAFF_NAME || "Dashboard Staff",
-  isProduction: process.env.NODE_ENV === "production",
-  botAutoSyncEnabled: String(process.env.BOT_AUTO_SYNC_ENABLED || "true") === "true",
-  botAutoSyncIntervalMinutes: Number(process.env.BOT_AUTO_SYNC_INTERVAL_MINUTES || 30),
-  botAutoSyncBatchLimit: Number(process.env.BOT_AUTO_SYNC_BATCH_LIMIT || 500)
-}
+export async function GET() {
+  try {
+    const supabase = createServerSupabase()
+    const guildId = env.guildId || ""
 
-export function assertServerEnv() {
-  required("NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL", env.supabaseUrl)
-  required("SUPABASE_SERVICE_ROLE or NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY", env.supabaseServiceRole)
-  required("DISCORD_TOKEN", env.discordToken)
-  required("DISCORD_GUILD_ID or GUILD_ID", env.guildId)
-  return true
-}
+    if (debugEnabled()) {
+      console.log("[dashboard/live] env.guildId =", guildId)
+      console.log("[dashboard/live] DISCORD_GUILD_ID =", process.env.DISCORD_GUILD_ID || "")
+      console.log("[dashboard/live] GUILD_ID =", process.env.GUILD_ID || "")
+    }
 
-export function assertOAuthEnv() {
-  required("DISCORD_CLIENT_ID", env.discordClientId)
-  required("DISCORD_CLIENT_SECRET", env.discordClientSecret)
-  required("DISCORD_REDIRECT_URI", env.discordRedirectUri)
-  required("APP_URL", env.appUrl)
-  required("DISCORD_GUILD_ID or GUILD_ID", env.guildId)
-  return true
-}
+    const [
+      ticketsRes,
+      eventsRes,
+      rolesRes,
+      metricsRes,
+      categoriesRes,
+      recentJoinsRes,
+      openTicketsRes,
+      warnsTodayRes,
+      raidAlertsRes,
+      fraudFlagsRes
+    ] = await Promise.all([
+      supabase
+        .from("tickets")
+        .select("*")
+        .eq("guild_id", guildId)
+        .order("updated_at", { ascending: false })
+        .limit(100),
 
-export function assertBrowserEnv() {
-  required("NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL", env.supabaseUrl)
-  required("NEXT_PUBLIC_SUPABASE_ANON_KEY", env.supabaseAnonKey)
-  return true
+      supabase
+        .from("audit_events")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(20),
+
+      supabase
+        .from("guild_roles")
+        .select("*")
+        .eq("guild_id", guildId)
+        .order("position", { ascending: false })
+        .limit(100),
+
+      supabase
+        .from("staff_metrics")
+        .select("*")
+        .eq("guild_id", guildId)
+        .order("tickets_handled", { ascending: false })
+        .limit(25),
+
+      supabase
+        .from("ticket_categories")
+        .select("*")
+        .eq("guild_id", guildId)
+        .order("name", { ascending: true }),
+
+      supabase
+        .from("guild_members")
+        .select("*")
+        .eq("guild_id", guildId)
+        .order("joined_at", { ascending: false })
+        .limit(25),
+
+      supabase
+        .from("tickets")
+        .select("*", { count: "exact", head: true })
+        .eq("guild_id", guildId)
+        .in("status", ["open", "claimed"]),
+
+      supabase
+        .from("warns")
+        .select("*", { count: "exact", head: true })
+        .eq("guild_id", guildId)
+        .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
+
+      supabase
+        .from("raid_events")
+        .select("*", { count: "exact", head: true })
+        .eq("guild_id", guildId)
+        .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
+
+      supabase
+        .from("verification_flags")
+        .select("*", { count: "exact", head: true })
+        .eq("guild_id", guildId)
+        .eq("flagged", true)
+    ])
+
+    const tickets = ticketsRes.data || []
+    const events = eventsRes.data || []
+    const roles = rolesRes.data || []
+    const metrics = metricsRes.data || []
+    const categories = categoriesRes.data || []
+    const recentJoins = recentJoinsRes.data || []
+
+    if (debugEnabled()) {
+      console.log("[dashboard/live] tickets found =", tickets.length)
+      console.log("[dashboard/live] recentJoins found =", recentJoins.length)
+      console.log("[dashboard/live] roles found =", roles.length)
+      console.log("[dashboard/live] categories found =", categories.length)
+
+      if (tickets.length) {
+        console.log(
+          "[dashboard/live] latest ticket snapshot =",
+          tickets.slice(0, 3).map((t) => ({
+            id: t.id,
+            guild_id: t.guild_id,
+            username: t.username,
+            category: t.category,
+            status: t.status,
+            discord_thread_id: t.discord_thread_id || null,
+            created_at: t.created_at
+          }))
+        )
+      } else {
+        const rawTicketCheck = await supabase
+          .from("tickets")
+          .select("id,guild_id,username,category,status,created_at")
+          .order("created_at", { ascending: false })
+          .limit(10)
+
+        console.log("[dashboard/live] no tickets matched env.guildId")
+        console.log("[dashboard/live] latest raw tickets =", rawTicketCheck.data || [])
+      }
+    }
+
+    const firstError =
+      ticketsRes.error ||
+      eventsRes.error ||
+      rolesRes.error ||
+      metricsRes.error ||
+      categoriesRes.error ||
+      recentJoinsRes.error ||
+      openTicketsRes.error ||
+      warnsTodayRes.error ||
+      raidAlertsRes.error ||
+      fraudFlagsRes.error
+
+    if (firstError) {
+      if (debugEnabled()) {
+        console.error("[dashboard/live] query error =", firstError)
+      }
+
+      return Response.json(
+        { error: firstError.message || "Failed to load dashboard data." },
+        { status: 500 }
+      )
+    }
+
+    const payload = {
+      tickets: sortTickets(tickets, "priority_desc"),
+      events,
+      roles,
+      metrics,
+      categories,
+      recentJoins,
+      counts: {
+        openTickets: openTicketsRes.count || 0,
+        warnsToday: warnsTodayRes.count || 0,
+        raidAlerts: raidAlertsRes.count || 0,
+        fraudFlags: fraudFlagsRes.count || 0
+      },
+      debug: debugEnabled()
+        ? {
+            guildId,
+            envGuildId: process.env.GUILD_ID || "",
+            envDiscordGuildId: process.env.DISCORD_GUILD_ID || "",
+            ticketCount: tickets.length
+          }
+        : undefined
+    }
+
+    return Response.json(payload, {
+      status: 200,
+      headers: {
+        "Cache-Control": "no-store, max-age=0"
+      }
+    })
+  } catch (error) {
+    if (debugEnabled()) {
+      console.error("[dashboard/live] fatal error =", error)
+    }
+
+    return Response.json(
+      { error: error.message || "Failed to load dashboard." },
+      { status: 500 }
+    )
+  }
 }
