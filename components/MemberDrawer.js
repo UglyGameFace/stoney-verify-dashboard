@@ -11,6 +11,8 @@ export default function MemberDrawer({ member, onClose }) {
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [modReason, setModReason] = useState("Dashboard moderation action")
+  const [timeoutMinutes, setTimeoutMinutes] = useState("10")
 
   const displayName =
     member?.display_name ||
@@ -90,6 +92,49 @@ export default function MemberDrawer({ member, onClose }) {
     ]
 
     await copyText(lines.join("\n"), "Staff summary copied.")
+  }
+
+  async function runModAction(action) {
+    setBusy(true)
+    setMessage("")
+    setError("")
+
+    try {
+      const payload = {
+        action,
+        user_id: memberId,
+        username: displayName,
+        reason: modReason.trim() || "Dashboard moderation action",
+        minutes: Number(timeoutMinutes || 10)
+      }
+
+      const res = await fetch("/api/discord/mod-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      })
+
+      const json = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        throw new Error(json.error || `${action} failed`)
+      }
+
+      if (action === "timeout") {
+        setMessage(`Timed out ${displayName} for ${payload.minutes} minute(s).`)
+      } else if (action === "warn") {
+        setMessage(`Warn recorded for ${displayName}.`)
+      } else if (action === "kick") {
+        setMessage(`${displayName} was kicked.`)
+      } else if (action === "ban") {
+        setMessage(`${displayName} was banned.`)
+      }
+    } catch (err) {
+      setError(err.message || "Moderation action failed.")
+      setMessage("")
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -247,58 +292,84 @@ export default function MemberDrawer({ member, onClose }) {
               marginBottom: 12
             }}
           >
-            <h2 style={{ margin: 0 }}>Staff Actions</h2>
+            <h2 style={{ margin: 0 }}>Staff Tools</h2>
             {syncing ? <span className="muted" style={{ fontSize: 13 }}>Syncing...</span> : null}
           </div>
 
-          <div className="member-action-grid">
-            <button
-              className="button"
-              disabled={busy}
-              onClick={() => copyText(memberId, "User ID copied.")}
-            >
+          <div className="member-action-grid" style={{ marginBottom: 12 }}>
+            <button className="button" disabled={busy} onClick={() => copyText(memberId, "User ID copied.")}>
               Copy User ID
             </button>
 
-            <button
-              className="button"
-              disabled={busy}
-              onClick={() => copyText(buildMention(memberId), "Mention copied.")}
-            >
+            <button className="button" disabled={busy} onClick={() => copyText(buildMention(memberId), "Mention copied.")}>
               Copy Mention
             </button>
 
-            <button
-              className="button"
-              disabled={busy}
-              onClick={triggerRoleSync}
-            >
+            <button className="button" disabled={busy} onClick={triggerRoleSync}>
               {syncing ? "Running Sync..." : "Run Role Sync"}
             </button>
 
-            <button
-              className="button"
-              disabled={busy}
-              onClick={prepTicketSearch}
-            >
+            <button className="button" disabled={busy} onClick={prepTicketSearch}>
               Prep Ticket Search
             </button>
 
-            <button
-              className="button"
-              disabled={busy}
-              onClick={copyStaffSummary}
-            >
+            <button className="button" disabled={busy} onClick={copyStaffSummary}>
               Copy Staff Summary
             </button>
+          </div>
 
-            <button
-              className="button ghost"
-              disabled
-              title="Real moderation actions come next once we wire the mod routes."
-            >
-              Warn / Timeout / Ban
-            </button>
+          <div className="space">
+            <textarea
+              className="textarea"
+              rows="3"
+              value={modReason}
+              onChange={(e) => setModReason(e.target.value)}
+              placeholder="Moderation reason..."
+            />
+
+            <div className="row" style={{ alignItems: "stretch" }}>
+              <input
+                className="input"
+                value={timeoutMinutes}
+                onChange={(e) => setTimeoutMinutes(e.target.value)}
+                placeholder="Timeout minutes"
+                inputMode="numeric"
+              />
+              <button
+                className="button"
+                disabled={busy || !memberId}
+                onClick={() => runModAction("timeout")}
+                style={{ width: "auto", minWidth: 120 }}
+              >
+                Timeout
+              </button>
+            </div>
+
+            <div className="member-action-grid">
+              <button
+                className="button"
+                disabled={busy || !memberId}
+                onClick={() => runModAction("warn")}
+              >
+                Warn
+              </button>
+
+              <button
+                className="button danger"
+                disabled={busy || !memberId}
+                onClick={() => runModAction("kick")}
+              >
+                Kick
+              </button>
+
+              <button
+                className="button danger"
+                disabled={busy || !memberId}
+                onClick={() => runModAction("ban")}
+              >
+                Ban
+              </button>
+            </div>
           </div>
         </div>
       </div>
