@@ -200,7 +200,7 @@ export default function DashboardClient({ initialData, staffName }) {
                 marginBottom: 10
               }}
             >
-              <div className="muted">Smoke Session Overview</div>
+              <div className="muted">Lounge Overview</div>
 
               <button
                 className="button ghost"
@@ -214,13 +214,12 @@ export default function DashboardClient({ initialData, staffName }) {
             </div>
 
             <h2 style={{ marginTop: 0 }}>
-              Stoney Verify command deck with cleaner mobile flow and greener branding
+              Stoney Verify control deck with cleaner mobile flow and stronger live sync
             </h2>
 
             <p className="muted" style={{ marginBottom: 0 }}>
-              This build keeps your moderation controls, realtime state updates,
-              member tools, role data, and queue handling while turning mobile into
-              focused sections instead of one endless stacked scroll.
+              Run ticket flow, moderation checks, member tracking, role sync,
+              and verification review from one greener, cleaner control room.
             </p>
           </div>
 
@@ -255,7 +254,7 @@ export default function DashboardClient({ initialData, staffName }) {
 
           <div className="space">
             <div className="card stoner-status-card">
-              <h2 style={{ marginTop: 0 }}>Session Status</h2>
+              <h2 style={{ marginTop: 0 }}>Session Pulse</h2>
 
               <div className="space">
                 <div className="row">
@@ -325,7 +324,7 @@ export default function DashboardClient({ initialData, staffName }) {
               marginBottom: 12
             }}
           >
-            <h2 style={{ margin: 0 }}>Ticket Filters</h2>
+            <h2 style={{ margin: 0 }}>Ticket Queue Filters</h2>
             <div className="muted" style={{ fontSize: 14 }}>
               {filteredTickets.length} result{filteredTickets.length === 1 ? "" : "s"}
             </div>
@@ -405,22 +404,22 @@ export default function DashboardClient({ initialData, staffName }) {
           <CategoryManager categories={safeCategories} onRefresh={refresh} />
 
           <div className="card">
-            <h2 style={{ marginTop: 0 }}>Stoney Ops Notes</h2>
+            <h2 style={{ marginTop: 0 }}>Flow Notes</h2>
             <div className="space">
               <div className="info-banner stoner-banner">
-                Keep category flows tight so staff can handle member issues fast
-                without bouncing back into Discord for every small step.
+                Keep category flow tight so staff can handle issues fast without
+                bouncing back into Discord for every small step.
               </div>
 
               <div className="space">
                 <div className="row">
                   <span className="status-dot" />
-                  <span>Verification flows should stay simple and green-lit</span>
+                  <span>Verification flow should stay simple and green-lit</span>
                 </div>
 
                 <div className="row">
                   <span className="status-dot" />
-                  <span>Appeals and fraud checks should be clearly separated</span>
+                  <span>Appeals and fraud review should stay clearly separated</span>
                 </div>
 
                 <div className="row">
