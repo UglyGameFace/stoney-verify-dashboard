@@ -59,4 +59,29 @@ export async function POST(req, { params }) {
     await Promise.all([
       supabase.from("audit_events").insert({
         title: "Ticket transferred",
-        description: `${staffName
+        description: `${staffName} transferred ticket ${ticket.id} to ${nextAssignee}`,
+        event_type: "ticket_transferred",
+        related_id: ticket.id
+      }),
+      supabase.from("ticket_notes").insert({
+        ticket_id: ticket.id,
+        staff_id: session.user.id,
+        staff_name: staffName,
+        content: noteText
+      })
+    ])
+
+    const response = Response.json({
+      ok: true,
+      ticket: updatedTicket
+    })
+
+    applyAuthCookies(response, refreshedTokens)
+    return response
+  } catch (error) {
+    return Response.json(
+      { error: error.message || "Failed to transfer ticket" },
+      { status: 500 }
+    )
+  }
+}
