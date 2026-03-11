@@ -367,6 +367,190 @@ function formatTicketChannelName(number) {
   return `ticket-${String(number).padStart(4, "0")}`
 }
 
+function inferCategoryFromChannel(channel) {
+  const source = `${channel.name || ""} ${channel.topic || ""}`.toLowerCase()
+
+  if (/verify|verification|wallet/.test(source)) return "verification_issue"
+  if (/appeal|ban|mute|timeout|warn/.test(source)) return "appeal"
+  if (/bug|glitch|broken|error/.test(source)) return "bug_report"
+  if (/payment|refund|chargeback|purchase/.test(source)) return "payment_issue"
+  if (/help|support|question/.test(source)) return "server_help"
+
+  return "other"
+}
+
+function inferPriorityFromChannel(channel) {
+  const source = `${channel.name || ""} ${channel.topic || ""}`.toLowerCase()
+
+  if (/urgent|critical|fraud|scam/.test(source)) return "high"
+  if (/verify|appeal|payment/.test(source)) return "medium"
+
+  return "low"
+}
+
+async function findExistingTicketByDiscordChannelId(channelId) {
+  const { data, error } = await supabase
+    .from("tickets")
+    .select("id, discord_thread_id")
+    .eq("discord_thread_id", channelId)
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.error("Failed looking up existing ticket by discord channel id:", error.message)
+    return null
+  }
+
+  return data || null
+}
+
+async function ingestExistingDiscordTicketChannel(channel) {
+  try {
+    if (!channel) return null
+    if (channel.guild?.id !== GUILD_ID) return null
+    if (channel.type !== ChannelType.GuildText) return null
+    if (channel.parentId !== TICKET_CATEGORY_ID) return null
+
+    const existing = await findExistingTicketByDiscordChannelId(channel.id)
+    if (existing) {
+      return existing
+    }
+
+    let starterMessage = ""
+    let inferredUserId = null
+    let inferredUsername = null
+
+    try {
+      const messages = await channel.messages.fetch({ limit: 10 })
+      const ordered = [...messages.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+
+      for (const msg of ordered) {
+        const content = String(msg.content || "").trim()
+        if (!starterMessage && content) {
+          starterMessage = content
+        }
+
+        const nonBotMention = msg.mentions.users.find((user) => !user.bot)
+        if (nonBotMention && !inferredUserId) {
+          inferredUserId = nonBotMention.id
+          inferredUsername = nonBotMention.tag
+        }
+
+        if (starterMessage && inferredUserId) break
+      }
+    } catch (error) {
+      console.error("Failed to inspect ticket channel messages:", error.message || error)
+    }
+
+    const category = inferCategoryFromChannel(channel)
+    const priority = inferPriorityFromChannel(channel)
+    const now = new Date().toISOString()
+
+    const insertPayload = {
+      guild_id: channel.guild.id,
+      user_id: inferredUserId || `discord-channel:${channel.id}`,
+      username: inferredUsername || channel.name || "Unknown User",
+      title: channel.name || "Discord Ticket",
+      category,
+      status: "open",
+      priority,
+      initial_message: starterMessage || channel.topic || `Imported from Discord channel ${channel.name}`,
+      ai_category_confidence: 0,
+      mod_suggestion: category === "verification_issue" ? "send_verification_help" : "review_manually",
+      mod_suggestion_confidence: 0,
+      discord_thread_id: channel.id,
+      created_at: now,
+      updated_at: now
+    }
+
+    const { data: ticket, error: ticketError } = await supabase
+      .from("tickets")
+      .insert(insertPayload)
+      .select("*")
+      .single()
+
+    if (ticketError || !ticket) {
+      console.error("Failed ingesting Discord ticket channel:", ticketError?.message || "Unknown error")
+      await audit(
+        "Discord ticket ingestion failed",
+        ticketError?.message || `Failed ingesting channel ${channel.id}`,
+        "ticket_ingest_failed",
+        channel.id
+      )
+      return null
+    }
+
+    if (starterMessage) {
+      const { error: messageError } = await supabase
+        .from("ticket_messages")
+        .insert({
+          ticket_id: ticket.id,
+          author_id: inferredUserId || `discord-channel:${channel.id}`,
+          author_name: inferredUsername || channel.name || "Unknown User",
+          content: starterMessage,
+          attachments: [],
+          message_type: "user"
+        })
+
+      if (messageError) {
+        console.error("Failed inserting ingested starter ticket message:", messageError.message)
+      }
+    }
+
+    await audit(
+      "Discord ticket channel ingested",
+      `Imported channel ${channel.id} (${channel.name}) into dashboard tickets`,
+      "ticket_ingested",
+      ticket.id
+    )
+
+    return ticket
+  } catch (error) {
+    console.error("Discord ticket ingestion failed:", error.message || error)
+    await audit(
+      "Discord ticket ingestion failed",
+      String(error.message || error),
+      "ticket_ingest_failed",
+      channel?.id || null
+    )
+    return null
+  }
+}
+
+async function ingestExistingTicketChannelsOnStartup() {
+  try {
+    const guild = await client.guilds.fetch(GUILD_ID)
+    const channels = await guild.channels.fetch()
+
+    const ticketChannels = [...channels.values()].filter((channel) => {
+      return channel &&
+        channel.type === ChannelType.GuildText &&
+        channel.parentId === TICKET_CATEGORY_ID
+    })
+
+    let imported = 0
+    for (const channel of ticketChannels) {
+      const ticket = await ingestExistingDiscordTicketChannel(channel)
+      if (ticket) imported += 1
+    }
+
+    await audit(
+      "Discord ticket ingestion scan completed",
+      `Scanned ${ticketChannels.length} ticket channels and imported ${imported}`,
+      "ticket_ingest_scan"
+    )
+
+    console.log(`Ticket ingestion scan complete: scanned ${ticketChannels.length}, imported ${imported}`)
+  } catch (error) {
+    console.error("Ticket ingestion scan failed:", error.message || error)
+    await audit(
+      "Discord ticket ingestion scan failed",
+      String(error.message || error),
+      "ticket_ingest_scan_failed"
+    )
+  }
+}
+
 async function createDiscordTicketChannel(message, ticket) {
   try {
     const guild = message.guild
@@ -457,6 +641,20 @@ client.once("ready", async () => {
   if (AUTO_SYNC_ENABLED) {
     await fullAutoSync()
     setInterval(fullAutoSync, AUTO_SYNC_INTERVAL_MINUTES * 60 * 1000)
+  }
+
+  await ingestExistingTicketChannelsOnStartup()
+})
+
+client.on("channelCreate", async (channel) => {
+  try {
+    if (!channel || channel.type !== ChannelType.GuildText) return
+    if (channel.guild?.id !== GUILD_ID) return
+    if (channel.parentId !== TICKET_CATEGORY_ID) return
+
+    await ingestExistingDiscordTicketChannel(channel)
+  } catch (error) {
+    console.error("channelCreate ingestion failed:", error.message || error)
   }
 })
 
