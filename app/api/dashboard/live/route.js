@@ -1,148 +1,57 @@
-import { createServerSupabase } from "@/lib/supabase-server"
-import { sortTickets, derivePriority } from "@/lib/priority"
-import { env } from "@/lib/env"
+function required(name, value) {
+  if (!value) throw new Error(`Missing required environment variable: ${name}`)
+  return value
+}
 
-export const dynamic = "force-dynamic"
-export const revalidate = 0
+export const env = {
+  appName: process.env.NEXT_PUBLIC_APP_NAME || "Stoney Verify Dashboard V3.8",
+  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "",
+  supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
+  supabaseServiceRole:
+    process.env.SUPABASE_SERVICE_ROLE ||
+    process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY ||
+    "",
+  supabaseDbUrl: process.env.SUPABASE_DB_URL || "",
+  discordToken: process.env.DISCORD_TOKEN || "",
+  discordClientId: process.env.DISCORD_CLIENT_ID || "",
+  discordClientSecret: process.env.DISCORD_CLIENT_SECRET || "",
+  discordRedirectUri: process.env.DISCORD_REDIRECT_URI || "",
+  appUrl: process.env.APP_URL || "",
+  guildId: process.env.DISCORD_GUILD_ID || process.env.GUILD_ID || "",
+  staffRoleIds: (process.env.STAFF_ROLE_IDS || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean),
+  staffRoleNames: (process.env.STAFF_ROLE_NAMES || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean),
+  defaultStaffName: process.env.DEFAULT_STAFF_NAME || "Dashboard Staff",
+  isProduction: process.env.NODE_ENV === "production",
+  botAutoSyncEnabled: String(process.env.BOT_AUTO_SYNC_ENABLED || "true") === "true",
+  botAutoSyncIntervalMinutes: Number(process.env.BOT_AUTO_SYNC_INTERVAL_MINUTES || 30),
+  botAutoSyncBatchLimit: Number(process.env.BOT_AUTO_SYNC_BATCH_LIMIT || 500)
+}
 
-export async function GET() {
-  try {
-    const supabase = createServerSupabase()
-    const guildId = env.guildId || "demo"
+export function assertServerEnv() {
+  required("NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL", env.supabaseUrl)
+  required("SUPABASE_SERVICE_ROLE or NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY", env.supabaseServiceRole)
+  required("DISCORD_TOKEN", env.discordToken)
+  required("DISCORD_GUILD_ID or GUILD_ID", env.guildId)
+  return true
+}
 
-    const [
-      { data: tickets, error: ticketsError },
-      { data: events, error: eventsError },
-      { data: roles, error: rolesError },
-      { data: metrics, error: metricsError },
-      { data: categories, error: categoriesError },
-      { data: recentJoins, error: recentJoinsError },
-      { count: openTickets, error: openError },
-      { count: warnsToday, error: warnsError },
-      { count: raidAlerts, error: raidsError },
-      { count: fraudFlags, error: fraudError }
-    ] = await Promise.all([
-      supabase
-        .from("tickets")
-        .select("*")
-        .eq("guild_id", guildId)
-        .order("created_at", { ascending: false })
-        .limit(40),
+export function assertOAuthEnv() {
+  required("DISCORD_CLIENT_ID", env.discordClientId)
+  required("DISCORD_CLIENT_SECRET", env.discordClientSecret)
+  required("DISCORD_REDIRECT_URI", env.discordRedirectUri)
+  required("APP_URL", env.appUrl)
+  required("DISCORD_GUILD_ID or GUILD_ID", env.guildId)
+  return true
+}
 
-      supabase
-        .from("audit_events")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(10),
-
-      supabase
-        .from("guild_roles")
-        .select("*")
-        .eq("guild_id", guildId)
-        .order("position", { ascending: false })
-        .limit(40),
-
-      supabase
-        .from("staff_metrics")
-        .select("*")
-        .eq("guild_id", guildId)
-        .order("tickets_handled", { ascending: false })
-        .limit(10),
-
-      supabase
-        .from("ticket_categories")
-        .select("*")
-        .eq("guild_id", guildId)
-        .order("name", { ascending: true }),
-
-      supabase
-        .from("guild_members")
-        .select(
-          "guild_id,user_id,username,display_name,nickname,avatar_url,joined_at,created_at,data_health,role_state,role_state_reason,has_staff_role,has_verified_role,in_guild,top_role"
-        )
-        .eq("guild_id", guildId)
-        .order("joined_at", { ascending: false })
-        .limit(10),
-
-      supabase
-        .from("tickets")
-        .select("*", { head: true, count: "exact" })
-        .eq("guild_id", guildId)
-        .eq("status", "open"),
-
-      supabase
-        .from("warns")
-        .select("*", { head: true, count: "exact" })
-        .eq("guild_id", guildId)
-        .gte("created_at", new Date(Date.now() - 86400000).toISOString()),
-
-      supabase
-        .from("raid_events")
-        .select("*", { head: true, count: "exact" })
-        .eq("guild_id", guildId)
-        .gte("created_at", new Date(Date.now() - 86400000).toISOString()),
-
-      supabase
-        .from("verification_flags")
-        .select("*", { head: true, count: "exact" })
-        .eq("guild_id", guildId)
-        .eq("flagged", true)
-    ])
-
-    const firstError =
-      ticketsError ||
-      eventsError ||
-      rolesError ||
-      metricsError ||
-      categoriesError ||
-      recentJoinsError ||
-      openError ||
-      warnsError ||
-      raidsError ||
-      fraudError
-
-    if (firstError) {
-      throw new Error(firstError.message || "Failed to load dashboard.")
-    }
-
-    return new Response(
-      JSON.stringify({
-        tickets: sortTickets(
-          (tickets || []).map((ticket) => ({
-            ...ticket,
-            priority: ticket.priority || derivePriority(ticket)
-          }))
-        ),
-        events: events || [],
-        roles: roles || [],
-        metrics: metrics || [],
-        categories: categories || [],
-        recentJoins: recentJoins || [],
-        counts: {
-          openTickets: openTickets || 0,
-          warnsToday: warnsToday || 0,
-          raidAlerts: raidAlerts || 0,
-          fraudFlags: fraudFlags || 0
-        }
-      }),
-      {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
-        }
-      }
-    )
-  } catch (error) {
-    return new Response(
-      JSON.stringify({ error: error.message || "Failed to load dashboard." }),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
-        }
-      }
-    )
-  }
+export function assertBrowserEnv() {
+  required("NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL", env.supabaseUrl)
+  required("NEXT_PUBLIC_SUPABASE_ANON_KEY", env.supabaseAnonKey)
+  return true
 }
