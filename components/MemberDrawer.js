@@ -55,9 +55,9 @@ export default function MemberDrawer({ member, onClose }) {
 
   return (
     <div className="drawer-backdrop" onClick={onClose}>
-      <div className="drawer" onClick={(e) => e.stopPropagation()}>
+      <div className="drawer member-drawer" onClick={(e) => e.stopPropagation()}>
         <div className="row" style={{ justifyContent: "space-between", marginBottom: 18 }}>
-          <h2 style={{ margin: 0 }}>Member Details</h2>
+          <h2 style={{ margin: 0 }}>Member Smoke Sheet</h2>
           <button className="button ghost" onClick={onClose}>Close</button>
         </div>
 
@@ -93,6 +93,7 @@ export default function MemberDrawer({ member, onClose }) {
             <div><strong>Top Role:</strong> {member.top_role || member.highest_role_name || "—"}</div>
             <div><strong>Role State:</strong> {member.role_state || "—"}</div>
             <div><strong>Health:</strong> {member.data_health || "—"}</div>
+            <div><strong>Reason:</strong> {member.role_state_reason || "—"}</div>
             <div><strong>Joined:</strong> {member.joined_at ? new Date(member.joined_at).toLocaleString() : "—"}</div>
             <div>
               <strong>Roles:</strong>
