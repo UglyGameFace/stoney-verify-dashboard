@@ -26,15 +26,15 @@ export default function RecentJoinsCard({ joins = [] }) {
         }}
       >
         <div>
-          <h2 style={{ margin: 0 }}>Recent Joins</h2>
+          <h2 style={{ margin: 0 }}>Fresh Smoke Entrants</h2>
           <div className="muted" style={{ marginTop: 6 }}>
-            Recent member flow with live active/left-server state
+            Live member arrivals with accurate in-server and left-server state
           </div>
         </div>
 
         <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
           <div className="muted" style={{ fontSize: 14 }}>
-            {joins.length} recent join{joins.length === 1 ? "" : "s"}
+            {joins.length} tracked
           </div>
 
           {joins.length > 5 ? (
@@ -51,7 +51,7 @@ export default function RecentJoinsCard({ joins = [] }) {
       </div>
 
       {!joins.length ? (
-        <div className="empty-state">No recent joins yet.</div>
+        <div className="empty-state">No fresh joins tracked yet.</div>
       ) : (
         <div
           className="space"
@@ -77,13 +77,12 @@ export default function RecentJoinsCard({ joins = [] }) {
               <button
                 key={`${join.user_id || "unknown"}-${join.joined_at || join.created_at || index}`}
                 type="button"
-                className="message"
+                className="message member-card"
                 onClick={() => setSelected(join)}
                 style={{
                   textAlign: "left",
                   width: "100%",
-                  cursor: "pointer",
-                  border: "1px solid var(--line)"
+                  cursor: "pointer"
                 }}
               >
                 <div
@@ -113,7 +112,8 @@ export default function RecentJoinsCard({ joins = [] }) {
                       <div
                         style={{
                           fontWeight: 800,
-                          overflowWrap: "anywhere"
+                          overflowWrap: "anywhere",
+                          color: "var(--text-strong)"
                         }}
                       >
                         {displayName}
