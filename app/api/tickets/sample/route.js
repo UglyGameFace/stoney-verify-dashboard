@@ -1,6 +1,8 @@
 import { createServerSupabase } from "@/lib/supabase-server"
 import { env } from "@/lib/env"
 
+export const dynamic = "force-dynamic"
+
 export async function POST() {
   try {
     const supabase = createServerSupabase()
@@ -36,10 +38,7 @@ export async function POST() {
       }
     ]
 
-    const { data, error } = await supabase
-      .from("tickets")
-      .insert(samples)
-      .select("*")
+    const { data, error } = await supabase.from("tickets").insert(samples).select("*")
 
     if (error) {
       return Response.json({ error: error.message }, { status: 500 })
@@ -53,15 +52,28 @@ export async function POST() {
       message_type: "user"
     }))
 
-    const { error: messageError } = await supabase
-      .from("ticket_messages")
-      .insert(messages)
+    const { error: messageError } = await supabase.from("ticket_messages").insert(messages)
 
     if (messageError) {
       return Response.json({ error: messageError.message }, { status: 500 })
     }
 
-    return Response.json({ inserted: data.length, tickets: data })
+    await supabase.from("audit_events").insert({
+      title: "Sample tickets created",
+      description: `Inserted ${data.length} sample tickets`,
+      event_type: "ticket_sample_create"
+    })
+
+    return new Response(
+      JSON.stringify({ inserted: data.length, tickets: data }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
+        }
+      }
+    )
   } catch (error) {
     return Response.json(
       { error: error.message || "Failed to create sample tickets." },
