@@ -81,6 +81,9 @@ export default function TicketDetailClient({ initialData, ticketId }) {
   const messages = data?.messages || []
   const notes = data?.notes || []
 
+  const status = ticket.status || "open"
+  const priority = ticket.priority || "medium"
+
   return (
     <>
       {error ? (
@@ -100,7 +103,7 @@ export default function TicketDetailClient({ initialData, ticketId }) {
           }}
         >
           <div className="muted">
-            Live ticket view with realtime updates for replies, notes, and status changes.
+            Live ticket view with realtime updates for replies, notes, status changes, and transfers.
           </div>
 
           <button
@@ -118,7 +121,37 @@ export default function TicketDetailClient({ initialData, ticketId }) {
       <div className="ticket-shell">
         <div className="space">
           <div className="card">
-            <h2 style={{ marginTop: 0 }}>Ticket Info</h2>
+            <div
+              className="row"
+              style={{
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                flexWrap: "wrap",
+                gap: 12,
+                marginBottom: 14
+              }}
+            >
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <h2 style={{ marginTop: 0, marginBottom: 8 }}>
+                  {ticket.title || "Ticket"}
+                </h2>
+
+                <div className="muted" style={{ overflowWrap: "anywhere" }}>
+                  Ticket ID: {ticket.id || ticketId}
+                </div>
+              </div>
+
+              <div
+                className="row"
+                style={{
+                  gap: 8,
+                  flexWrap: "wrap"
+                }}
+              >
+                <span className={`badge ${status}`}>{status}</span>
+                <span className={`badge ${priority}`}>{priority}</span>
+              </div>
+            </div>
 
             <div className="ticket-info-grid">
               <div className="ticket-info-item">
@@ -134,22 +167,31 @@ export default function TicketDetailClient({ initialData, ticketId }) {
               </div>
 
               <div className="ticket-info-item">
-                <span className="ticket-info-label">Status</span>
-                <span className={`badge ${ticket.status || "open"}`}>
-                  {ticket.status || "open"}
-                </span>
-              </div>
-
-              <div className="ticket-info-item">
-                <span className="ticket-info-label">Priority</span>
-                <span className={`badge ${ticket.priority || "medium"}`}>
-                  {ticket.priority || "medium"}
-                </span>
-              </div>
-
-              <div className="ticket-info-item">
                 <span className="ticket-info-label">Claimed By</span>
-                <span style={{ overflowWrap: "anywhere" }}>{ticket.claimed_by || "—"}</span>
+                <span style={{ overflowWrap: "anywhere" }}>
+                  {ticket.claimed_by || "—"}
+                </span>
+              </div>
+
+              <div className="ticket-info-item">
+                <span className="ticket-info-label">Assigned To</span>
+                <span style={{ overflowWrap: "anywhere" }}>
+                  {ticket.assigned_to || "—"}
+                </span>
+              </div>
+
+              <div className="ticket-info-item">
+                <span className="ticket-info-label">Closed By</span>
+                <span style={{ overflowWrap: "anywhere" }}>
+                  {ticket.closed_by || "—"}
+                </span>
+              </div>
+
+              <div className="ticket-info-item">
+                <span className="ticket-info-label">Discord Channel</span>
+                <span style={{ overflowWrap: "anywhere" }}>
+                  {ticket.discord_thread_id ? `#${ticket.discord_thread_id}` : "Not linked"}
+                </span>
               </div>
 
               <div className="ticket-info-item">
@@ -163,9 +205,16 @@ export default function TicketDetailClient({ initialData, ticketId }) {
                 </span>
               </div>
 
+              <div className="ticket-info-item">
+                <span className="ticket-info-label">Closed Reason</span>
+                <span style={{ overflowWrap: "anywhere" }}>
+                  {ticket.closed_reason || "—"}
+                </span>
+              </div>
+
               <div className="ticket-info-item full">
                 <span className="ticket-info-label">Initial Message</span>
-                <span style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
+                <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
                   {ticket.initial_message || "—"}
                 </span>
               </div>
@@ -195,6 +244,7 @@ export default function TicketDetailClient({ initialData, ticketId }) {
                     <div style={{ fontWeight: 800, overflowWrap: "anywhere" }}>
                       {note.staff_name || note.staff_id}
                     </div>
+
                     <div className="muted" style={{ fontSize: 12 }}>
                       Internal
                     </div>
@@ -208,6 +258,12 @@ export default function TicketDetailClient({ initialData, ticketId }) {
                     }}
                   >
                     {note.content}
+                  </div>
+
+                  <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
+                    {note.created_at
+                      ? new Date(note.created_at).toLocaleString()
+                      : "Unknown time"}
                   </div>
                 </div>
               ))}
