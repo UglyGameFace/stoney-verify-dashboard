@@ -11,15 +11,20 @@ export default function TicketStaffActions({ ticket, onRefresh }) {
   async function post(endpoint, payload) {
     setBusy(true)
     setError("")
+
     try {
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       })
+
       const json = await res.json()
+
       if (!res.ok) throw new Error(json.error || "Ticket action failed.")
-      await onRefresh()
+
+      if (onRefresh) await onRefresh()
+
       setNote("")
     } catch (err) {
       setError(err.message || "Ticket action failed.")
@@ -34,17 +39,33 @@ export default function TicketStaffActions({ ticket, onRefresh }) {
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Staff Actions</h2>
+
         <div className="space">
           {ticket.status !== "claimed" && ticket.status !== "closed" ? (
-            <button className="button" disabled={busy} onClick={() => post(`/api/tickets/${ticket.id}/claim`, {})}>
+            <button
+              className="button"
+              disabled={busy}
+              onClick={() => post(`/api/tickets/${ticket.id}/claim`, {})}
+            >
               {busy ? "Working…" : "Claim Ticket"}
             </button>
           ) : null}
 
           {ticket.status !== "closed" ? (
             <>
-              <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} />
-              <button className="button danger" disabled={busy} onClick={() => post(`/api/tickets/${ticket.id}/close`, { reason })}>
+              <input
+                className="input"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+              />
+
+              <button
+                className="button danger"
+                disabled={busy}
+                onClick={() =>
+                  post(`/api/tickets/${ticket.id}/close`, { reason })
+                }
+              >
                 {busy ? "Working…" : "Close Ticket"}
               </button>
             </>
@@ -54,15 +75,34 @@ export default function TicketStaffActions({ ticket, onRefresh }) {
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Internal Note</h2>
+
         <div className="space">
-          <textarea className="textarea" rows="5" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add internal note..." />
-          <button className="button" disabled={busy || !note.trim()} onClick={() => post(`/api/tickets/${ticket.id}/notes`, { content: note })}>
+          <textarea
+            className="textarea"
+            rows="5"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Add internal note..."
+          />
+
+          <button
+            className="button"
+            disabled={busy || !note.trim()}
+            onClick={() =>
+              post(`/api/tickets/${ticket.id}/notes`, { content: note })
+            }
+          >
             {busy ? "Saving…" : "Save Note"}
           </button>
         </div>
       </div>
 
-      <a className="button primary" href={`/api/tickets/${ticket.id}/transcript`} target="_blank" rel="noreferrer">
+      <a
+        className="button primary"
+        href={`/api/tickets/${ticket.id}/transcript`}
+        target="_blank"
+        rel="noreferrer"
+      >
         Export Transcript
       </a>
     </div>
