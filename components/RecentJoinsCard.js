@@ -1,32 +1,20 @@
 "use client"
 
-function timeAgo(value) {
-  if (!value) return "Unknown"
-  const date = new Date(value)
-  const diffMs = Date.now() - date.getTime()
-  const diffSec = Math.max(1, Math.floor(diffMs / 1000))
-
-  if (diffSec < 60) return `${diffSec}s ago`
-
-  const diffMin = Math.floor(diffSec / 60)
-  if (diffMin < 60) return `${diffMin}m ago`
-
-  const diffHr = Math.floor(diffMin / 60)
-  if (diffHr < 24) return `${diffHr}h ago`
-
-  const diffDay = Math.floor(diffHr / 24)
-  return `${diffDay}d ago`
-}
-
-function initialsFromName(value) {
-  const raw = String(value || "?").trim()
-  if (!raw) return "?"
-  return raw.slice(0, 1).toUpperCase()
-}
+import { useMemo, useState } from "react"
+import MemberDrawer from "@/components/MemberDrawer"
+import { timeAgo, initials } from "@/lib/format"
 
 export default function RecentJoinsCard({ joins = [] }) {
+  const [selected, setSelected] = useState(null)
+  const [showAll, setShowAll] = useState(false)
+
+  const visibleJoins = useMemo(() => {
+    if (showAll) return joins
+    return joins.slice(0, 5)
+  }, [joins, showAll])
+
   return (
-    <div className="card" id="members">
+    <div className="card" id="recent-joins">
       <div
         className="row"
         style={{
@@ -40,20 +28,40 @@ export default function RecentJoinsCard({ joins = [] }) {
         <div>
           <h2 style={{ margin: 0 }}>Recent Joins</h2>
           <div className="muted" style={{ marginTop: 6 }}>
-            Live feed of the newest members entering the server
+            Recent member flow with live active/left-server state
           </div>
         </div>
 
-        <div className="muted" style={{ fontSize: 14 }}>
-          {joins.length} recent join{joins.length === 1 ? "" : "s"}
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <div className="muted" style={{ fontSize: 14 }}>
+            {joins.length} recent join{joins.length === 1 ? "" : "s"}
+          </div>
+
+          {joins.length > 5 ? (
+            <button
+              className="button ghost"
+              type="button"
+              style={{ width: "auto", minWidth: 96 }}
+              onClick={() => setShowAll((prev) => !prev)}
+            >
+              {showAll ? "Show Less" : "Show All"}
+            </button>
+          ) : null}
         </div>
       </div>
 
       {!joins.length ? (
         <div className="empty-state">No recent joins yet.</div>
       ) : (
-        <div className="space">
-          {joins.map((join, index) => {
+        <div
+          className="space"
+          style={{
+            maxHeight: showAll ? 540 : "none",
+            overflowY: showAll ? "auto" : "visible",
+            paddingRight: showAll ? 4 : 0
+          }}
+        >
+          {visibleJoins.map((join, index) => {
             const displayName =
               join.display_name ||
               join.nickname ||
@@ -61,14 +69,22 @@ export default function RecentJoinsCard({ joins = [] }) {
               join.user_id ||
               "Unknown Member"
 
+            const inGuild = join.in_guild !== false
+            const joinedLabel = timeAgo(join.joined_at || join.created_at)
             const avatarUrl = join.avatar_url || null
-            const health = join.data_health || "ok"
-            const roleState = join.role_state || "unknown"
 
             return (
-              <div
+              <button
                 key={`${join.user_id || "unknown"}-${join.joined_at || join.created_at || index}`}
+                type="button"
                 className="message"
+                onClick={() => setSelected(join)}
+                style={{
+                  textAlign: "left",
+                  width: "100%",
+                  cursor: "pointer",
+                  border: "1px solid var(--line)"
+                }}
               >
                 <div
                   className="row"
@@ -79,8 +95,8 @@ export default function RecentJoinsCard({ joins = [] }) {
                   }}
                 >
                   <div className="row" style={{ minWidth: 0, flex: 1 }}>
-                    {avatarUrl ? (
-                      <div className="avatar">
+                    <div className="avatar">
+                      {avatarUrl ? (
                         <img
                           src={avatarUrl}
                           alt={displayName}
@@ -88,12 +104,10 @@ export default function RecentJoinsCard({ joins = [] }) {
                           height="38"
                           style={{ width: "100%", height: "100%", objectFit: "cover" }}
                         />
-                      </div>
-                    ) : (
-                      <div className="avatar">
-                        {initialsFromName(displayName)}
-                      </div>
-                    )}
+                      ) : (
+                        initials(displayName)
+                      )}
+                    </div>
 
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div
@@ -118,14 +132,8 @@ export default function RecentJoinsCard({ joins = [] }) {
                     </div>
                   </div>
 
-                  <div
-                    className="muted"
-                    style={{
-                      fontSize: 12,
-                      whiteSpace: "nowrap"
-                    }}
-                  >
-                    {timeAgo(join.joined_at || join.created_at)}
+                  <div className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                    {joinedLabel}
                   </div>
                 </div>
 
@@ -137,27 +145,29 @@ export default function RecentJoinsCard({ joins = [] }) {
                     flexWrap: "wrap"
                   }}
                 >
-                  <span className={`badge ${join.has_staff_role ? "claimed" : "open"}`}>
-                    {join.has_staff_role ? "Staff" : "Member"}
+                  <span className={`badge ${inGuild ? "claimed" : "closed"}`}>
+                    {inGuild ? "In Server" : "Left Server"}
                   </span>
 
                   <span className={`badge ${join.has_verified_role ? "low" : "medium"}`}>
                     {join.has_verified_role ? "Verified" : "Pending Verification"}
                   </span>
 
-                  <span className="badge">
-                    Health: {health}
+                  <span className={`badge ${join.has_staff_role ? "claimed" : "open"}`}>
+                    {join.has_staff_role ? "Staff" : "Member"}
                   </span>
 
                   <span className="badge">
-                    State: {roleState}
+                    State: {join.role_state || "unknown"}
                   </span>
                 </div>
-              </div>
+              </button>
             )
           })}
         </div>
       )}
+
+      <MemberDrawer member={selected} onClose={() => setSelected(null)} />
     </div>
   )
 }
