@@ -16,20 +16,77 @@ export async function GET() {
       { data: roles, error: rolesError },
       { data: metrics, error: metricsError },
       { data: categories, error: categoriesError },
+      { data: recentJoins, error: recentJoinsError },
       { count: openTickets, error: openError },
       { count: warnsToday, error: warnsError },
       { count: raidAlerts, error: raidsError },
       { count: fraudFlags, error: fraudError }
     ] = await Promise.all([
-      supabase.from("tickets").select("*").eq("guild_id", guildId).order("created_at", { ascending: false }).limit(40),
-      supabase.from("audit_events").select("*").order("created_at", { ascending: false }).limit(10),
-      supabase.from("guild_roles").select("*").eq("guild_id", guildId).order("position", { ascending: false }).limit(40),
-      supabase.from("staff_metrics").select("*").eq("guild_id", guildId).order("tickets_handled", { ascending: false }).limit(10),
-      supabase.from("ticket_categories").select("*").eq("guild_id", guildId).order("name", { ascending: true }),
-      supabase.from("tickets").select("*", { head: true, count: "exact" }).eq("guild_id", guildId).eq("status", "open"),
-      supabase.from("warns").select("*", { head: true, count: "exact" }).eq("guild_id", guildId).gte("created_at", new Date(Date.now() - 86400000).toISOString()),
-      supabase.from("raid_events").select("*", { head: true, count: "exact" }).eq("guild_id", guildId).gte("created_at", new Date(Date.now() - 86400000).toISOString()),
-      supabase.from("verification_flags").select("*", { head: true, count: "exact" }).eq("guild_id", guildId).eq("flagged", true)
+      supabase
+        .from("tickets")
+        .select("*")
+        .eq("guild_id", guildId)
+        .order("created_at", { ascending: false })
+        .limit(40),
+
+      supabase
+        .from("audit_events")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(10),
+
+      supabase
+        .from("guild_roles")
+        .select("*")
+        .eq("guild_id", guildId)
+        .order("position", { ascending: false })
+        .limit(40),
+
+      supabase
+        .from("staff_metrics")
+        .select("*")
+        .eq("guild_id", guildId)
+        .order("tickets_handled", { ascending: false })
+        .limit(10),
+
+      supabase
+        .from("ticket_categories")
+        .select("*")
+        .eq("guild_id", guildId)
+        .order("name", { ascending: true }),
+
+      supabase
+        .from("guild_members")
+        .select(
+          "guild_id,user_id,username,display_name,nickname,avatar_url,joined_at,created_at,data_health,role_state,has_staff_role,has_verified_role"
+        )
+        .eq("guild_id", guildId)
+        .order("joined_at", { ascending: false })
+        .limit(8),
+
+      supabase
+        .from("tickets")
+        .select("*", { head: true, count: "exact" })
+        .eq("guild_id", guildId)
+        .eq("status", "open"),
+
+      supabase
+        .from("warns")
+        .select("*", { head: true, count: "exact" })
+        .eq("guild_id", guildId)
+        .gte("created_at", new Date(Date.now() - 86400000).toISOString()),
+
+      supabase
+        .from("raid_events")
+        .select("*", { head: true, count: "exact" })
+        .eq("guild_id", guildId)
+        .gte("created_at", new Date(Date.now() - 86400000).toISOString()),
+
+      supabase
+        .from("verification_flags")
+        .select("*", { head: true, count: "exact" })
+        .eq("guild_id", guildId)
+        .eq("flagged", true)
     ])
 
     const firstError =
@@ -38,6 +95,7 @@ export async function GET() {
       rolesError ||
       metricsError ||
       categoriesError ||
+      recentJoinsError ||
       openError ||
       warnsError ||
       raidsError ||
@@ -59,6 +117,7 @@ export async function GET() {
         roles: roles || [],
         metrics: metrics || [],
         categories: categories || [],
+        recentJoins: recentJoins || [],
         counts: {
           openTickets: openTickets || 0,
           warnsToday: warnsToday || 0,
