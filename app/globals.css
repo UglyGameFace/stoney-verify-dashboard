@@ -484,11 +484,12 @@ tbody tr:hover {
 .drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,.65);
+  background: rgba(0,0,0,.70);
   display: grid;
   justify-items: end;
-  z-index: 90;
+  z-index: 200;
   backdrop-filter: blur(8px);
+  overscroll-behavior: contain;
 }
 
 .drawer {
@@ -500,8 +501,12 @@ tbody tr:hover {
     linear-gradient(180deg, #10203a, #091321);
   border-left: 1px solid var(--line);
   padding: 18px;
-  overflow: auto;
+  padding-bottom: 120px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   box-shadow: -20px 0 60px rgba(0,0,0,.45);
+  -webkit-overflow-scrolling: touch;
 }
 
 .status-dot {
@@ -822,6 +827,7 @@ tbody tr:hover {
     width: 100vw;
     border-left: none;
     padding: 16px;
+    padding-bottom: 140px;
   }
 
   .row {
