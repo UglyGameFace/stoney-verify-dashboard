@@ -10,6 +10,7 @@ export default function MemberDrawer({ member, onClose }) {
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
+  const [syncing, setSyncing] = useState(false)
 
   const displayName =
     member?.display_name ||
@@ -25,7 +26,12 @@ export default function MemberDrawer({ member, onClose }) {
   const memberId = member?.user_id || member?.id || ""
 
   const roleList = useMemo(() => {
-    return member ? (member.roles || member.role_names || []) : []
+    if (!member) return []
+    return Array.isArray(member.roles) && member.roles.length
+      ? member.roles
+      : Array.isArray(member.role_names)
+        ? member.role_names
+        : []
   }, [member])
 
   if (!member) return null
@@ -43,51 +49,58 @@ export default function MemberDrawer({ member, onClose }) {
 
   async function triggerRoleSync() {
     setBusy(true)
+    setSyncing(true)
     setMessage("")
     setError("")
 
     try {
       const res = await fetch("/api/discord/role-sync", {
-        method: "POST"
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
       })
 
-      const json = await res.json()
+      const json = await res.json().catch(() => ({}))
 
       if (!res.ok) {
         throw new Error(json.error || "Role sync failed.")
       }
 
-      setMessage("Role sync started.")
+      setMessage("Role sync started. Refresh the dashboard in a few seconds to pull updated member state.")
     } catch (err) {
       setError(err.message || "Role sync failed.")
+      setMessage("")
     } finally {
       setBusy(false)
+      setSyncing(false)
     }
   }
 
-  async function searchTicketsForMember() {
-    try {
-      await copyText(memberId, "User ID copied. Paste it into ticket search.")
-    } catch {
-      setError("Failed to copy user ID.")
-    }
+  async function prepTicketSearch() {
+    await copyText(memberId, "User ID copied. Paste it into ticket search.")
   }
 
-  async function openStaffTicketTemplate() {
+  async function copyStaffSummary() {
     const lines = [
       `Member: ${displayName}`,
       `User ID: ${memberId || "unknown"}`,
       `Status: ${inGuild ? "In Server" : "Left / Removed"}`,
       `Role State: ${member.role_state || "unknown"}`,
+      `Health: ${member.data_health || "unknown"}`,
       `Top Role: ${member.top_role || member.highest_role_name || "none"}`
     ]
 
-    await copyText(lines.join("\n"), "Member summary copied for staff use.")
+    await copyText(lines.join("\n"), "Staff summary copied.")
   }
 
   return (
     <div className="drawer-backdrop" onClick={onClose}>
-      <div className="drawer member-drawer" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="drawer member-drawer"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Member details"
+      >
         <div className="member-drawer-handle" />
 
         <div
@@ -98,14 +111,18 @@ export default function MemberDrawer({ member, onClose }) {
             marginBottom: 18
           }}
         >
-          <div>
+          <div style={{ minWidth: 0 }}>
             <h2 style={{ margin: 0 }}>Member Smoke Sheet</h2>
             <div className="muted" style={{ marginTop: 6 }}>
-              Quick staff view and fast helper actions
+              Quick staff view and member helper actions
             </div>
           </div>
 
-          <button className="button ghost" onClick={onClose} style={{ width: "auto" }}>
+          <button
+            className="button ghost"
+            onClick={onClose}
+            style={{ width: "auto", minWidth: 88 }}
+          >
             Close
           </button>
         </div>
@@ -138,7 +155,7 @@ export default function MemberDrawer({ member, onClose }) {
               )}
             </div>
 
-            <div style={{ minWidth: 0 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
               <div
                 style={{
                   fontWeight: 800,
@@ -150,7 +167,13 @@ export default function MemberDrawer({ member, onClose }) {
                 {displayName}
               </div>
 
-              <div className="muted" style={{ overflowWrap: "anywhere", marginTop: 4 }}>
+              <div
+                className="muted"
+                style={{
+                  overflowWrap: "anywhere",
+                  marginTop: 4
+                }}
+              >
                 {member.nickname || "No nickname"} • {memberId || "No user id"}
               </div>
 
@@ -216,7 +239,17 @@ export default function MemberDrawer({ member, onClose }) {
         </div>
 
         <div className="card" style={{ marginTop: 14 }}>
-          <h2 style={{ marginTop: 0 }}>Staff Actions</h2>
+          <div
+            className="row"
+            style={{
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 12
+            }}
+          >
+            <h2 style={{ margin: 0 }}>Staff Actions</h2>
+            {syncing ? <span className="muted" style={{ fontSize: 13 }}>Syncing...</span> : null}
+          </div>
 
           <div className="member-action-grid">
             <button
@@ -240,13 +273,13 @@ export default function MemberDrawer({ member, onClose }) {
               disabled={busy}
               onClick={triggerRoleSync}
             >
-              Run Role Sync
+              {syncing ? "Running Sync..." : "Run Role Sync"}
             </button>
 
             <button
               className="button"
               disabled={busy}
-              onClick={searchTicketsForMember}
+              onClick={prepTicketSearch}
             >
               Prep Ticket Search
             </button>
@@ -254,7 +287,7 @@ export default function MemberDrawer({ member, onClose }) {
             <button
               className="button"
               disabled={busy}
-              onClick={openStaffTicketTemplate}
+              onClick={copyStaffSummary}
             >
               Copy Staff Summary
             </button>
@@ -262,7 +295,7 @@ export default function MemberDrawer({ member, onClose }) {
             <button
               className="button ghost"
               disabled
-              title="True mod actions come next once we wire the moderation routes."
+              title="Real moderation actions come next once we wire the mod routes."
             >
               Warn / Timeout / Ban
             </button>
