@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 function buildMention(id) {
   return id ? `<@${id}>` : ""
@@ -13,6 +13,8 @@ export default function MemberDrawer({ member, onClose }) {
   const [syncing, setSyncing] = useState(false)
   const [modReason, setModReason] = useState("Dashboard moderation action")
   const [timeoutMinutes, setTimeoutMinutes] = useState("10")
+  const [liveMember, setLiveMember] = useState(null)
+  const [loadingLive, setLoadingLive] = useState(false)
 
   const displayName =
     member?.display_name ||
@@ -27,14 +29,59 @@ export default function MemberDrawer({ member, onClose }) {
   const avatarUrl = member?.avatar_url || member?.avatar || null
   const memberId = member?.user_id || member?.id || ""
 
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadLiveMember() {
+      if (!memberId) {
+        setLiveMember(null)
+        return
+      }
+
+      setLoadingLive(true)
+
+      try {
+        const res = await fetch(`/api/discord/member-details?user_id=${encodeURIComponent(memberId)}`, {
+          cache: "no-store"
+        })
+        const json = await res.json()
+
+        if (!res.ok) {
+          throw new Error(json.error || "Failed to load live member roles.")
+        }
+
+        if (!cancelled) {
+          setLiveMember(json.member || null)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setLiveMember(null)
+          setError((prev) => prev || err.message || "Failed to load live member roles.")
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingLive(false)
+        }
+      }
+    }
+
+    if (member) {
+      loadLiveMember()
+    } else {
+      setLiveMember(null)
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [member, memberId])
+
   const roleList = useMemo(() => {
-    if (!member) return []
-    return Array.isArray(member.roles) && member.roles.length
-      ? member.roles
-      : Array.isArray(member.role_names)
-        ? member.role_names
-        : []
-  }, [member])
+    if (liveMember?.role_names?.length) return liveMember.role_names
+    if (Array.isArray(member?.roles) && member.roles.length) return member.roles
+    if (Array.isArray(member?.role_names) && member.role_names.length) return member.role_names
+    return []
+  }, [liveMember, member])
 
   if (!member) return null
 
@@ -88,7 +135,7 @@ export default function MemberDrawer({ member, onClose }) {
       `Status: ${inGuild ? "In Server" : "Left / Removed"}`,
       `Role State: ${member.role_state || "unknown"}`,
       `Health: ${member.data_health || "unknown"}`,
-      `Top Role: ${member.top_role || member.highest_role_name || "none"}`
+      `Top Role: ${liveMember?.top_role || member.top_role || member.highest_role_name || "none"}`
     ]
 
     await copyText(lines.join("\n"), "Staff summary copied.")
@@ -121,7 +168,7 @@ export default function MemberDrawer({ member, onClose }) {
       }
 
       if (action === "timeout") {
-        setMessage(`Timed out ${displayName} for ${payload.minutes} minute(s).`)
+        setMessage(`Timed out ${displayName} for ${json.timeout_minutes || payload.minutes} minute(s).`)
       } else if (action === "warn") {
         setMessage(`Warn recorded for ${displayName}.`)
       } else if (action === "kick") {
@@ -219,7 +266,7 @@ export default function MemberDrawer({ member, onClose }) {
                   marginTop: 4
                 }}
               >
-                {member.nickname || "No nickname"} • {memberId || "No user id"}
+                {(liveMember?.nickname || member.nickname || "No nickname")} • {memberId || "No user id"}
               </div>
 
               <div className="member-drawer-badges">
@@ -241,7 +288,7 @@ export default function MemberDrawer({ member, onClose }) {
           <div className="member-detail-grid" style={{ marginTop: 16 }}>
             <div className="member-detail-item">
               <span className="ticket-info-label">Top Role</span>
-              <span>{member.top_role || member.highest_role_name || "—"}</span>
+              <span>{liveMember?.top_role || member.top_role || member.highest_role_name || "—"}</span>
             </div>
 
             <div className="member-detail-item">
@@ -257,7 +304,11 @@ export default function MemberDrawer({ member, onClose }) {
             <div className="member-detail-item">
               <span className="ticket-info-label">Joined</span>
               <span>
-                {member.joined_at ? new Date(member.joined_at).toLocaleString() : "—"}
+                {liveMember?.joined_at
+                  ? new Date(liveMember.joined_at).toLocaleString()
+                  : member.joined_at
+                    ? new Date(member.joined_at).toLocaleString()
+                    : "—"}
               </span>
             </div>
 
@@ -269,14 +320,16 @@ export default function MemberDrawer({ member, onClose }) {
             </div>
 
             <div className="member-detail-item full">
-              <span className="ticket-info-label">Roles</span>
+              <span className="ticket-info-label">
+                Roles {loadingLive ? "(loading live...)" : "(live Discord)"}
+              </span>
               <div className="roles" style={{ marginTop: 8 }}>
                 {roleList.length ? (
                   roleList.map((role) => (
                     <span key={role} className="badge">{role}</span>
                   ))
                 ) : (
-                  <span className="muted">No stored roles.</span>
+                  <span className="muted">No roles found.</span>
                 )}
               </div>
             </div>
