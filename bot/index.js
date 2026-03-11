@@ -136,10 +136,136 @@ async function audit(title, description, eventType, relatedId = null) {
   })
 }
 
+async function fetchRoleRules(guildId) {
+  const { data, error } = await supabase
+    .from("guild_role_rules")
+    .select("*")
+    .eq("guild_id", guildId)
+    .eq("active", true)
+
+  if (error) {
+    console.error("Failed to fetch guild_role_rules:", error.message)
+    return []
+  }
+
+  return data || []
+}
+
+function buildRoleState(roleIds, roleNames, roleRules, inGuild = true) {
+  const lowerNames = roleNames.map((x) => String(x || "").toLowerCase())
+  const rulesById = new Map(roleRules.map((rule) => [rule.role_id, rule.role_group]))
+
+  const hasGroup = (group) => roleIds.some((id) => rulesById.get(id) === group)
+  const hasName = (pattern) => lowerNames.some((name) => pattern.test(name))
+
+  const hasUnverified = hasGroup("unverified") || hasName(/\bunverified\b/)
+  const hasVerifiedRole =
+    hasGroup("verified") ||
+    hasGroup("secondary_verified") ||
+    lowerNames.some((name) => /\bverified\b/.test(name) && !/\bunverified\b/.test(name))
+  const hasSecondaryVerifiedRole =
+    hasGroup("secondary_verified") ||
+    hasName(/\bsecondary verified\b|\bfully verified\b|\btrusted\b/)
+  const hasStaffRole =
+    hasGroup("staff") ||
+    hasGroup("admin") ||
+    hasName(/\bstaff\b|\bmod\b|\bmoderator\b|\badmin\b|\bowner\b/)
+  const hasCosmeticOnly =
+    !hasUnverified &&
+    !hasVerifiedRole &&
+    !hasStaffRole &&
+    (hasGroup("cosmetic") || roleNames.length > 0)
+
+  let roleState = "unknown"
+  let roleStateReason = "No matching role rules."
+
+  if (!inGuild) {
+    roleState = "left_guild"
+    roleStateReason = "Member is no longer in the guild."
+  } else if (hasStaffRole && hasUnverified) {
+    roleState = "staff_conflict"
+    roleStateReason = "Member has both staff and unverified roles."
+  } else if (hasVerifiedRole && hasUnverified) {
+    roleState = "verified_conflict"
+    roleStateReason = "Member has both verified and unverified roles."
+  } else if (hasStaffRole) {
+    roleState = "staff_ok"
+    roleStateReason = "Member has staff roles."
+  } else if (hasVerifiedRole) {
+    roleState = "verified_ok"
+    roleStateReason = "Member has a verified role."
+  } else if (hasUnverified) {
+    roleState = "unverified_only"
+    roleStateReason = "Member has only unverified access."
+  } else if (hasCosmeticOnly) {
+    roleState = "booster_only"
+    roleStateReason = "Member has cosmetic-only roles."
+  }
+
+  const dataHealth = inGuild ? "ok" : "left_guild"
+
+  return {
+    hasUnverified,
+    hasVerifiedRole,
+    hasStaffRole,
+    hasSecondaryVerifiedRole,
+    hasCosmeticOnly,
+    hasAnyRole: roleIds.length > 0,
+    roleState,
+    roleStateReason,
+    dataHealth
+  }
+}
+
+function buildMemberSyncRow(member, roleRules, inGuild = true) {
+  const sortedRoles = [...member.roles.cache.values()]
+    .filter((role) => role.name !== "@everyone")
+    .sort((a, b) => b.position - a.position)
+
+  const roleIds = sortedRoles.map((role) => role.id)
+  const roleNames = sortedRoles.map((role) => role.name)
+  const topRole = roleNames[0] || null
+  const topRoleId = roleIds[0] || null
+  const displayName = member.user.globalName || member.displayName || member.user.username
+
+  const state = buildRoleState(roleIds, roleNames, roleRules, inGuild)
+
+  return {
+    guild_id: member.guild.id,
+    user_id: member.user.id,
+    username: member.user.username,
+    display_name: displayName,
+    nickname: member.nickname,
+    avatar_hash: member.user.avatar,
+    avatar_url: member.user.displayAvatarURL(),
+    role_ids: roleIds,
+    role_names: roleNames,
+    highest_role_id: topRoleId,
+    highest_role_name: topRole,
+    in_guild: inGuild,
+    has_any_role: state.hasAnyRole,
+    data_health: state.dataHealth,
+    synced_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    has_unverified: state.hasUnverified,
+    has_verified_role: state.hasVerifiedRole,
+    has_staff_role: state.hasStaffRole,
+    has_secondary_verified_role: state.hasSecondaryVerifiedRole,
+    has_cosmetic_only: state.hasCosmeticOnly,
+    role_state: state.roleState,
+    role_state_reason: state.roleStateReason,
+    roles: roleNames,
+    top_role: topRole,
+    joined_at: member.joinedAt ? member.joinedAt.toISOString() : new Date().toISOString()
+  }
+}
+
 async function fullAutoSync() {
   try {
     const guild = await client.guilds.fetch(GUILD_ID)
     const fetchedRoles = await guild.roles.fetch()
+    const roleRules = await fetchRoleRules(guild.id)
+
     const roles = [...fetchedRoles.values()]
       .filter((role) => role.name !== "@everyone")
       .sort((a, b) => b.position - a.position)
@@ -154,29 +280,13 @@ async function fullAutoSync() {
       if (!members.length) break
 
       const rows = members.map((member) => {
-        const roleNames = member.roles.cache
-          .sort((a, b) => b.position - a.position)
-          .map((role) => role.name)
-          .filter((name) => name !== "@everyone")
-
-        for (const roleId of member.roles.cache.keys()) {
-          if (roleId !== guild.id) {
-            roleCounts.set(roleId, (roleCounts.get(roleId) || 0) + 1)
+        for (const role of member.roles.cache.values()) {
+          if (role.id !== guild.id) {
+            roleCounts.set(role.id, (roleCounts.get(role.id) || 0) + 1)
           }
         }
 
-        return {
-          guild_id: guild.id,
-          user_id: member.user.id,
-          username: member.user.globalName || member.user.username,
-          nickname: member.nickname,
-          avatar_hash: member.user.avatar,
-          avatar_url: member.user.displayAvatarURL(),
-          roles: roleNames,
-          top_role: roleNames[0] || null,
-          joined_at: member.joinedAt ? member.joinedAt.toISOString() : new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }
+        return buildMemberSyncRow(member, roleRules, true)
       })
 
       const { error } = await supabase
@@ -353,10 +463,8 @@ client.once("ready", async () => {
 client.on("guildMemberAdd", async (member) => {
   recentJoins.push(Date.now())
 
-  const roles = member.roles.cache
-    .sort((a, b) => b.position - a.position)
-    .map((role) => role.name)
-    .filter((name) => name !== "@everyone")
+  const roleRules = await fetchRoleRules(member.guild.id)
+  const row = buildMemberSyncRow(member, roleRules, true)
 
   await Promise.all([
     supabase.from("member_joins").insert({
@@ -365,18 +473,7 @@ client.on("guildMemberAdd", async (member) => {
       username: member.user.tag,
       joined_at: new Date().toISOString()
     }),
-    supabase.from("guild_members").upsert({
-      guild_id: member.guild.id,
-      user_id: member.user.id,
-      username: member.user.globalName || member.user.username,
-      nickname: member.nickname,
-      avatar_hash: member.user.avatar,
-      avatar_url: member.user.displayAvatarURL(),
-      roles,
-      top_role: roles[0] || null,
-      joined_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    }, { onConflict: "guild_id,user_id" })
+    supabase.from("guild_members").upsert(row, { onConflict: "guild_id,user_id" })
   ])
 
   const now = Date.now()
@@ -395,6 +492,36 @@ client.on("guildMemberAdd", async (member) => {
     })
 
     await audit("Raid alert", `${Math.max(last10, last30)} joins detected`, "raid_alert")
+  }
+})
+
+client.on("guildMemberRemove", async (member) => {
+  try {
+    const { error } = await supabase
+      .from("guild_members")
+      .update({
+        in_guild: false,
+        data_health: "left_guild",
+        role_state: "left_guild",
+        role_state_reason: "Member left or was removed from the server.",
+        updated_at: new Date().toISOString(),
+        synced_at: new Date().toISOString()
+      })
+      .eq("guild_id", member.guild.id)
+      .eq("user_id", member.user.id)
+
+    if (error) {
+      console.error("Failed to mark member as left_guild:", error.message)
+    }
+
+    await audit(
+      "Member left guild",
+      `${member.user.tag} left or was removed from the guild`,
+      "member_left",
+      member.user.id
+    )
+  } catch (error) {
+    console.error("guildMemberRemove handling failed:", error.message || error)
   }
 })
 
@@ -471,6 +598,7 @@ client.on("messageCreate", async (message) => {
         author_id: message.author.id,
         author_name: message.author.tag,
         content,
+        attachments: [],
         message_type: "user"
       }),
       audit(
