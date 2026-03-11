@@ -14,6 +14,8 @@ import TicketQueueTable from "@/components/TicketQueueTable"
 import CategoryManager from "@/components/CategoryManager"
 import MobileBottomNav from "@/components/MobileBottomNav"
 
+const MOBILE_TABS = ["home", "tickets", "members", "categories"]
+
 export default function DashboardClient({ initialData, staffName }) {
   const [data, setData] = useState(initialData)
   const [loadingId, setLoadingId] = useState("")
@@ -23,6 +25,7 @@ export default function DashboardClient({ initialData, staffName }) {
   const [priorityFilter, setPriorityFilter] = useState("all")
   const [sortBy, setSortBy] = useState("priority_desc")
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [activeTab, setActiveTab] = useState("home")
 
   async function refresh({ silent = false } = {}) {
     if (!silent) setIsRefreshing(true)
@@ -147,187 +150,240 @@ export default function DashboardClient({ initialData, staffName }) {
     fraudFlags: 0
   }
 
+  const safeEvents = data?.events || []
+  const safeRoles = data?.roles || []
+  const safeMetrics = data?.metrics || []
+  const safeCategories = data?.categories || []
+
+  function isActiveTab(tab) {
+    return activeTab === tab
+  }
+
   return (
     <>
       <Topbar />
 
       {error ? (
-        <div className="error-banner" style={{ marginBottom: 18 }}>
+        <div className="error-banner stoner-banner" style={{ marginBottom: 18 }}>
           {error}
         </div>
       ) : null}
 
-      <section className="hero" id="overview">
-        <div className="card">
+      <section
+        className={`mobile-tab-panel ${isActiveTab("home") ? "active" : ""}`}
+        id="overview"
+      >
+        <section className="hero">
+          <div className="card stoner-hero-card">
+            <div
+              className="row"
+              style={{
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                gap: 12,
+                marginBottom: 10
+              }}
+            >
+              <div className="muted">Smoke Session Overview</div>
+
+              <button
+                className="button ghost"
+                type="button"
+                onClick={() => refresh()}
+                disabled={isRefreshing}
+                style={{ width: "auto", minWidth: 110 }}
+              >
+                {isRefreshing ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
+
+            <h2 style={{ marginTop: 0 }}>
+              Stoney Verify command deck with cleaner mobile flow and greener branding
+            </h2>
+
+            <p className="muted" style={{ marginBottom: 0 }}>
+              This build keeps your moderation controls, realtime state updates,
+              member tools, role data, and queue handling while turning mobile into
+              focused sections instead of one endless stacked scroll.
+            </p>
+          </div>
+
+          <QuickActions onRefresh={refresh} />
+        </section>
+
+        <section className="metrics">
+          <StatCard
+            title="Open Tickets"
+            value={counts.openTickets}
+            subtitle="Current queue in rotation"
+          />
+          <StatCard
+            title="Warns Today"
+            value={counts.warnsToday}
+            subtitle="Spam and scam enforcement"
+          />
+          <StatCard
+            title="Raid Alerts (24h)"
+            value={counts.raidAlerts}
+            subtitle="Join spike detections"
+          />
+          <StatCard
+            title="Fraud Flags"
+            value={counts.fraudFlags}
+            subtitle="Manual verification review"
+          />
+        </section>
+
+        <section className="grid-2">
+          <AuditTimeline events={safeEvents} />
+          <div className="card stoner-status-card">
+            <h2 style={{ marginTop: 0 }}>Session Status</h2>
+
+            <div className="space">
+              <div className="row">
+                <span className="status-dot" />
+                <span>Realtime subscriptions active</span>
+              </div>
+
+              <div className="row">
+                <span className="status-dot" />
+                <span>Authenticated identity: {staffName}</span>
+              </div>
+
+              <div className="row">
+                <span className="status-dot" />
+                <span>Queue and panels update without full reloads</span>
+              </div>
+
+              <div className="row">
+                <span className="status-dot" />
+                <span>Current sync state: {isRefreshing ? "Refreshing..." : "Idle"}</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section
+        className={`mobile-tab-panel ${isActiveTab("tickets") ? "active" : ""}`}
+        id="tickets"
+      >
+        <div className="card" style={{ marginBottom: 18 }}>
           <div
             className="row"
             style={{
               justifyContent: "space-between",
-              alignItems: "flex-start",
-              gap: 12,
-              marginBottom: 10
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: 10,
+              marginBottom: 12
             }}
           >
-            <div className="muted">Overview</div>
+            <h2 style={{ margin: 0 }}>Ticket Filters</h2>
+            <div className="muted" style={{ fontSize: 14 }}>
+              {filteredTickets.length} result{filteredTickets.length === 1 ? "" : "s"}
+            </div>
+          </div>
 
-            <button
-              className="button ghost"
-              type="button"
-              onClick={() => refresh()}
-              disabled={isRefreshing}
-              style={{ width: "auto", minWidth: 110 }}
+          <div className="filters">
+            <input
+              className="input"
+              placeholder="Search user, title, category, suggestion..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+
+            <select
+              className="select"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
             >
-              {isRefreshing ? "Refreshing..." : "Refresh"}
-            </button>
-          </div>
+              <option value="all">All statuses</option>
+              <option value="open">Open</option>
+              <option value="claimed">Claimed</option>
+              <option value="closed">Closed</option>
+            </select>
 
-          <h2 style={{ marginTop: 0 }}>
-            Production dashboard with safer realtime state and better mobile behavior
-          </h2>
+            <select
+              className="select"
+              value={priorityFilter}
+              onChange={(e) => setPriorityFilter(e.target.value)}
+            >
+              <option value="all">All priorities</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
 
-          <p className="muted" style={{ marginBottom: 0 }}>
-            This pass keeps realtime updates, ticket controls, staff tools, and
-            category management while making the layout stack cleaner on phones and
-            reducing overlap issues on smaller screens.
-          </p>
-        </div>
-
-        <QuickActions onRefresh={refresh} />
-      </section>
-
-      <section className="metrics">
-        <StatCard
-          title="Open Tickets"
-          value={counts.openTickets}
-          subtitle="Current open queue load"
-        />
-        <StatCard
-          title="Warns Today"
-          value={counts.warnsToday}
-          subtitle="Spam and scam enforcement"
-        />
-        <StatCard
-          title="Raid Alerts (24h)"
-          value={counts.raidAlerts}
-          subtitle="Join velocity incidents"
-        />
-        <StatCard
-          title="Fraud Flags"
-          value={counts.fraudFlags}
-          subtitle="Manual verification review"
-        />
-      </section>
-
-      <div className="card" style={{ marginBottom: 18 }}>
-        <div
-          className="row"
-          style={{
-            justifyContent: "space-between",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: 10,
-            marginBottom: 12
-          }}
-        >
-          <h2 style={{ margin: 0 }}>Ticket Filters</h2>
-          <div className="muted" style={{ fontSize: 14 }}>
-            {filteredTickets.length} result{filteredTickets.length === 1 ? "" : "s"}
+            <select
+              className="select"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+            >
+              <option value="priority_desc">Priority</option>
+              <option value="updated_desc">Updated desc</option>
+              <option value="updated_asc">Updated asc</option>
+              <option value="created_desc">Created desc</option>
+              <option value="created_asc">Created asc</option>
+            </select>
           </div>
         </div>
 
-        <div className="filters">
-          <input
-            className="input"
-            placeholder="Search user, title, category, suggestion..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-
-          <select
-            className="select"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            <option value="all">All statuses</option>
-            <option value="open">Open</option>
-            <option value="claimed">Claimed</option>
-            <option value="closed">Closed</option>
-          </select>
-
-          <select
-            className="select"
-            value={priorityFilter}
-            onChange={(e) => setPriorityFilter(e.target.value)}
-          >
-            <option value="all">All priorities</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
-
-          <select
-            className="select"
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-          >
-            <option value="priority_desc">Priority</option>
-            <option value="updated_desc">Updated desc</option>
-            <option value="updated_asc">Updated asc</option>
-            <option value="created_desc">Created desc</option>
-            <option value="created_asc">Created asc</option>
-          </select>
-        </div>
-      </div>
-
-      <section className="grid-2">
         <TicketQueueTable
           tickets={filteredTickets}
           onAction={onAction}
           loadingId={loadingId}
         />
-        <AuditTimeline events={data?.events || []} />
       </section>
 
-      <section className="grid-3">
-        <MemberSearchCard />
-        <RoleHierarchyCard roles={data?.roles || []} />
-        <StaffMetricsCard metrics={data?.metrics || []} />
+      <section
+        className={`mobile-tab-panel ${isActiveTab("members") ? "active" : ""}`}
+        id="members"
+      >
+        <section className="grid-3 stoner-members-grid">
+          <MemberSearchCard />
+          <RoleHierarchyCard roles={safeRoles} />
+          <StaffMetricsCard metrics={safeMetrics} />
+        </section>
       </section>
 
-      <section className="grid-2" style={{ marginTop: 18 }}>
-        <CategoryManager
-          categories={data?.categories || []}
-          onRefresh={refresh}
-        />
+      <section
+        className={`mobile-tab-panel ${isActiveTab("categories") ? "active" : ""}`}
+        id="categories"
+      >
+        <section className="grid-2">
+          <CategoryManager categories={safeCategories} onRefresh={refresh} />
 
-        <div className="card">
-          <h2 style={{ marginTop: 0 }}>Live Sync Status</h2>
+          <div className="card">
+            <h2 style={{ marginTop: 0 }}>Stoney Ops Notes</h2>
+            <div className="space">
+              <div className="info-banner stoner-banner">
+                Keep category flows tight so staff can handle member issues fast
+                without bouncing back into Discord for every small step.
+              </div>
 
-          <div className="space">
-            <div className="row">
-              <span className="status-dot" />
-              <span>Realtime subscriptions active</span>
-            </div>
+              <div className="space">
+                <div className="row">
+                  <span className="status-dot" />
+                  <span>Verification flows should stay simple and green-lit</span>
+                </div>
 
-            <div className="row">
-              <span className="status-dot" />
-              <span>Authenticated identity: {staffName}</span>
-            </div>
+                <div className="row">
+                  <span className="status-dot" />
+                  <span>Appeals and fraud checks should be clearly separated</span>
+                </div>
 
-            <div className="row">
-              <span className="status-dot" />
-              <span>Dashboard state updates without page reloads</span>
-            </div>
-
-            <div className="row">
-              <span className="status-dot" />
-              <span>Sync status: {isRefreshing ? "Refreshing now..." : "Idle"}</span>
+                <div className="row">
+                  <span className="status-dot" />
+                  <span>High-priority queue items should stay obvious on desktop and mobile</span>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        </section>
       </section>
 
-      <MobileBottomNav />
+      <MobileBottomNav activeTab={activeTab} onChange={setActiveTab} tabs={MOBILE_TABS} />
     </>
   )
 }
