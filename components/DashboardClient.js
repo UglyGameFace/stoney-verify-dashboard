@@ -13,6 +13,7 @@ import MemberSearchCard from "@/components/MemberSearchCard"
 import TicketQueueTable from "@/components/TicketQueueTable"
 import CategoryManager from "@/components/CategoryManager"
 import MobileBottomNav from "@/components/MobileBottomNav"
+import RecentJoinsCard from "@/components/RecentJoinsCard"
 
 const MOBILE_TABS = ["home", "tickets", "members", "categories"]
 
@@ -65,6 +66,9 @@ export default function DashboardClient({ initialData, staffName }) {
         .on("postgres_changes", { event: "*", schema: "public", table: "ticket_notes" }, handleRealtimeChange)
         .on("postgres_changes", { event: "*", schema: "public", table: "ticket_categories" }, handleRealtimeChange)
         .on("postgres_changes", { event: "*", schema: "public", table: "audit_events" }, handleRealtimeChange)
+        .on("postgres_changes", { event: "*", schema: "public", table: "member_joins" }, handleRealtimeChange)
+        .on("postgres_changes", { event: "*", schema: "public", table: "guild_members" }, handleRealtimeChange)
+        .on("postgres_changes", { event: "*", schema: "public", table: "raid_events" }, handleRealtimeChange)
         .subscribe((status) => {
           console.log("dashboard realtime status:", status)
           if (status === "SUBSCRIBED") {
@@ -154,6 +158,7 @@ export default function DashboardClient({ initialData, staffName }) {
   const safeRoles = data?.roles || []
   const safeMetrics = data?.metrics || []
   const safeCategories = data?.categories || []
+  const safeRecentJoins = data?.recentJoins || []
 
   function isActiveTab(tab) {
     return activeTab === tab
@@ -234,8 +239,12 @@ export default function DashboardClient({ initialData, staffName }) {
           />
         </section>
 
-        <section className="grid-2">
+        <section className="grid-2" style={{ marginBottom: 18 }}>
+          <RecentJoinsCard joins={safeRecentJoins} />
           <AuditTimeline events={safeEvents} />
+        </section>
+
+        <section className="grid-2">
           <div className="card stoner-status-card">
             <h2 style={{ marginTop: 0 }}>Session Status</h2>
 
@@ -261,6 +270,8 @@ export default function DashboardClient({ initialData, staffName }) {
               </div>
             </div>
           </div>
+
+          <MemberSearchCard />
         </section>
       </section>
 
@@ -383,7 +394,11 @@ export default function DashboardClient({ initialData, staffName }) {
         </section>
       </section>
 
-      <MobileBottomNav activeTab={activeTab} onChange={setActiveTab} tabs={MOBILE_TABS} />
+      <MobileBottomNav
+        activeTab={activeTab}
+        onChange={setActiveTab}
+        tabs={MOBILE_TABS}
+      />
     </>
   )
 }
