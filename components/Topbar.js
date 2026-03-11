@@ -14,17 +14,16 @@ export default function Topbar() {
       >
         <div style={{ minWidth: 0, flex: "1 1 420px" }}>
           <div className="muted" style={{ marginBottom: 8 }}>
-            Operations smoke circle
+            Stoney Balonney control room
           </div>
 
           <h1 style={{ margin: 0, fontSize: 34, letterSpacing: "-0.03em" }}>
-            Stoney Verify moderation dashboard
+            Stoney Verify Dashboard
           </h1>
 
           <div className="muted" style={{ marginTop: 10, maxWidth: 760 }}>
-            Premium green-room control for tickets, members, fraud review,
-            realtime queue handling, and staff workflow without the cluttered feel
-            on mobile.
+            Green-room command for tickets, joins, verification flow, role sync,
+            fraud checks, and staff actions without bouncing around Discord all day.
           </div>
         </div>
 
