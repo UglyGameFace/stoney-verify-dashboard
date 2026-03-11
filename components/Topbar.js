@@ -22,8 +22,8 @@ export default function Topbar() {
           </h1>
 
           <div className="muted" style={{ marginTop: 10, maxWidth: 760 }}>
-            Green-room command for tickets, joins, verification flow, role sync,
-            fraud checks, and staff actions without bouncing around Discord all day.
+            Green-room command for tickets, joins, verification flow,
+            role sync, fraud checks, and staff actions.
           </div>
         </div>
 
