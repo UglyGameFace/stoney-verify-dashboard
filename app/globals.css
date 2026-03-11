@@ -612,3 +612,89 @@ tbody tr:hover {
     grid-template-columns: 1fr;
   }
 }
+/* --- Stoney branding + true mobile tab flow --- */
+
+.stoner-topbar {
+  background:
+    radial-gradient(circle at top right, rgba(65, 211, 137, 0.18), transparent 36%),
+    linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02));
+}
+
+.stoner-hero-card {
+  background:
+    radial-gradient(circle at top right, rgba(104, 255, 172, 0.16), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02));
+}
+
+.stoner-sidebar {
+  background:
+    radial-gradient(circle at top, rgba(65, 211, 137, 0.12), transparent 30%),
+    rgba(15,27,49,.92);
+}
+
+.stoner-sidebar-card,
+.stoner-status-card {
+  background:
+    radial-gradient(circle at top right, rgba(65, 211, 137, 0.1), transparent 40%),
+    linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+}
+
+.stoner-banner {
+  box-shadow: 0 0 0 1px rgba(65, 211, 137, 0.08), 0 10px 26px rgba(0, 0, 0, 0.25);
+}
+
+.mobile-tab-panel {
+  display: block;
+}
+
+.stoner-members-grid {
+  margin-top: 0;
+}
+
+@media (max-width: 860px) {
+  .mobile-tab-panel {
+    display: none;
+  }
+
+  .mobile-tab-panel.active {
+    display: block;
+  }
+
+  .mobile-tab-panel.active + .mobile-tab-panel {
+    margin-top: 0;
+  }
+
+  .hero {
+    margin-bottom: 14px;
+  }
+
+  .metrics {
+    margin-bottom: 14px;
+  }
+
+  .mobile-bottom-nav {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    padding: 8px;
+    gap: 6px;
+  }
+
+  .mobile-bottom-nav .sidebar-link {
+    border: 1px solid transparent;
+    background: rgba(255,255,255,.02);
+    color: var(--muted);
+    font-weight: 700;
+  }
+
+  .mobile-bottom-nav .sidebar-link.active {
+    background: linear-gradient(135deg, rgba(65,211,137,.2), rgba(76,164,255,.18));
+    border-color: rgba(65,211,137,.22);
+    color: white;
+  }
+
+  .mobile-bottom-nav button {
+    appearance: none;
+    -webkit-appearance: none;
+  }
+}
