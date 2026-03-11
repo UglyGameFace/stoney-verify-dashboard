@@ -58,11 +58,11 @@ export async function GET() {
       supabase
         .from("guild_members")
         .select(
-          "guild_id,user_id,username,display_name,nickname,avatar_url,joined_at,created_at,data_health,role_state,has_staff_role,has_verified_role"
+          "guild_id,user_id,username,display_name,nickname,avatar_url,joined_at,created_at,data_health,role_state,role_state_reason,has_staff_role,has_verified_role,in_guild,top_role"
         )
         .eq("guild_id", guildId)
         .order("joined_at", { ascending: false })
-        .limit(8),
+        .limit(10),
 
       supabase
         .from("tickets")
