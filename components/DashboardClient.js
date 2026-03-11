@@ -160,6 +160,17 @@ export default function DashboardClient({ initialData, staffName }) {
   const safeCategories = data?.categories || []
   const safeRecentJoins = data?.recentJoins || []
 
+  const memberSummary = useMemo(() => {
+    const rows = safeRecentJoins
+    const total = rows.length
+    const inServer = rows.filter((m) => m.in_guild !== false).length
+    const leftServer = rows.filter((m) => m.in_guild === false).length
+    const verified = rows.filter((m) => m.has_verified_role).length
+    const pending = rows.filter((m) => !m.has_verified_role).length
+
+    return { total, inServer, leftServer, verified, pending }
+  }, [safeRecentJoins])
+
   function isActiveTab(tab) {
     return activeTab === tab
   }
@@ -239,39 +250,63 @@ export default function DashboardClient({ initialData, staffName }) {
           />
         </section>
 
-        <section className="grid-2" style={{ marginBottom: 18 }}>
-          <RecentJoinsCard joins={safeRecentJoins} />
-          <AuditTimeline events={safeEvents} />
-        </section>
-
         <section className="grid-2">
-          <div className="card stoner-status-card">
-            <h2 style={{ marginTop: 0 }}>Session Status</h2>
+          <AuditTimeline events={safeEvents} />
 
-            <div className="space">
-              <div className="row">
-                <span className="status-dot" />
-                <span>Realtime subscriptions active</span>
+          <div className="space">
+            <div className="card stoner-status-card">
+              <h2 style={{ marginTop: 0 }}>Session Status</h2>
+
+              <div className="space">
+                <div className="row">
+                  <span className="status-dot" />
+                  <span>Realtime subscriptions active</span>
+                </div>
+
+                <div className="row">
+                  <span className="status-dot" />
+                  <span>Authenticated identity: {staffName}</span>
+                </div>
+
+                <div className="row">
+                  <span className="status-dot" />
+                  <span>Queue and panels update without full reloads</span>
+                </div>
+
+                <div className="row">
+                  <span className="status-dot" />
+                  <span>Current sync state: {isRefreshing ? "Refreshing..." : "Idle"}</span>
+                </div>
               </div>
+            </div>
 
-              <div className="row">
-                <span className="status-dot" />
-                <span>Authenticated identity: {staffName}</span>
-              </div>
+            <div className="card">
+              <h2 style={{ marginTop: 0 }}>Member Snapshot</h2>
 
-              <div className="row">
-                <span className="status-dot" />
-                <span>Queue and panels update without full reloads</span>
-              </div>
-
-              <div className="row">
-                <span className="status-dot" />
-                <span>Current sync state: {isRefreshing ? "Refreshing..." : "Idle"}</span>
+              <div className="space">
+                <div className="row" style={{ justifyContent: "space-between" }}>
+                  <span className="muted">Recent tracked</span>
+                  <strong>{memberSummary.total}</strong>
+                </div>
+                <div className="row" style={{ justifyContent: "space-between" }}>
+                  <span className="muted">Still in server</span>
+                  <strong>{memberSummary.inServer}</strong>
+                </div>
+                <div className="row" style={{ justifyContent: "space-between" }}>
+                  <span className="muted">Left / removed</span>
+                  <strong>{memberSummary.leftServer}</strong>
+                </div>
+                <div className="row" style={{ justifyContent: "space-between" }}>
+                  <span className="muted">Verified</span>
+                  <strong>{memberSummary.verified}</strong>
+                </div>
+                <div className="row" style={{ justifyContent: "space-between" }}>
+                  <span className="muted">Pending verify</span>
+                  <strong>{memberSummary.pending}</strong>
+                </div>
               </div>
             </div>
           </div>
-
-          <MemberSearchCard />
         </section>
       </section>
 
@@ -351,8 +386,12 @@ export default function DashboardClient({ initialData, staffName }) {
         className={`mobile-tab-panel ${isActiveTab("members") ? "active" : ""}`}
         id="members"
       >
-        <section className="grid-3 stoner-members-grid">
+        <section className="grid-2" style={{ marginBottom: 18 }}>
+          <RecentJoinsCard joins={safeRecentJoins} />
           <MemberSearchCard />
+        </section>
+
+        <section className="grid-2">
           <RoleHierarchyCard roles={safeRoles} />
           <StaffMetricsCard metrics={safeMetrics} />
         </section>
