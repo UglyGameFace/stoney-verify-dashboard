@@ -190,7 +190,7 @@ export default function DashboardClient({ initialData, staffName }) {
         id="overview"
       >
         <section className="hero">
-          <div className="card stoner-hero-card">
+          <div className="card stoner-hero-card compact-hero">
             <div
               className="row"
               style={{
@@ -200,7 +200,7 @@ export default function DashboardClient({ initialData, staffName }) {
                 marginBottom: 10
               }}
             >
-              <div className="muted">Lounge Overview</div>
+              <div className="muted">Control Deck</div>
 
               <button
                 className="button ghost"
@@ -214,12 +214,11 @@ export default function DashboardClient({ initialData, staffName }) {
             </div>
 
             <h2 style={{ marginTop: 0 }}>
-              Stoney Verify control deck with cleaner mobile flow and stronger live sync
+              Run tickets, verification, joins, and role sync from one cleaner lounge
             </h2>
 
             <p className="muted" style={{ marginBottom: 0 }}>
-              Run ticket flow, moderation checks, member tracking, role sync,
-              and verification review from one greener, cleaner control room.
+              Live staff controls, greener visuals, tighter member tracking, and less mobile clutter.
             </p>
           </div>
 
@@ -238,7 +237,7 @@ export default function DashboardClient({ initialData, staffName }) {
             subtitle="Spam and scam enforcement"
           />
           <StatCard
-            title="Raid Alerts (24h)"
+            title="Raid Alerts"
             value={counts.raidAlerts}
             subtitle="Join spike detections"
           />
@@ -284,11 +283,11 @@ export default function DashboardClient({ initialData, staffName }) {
 
               <div className="space">
                 <div className="row" style={{ justifyContent: "space-between" }}>
-                  <span className="muted">Recent tracked</span>
+                  <span className="muted">Tracked</span>
                   <strong>{memberSummary.total}</strong>
                 </div>
                 <div className="row" style={{ justifyContent: "space-between" }}>
-                  <span className="muted">Still in server</span>
+                  <span className="muted">In server</span>
                   <strong>{memberSummary.inServer}</strong>
                 </div>
                 <div className="row" style={{ justifyContent: "space-between" }}>
@@ -324,7 +323,7 @@ export default function DashboardClient({ initialData, staffName }) {
               marginBottom: 12
             }}
           >
-            <h2 style={{ margin: 0 }}>Ticket Queue Filters</h2>
+            <h2 style={{ margin: 0 }}>Ticket Queue</h2>
             <div className="muted" style={{ fontSize: 14 }}>
               {filteredTickets.length} result{filteredTickets.length === 1 ? "" : "s"}
             </div>
@@ -385,12 +384,12 @@ export default function DashboardClient({ initialData, staffName }) {
         className={`mobile-tab-panel ${isActiveTab("members") ? "active" : ""}`}
         id="members"
       >
-        <section className="grid-2" style={{ marginBottom: 18 }}>
+        <section className="grid-2 members-top-grid" style={{ marginBottom: 18 }}>
           <RecentJoinsCard joins={safeRecentJoins} />
           <MemberSearchCard />
         </section>
 
-        <section className="grid-2">
+        <section className="grid-2 members-bottom-grid">
           <RoleHierarchyCard roles={safeRoles} />
           <StaffMetricsCard metrics={safeMetrics} />
         </section>
