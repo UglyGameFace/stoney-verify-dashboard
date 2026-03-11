@@ -48,16 +48,26 @@ export default function DashboardClient({ initialData, staffName }) {
     let supabase
     let channel
 
+    async function handleRealtimeChange() {
+      await refresh({ silent: true })
+    }
+
     try {
       supabase = getBrowserSupabase()
+
       channel = supabase
         .channel("dashboard-live")
-        .on("postgres_changes", { event: "*", schema: "public", table: "tickets" }, () => refresh({ silent: true }))
-        .on("postgres_changes", { event: "*", schema: "public", table: "ticket_messages" }, () => refresh({ silent: true }))
-        .on("postgres_changes", { event: "*", schema: "public", table: "ticket_notes" }, () => refresh({ silent: true }))
-        .on("postgres_changes", { event: "*", schema: "public", table: "ticket_categories" }, () => refresh({ silent: true }))
-        .on("postgres_changes", { event: "*", schema: "public", table: "audit_events" }, () => refresh({ silent: true }))
-        .subscribe()
+        .on("postgres_changes", { event: "*", schema: "public", table: "tickets" }, handleRealtimeChange)
+        .on("postgres_changes", { event: "*", schema: "public", table: "ticket_messages" }, handleRealtimeChange)
+        .on("postgres_changes", { event: "*", schema: "public", table: "ticket_notes" }, handleRealtimeChange)
+        .on("postgres_changes", { event: "*", schema: "public", table: "ticket_categories" }, handleRealtimeChange)
+        .on("postgres_changes", { event: "*", schema: "public", table: "audit_events" }, handleRealtimeChange)
+        .subscribe((status) => {
+          console.log("dashboard realtime status:", status)
+          if (status === "SUBSCRIBED") {
+            refresh({ silent: true })
+          }
+        })
     } catch (err) {
       setError(err.message || "Realtime client unavailable.")
       return
@@ -159,6 +169,7 @@ export default function DashboardClient({ initialData, staffName }) {
             }}
           >
             <div className="muted">Overview</div>
+
             <button
               className="button ghost"
               type="button"
@@ -181,7 +192,7 @@ export default function DashboardClient({ initialData, staffName }) {
           </p>
         </div>
 
-        <QuickActions />
+        <QuickActions onRefresh={refresh} />
       </section>
 
       <section className="metrics">
@@ -310,9 +321,7 @@ export default function DashboardClient({ initialData, staffName }) {
 
             <div className="row">
               <span className="status-dot" />
-              <span>
-                Sync status: {isRefreshing ? "Refreshing now..." : "Idle"}
-              </span>
+              <span>Sync status: {isRefreshing ? "Refreshing now..." : "Idle"}</span>
             </div>
           </div>
         </div>
