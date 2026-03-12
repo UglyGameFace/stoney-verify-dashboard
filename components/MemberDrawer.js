@@ -15,6 +15,7 @@ export default function MemberDrawer({ member, onClose }) {
   const [timeoutMinutes, setTimeoutMinutes] = useState("10")
   const [liveMember, setLiveMember] = useState(null)
   const [loadingLive, setLoadingLive] = useState(false)
+  const [discordUnavailable, setDiscordUnavailable] = useState(false)
 
   const displayName =
     member?.display_name ||
@@ -39,11 +40,13 @@ export default function MemberDrawer({ member, onClose }) {
       }
 
       setLoadingLive(true)
+      setDiscordUnavailable(false)
 
       try {
         const res = await fetch(`/api/discord/member-details?user_id=${encodeURIComponent(memberId)}`, {
           cache: "no-store"
         })
+
         const json = await res.json()
 
         if (!res.ok) {
@@ -52,10 +55,14 @@ export default function MemberDrawer({ member, onClose }) {
 
         if (!cancelled) {
           setLiveMember(json.member || null)
+          if (json.member?.discord_unavailable) {
+            setDiscordUnavailable(true)
+          }
         }
       } catch (err) {
         if (!cancelled) {
           setLiveMember(null)
+          setDiscordUnavailable(true)
           setError((prev) => prev || err.message || "Failed to load live member roles.")
         }
       } finally {
@@ -219,6 +226,12 @@ export default function MemberDrawer({ member, onClose }) {
           </button>
         </div>
 
+        {discordUnavailable ? (
+          <div className="warning-banner" style={{ marginBottom: 12 }}>
+            Discord no longer reports this member. Showing stored record.
+          </div>
+        ) : null}
+
         {error ? (
           <div className="error-banner" style={{ marginBottom: 12 }}>
             {error}
@@ -271,7 +284,7 @@ export default function MemberDrawer({ member, onClose }) {
 
               <div className="member-drawer-badges">
                 <span className={`badge ${inGuild ? "claimed" : "closed"}`}>
-                  {inGuild ? "In Server" : "Left / Removed"}
+                  {inGuild ? "In Server" : "Former Member"}
                 </span>
 
                 <span className={`badge ${member.has_verified_role ? "low" : "medium"}`}>
@@ -321,8 +334,9 @@ export default function MemberDrawer({ member, onClose }) {
 
             <div className="member-detail-item full">
               <span className="ticket-info-label">
-                Roles {loadingLive ? "(loading live...)" : "(live Discord)"}
+                Roles {loadingLive ? "(loading live...)" : discordUnavailable ? "(stored record)" : "(live Discord)"}
               </span>
+
               <div className="roles" style={{ marginTop: 8 }}>
                 {roleList.length ? (
                   roleList.map((role) => (
