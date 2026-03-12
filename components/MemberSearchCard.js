@@ -19,6 +19,47 @@ function useDebouncedValue(value, delay = 250) {
   return debounced
 }
 
+function getDisplayName(member) {
+  return (
+    member?.display_name ||
+    member?.nickname ||
+    member?.username ||
+    member?.user_id ||
+    "Unknown Member"
+  )
+}
+
+function getTopRoleLabel(member) {
+  if (member?.top_role) return member.top_role
+  if (member?.highest_role_name) return member.highest_role_name
+  if (Array.isArray(member?.role_names) && member.role_names.length) return member.role_names[0]
+  if (Array.isArray(member?.roles) && member.roles.length) {
+    const first = member.roles[0]
+    if (typeof first === "string") return first
+    if (first && typeof first === "object" && first.name) return first.name
+  }
+  return "No top role"
+}
+
+function getRolePreview(member) {
+  if (Array.isArray(member?.role_names) && member.role_names.length) {
+    return member.role_names.slice(0, 3)
+  }
+
+  if (Array.isArray(member?.roles) && member.roles.length) {
+    return member.roles
+      .map((role) => {
+        if (typeof role === "string") return role
+        if (role && typeof role === "object" && role.name) return role.name
+        return null
+      })
+      .filter(Boolean)
+      .slice(0, 3)
+  }
+
+  return []
+}
+
 export default function MemberSearchCard() {
   const [query, setQuery] = useState("")
   const debouncedQuery = useDebouncedValue(query, 250)
@@ -82,6 +123,19 @@ export default function MemberSearchCard() {
     return { total, inServer, leftServer }
   }, [results])
 
+  useEffect(() => {
+    if (!selected) return
+
+    const selectedId = selected.user_id || selected.id
+    if (!selectedId) return
+
+    const updatedSelected = results.find((item) => (item.user_id || item.id) === selectedId)
+
+    if (updatedSelected) {
+      setSelected(updatedSelected)
+    }
+  }, [results, selected])
+
   return (
     <>
       <div className="card">
@@ -95,7 +149,7 @@ export default function MemberSearchCard() {
             marginBottom: 12
           }}
         >
-          <div>
+          <div style={{ minWidth: 0 }}>
             <h2 style={{ margin: 0 }}>Live Member Search</h2>
             <div className="muted" style={{ marginTop: 6 }}>
               Search username, display name, nickname, or ID as you type
@@ -140,30 +194,35 @@ export default function MemberSearchCard() {
                 <span className="badge">{summary.total} tracked</span>
                 <span className="badge claimed">{summary.inServer} in server</span>
                 {summary.leftServer ? (
-                  <span className="badge closed">{summary.leftServer} left</span>
+                  <span className="badge closed">{summary.leftServer} former</span>
                 ) : null}
               </div>
 
               <div className="member-search-results">
                 {results.map((member) => {
-                  const displayName =
-                    member.display_name ||
-                    member.nickname ||
-                    member.username ||
-                    member.user_id ||
-                    "Unknown Member"
-
+                  const displayName = getDisplayName(member)
                   const avatarUrl = member.avatar_url || null
                   const inGuild = member.in_guild !== false
+                  const memberId = member.user_id || member.id || ""
+                  const topRoleLabel = getTopRoleLabel(member)
+                  const rolePreview = getRolePreview(member)
 
                   return (
                     <button
-                      key={member.user_id}
+                      key={memberId || `${displayName}-${Math.random()}`}
                       type="button"
                       className="member-search-result"
                       onClick={() => setSelected(member)}
                     >
-                      <div className="row" style={{ minWidth: 0, flex: 1 }}>
+                      <div
+                        className="row"
+                        style={{
+                          minWidth: 0,
+                          flex: 1,
+                          alignItems: "center",
+                          gap: 12
+                        }}
+                      >
                         <div className="avatar">
                           {avatarUrl ? (
                             <img
@@ -197,22 +256,61 @@ export default function MemberSearchCard() {
                               overflowWrap: "anywhere"
                             }}
                           >
-                            {member.user_id}
+                            {memberId || "No user id"}
                           </div>
+
+                          {member.nickname && member.nickname !== displayName ? (
+                            <div
+                              className="muted"
+                              style={{
+                                marginTop: 4,
+                                fontSize: 12,
+                                overflowWrap: "anywhere"
+                              }}
+                            >
+                              Nickname: {member.nickname}
+                            </div>
+                          ) : null}
+
+                          {rolePreview.length ? (
+                            <div
+                              className="muted"
+                              style={{
+                                marginTop: 6,
+                                fontSize: 12,
+                                overflowWrap: "anywhere"
+                              }}
+                            >
+                              Roles: {rolePreview.join(" • ")}
+                              {(Array.isArray(member.role_names) && member.role_names.length > rolePreview.length) ||
+                              (Array.isArray(member.roles) && member.roles.length > rolePreview.length)
+                                ? " • …"
+                                : ""}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
 
-                      <div className="member-search-badges">
+                      <div
+                        className="member-search-badges"
+                        style={{
+                          alignItems: "flex-end"
+                        }}
+                      >
                         <span className={`badge ${inGuild ? "claimed" : "closed"}`}>
-                          {inGuild ? "In Server" : "Left Server"}
+                          {inGuild ? "In Server" : "Former Member"}
                         </span>
 
                         <span className={`badge ${member.has_verified_role ? "low" : "medium"}`}>
                           {member.has_verified_role ? "Verified" : "Pending"}
                         </span>
 
+                        <span className={`badge ${member.has_staff_role ? "claimed" : "open"}`}>
+                          {member.has_staff_role ? "Staff" : "Member"}
+                        </span>
+
                         <span className="badge">
-                          {member.top_role || member.highest_role_name || "No top role"}
+                          {topRoleLabel}
                         </span>
                       </div>
                     </button>
