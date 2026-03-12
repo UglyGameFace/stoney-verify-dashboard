@@ -27,10 +27,17 @@ export async function GET() {
       metricsRes,
       categoriesRes,
       recentJoinsRes,
+      recentActiveMembersRes,
+      recentFormerMembersRes,
       openTicketsRes,
       warnsTodayRes,
       raidAlertsRes,
-      fraudFlagsRes
+      fraudFlagsRes,
+      activeMembersCountRes,
+      formerMembersCountRes,
+      pendingVerificationCountRes,
+      verifiedMembersCountRes,
+      staffMembersCountRes
     ] = await Promise.all([
       supabase
         .from("tickets")
@@ -73,6 +80,22 @@ export async function GET() {
         .limit(25),
 
       supabase
+        .from("guild_members")
+        .select("*")
+        .eq("guild_id", guildId)
+        .eq("in_guild", true)
+        .order("joined_at", { ascending: false })
+        .limit(25),
+
+      supabase
+        .from("guild_members")
+        .select("*")
+        .eq("guild_id", guildId)
+        .eq("in_guild", false)
+        .order("updated_at", { ascending: false })
+        .limit(25),
+
+      supabase
         .from("tickets")
         .select("*", { count: "exact", head: true })
         .eq("guild_id", guildId)
@@ -94,7 +117,40 @@ export async function GET() {
         .from("verification_flags")
         .select("*", { count: "exact", head: true })
         .eq("guild_id", guildId)
-        .eq("flagged", true)
+        .eq("flagged", true),
+
+      supabase
+        .from("guild_members")
+        .select("*", { count: "exact", head: true })
+        .eq("guild_id", guildId)
+        .eq("in_guild", true),
+
+      supabase
+        .from("guild_members")
+        .select("*", { count: "exact", head: true })
+        .eq("guild_id", guildId)
+        .eq("in_guild", false),
+
+      supabase
+        .from("guild_members")
+        .select("*", { count: "exact", head: true })
+        .eq("guild_id", guildId)
+        .eq("in_guild", true)
+        .eq("has_unverified", true),
+
+      supabase
+        .from("guild_members")
+        .select("*", { count: "exact", head: true })
+        .eq("guild_id", guildId)
+        .eq("in_guild", true)
+        .eq("has_verified_role", true),
+
+      supabase
+        .from("guild_members")
+        .select("*", { count: "exact", head: true })
+        .eq("guild_id", guildId)
+        .eq("in_guild", true)
+        .eq("has_staff_role", true)
     ])
 
     const tickets = ticketsRes.data || []
@@ -103,12 +159,21 @@ export async function GET() {
     const metrics = metricsRes.data || []
     const categories = categoriesRes.data || []
     const recentJoins = recentJoinsRes.data || []
+    const recentActiveMembers = recentActiveMembersRes.data || []
+    const recentFormerMembers = recentFormerMembersRes.data || []
 
     if (debugEnabled()) {
       console.log("[dashboard/live] tickets found =", tickets.length)
       console.log("[dashboard/live] recentJoins found =", recentJoins.length)
+      console.log("[dashboard/live] recentActiveMembers found =", recentActiveMembers.length)
+      console.log("[dashboard/live] recentFormerMembers found =", recentFormerMembers.length)
       console.log("[dashboard/live] roles found =", roles.length)
       console.log("[dashboard/live] categories found =", categories.length)
+      console.log("[dashboard/live] activeMembersCount =", activeMembersCountRes.count || 0)
+      console.log("[dashboard/live] formerMembersCount =", formerMembersCountRes.count || 0)
+      console.log("[dashboard/live] pendingVerificationCount =", pendingVerificationCountRes.count || 0)
+      console.log("[dashboard/live] verifiedMembersCount =", verifiedMembersCountRes.count || 0)
+      console.log("[dashboard/live] staffMembersCount =", staffMembersCountRes.count || 0)
 
       if (tickets.length) {
         console.log(
@@ -142,10 +207,17 @@ export async function GET() {
       metricsRes.error ||
       categoriesRes.error ||
       recentJoinsRes.error ||
+      recentActiveMembersRes.error ||
+      recentFormerMembersRes.error ||
       openTicketsRes.error ||
       warnsTodayRes.error ||
       raidAlertsRes.error ||
-      fraudFlagsRes.error
+      fraudFlagsRes.error ||
+      activeMembersCountRes.error ||
+      formerMembersCountRes.error ||
+      pendingVerificationCountRes.error ||
+      verifiedMembersCountRes.error ||
+      staffMembersCountRes.error
 
     if (firstError) {
       if (debugEnabled()) {
@@ -165,6 +237,16 @@ export async function GET() {
       metrics,
       categories,
       recentJoins,
+      recentActiveMembers,
+      recentFormerMembers,
+      memberCounts: {
+        tracked: (activeMembersCountRes.count || 0) + (formerMembersCountRes.count || 0),
+        active: activeMembersCountRes.count || 0,
+        former: formerMembersCountRes.count || 0,
+        pendingVerification: pendingVerificationCountRes.count || 0,
+        verified: verifiedMembersCountRes.count || 0,
+        staff: staffMembersCountRes.count || 0
+      },
       counts: {
         openTickets: openTicketsRes.count || 0,
         warnsToday: warnsTodayRes.count || 0,
@@ -176,7 +258,15 @@ export async function GET() {
             guildId,
             envGuildId: process.env.GUILD_ID || "",
             envDiscordGuildId: process.env.DISCORD_GUILD_ID || "",
-            ticketCount: tickets.length
+            ticketCount: tickets.length,
+            memberCounts: {
+              tracked: (activeMembersCountRes.count || 0) + (formerMembersCountRes.count || 0),
+              active: activeMembersCountRes.count || 0,
+              former: formerMembersCountRes.count || 0,
+              pendingVerification: pendingVerificationCountRes.count || 0,
+              verified: verifiedMembersCountRes.count || 0,
+              staff: staffMembersCountRes.count || 0
+            }
           }
         : undefined
     }
