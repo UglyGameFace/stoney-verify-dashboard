@@ -17,6 +17,26 @@ import RecentJoinsCard from "@/components/RecentJoinsCard"
 
 const MOBILE_TABS = ["home", "tickets", "members", "categories"]
 
+function formatMemberName(member) {
+  return (
+    member?.display_name ||
+    member?.nickname ||
+    member?.username ||
+    member?.user_id ||
+    "Unknown Member"
+  )
+}
+
+function formatTime(value) {
+  if (!value) return "—"
+
+  try {
+    return new Date(value).toLocaleString()
+  } catch {
+    return "—"
+  }
+}
+
 export default function DashboardClient({ initialData, staffName }) {
   const [data, setData] = useState(initialData)
   const [loadingId, setLoadingId] = useState("")
@@ -159,17 +179,39 @@ export default function DashboardClient({ initialData, staffName }) {
   const safeMetrics = data?.metrics || []
   const safeCategories = data?.categories || []
   const safeRecentJoins = data?.recentJoins || []
+  const safeRecentActiveMembers = data?.recentActiveMembers || []
+  const safeRecentFormerMembers = data?.recentFormerMembers || []
+
+  const memberCounts = data?.memberCounts || {
+    tracked: safeRecentJoins.length,
+    active: safeRecentJoins.filter((m) => m.in_guild !== false).length,
+    former: safeRecentJoins.filter((m) => m.in_guild === false).length,
+    pendingVerification: safeRecentJoins.filter((m) => m.has_unverified).length,
+    verified: safeRecentJoins.filter((m) => m.has_verified_role).length,
+    staff: safeRecentJoins.filter((m) => m.has_staff_role).length
+  }
 
   const memberSummary = useMemo(() => {
     const rows = safeRecentJoins
-    const total = rows.length
-    const inServer = rows.filter((m) => m.in_guild !== false).length
-    const leftServer = rows.filter((m) => m.in_guild === false).length
-    const verified = rows.filter((m) => m.has_verified_role).length
-    const pending = rows.filter((m) => !m.has_verified_role).length
+    const total = memberCounts.tracked
+    const inServer = memberCounts.active
+    const leftServer = memberCounts.former
+    const verified = memberCounts.verified
+    const pending = memberCounts.pendingVerification
+    const staff = memberCounts.staff
 
-    return { total, inServer, leftServer, verified, pending }
-  }, [safeRecentJoins])
+    return { total, inServer, leftServer, verified, pending, staff, rows }
+  }, [safeRecentJoins, memberCounts])
+
+  const memberPulse = useMemo(() => {
+    const activePreview = safeRecentActiveMembers.slice(0, 5)
+    const formerPreview = safeRecentFormerMembers.slice(0, 5)
+
+    return {
+      activePreview,
+      formerPreview
+    }
+  }, [safeRecentActiveMembers, safeRecentFormerMembers])
 
   function isActiveTab(tab) {
     return activeTab === tab
@@ -291,7 +333,7 @@ export default function DashboardClient({ initialData, staffName }) {
                   <strong>{memberSummary.inServer}</strong>
                 </div>
                 <div className="row" style={{ justifyContent: "space-between" }}>
-                  <span className="muted">Left / removed</span>
+                  <span className="muted">Former members</span>
                   <strong>{memberSummary.leftServer}</strong>
                 </div>
                 <div className="row" style={{ justifyContent: "space-between" }}>
@@ -301,6 +343,10 @@ export default function DashboardClient({ initialData, staffName }) {
                 <div className="row" style={{ justifyContent: "space-between" }}>
                   <span className="muted">Pending verify</span>
                   <strong>{memberSummary.pending}</strong>
+                </div>
+                <div className="row" style={{ justifyContent: "space-between" }}>
+                  <span className="muted">Staff tracked</span>
+                  <strong>{memberSummary.staff}</strong>
                 </div>
               </div>
             </div>
@@ -387,6 +433,113 @@ export default function DashboardClient({ initialData, staffName }) {
         <section className="grid-2 members-top-grid" style={{ marginBottom: 18 }}>
           <RecentJoinsCard joins={safeRecentJoins} />
           <MemberSearchCard />
+        </section>
+
+        <section className="grid-2" style={{ marginBottom: 18 }}>
+          <div className="card">
+            <div
+              className="row"
+              style={{
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: 10,
+                marginBottom: 12
+              }}
+            >
+              <h2 style={{ margin: 0 }}>Member Control Snapshot</h2>
+              <div className="member-search-summary">
+                <span className="badge">{memberCounts.tracked} tracked</span>
+                <span className="badge claimed">{memberCounts.active} active</span>
+                <span className="badge closed">{memberCounts.former} former</span>
+              </div>
+            </div>
+
+            <div className="member-detail-grid">
+              <div className="member-detail-item">
+                <span className="ticket-info-label">Pending Verify</span>
+                <span>{memberCounts.pendingVerification}</span>
+              </div>
+
+              <div className="member-detail-item">
+                <span className="ticket-info-label">Verified</span>
+                <span>{memberCounts.verified}</span>
+              </div>
+
+              <div className="member-detail-item">
+                <span className="ticket-info-label">Staff</span>
+                <span>{memberCounts.staff}</span>
+              </div>
+
+              <div className="member-detail-item">
+                <span className="ticket-info-label">Recent Active</span>
+                <span>{safeRecentActiveMembers.length}</span>
+              </div>
+
+              <div className="member-detail-item">
+                <span className="ticket-info-label">Recent Former</span>
+                <span>{safeRecentFormerMembers.length}</span>
+              </div>
+
+              <div className="member-detail-item">
+                <span className="ticket-info-label">Realtime Sync</span>
+                <span>{isRefreshing ? "Refreshing..." : "Live"}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <h2 style={{ marginTop: 0 }}>Former Member Watch</h2>
+
+            {memberPulse.formerPreview.length ? (
+              <div className="space">
+                {memberPulse.formerPreview.map((member) => (
+                  <div
+                    key={member.user_id}
+                    className="row"
+                    style={{
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      gap: 12
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontWeight: 700,
+                          color: "var(--text-strong)",
+                          overflowWrap: "anywhere"
+                        }}
+                      >
+                        {formatMemberName(member)}
+                      </div>
+                      <div
+                        className="muted"
+                        style={{
+                          marginTop: 4,
+                          fontSize: 13,
+                          overflowWrap: "anywhere"
+                        }}
+                      >
+                        {member.user_id}
+                      </div>
+                    </div>
+
+                    <div style={{ textAlign: "right", minWidth: 92 }}>
+                      <div className="badge closed">Former</div>
+                      <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+                        {formatTime(member.updated_at || member.synced_at)}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state">
+                No former members in the current recent snapshot.
+              </div>
+            )}
+          </div>
         </section>
 
         <section className="grid-2 members-bottom-grid">
