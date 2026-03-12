@@ -23,7 +23,10 @@ async function discordApi(path) {
 
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`Discord API ${res.status}: ${text}`)
+
+    const err = new Error(`Discord API ${res.status}: ${text}`)
+    err.status = res.status
+    throw err
   }
 
   return res.json()
@@ -44,10 +47,44 @@ export async function GET(req) {
       return NextResponse.json({ error: "Missing user id" }, { status: 400 })
     }
 
-    const [member, roles] = await Promise.all([
-      discordApi(`/guilds/${guildId}/members/${userId}`),
-      discordApi(`/guilds/${guildId}/roles`)
-    ])
+    let member = null
+    let roles = []
+
+    try {
+      const results = await Promise.all([
+        discordApi(`/guilds/${guildId}/members/${userId}`),
+        discordApi(`/guilds/${guildId}/roles`)
+      ])
+
+      member = results[0]
+      roles = results[1]
+    } catch (err) {
+      // Handle Discord Unknown Member (user left / kicked / banned)
+      if (err?.status === 404) {
+        const response = NextResponse.json({
+          ok: true,
+          member: {
+            user_id: userId,
+            username: "",
+            global_name: "",
+            avatar: "",
+            nickname: "",
+            joined_at: null,
+            role_ids: [],
+            role_names: [],
+            top_role: null,
+            roles: [],
+            in_guild: false,
+            discord_unavailable: true
+          }
+        })
+
+        applyAuthCookies(response, refreshedTokens)
+        return response
+      }
+
+      throw err
+    }
 
     const roleMap = new Map((roles || []).map((role) => [role.id, role]))
     const roleIds = Array.isArray(member.roles) ? member.roles : []
@@ -74,7 +111,8 @@ export async function GET(req) {
         role_ids: fullRoles.map((role) => role.id),
         role_names: fullRoles.map((role) => role.name),
         top_role: fullRoles[0]?.name || null,
-        roles: fullRoles
+        roles: fullRoles,
+        in_guild: true
       }
     })
 
