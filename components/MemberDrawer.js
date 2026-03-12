@@ -6,6 +6,16 @@ function buildMention(id) {
   return id ? `<@${id}>` : ""
 }
 
+function normalizeRoleLabel(role) {
+  if (!role) return ""
+  if (typeof role === "string") return role
+  if (typeof role === "object") {
+    if (typeof role.name === "string" && role.name.trim()) return role.name
+    if (typeof role.id === "string" && role.id.trim()) return role.id
+  }
+  return ""
+}
+
 export default function MemberDrawer({ member, onClose }) {
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
@@ -84,10 +94,15 @@ export default function MemberDrawer({ member, onClose }) {
   }, [member, memberId])
 
   const roleList = useMemo(() => {
-    if (liveMember?.role_names?.length) return liveMember.role_names
-    if (Array.isArray(member?.roles) && member.roles.length) return member.roles
-    if (Array.isArray(member?.role_names) && member.role_names.length) return member.role_names
-    return []
+    const rawRoles =
+      (liveMember?.role_names?.length && liveMember.role_names) ||
+      (Array.isArray(member?.roles) && member.roles.length ? member.roles : null) ||
+      (Array.isArray(member?.role_names) && member.role_names.length ? member.role_names : []) ||
+      []
+
+    return rawRoles
+      .map((role) => normalizeRoleLabel(role))
+      .filter(Boolean)
   }, [liveMember, member])
 
   if (!member) return null
