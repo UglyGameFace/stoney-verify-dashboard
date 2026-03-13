@@ -84,9 +84,7 @@ function getRoleNames(member: GuildMemberRow): string[] {
   }
 
   if (Array.isArray(member.roles)) {
-    return member.roles
-      .map((r) => normalizeString(r?.name))
-      .filter(Boolean);
+    return member.roles.map((r) => normalizeString(r?.name)).filter(Boolean);
   }
 
   return [];
@@ -120,23 +118,14 @@ function memberHasRole(member: GuildMemberRow, roleId: string, roleName: string)
   return false;
 }
 
-function buttonClass(kind: "primary" | "secondary", disabled = false) {
-  const base =
-    "inline-flex items-center justify-center rounded-2xl px-4 py-2.5 text-sm font-semibold transition border";
-  const palette =
-    kind === "primary"
-      ? "bg-blue-600 text-white border-blue-600 hover:bg-blue-700"
-      : "bg-zinc-900 text-white border-zinc-700 hover:bg-zinc-800";
-  const off = disabled ? " opacity-50 cursor-not-allowed hover:bg-inherit" : "";
-  return `${base} ${palette}${off}`;
-}
-
-function panelClass() {
-  return "rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4";
-}
-
-function inputClass() {
-  return "w-full rounded-2xl border border-zinc-700 bg-zinc-900 px-3 py-2.5 text-sm text-white outline-none focus:border-zinc-500";
+function statusChipStyle(selected = false) {
+  return {
+    background: selected ? "rgba(59,130,246,0.18)" : "rgba(255,255,255,0.06)",
+    border: selected
+      ? "1px solid rgba(59,130,246,0.38)"
+      : "1px solid rgba(255,255,255,0.08)",
+    color: selected ? "#dbeafe" : "var(--text-soft)",
+  };
 }
 
 export default function RoleHierarchy({
@@ -173,9 +162,7 @@ export default function RoleHierarchy({
     const roleId = getRoleId(selectedRole);
     const roleName = normalizeString(selectedRole.name);
 
-    const base = activeMembers.filter((member) =>
-      memberHasRole(member, roleId, roleName)
-    );
+    const base = activeMembers.filter((member) => memberHasRole(member, roleId, roleName));
 
     const term = search.trim().toLowerCase();
     if (!term) return base;
@@ -223,20 +210,8 @@ export default function RoleHierarchy({
         throw new Error(result.command?.error || "Failed to sync role members.");
       }
 
-      const summary = result.command?.result as
-        | {
-            summary?: {
-              role_name?: string;
-              processed?: number;
-              failed?: number;
-            };
-          }
-        | undefined;
-
       setMessage(
-        `Role sync complete${
-          summary?.summary?.role_name ? ` for ${summary.summary.role_name}` : ""
-        }.`
+        `Role sync complete${normalizeString(role.name) ? ` for ${normalizeString(role.name)}` : ""}.`
       );
 
       if (onChanged) {
@@ -250,77 +225,113 @@ export default function RoleHierarchy({
   }
 
   return (
-    <div className={`space-y-4 ${className}`}>
-      <div className="rounded-3xl border border-zinc-800 bg-zinc-950/80 p-4">
-        <div className="mb-4">
-          <div className="text-lg font-semibold text-white">{title}</div>
-          <div className="text-sm text-zinc-400">
+    <div className={className}>
+      <div className="card" style={{ marginBottom: 18 }}>
+        <div style={{ marginBottom: 14 }}>
+          <h2 style={{ margin: 0 }}>{title}</h2>
+          <div className="muted" style={{ marginTop: 6 }}>
             Tap a role name or count bubble to open the members with that role.
           </div>
         </div>
 
-        <div className="space-y-3">
+        <div className="space">
           {sortedRoles.length === 0 ? (
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400">
-              No roles available.
-            </div>
+            <div className="empty-state">No roles available.</div>
           ) : (
             sortedRoles.map((role) => {
               const roleId = getRoleId(role);
               const roleName = normalizeString(role.name) || "Unnamed Role";
               const count = Number(role.member_count ?? 0);
-              const selected = selectedRole && getRoleId(selectedRole) === roleId;
+              const selected = !!selectedRole && getRoleId(selectedRole) === roleId;
               const syncing = syncingRoleId === roleId;
 
               return (
                 <div
                   key={roleId || normalizeString(role.id) || roleName}
-                  className={`rounded-2xl border p-4 transition ${
-                    selected
-                      ? "border-blue-700 bg-blue-950/20"
-                      : "border-zinc-800 bg-zinc-900/60"
-                  }`}
+                  className="card"
+                  style={{
+                    padding: 14,
+                    borderRadius: 18,
+                    border: selected
+                      ? "1px solid rgba(59,130,246,0.35)"
+                      : "1px solid rgba(255,255,255,0.08)",
+                    background: selected
+                      ? "linear-gradient(180deg, rgba(59,130,246,0.10), rgba(59,130,246,0.04))"
+                      : undefined,
+                  }}
                 >
-                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                    <div className="min-w-0 flex-1">
-                      <button
-                        type="button"
-                        className="block text-left"
-                        onClick={() => {
-                          setSelectedRole(role);
-                          setSearch("");
-                          setError("");
-                          setMessage("");
+                  <div
+                    className="row"
+                    style={{
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 12,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedRole(role);
+                        setSearch("");
+                        setError("");
+                        setMessage("");
+                      }}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        padding: 0,
+                        textAlign: "left",
+                        cursor: "pointer",
+                        minWidth: 0,
+                        flex: 1,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontWeight: 800,
+                          color: "var(--text-strong)",
+                          overflowWrap: "anywhere",
                         }}
                       >
-                        <div className="truncate text-base font-semibold text-white">
-                          {roleName}
-                        </div>
-                        <div className="mt-1 text-xs text-zinc-400">
-                          Position: {Number(role.position ?? 0)}
-                        </div>
-                      </button>
-                    </div>
+                        {roleName}
+                      </div>
+                      <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
+                        Position {Number(role.position ?? 0)}
+                      </div>
+                    </button>
 
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                      }}
+                    >
                       <button
                         type="button"
+                        className="badge"
+                        style={{
+                          ...statusChipStyle(selected),
+                          cursor: "pointer",
+                        }}
                         onClick={() => {
                           setSelectedRole(role);
                           setSearch("");
                           setError("");
                           setMessage("");
                         }}
-                        className="rounded-full border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm font-semibold text-zinc-200 transition hover:bg-zinc-900"
                       >
                         {count} member{count === 1 ? "" : "s"}
                       </button>
 
                       <button
                         type="button"
-                        className={buttonClass("secondary", syncing)}
+                        className="button ghost"
                         disabled={syncing}
                         onClick={() => handleRoleSync(role)}
+                        style={{ width: "auto", minWidth: 110 }}
                       >
                         {syncing ? "Syncing..." : "Sync Role"}
                       </button>
@@ -333,117 +344,206 @@ export default function RoleHierarchy({
         </div>
       </div>
 
-      {!!message && (
-        <div className="rounded-2xl border border-emerald-800 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-300">
+      {message ? (
+        <div
+          className="info-banner"
+          style={{
+            marginBottom: 18,
+            border: "1px solid rgba(16,185,129,0.28)",
+            background: "rgba(16,185,129,0.12)",
+            color: "#d1fae5",
+          }}
+        >
           {message}
         </div>
-      )}
+      ) : null}
 
-      {!!error && (
-        <div className="rounded-2xl border border-red-800 bg-red-950/30 px-3 py-2 text-sm text-red-300">
+      {error ? (
+        <div
+          className="error-banner"
+          style={{
+            marginBottom: 18,
+            border: "1px solid rgba(239,68,68,0.28)",
+            background: "rgba(239,68,68,0.12)",
+            color: "#fecaca",
+          }}
+        >
           {error}
         </div>
-      )}
+      ) : null}
 
-      {selectedRole && (
-        <div className={panelClass()}>
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      {selectedRole ? (
+        <div className="card">
+          <div
+            className="row"
+            style={{
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              gap: 12,
+              flexWrap: "wrap",
+              marginBottom: 14,
+            }}
+          >
             <div>
-              <div className="text-lg font-semibold text-white">
+              <h2 style={{ margin: 0 }}>
                 {normalizeString(selectedRole.name) || "Role Members"}
-              </div>
-              <div className="text-sm text-zinc-400">
+              </h2>
+              <div className="muted" style={{ marginTop: 6 }}>
                 Showing {selectedRoleMembers.length} member
                 {selectedRoleMembers.length === 1 ? "" : "s"}
               </div>
             </div>
 
-            <div className="flex gap-2">
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                flexWrap: "wrap",
+                width: "100%",
+                maxWidth: 460,
+              }}
+            >
               <input
-                className={inputClass()}
+                className="input"
+                style={{ flex: 1, minWidth: 180 }}
                 placeholder="Search members, IDs, or role names..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
+
               <button
                 type="button"
-                className={buttonClass("secondary")}
+                className="button ghost"
                 onClick={() => {
                   setSelectedRole(null);
                   setSearch("");
                 }}
+                style={{ width: "auto", minWidth: 92 }}
               >
                 Close
               </button>
             </div>
           </div>
 
-          <div className="space-y-3">
+          <div className="space">
             {selectedRoleMembers.length === 0 ? (
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400">
-                No members found for this role.
-              </div>
+              <div className="empty-state">No members found for this role.</div>
             ) : (
               selectedRoleMembers.map((member) => (
                 <div
                   key={`${getMemberId(member)}-${member.updated_at || member.last_seen_at || ""}`}
-                  className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"
+                  className="card"
+                  style={{
+                    padding: 14,
+                    borderRadius: 18,
+                    border: "1px solid rgba(255,255,255,0.08)",
+                  }}
                 >
-                  <div className="flex items-start gap-3">
-                    <div className="h-12 w-12 overflow-hidden rounded-full border border-zinc-800 bg-zinc-800">
+                  <div className="row" style={{ alignItems: "flex-start", gap: 12 }}>
+                    <div
+                      style={{
+                        width: 48,
+                        height: 48,
+                        minWidth: 48,
+                        borderRadius: "999px",
+                        overflow: "hidden",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        background: "rgba(255,255,255,0.06)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: 800,
+                        color: "var(--text-strong)",
+                      }}
+                    >
                       {member.avatar_url ? (
                         <img
                           src={member.avatar_url}
                           alt={getDisplayName(member)}
-                          className="h-full w-full object-cover"
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
                         />
                       ) : (
-                        <div className="flex h-full w-full items-center justify-center text-sm font-bold text-zinc-300">
-                          {getDisplayName(member).slice(0, 2).toUpperCase()}
-                        </div>
+                        getDisplayName(member).slice(0, 2).toUpperCase()
                       )}
                     </div>
 
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-base font-semibold text-white">
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div
+                        style={{
+                          fontWeight: 800,
+                          color: "var(--text-strong)",
+                          overflowWrap: "anywhere",
+                        }}
+                      >
                         {getDisplayName(member)}
                       </div>
-                      <div className="mt-1 text-sm text-zinc-400">
+
+                      <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
                         {getSubtitle(member)}
                       </div>
 
-                      <div className="mt-3 grid gap-2 text-xs text-zinc-400 sm:grid-cols-2 lg:grid-cols-3">
-                        <div>
-                          <span className="font-semibold text-zinc-300">Joined:</span>{" "}
-                          {formatDate(member.joined_at)}
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                          gap: 10,
+                          marginTop: 12,
+                        }}
+                      >
+                        <div className="member-detail-item">
+                          <span className="ticket-info-label">Joined</span>
+                          <span>{formatDate(member.joined_at)}</span>
                         </div>
-                        <div>
-                          <span className="font-semibold text-zinc-300">Last Seen:</span>{" "}
-                          {formatDate(member.last_seen_at || member.updated_at)}
+
+                        <div className="member-detail-item">
+                          <span className="ticket-info-label">Last Seen</span>
+                          <span>{formatDate(member.last_seen_at || member.updated_at)}</span>
                         </div>
-                        <div>
-                          <span className="font-semibold text-zinc-300">Role Count:</span>{" "}
-                          {getRoleNames(member).length}
+
+                        <div className="member-detail-item">
+                          <span className="ticket-info-label">Role Count</span>
+                          <span>{getRoleNames(member).length}</span>
                         </div>
                       </div>
 
-                      {getRoleNames(member).length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {getRoleNames(member).map((roleName) => (
-                            <span
-                              key={`${getMemberId(member)}-${roleName}`}
-                              className={`rounded-full border px-2.5 py-1 text-xs ${
-                                roleName.toLowerCase() ===
-                                normalizeString(selectedRole.name).toLowerCase()
-                                  ? "border-blue-700 bg-blue-950/40 text-blue-300"
-                                  : "border-zinc-700 bg-zinc-950 text-zinc-300"
-                              }`}
-                            >
-                              {roleName}
-                            </span>
-                          ))}
+                      {getRoleNames(member).length > 0 ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: 8,
+                            marginTop: 12,
+                          }}
+                        >
+                          {getRoleNames(member).map((roleName) => {
+                            const highlighted =
+                              roleName.toLowerCase() ===
+                              normalizeString(selectedRole.name).toLowerCase();
+
+                            return (
+                              <span
+                                key={`${getMemberId(member)}-${roleName}`}
+                                className="badge"
+                                style={
+                                  highlighted
+                                    ? {
+                                        background: "rgba(59,130,246,0.18)",
+                                        border: "1px solid rgba(59,130,246,0.38)",
+                                        color: "#dbeafe",
+                                      }
+                                    : {
+                                        background: "rgba(255,255,255,0.06)",
+                                        border: "1px solid rgba(255,255,255,0.08)",
+                                        color: "var(--text-soft)",
+                                      }
+                                }
+                              >
+                                {roleName}
+                              </span>
+                            );
+                          })}
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -451,7 +551,7 @@ export default function RoleHierarchy({
             )}
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
