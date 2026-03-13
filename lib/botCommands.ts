@@ -42,20 +42,24 @@ function requireEnv(name: string, value: string | undefined): string {
 
 function getGuildId(): string {
   return requireEnv(
-    "DISCORD_GUILD_ID or NEXT_PUBLIC_DISCORD_GUILD_ID",
-    process.env.DISCORD_GUILD_ID || process.env.NEXT_PUBLIC_DISCORD_GUILD_ID
+    "DISCORD_GUILD_ID or GUILD_ID or NEXT_PUBLIC_DISCORD_GUILD_ID",
+    process.env.DISCORD_GUILD_ID ||
+      process.env.GUILD_ID ||
+      process.env.NEXT_PUBLIC_DISCORD_GUILD_ID
   );
 }
 
 function createAdminSupabase(): SupabaseClient {
   const url = requireEnv(
-    "NEXT_PUBLIC_SUPABASE_URL",
-    process.env.NEXT_PUBLIC_SUPABASE_URL
+    "NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL",
+    process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
   );
 
   const serviceRoleKey = requireEnv(
-    "SUPABASE_SERVICE_ROLE_KEY",
-    process.env.SUPABASE_SERVICE_ROLE_KEY
+    "SUPABASE_SERVICE_ROLE or NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SERVICE_ROLE_KEY",
+    process.env.SUPABASE_SERVICE_ROLE ||
+      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.SUPABASE_SERVICE_ROLE_KEY
   );
 
   return createClient(url, serviceRoleKey, {
@@ -190,21 +194,13 @@ export async function queueAssignTicket(input: {
 export async function queueSyncMembers(input?: {
   requestedBy?: string | null;
 }) {
-  return insertCommand(
-    "sync_members",
-    {},
-    input?.requestedBy
-  );
+  return insertCommand("sync_members", {}, input?.requestedBy);
 }
 
 export async function queueReconcileDepartedMembers(input?: {
   requestedBy?: string | null;
 }) {
-  return insertCommand(
-    "reconcile_departed_members",
-    {},
-    input?.requestedBy
-  );
+  return insertCommand("reconcile_departed_members", {}, input?.requestedBy);
 }
 
 export async function queueSyncRoleMembers(input: {
@@ -220,7 +216,9 @@ export async function queueSyncRoleMembers(input: {
   );
 }
 
-export async function getBotCommand(commandId: string): Promise<BotCommandRow | null> {
+export async function getBotCommand(
+  commandId: string
+): Promise<BotCommandRow | null> {
   const supabase = createAdminSupabase();
 
   const { data, error } = await supabase
