@@ -1,40 +1,37 @@
-"use client"
+"use client";
 
-import { useState } from "react"
+import { useState } from "react";
+import {
+  syncMembersAction,
+  reconcileDepartedMembersAction,
+} from "@/lib/dashboardActions";
 
-const actions = [
-  { name: "Live Role Sync", endpoint: "/api/discord/role-sync", method: "POST" },
-  { name: "Raid Check", endpoint: "/api/moderation/raid-check", method: "POST" },
-  { name: "Create Sample Tickets", endpoint: "/api/tickets/sample", method: "POST" }
-]
+export default function QuickActions({ onRefresh, currentStaffId = null }) {
+  const [running, setRunning] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
-export default function QuickActions({ onRefresh }) {
-  const [running, setRunning] = useState("")
-  const [error, setError] = useState("")
-  const [message, setMessage] = useState("")
-
-  async function run(endpoint, method, name) {
-    setError("")
-    setMessage("")
-    setRunning(name)
+  async function runAction(name, runner) {
+    setError("");
+    setMessage("");
+    setRunning(name);
 
     try {
-      const res = await fetch(endpoint, { method })
-      const json = await res.json()
+      const result = await runner();
 
-      if (!res.ok) {
-        throw new Error(json.error || "Action failed.")
+      if (!result?.ok) {
+        throw new Error(result?.command?.error || `${name} failed.`);
       }
 
-      setMessage(`${name} completed.`)
+      setMessage(`${name} completed.`);
 
       if (onRefresh) {
-        await onRefresh()
+        await onRefresh();
       }
     } catch (err) {
-      setError(err.message || "Action failed.")
+      setError(err?.message || `${name} failed.`);
     } finally {
-      setRunning("")
+      setRunning("");
     }
   }
 
@@ -55,17 +52,40 @@ export default function QuickActions({ onRefresh }) {
       ) : null}
 
       <div className="quick-actions">
-        {actions.map((action) => (
-          <button
-            key={action.name}
-            className="button"
-            disabled={running === action.name}
-            onClick={() => run(action.endpoint, action.method, action.name)}
-          >
-            {running === action.name ? `Running ${action.name}...` : action.name}
-          </button>
-        ))}
+        <button
+          className="button"
+          disabled={running === "Full Member Sync"}
+          onClick={() =>
+            runAction("Full Member Sync", () =>
+              syncMembersAction({
+                staffId: currentStaffId,
+                requestedBy: currentStaffId,
+              })
+            )
+          }
+        >
+          {running === "Full Member Sync"
+            ? "Running Full Member Sync..."
+            : "Full Member Sync"}
+        </button>
+
+        <button
+          className="button"
+          disabled={running === "Reconcile Departed Members"}
+          onClick={() =>
+            runAction("Reconcile Departed Members", () =>
+              reconcileDepartedMembersAction({
+                staffId: currentStaffId,
+                requestedBy: currentStaffId,
+              })
+            )
+          }
+        >
+          {running === "Reconcile Departed Members"
+            ? "Running Reconcile Departed Members..."
+            : "Reconcile Departed Members"}
+        </button>
       </div>
     </div>
-  )
+  );
 }
