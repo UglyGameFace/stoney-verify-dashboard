@@ -1,21 +1,22 @@
-"use client"
+"use client";
 
-import { useEffect, useMemo, useState } from "react"
-import { getBrowserSupabase } from "@/lib/supabase-browser"
-import { sortTickets } from "@/lib/priority"
-import Topbar from "@/components/Topbar"
-import StatCard from "@/components/StatCard"
-import QuickActions from "@/components/QuickActions"
-import AuditTimeline from "@/components/AuditTimeline"
-import RoleHierarchyCard from "@/components/RoleHierarchyCard"
-import StaffMetricsCard from "@/components/StaffMetricsCard"
-import MemberSearchCard from "@/components/MemberSearchCard"
-import TicketQueueTable from "@/components/TicketQueueTable"
-import CategoryManager from "@/components/CategoryManager"
-import MobileBottomNav from "@/components/MobileBottomNav"
-import RecentJoinsCard from "@/components/RecentJoinsCard"
+import { useEffect, useMemo, useState } from "react";
+import { getBrowserSupabase } from "@/lib/supabase-browser";
+import { sortTickets } from "@/lib/priority";
+import Topbar from "@/components/Topbar";
+import StatCard from "@/components/StatCard";
+import QuickActions from "@/components/QuickActions";
+import AuditTimeline from "@/components/AuditTimeline";
+import RoleHierarchyCard from "@/components/RoleHierarchyCard";
+import StaffMetricsCard from "@/components/StaffMetricsCard";
+import MemberSearchCard from "@/components/MemberSearchCard";
+import TicketQueueTable from "@/components/TicketQueueTable";
+import CategoryManager from "@/components/CategoryManager";
+import MobileBottomNav from "@/components/MobileBottomNav";
+import RecentJoinsCard from "@/components/RecentJoinsCard";
+import MemberSnapshot from "@/components/dashboard/MemberSnapshot";
 
-const MOBILE_TABS = ["home", "tickets", "members", "categories"]
+const MOBILE_TABS = ["home", "tickets", "members", "categories"];
 
 function formatMemberName(member) {
   return (
@@ -24,124 +25,165 @@ function formatMemberName(member) {
     member?.username ||
     member?.user_id ||
     "Unknown Member"
-  )
+  );
 }
 
 function formatTime(value) {
-  if (!value) return "—"
+  if (!value) return "—";
 
   try {
-    return new Date(value).toLocaleString()
+    return new Date(value).toLocaleString();
   } catch {
-    return "—"
+    return "—";
   }
 }
 
+function getStaffUserId(initialData, staffName) {
+  const possible =
+    initialData?.staffUserId ||
+    initialData?.staff_user_id ||
+    initialData?.viewer?.user_id ||
+    initialData?.viewer?.id ||
+    initialData?.auth?.user_id ||
+    initialData?.auth?.id ||
+    null;
+
+  if (possible) return String(possible);
+
+  const metrics = Array.isArray(initialData?.metrics) ? initialData.metrics : [];
+  const matchedMetric = metrics.find((m) => {
+    const metricName = String(m?.staff_name || "").trim().toLowerCase();
+    return metricName && metricName === String(staffName || "").trim().toLowerCase();
+  });
+
+  if (matchedMetric?.staff_id) {
+    return String(matchedMetric.staff_id);
+  }
+
+  return null;
+}
+
 export default function DashboardClient({ initialData, staffName }) {
-  const [data, setData] = useState(initialData)
-  const [loadingId, setLoadingId] = useState("")
-  const [error, setError] = useState("")
-  const [search, setSearch] = useState("")
-  const [statusFilter, setStatusFilter] = useState("all")
-  const [priorityFilter, setPriorityFilter] = useState("all")
-  const [sortBy, setSortBy] = useState("priority_desc")
-  const [isRefreshing, setIsRefreshing] = useState(false)
-  const [activeTab, setActiveTab] = useState("home")
+  const [data, setData] = useState(initialData);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [priorityFilter, setPriorityFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("priority_desc");
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState("home");
+
+  const currentStaffId = useMemo(
+    () => getStaffUserId(initialData, staffName),
+    [initialData, staffName]
+  );
 
   async function refresh({ silent = false } = {}) {
-    if (!silent) setIsRefreshing(true)
-    setError("")
+    if (!silent) setIsRefreshing(true);
+    setError("");
 
     try {
-      const res = await fetch("/api/dashboard/live", { cache: "no-store" })
-      const json = await res.json()
+      const res = await fetch("/api/dashboard/live", { cache: "no-store" });
+      const json = await res.json();
 
       if (!res.ok) {
-        throw new Error(json.error || "Failed to refresh dashboard.")
+        throw new Error(json.error || "Failed to refresh dashboard.");
       }
 
-      setData(json)
+      setData(json);
     } catch (err) {
-      setError(err.message || "Failed to refresh dashboard.")
+      setError(err?.message || "Failed to refresh dashboard.");
     } finally {
-      if (!silent) setIsRefreshing(false)
+      if (!silent) setIsRefreshing(false);
     }
   }
 
   useEffect(() => {
-    let supabase
-    let channel
+    let supabase;
+    let channel;
 
     async function handleRealtimeChange() {
-      await refresh({ silent: true })
+      await refresh({ silent: true });
     }
 
     try {
-      supabase = getBrowserSupabase()
+      supabase = getBrowserSupabase();
 
       channel = supabase
         .channel("dashboard-live")
-        .on("postgres_changes", { event: "*", schema: "public", table: "tickets" }, handleRealtimeChange)
-        .on("postgres_changes", { event: "*", schema: "public", table: "ticket_messages" }, handleRealtimeChange)
-        .on("postgres_changes", { event: "*", schema: "public", table: "ticket_notes" }, handleRealtimeChange)
-        .on("postgres_changes", { event: "*", schema: "public", table: "ticket_categories" }, handleRealtimeChange)
-        .on("postgres_changes", { event: "*", schema: "public", table: "audit_events" }, handleRealtimeChange)
-        .on("postgres_changes", { event: "*", schema: "public", table: "member_joins" }, handleRealtimeChange)
-        .on("postgres_changes", { event: "*", schema: "public", table: "guild_members" }, handleRealtimeChange)
-        .on("postgres_changes", { event: "*", schema: "public", table: "raid_events" }, handleRealtimeChange)
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "tickets" },
+          handleRealtimeChange
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "ticket_messages" },
+          handleRealtimeChange
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "ticket_notes" },
+          handleRealtimeChange
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "ticket_categories" },
+          handleRealtimeChange
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "audit_events" },
+          handleRealtimeChange
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "member_joins" },
+          handleRealtimeChange
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "guild_members" },
+          handleRealtimeChange
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "guild_roles" },
+          handleRealtimeChange
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "raid_events" },
+          handleRealtimeChange
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "bot_commands" },
+          handleRealtimeChange
+        )
         .subscribe((status) => {
-          console.log("dashboard realtime status:", status)
+          console.log("dashboard realtime status:", status);
           if (status === "SUBSCRIBED") {
-            refresh({ silent: true })
+            refresh({ silent: true });
           }
-        })
+        });
     } catch (err) {
-      setError(err.message || "Realtime client unavailable.")
-      return
+      setError(err?.message || "Realtime client unavailable.");
+      return;
     }
 
     return () => {
       if (supabase && channel) {
-        supabase.removeChannel(channel)
+        supabase.removeChannel(channel);
       }
-    }
-  }, [])
-
-  async function onAction(type, ticketId, payload) {
-    setLoadingId(ticketId)
-    setError("")
-
-    try {
-      const endpoint =
-        type === "claim"
-          ? `/api/tickets/${ticketId}/claim`
-          : `/api/tickets/${ticketId}/close`
-
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload || {})
-      })
-
-      const json = await res.json()
-
-      if (!res.ok) {
-        throw new Error(json.error || "Ticket action failed.")
-      }
-
-      await refresh()
-    } catch (err) {
-      setError(err.message || "Ticket action failed.")
-    } finally {
-      setLoadingId("")
-    }
-  }
+    };
+  }, []);
 
   const filteredTickets = useMemo(() => {
-    let rows = [...(data?.tickets || [])]
+    let rows = [...(data?.tickets || [])];
 
     if (search.trim()) {
-      const q = search.toLowerCase()
+      const q = search.toLowerCase();
       rows = rows.filter((t) =>
         [
           t.username,
@@ -149,72 +191,84 @@ export default function DashboardClient({ initialData, staffName }) {
           t.title,
           t.category,
           t.mod_suggestion,
-          t.claimed_by
+          t.claimed_by,
+          t.channel_name,
+          t.discord_thread_id,
+          t.channel_id,
         ]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(q))
-      )
+      );
     }
 
     if (statusFilter !== "all") {
-      rows = rows.filter((t) => t.status === statusFilter)
+      rows = rows.filter((t) => String(t.status || "").toLowerCase() === statusFilter);
     }
 
     if (priorityFilter !== "all") {
-      rows = rows.filter((t) => t.priority === priorityFilter)
+      rows = rows.filter(
+        (t) => String(t.priority || "").toLowerCase() === priorityFilter
+      );
     }
 
-    return sortTickets(rows, sortBy)
-  }, [data?.tickets, search, statusFilter, priorityFilter, sortBy])
+    return sortTickets(rows, sortBy);
+  }, [data?.tickets, search, statusFilter, priorityFilter, sortBy]);
 
   const counts = data?.counts || {
     openTickets: 0,
     warnsToday: 0,
     raidAlerts: 0,
-    fraudFlags: 0
-  }
+    fraudFlags: 0,
+  };
 
-  const safeEvents = data?.events || []
-  const safeRoles = data?.roles || []
-  const safeMetrics = data?.metrics || []
-  const safeCategories = data?.categories || []
-  const safeRecentJoins = data?.recentJoins || []
-  const safeRecentActiveMembers = data?.recentActiveMembers || []
-  const safeRecentFormerMembers = data?.recentFormerMembers || []
+  const safeEvents = data?.events || [];
+  const safeRoles = data?.roles || [];
+  const safeMetrics = data?.metrics || [];
+  const safeCategories = data?.categories || [];
+  const safeRecentJoins = data?.recentJoins || [];
+  const safeRecentActiveMembers = data?.recentActiveMembers || [];
+  const safeRecentFormerMembers = data?.recentFormerMembers || [];
+
+  const allMemberRows =
+    data?.guildMembers ||
+    data?.members ||
+    data?.memberRows ||
+    safeRecentJoins ||
+    [];
 
   const memberCounts = data?.memberCounts || {
-    tracked: safeRecentJoins.length,
-    active: safeRecentJoins.filter((m) => m.in_guild !== false).length,
-    former: safeRecentJoins.filter((m) => m.in_guild === false).length,
-    pendingVerification: safeRecentJoins.filter((m) => m.has_unverified).length,
-    verified: safeRecentJoins.filter((m) => m.has_verified_role).length,
-    staff: safeRecentJoins.filter((m) => m.has_staff_role).length
-  }
+    tracked: allMemberRows.length,
+    active: allMemberRows.filter((m) => m.in_guild !== false).length,
+    former: allMemberRows.filter((m) => m.in_guild === false).length,
+    pendingVerification: allMemberRows.filter((m) => m.has_unverified).length,
+    verified: allMemberRows.filter((m) => m.has_verified_role).length,
+    staff: allMemberRows.filter((m) => m.has_staff_role).length,
+  };
 
   const memberSummary = useMemo(() => {
-    const rows = safeRecentJoins
-    const total = memberCounts.tracked
-    const inServer = memberCounts.active
-    const leftServer = memberCounts.former
-    const verified = memberCounts.verified
-    const pending = memberCounts.pendingVerification
-    const staff = memberCounts.staff
+    const rows = allMemberRows;
+    const total = memberCounts.tracked;
+    const inServer = memberCounts.active;
+    const leftServer = memberCounts.former;
+    const verified = memberCounts.verified;
+    const pending = memberCounts.pendingVerification;
+    const staff = memberCounts.staff;
 
-    return { total, inServer, leftServer, verified, pending, staff, rows }
-  }, [safeRecentJoins, memberCounts])
+    return { total, inServer, leftServer, verified, pending, staff, rows };
+  }, [allMemberRows, memberCounts]);
 
   const memberPulse = useMemo(() => {
-    const activePreview = safeRecentActiveMembers.slice(0, 5)
-    const formerPreview = safeRecentFormerMembers.slice(0, 5)
+    const activePreview = safeRecentActiveMembers.slice(0, 5);
+    const formerPreview = safeRecentFormerMembers.slice(0, 5);
 
     return {
       activePreview,
-      formerPreview
-    }
-  }, [safeRecentActiveMembers, safeRecentFormerMembers])
+      formerPreview,
+    };
+  }, [safeRecentActiveMembers, safeRecentFormerMembers]);
 
   function isActiveTab(tab) {
-    return activeTab === tab
+    return activeTab === tab;
   }
 
   return (
@@ -239,7 +293,7 @@ export default function DashboardClient({ initialData, staffName }) {
                 justifyContent: "space-between",
                 alignItems: "flex-start",
                 gap: 12,
-                marginBottom: 10
+                marginBottom: 10,
               }}
             >
               <div className="muted">Control Deck</div>
@@ -320,36 +374,7 @@ export default function DashboardClient({ initialData, staffName }) {
               </div>
             </div>
 
-            <div className="card">
-              <h2 style={{ marginTop: 0 }}>Member Snapshot</h2>
-
-              <div className="space">
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <span className="muted">Tracked</span>
-                  <strong>{memberSummary.total}</strong>
-                </div>
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <span className="muted">In server</span>
-                  <strong>{memberSummary.inServer}</strong>
-                </div>
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <span className="muted">Former members</span>
-                  <strong>{memberSummary.leftServer}</strong>
-                </div>
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <span className="muted">Verified</span>
-                  <strong>{memberSummary.verified}</strong>
-                </div>
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <span className="muted">Pending verify</span>
-                  <strong>{memberSummary.pending}</strong>
-                </div>
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <span className="muted">Staff tracked</span>
-                  <strong>{memberSummary.staff}</strong>
-                </div>
-              </div>
-            </div>
+            <MemberSnapshot members={allMemberRows} />
           </div>
         </section>
       </section>
@@ -366,7 +391,7 @@ export default function DashboardClient({ initialData, staffName }) {
               alignItems: "center",
               flexWrap: "wrap",
               gap: 10,
-              marginBottom: 12
+              marginBottom: 12,
             }}
           >
             <h2 style={{ margin: 0 }}>Ticket Queue</h2>
@@ -378,7 +403,7 @@ export default function DashboardClient({ initialData, staffName }) {
           <div className="filters">
             <input
               className="input"
-              placeholder="Search user, title, category, suggestion..."
+              placeholder="Search user, title, category, suggestion, channel..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -392,6 +417,7 @@ export default function DashboardClient({ initialData, staffName }) {
               <option value="open">Open</option>
               <option value="claimed">Claimed</option>
               <option value="closed">Closed</option>
+              <option value="deleted">Deleted</option>
             </select>
 
             <select
@@ -400,6 +426,7 @@ export default function DashboardClient({ initialData, staffName }) {
               onChange={(e) => setPriorityFilter(e.target.value)}
             >
               <option value="all">All priorities</option>
+              <option value="urgent">Urgent</option>
               <option value="high">High</option>
               <option value="medium">Medium</option>
               <option value="low">Low</option>
@@ -421,8 +448,8 @@ export default function DashboardClient({ initialData, staffName }) {
 
         <TicketQueueTable
           tickets={filteredTickets}
-          onAction={onAction}
-          loadingId={loadingId}
+          currentStaffId={currentStaffId}
+          onRefresh={refresh}
         />
       </section>
 
@@ -444,7 +471,7 @@ export default function DashboardClient({ initialData, staffName }) {
                 alignItems: "center",
                 flexWrap: "wrap",
                 gap: 10,
-                marginBottom: 12
+                marginBottom: 12,
               }}
             >
               <h2 style={{ margin: 0 }}>Member Control Snapshot</h2>
@@ -500,7 +527,7 @@ export default function DashboardClient({ initialData, staffName }) {
                     style={{
                       justifyContent: "space-between",
                       alignItems: "flex-start",
-                      gap: 12
+                      gap: 12,
                     }}
                   >
                     <div style={{ minWidth: 0 }}>
@@ -508,7 +535,7 @@ export default function DashboardClient({ initialData, staffName }) {
                         style={{
                           fontWeight: 700,
                           color: "var(--text-strong)",
-                          overflowWrap: "anywhere"
+                          overflowWrap: "anywhere",
                         }}
                       >
                         {formatMemberName(member)}
@@ -518,7 +545,7 @@ export default function DashboardClient({ initialData, staffName }) {
                         style={{
                           marginTop: 4,
                           fontSize: 13,
-                          overflowWrap: "anywhere"
+                          overflowWrap: "anywhere",
                         }}
                       >
                         {member.user_id}
@@ -543,7 +570,12 @@ export default function DashboardClient({ initialData, staffName }) {
         </section>
 
         <section className="grid-2 members-bottom-grid">
-          <RoleHierarchyCard roles={safeRoles} />
+          <RoleHierarchyCard
+            roles={safeRoles}
+            members={allMemberRows}
+            staffUserId={currentStaffId}
+            refreshDashboardData={refresh}
+          />
           <StaffMetricsCard metrics={safeMetrics} />
         </section>
       </section>
@@ -590,5 +622,5 @@ export default function DashboardClient({ initialData, staffName }) {
         tabs={MOBILE_TABS}
       />
     </>
-  )
+  );
 }
