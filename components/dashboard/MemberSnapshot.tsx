@@ -62,22 +62,50 @@ function formatDate(value?: string | null): string {
   return date.toLocaleString();
 }
 
-function bucketClass(kind: BucketKey) {
+function bubbleStyle(kind: BucketKey) {
   if (kind === "verified") {
-    return "border-emerald-800 bg-emerald-950/30 text-emerald-300 hover:bg-emerald-900/30";
+    return {
+      border: "1px solid rgba(52, 211, 153, 0.28)",
+      background: "linear-gradient(180deg, rgba(16,185,129,0.16), rgba(16,185,129,0.08))",
+      color: "#d1fae5",
+    };
+  }
+
+  if (kind === "unverified") {
+    return {
+      border: "1px solid rgba(245, 158, 11, 0.28)",
+      background: "linear-gradient(180deg, rgba(245,158,11,0.16), rgba(245,158,11,0.08))",
+      color: "#fef3c7",
+    };
+  }
+
+  return {
+    border: "1px solid rgba(59, 130, 246, 0.28)",
+    background: "linear-gradient(180deg, rgba(59,130,246,0.16), rgba(59,130,246,0.08))",
+    color: "#dbeafe",
+  };
+}
+
+function chipStyle(kind: "verified" | "unverified" | "staff") {
+  if (kind === "verified") {
+    return {
+      border: "1px solid rgba(52, 211, 153, 0.28)",
+      background: "rgba(16,185,129,0.12)",
+      color: "#d1fae5",
+    };
   }
   if (kind === "unverified") {
-    return "border-amber-800 bg-amber-950/30 text-amber-300 hover:bg-amber-900/30";
+    return {
+      border: "1px solid rgba(245, 158, 11, 0.28)",
+      background: "rgba(245,158,11,0.12)",
+      color: "#fef3c7",
+    };
   }
-  return "border-blue-800 bg-blue-950/30 text-blue-300 hover:bg-blue-900/30";
-}
-
-function panelClass() {
-  return "rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4";
-}
-
-function inputClass() {
-  return "w-full rounded-2xl border border-zinc-700 bg-zinc-900 px-3 py-2.5 text-sm text-white outline-none focus:border-zinc-500";
+  return {
+    border: "1px solid rgba(59, 130, 246, 0.28)",
+    background: "rgba(59,130,246,0.12)",
+    color: "#dbeafe",
+  };
 }
 
 export default function MemberSnapshot({
@@ -151,32 +179,58 @@ export default function MemberSnapshot({
       : "";
 
   return (
-    <div className={`space-y-4 ${className}`}>
-      <div className="rounded-3xl border border-zinc-800 bg-zinc-950/80 p-4">
-        <div className="mb-4 flex items-center justify-between gap-3">
+    <div className={className}>
+      <div className="card" style={{ marginBottom: 18 }}>
+        <div
+          className="row"
+          style={{
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 12,
+            flexWrap: "wrap",
+            marginBottom: 14,
+          }}
+        >
           <div>
-            <div className="text-lg font-semibold text-white">{title}</div>
-            <div className="text-sm text-zinc-400">
+            <h2 style={{ margin: 0 }}>{title}</h2>
+            <div className="muted" style={{ marginTop: 6 }}>
               Tap any bubble to open the matching member list.
             </div>
           </div>
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-3 py-2 text-xs text-zinc-400">
-            Total Active: <span className="font-semibold text-zinc-200">{activeMembers.length}</span>
+
+          <div className="badge" style={{ alignSelf: "flex-start" }}>
+            Total Active: {activeMembers.length}
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+            gap: 12,
+          }}
+        >
           <button
             type="button"
             onClick={() => {
               setActiveBucket("verified");
               setSearch("");
             }}
-            className={`rounded-2xl border p-4 text-left transition ${bucketClass("verified")}`}
+            style={{
+              ...bubbleStyle("verified"),
+              borderRadius: 18,
+              padding: "16px 14px",
+              textAlign: "left",
+              cursor: "pointer",
+            }}
           >
-            <div className="text-xs font-semibold uppercase tracking-wide">Verified</div>
-            <div className="mt-2 text-3xl font-bold">{verifiedMembers.length}</div>
-            <div className="mt-1 text-sm opacity-90">Open verified member list</div>
+            <div style={{ fontSize: 12, fontWeight: 800, opacity: 0.9 }}>VERIFIED</div>
+            <div style={{ fontSize: 34, fontWeight: 800, lineHeight: 1.1, marginTop: 10 }}>
+              {verifiedMembers.length}
+            </div>
+            <div style={{ marginTop: 8, fontSize: 14, opacity: 0.95 }}>
+              Open verified member list
+            </div>
           </button>
 
           <button
@@ -185,11 +239,21 @@ export default function MemberSnapshot({
               setActiveBucket("unverified");
               setSearch("");
             }}
-            className={`rounded-2xl border p-4 text-left transition ${bucketClass("unverified")}`}
+            style={{
+              ...bubbleStyle("unverified"),
+              borderRadius: 18,
+              padding: "16px 14px",
+              textAlign: "left",
+              cursor: "pointer",
+            }}
           >
-            <div className="text-xs font-semibold uppercase tracking-wide">Unverified</div>
-            <div className="mt-2 text-3xl font-bold">{unverifiedMembers.length}</div>
-            <div className="mt-1 text-sm opacity-90">Open unverified member list</div>
+            <div style={{ fontSize: 12, fontWeight: 800, opacity: 0.9 }}>UNVERIFIED</div>
+            <div style={{ fontSize: 34, fontWeight: 800, lineHeight: 1.1, marginTop: 10 }}>
+              {unverifiedMembers.length}
+            </div>
+            <div style={{ marginTop: 8, fontSize: 14, opacity: 0.95 }}>
+              Open unverified member list
+            </div>
           </button>
 
           <button
@@ -198,125 +262,208 @@ export default function MemberSnapshot({
               setActiveBucket("staff");
               setSearch("");
             }}
-            className={`rounded-2xl border p-4 text-left transition ${bucketClass("staff")}`}
+            style={{
+              ...bubbleStyle("staff"),
+              borderRadius: 18,
+              padding: "16px 14px",
+              textAlign: "left",
+              cursor: "pointer",
+            }}
           >
-            <div className="text-xs font-semibold uppercase tracking-wide">Staff</div>
-            <div className="mt-2 text-3xl font-bold">{staffMembers.length}</div>
-            <div className="mt-1 text-sm opacity-90">Open staff member list</div>
+            <div style={{ fontSize: 12, fontWeight: 800, opacity: 0.9 }}>STAFF</div>
+            <div style={{ fontSize: 34, fontWeight: 800, lineHeight: 1.1, marginTop: 10 }}>
+              {staffMembers.length}
+            </div>
+            <div style={{ marginTop: 8, fontSize: 14, opacity: 0.95 }}>
+              Open staff member list
+            </div>
           </button>
         </div>
       </div>
 
-      {activeBucket && (
-        <div className={panelClass()}>
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      {activeBucket ? (
+        <div className="card">
+          <div
+            className="row"
+            style={{
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              gap: 12,
+              flexWrap: "wrap",
+              marginBottom: 14,
+            }}
+          >
             <div>
-              <div className="text-lg font-semibold text-white">{bucketTitle}</div>
-              <div className="text-sm text-zinc-400">
+              <h2 style={{ margin: 0 }}>{bucketTitle}</h2>
+              <div className="muted" style={{ marginTop: 6 }}>
                 Showing {currentMembers.length} member{currentMembers.length === 1 ? "" : "s"}
               </div>
             </div>
 
-            <div className="flex gap-2">
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                flexWrap: "wrap",
+                width: "100%",
+                maxWidth: 460,
+              }}
+            >
               <input
-                className={inputClass()}
+                className="input"
+                style={{ flex: 1, minWidth: 180 }}
                 placeholder="Search members, IDs, or roles..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
+
               <button
                 type="button"
-                className="rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                className="button ghost"
                 onClick={() => {
                   setActiveBucket(null);
                   setSearch("");
                 }}
+                style={{ width: "auto", minWidth: 92 }}
               >
                 Close
               </button>
             </div>
           </div>
 
-          <div className="space-y-3">
+          <div className="space">
             {currentMembers.length === 0 ? (
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400">
-                No members found for this filter.
-              </div>
+              <div className="empty-state">No members found for this filter.</div>
             ) : (
               currentMembers.map((member) => (
                 <div
                   key={`${getMemberId(member)}-${member.updated_at || member.last_seen_at || ""}`}
-                  className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"
+                  className="card"
+                  style={{
+                    padding: 14,
+                    borderRadius: 18,
+                    border: "1px solid rgba(255,255,255,0.08)",
+                  }}
                 >
-                  <div className="flex items-start gap-3">
-                    <div className="h-12 w-12 overflow-hidden rounded-full border border-zinc-800 bg-zinc-800">
+                  <div className="row" style={{ alignItems: "flex-start", gap: 12 }}>
+                    <div
+                      style={{
+                        width: 48,
+                        height: 48,
+                        minWidth: 48,
+                        borderRadius: "999px",
+                        overflow: "hidden",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        background: "rgba(255,255,255,0.06)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: 800,
+                        color: "var(--text-strong)",
+                      }}
+                    >
                       {member.avatar_url ? (
                         <img
                           src={member.avatar_url}
                           alt={getDisplayName(member)}
-                          className="h-full w-full object-cover"
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
                         />
                       ) : (
-                        <div className="flex h-full w-full items-center justify-center text-sm font-bold text-zinc-300">
-                          {getDisplayName(member).slice(0, 2).toUpperCase()}
-                        </div>
+                        getDisplayName(member).slice(0, 2).toUpperCase()
                       )}
                     </div>
 
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="truncate text-base font-semibold text-white">
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div
+                        className="row"
+                        style={{
+                          gap: 8,
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                          marginBottom: 6,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontWeight: 800,
+                            color: "var(--text-strong)",
+                            overflowWrap: "anywhere",
+                          }}
+                        >
                           {getDisplayName(member)}
                         </div>
 
-                        {normalizeBool(member.has_verified_role) && (
-                          <span className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-xs font-semibold text-emerald-300">
+                        {normalizeBool(member.has_verified_role) ? (
+                          <span className="badge" style={chipStyle("verified")}>
                             Verified
                           </span>
-                        )}
+                        ) : null}
 
-                        {normalizeBool(member.has_unverified) && (
-                          <span className="rounded-full border border-amber-800 bg-amber-950/40 px-2 py-0.5 text-xs font-semibold text-amber-300">
+                        {normalizeBool(member.has_unverified) ? (
+                          <span className="badge" style={chipStyle("unverified")}>
                             Unverified
                           </span>
-                        )}
+                        ) : null}
 
-                        {normalizeBool(member.has_staff_role) && (
-                          <span className="rounded-full border border-blue-800 bg-blue-950/40 px-2 py-0.5 text-xs font-semibold text-blue-300">
+                        {normalizeBool(member.has_staff_role) ? (
+                          <span className="badge" style={chipStyle("staff")}>
                             Staff
                           </span>
-                        )}
+                        ) : null}
                       </div>
 
-                      <div className="mt-1 text-sm text-zinc-400">{getSubtitle(member)}</div>
+                      <div className="muted" style={{ fontSize: 13, overflowWrap: "anywhere" }}>
+                        {getSubtitle(member)}
+                      </div>
 
-                      <div className="mt-3 grid gap-2 text-xs text-zinc-400 sm:grid-cols-2 lg:grid-cols-3">
-                        <div>
-                          <span className="font-semibold text-zinc-300">Role State:</span>{" "}
-                          {member.role_state || "unknown"}
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                          gap: 10,
+                          marginTop: 12,
+                        }}
+                      >
+                        <div className="member-detail-item">
+                          <span className="ticket-info-label">Role State</span>
+                          <span>{member.role_state || "unknown"}</span>
                         </div>
-                        <div>
-                          <span className="font-semibold text-zinc-300">Joined:</span>{" "}
-                          {formatDate(member.joined_at)}
+
+                        <div className="member-detail-item">
+                          <span className="ticket-info-label">Joined</span>
+                          <span>{formatDate(member.joined_at)}</span>
                         </div>
-                        <div>
-                          <span className="font-semibold text-zinc-300">Last Seen:</span>{" "}
-                          {formatDate(member.last_seen_at || member.updated_at)}
+
+                        <div className="member-detail-item">
+                          <span className="ticket-info-label">Last Seen</span>
+                          <span>{formatDate(member.last_seen_at || member.updated_at)}</span>
                         </div>
                       </div>
 
-                      {member.role_names && member.role_names.length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2">
+                      {member.role_names && member.role_names.length > 0 ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: 8,
+                            marginTop: 12,
+                          }}
+                        >
                           {member.role_names.map((roleName) => (
                             <span
                               key={`${getMemberId(member)}-${roleName}`}
-                              className="rounded-full border border-zinc-700 bg-zinc-950 px-2.5 py-1 text-xs text-zinc-300"
+                              className="badge"
+                              style={{
+                                background: "rgba(255,255,255,0.06)",
+                                border: "1px solid rgba(255,255,255,0.08)",
+                                color: "var(--text-soft)",
+                              }}
                             >
                               {roleName}
                             </span>
                           ))}
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -324,7 +471,7 @@ export default function MemberSnapshot({
             )}
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
