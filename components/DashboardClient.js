@@ -318,7 +318,7 @@ export default function DashboardClient({ initialData, staffName }) {
             </p>
           </div>
 
-          <QuickActions onRefresh={refresh} />
+          <QuickActions onRefresh={refresh} currentStaffId={currentStaffId} />
         </section>
 
         <section className="metrics">
