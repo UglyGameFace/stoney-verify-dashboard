@@ -1,33 +1,50 @@
 import { NextRequest, NextResponse } from "next/server";
-import { botCreateTicket } from "@/lib/botApi";
+import { queueCreateTicket } from "@/lib/botCommands";
 
 export const dynamic = "force-dynamic";
 
-function getGuildId(): string {
-  const guildId =
-    process.env.DISCORD_GUILD_ID ||
-    process.env.NEXT_PUBLIC_DISCORD_GUILD_ID ||
-    "";
+function getRequestedBy(body: any): string | null {
+  const candidates = [
+    body?.requestedBy,
+    body?.requested_by,
+    body?.staffId,
+    body?.staff_id,
+    body?.userId,
+    body?.user_id,
+  ];
 
-  if (!guildId.trim()) {
-    throw new Error("Missing DISCORD_GUILD_ID / NEXT_PUBLIC_DISCORD_GUILD_ID");
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
   }
 
-  return guildId.trim();
+  return null;
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    const userId = String(body?.userId || body?.user_id || "").trim();
-    const category = String(body?.category || "support").trim() || "support";
+    const userId =
+      typeof body?.userId === "string" && body.userId.trim()
+        ? body.userId.trim()
+        : typeof body?.user_id === "string" && body.user_id.trim()
+        ? body.user_id.trim()
+        : "";
+
+    const category =
+      typeof body?.category === "string" && body.category.trim()
+        ? body.category.trim()
+        : "support";
+
     const openingMessage =
       typeof body?.openingMessage === "string"
         ? body.openingMessage
         : typeof body?.opening_message === "string"
         ? body.opening_message
         : "";
+
     const priority =
       typeof body?.priority === "string" && body.priority.trim()
         ? body.priority.trim()
@@ -39,54 +56,48 @@ export async function POST(req: NextRequest) {
         : typeof body?.parent_category_id === "string" &&
           body.parent_category_id.trim()
         ? body.parent_category_id.trim()
-        : undefined;
+        : null;
 
     const staffRoleIds = Array.isArray(body?.staffRoleIds)
-      ? body.staffRoleIds.map((x: unknown) => String(x))
+      ? body.staffRoleIds
+          .map((x: unknown) => String(x).trim())
+          .filter(Boolean)
       : Array.isArray(body?.staff_role_ids)
-      ? body.staff_role_ids.map((x: unknown) => String(x))
-      : undefined;
+      ? body.staff_role_ids
+          .map((x: unknown) => String(x).trim())
+          .filter(Boolean)
+      : null;
 
-    const allowDuplicate = Boolean(body?.allowDuplicate ?? body?.allow_duplicate);
+    const allowDuplicate = Boolean(
+      body?.allowDuplicate ?? body?.allow_duplicate
+    );
 
     if (!userId) {
       return NextResponse.json(
-        { ok: false, error: "Missing userId" },
+        {
+          ok: false,
+          error: "Missing userId",
+        },
         { status: 400 }
       );
     }
 
-    const guildId = getGuildId();
-
-    const result = await botCreateTicket({
-      guildId,
+    const command = await queueCreateTicket({
       userId,
       category,
-      ghost: false,
-      openingMessage,
       priority,
+      openingMessage,
+      ghost: false,
+      allowDuplicate,
+      requestedBy: getRequestedBy(body),
       parentCategoryId,
       staffRoleIds,
-      allowDuplicate,
     });
-
-    if (!result.ok) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: result.error || "Failed to create ticket",
-          details: result,
-        },
-        { status: 500 }
-      );
-    }
 
     return NextResponse.json({
       ok: true,
-      created: result.created ?? false,
-      duplicate: result.duplicate ?? false,
-      existing_ticket: result.existing_ticket ?? null,
-      ticket: result.ticket ?? null,
+      queued: true,
+      command,
     });
   } catch (error) {
     return NextResponse.json(
