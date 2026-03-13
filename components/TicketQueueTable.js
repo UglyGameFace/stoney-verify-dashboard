@@ -297,121 +297,127 @@ export default function TicketQueueTable({
             </div>
 
             <div style={{ marginTop: 16, display: "grid", gap: 14 }}>
-              {tickets.map((ticket) => (
-                <div
-                  key={`${ticket.id}-controls`}
-                  className="card"
-                  style={{
-                    padding: 16,
-                    borderRadius: 18,
-                    border: "1px solid rgba(255,255,255,0.08)",
-                  }}
-                >
+              {tickets.map((ticket) => {
+                const channelId = getChannelId(ticket);
+
+                return (
                   <div
-                    className="row"
+                    key={`${ticket.id}-controls`}
+                    className="card"
                     style={{
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      gap: 12,
-                      marginBottom: 12,
-                      flexWrap: "wrap",
+                      padding: 16,
+                      borderRadius: 18,
+                      border: "1px solid rgba(255,255,255,0.08)",
                     }}
                   >
-                    <div style={{ minWidth: 0, flex: 1 }}>
+                    <div
+                      className="row"
+                      style={{
+                        justifyContent: "space-between",
+                        alignItems: "flex-start",
+                        gap: 12,
+                        marginBottom: 12,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div
+                          style={{
+                            fontWeight: 800,
+                            fontSize: 16,
+                            overflowWrap: "anywhere",
+                          }}
+                        >
+                          {getTicketUserLabel(ticket)}
+                        </div>
+                        <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
+                          {getTicketTitle(ticket)}
+                        </div>
+                      </div>
+
                       <div
                         style={{
-                          fontWeight: 800,
-                          fontSize: 16,
-                          overflowWrap: "anywhere",
+                          display: "flex",
+                          gap: 8,
+                          flexWrap: "wrap",
+                          alignItems: "center",
                         }}
                       >
-                        {getTicketUserLabel(ticket)}
-                      </div>
-                      <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
-                        {getTicketTitle(ticket)}
+                        <span className={badgeClass(ticket.status)}>{safeText(ticket.status)}</span>
+                        <span className={badgeClass(ticket.priority)}>
+                          {safeText(ticket.priority)}
+                        </span>
+                        <Link className="button ghost" href={`/tickets/${ticket.id}`}>
+                          Open
+                        </Link>
                       </div>
                     </div>
 
                     <div
                       style={{
-                        display: "flex",
-                        gap: 8,
-                        flexWrap: "wrap",
-                        alignItems: "center",
+                        display: "grid",
+                        gap: 10,
+                        gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                        marginBottom: 14,
                       }}
                     >
-                      <span className={badgeClass(ticket.status)}>{safeText(ticket.status)}</span>
-                      <span className={badgeClass(ticket.priority)}>
-                        {safeText(ticket.priority)}
-                      </span>
-                      <Link className="button ghost" href={`/tickets/${ticket.id}`}>
-                        Open
-                      </Link>
+                      <div>
+                        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+                          Category
+                        </div>
+                        <div>{safeText(ticket.category)}</div>
+                      </div>
+
+                      <div>
+                        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+                          Claimed By
+                        </div>
+                        <div>{safeText(ticket.claimed_by)}</div>
+                      </div>
+
+                      <div>
+                        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+                          Channel ID
+                        </div>
+                        <div style={{ overflowWrap: "anywhere" }}>
+                          {channelId || "Missing"}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+                          Updated
+                        </div>
+                        <div>{timeAgo(ticket.updated_at || ticket.created_at)}</div>
+                      </div>
                     </div>
+
+                    {!!ticket.mod_suggestion ? (
+                      <div style={{ marginBottom: 14 }}>
+                        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+                          Suggestion
+                        </div>
+                        <div style={{ overflowWrap: "anywhere" }}>{ticket.mod_suggestion}</div>
+                      </div>
+                    ) : null}
+
+                    {!!ticket.closed_reason ? (
+                      <div style={{ marginBottom: 14 }}>
+                        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+                          Closed Reason
+                        </div>
+                        <div style={{ overflowWrap: "anywhere" }}>{ticket.closed_reason}</div>
+                      </div>
+                    ) : null}
+
+                    <TicketControls
+                      ticket={ticket}
+                      currentStaffId={currentStaffId}
+                      onChanged={onRefresh}
+                    />
                   </div>
-
-                  <div
-                    style={{
-                      display: "grid",
-                      gap: 10,
-                      gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                      marginBottom: 14,
-                    }}
-                  >
-                    <div>
-                      <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                        Category
-                      </div>
-                      <div>{safeText(ticket.category)}</div>
-                    </div>
-
-                    <div>
-                      <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                        Claimed By
-                      </div>
-                      <div>{safeText(ticket.claimed_by)}</div>
-                    </div>
-
-                    <div>
-                      <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                        Channel ID
-                      </div>
-                      <div style={{ overflowWrap: "anywhere" }}>{channelId || "Missing"}</div>
-                    </div>
-
-                    <div>
-                      <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                        Updated
-                      </div>
-                      <div>{timeAgo(ticket.updated_at || ticket.created_at)}</div>
-                    </div>
-                  </div>
-
-                  {!!ticket.mod_suggestion ? (
-                    <div style={{ marginBottom: 14 }}>
-                      <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                        Suggestion
-                      </div>
-                      <div style={{ overflowWrap: "anywhere" }}>{ticket.mod_suggestion}</div>
-                    </div>
-                  ) : null}
-
-                  {!!ticket.closed_reason ? (
-                    <div style={{ marginBottom: 14 }}>
-                      <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                        Closed Reason
-                      </div>
-                      <div style={{ overflowWrap: "anywhere" }}>{ticket.closed_reason}</div>
-                    </div>
-                  ) : null}
-
-                  <TicketControls
-                    ticket={ticket}
-                    currentStaffId={currentStaffId}
-                    onChanged={onRefresh}
-                  />
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </>
