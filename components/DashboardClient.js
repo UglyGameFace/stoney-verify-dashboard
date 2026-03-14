@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { getBrowserSupabase } from "@/lib/supabase-browser";
 import { sortTickets } from "@/lib/priority";
 import Topbar from "@/components/Topbar";
@@ -78,7 +78,7 @@ export default function DashboardClient({ initialData, staffName }) {
     [initialData, staffName]
   );
 
-  async function refresh({ silent = false } = {}) {
+  const refresh = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setIsRefreshing(true);
     setError("");
 
@@ -96,7 +96,7 @@ export default function DashboardClient({ initialData, staffName }) {
     } finally {
       if (!silent) setIsRefreshing(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     let supabase;
@@ -133,6 +133,11 @@ export default function DashboardClient({ initialData, staffName }) {
         )
         .on(
           "postgres_changes",
+          { event: "*", schema: "public", table: "audit_logs" },
+          handleRealtimeChange
+        )
+        .on(
+          "postgres_changes",
           { event: "*", schema: "public", table: "audit_events" },
           handleRealtimeChange
         )
@@ -163,8 +168,13 @@ export default function DashboardClient({ initialData, staffName }) {
         )
         .subscribe((status) => {
           console.log("dashboard realtime status:", status);
+
           if (status === "SUBSCRIBED") {
             refresh({ silent: true });
+          }
+
+          if (status === "CHANNEL_ERROR") {
+            console.error("Realtime subscription failed");
           }
         });
     } catch (err) {
@@ -177,7 +187,7 @@ export default function DashboardClient({ initialData, staffName }) {
         supabase.removeChannel(channel);
       }
     };
-  }, []);
+  }, [refresh]);
 
   const filteredTickets = useMemo(() => {
     let rows = [...(data?.tickets || [])];
@@ -221,13 +231,17 @@ export default function DashboardClient({ initialData, staffName }) {
     fraudFlags: 0,
   };
 
-  const safeEvents = data?.events || [];
-  const safeRoles = data?.roles || [];
-  const safeMetrics = data?.metrics || [];
-  const safeCategories = data?.categories || [];
-  const safeRecentJoins = data?.recentJoins || [];
-  const safeRecentActiveMembers = data?.recentActiveMembers || [];
-  const safeRecentFormerMembers = data?.recentFormerMembers || [];
+  const safeEvents = Array.isArray(data?.events) ? data.events : [];
+  const safeRoles = Array.isArray(data?.roles) ? data.roles : [];
+  const safeMetrics = Array.isArray(data?.metrics) ? data.metrics : [];
+  const safeCategories = Array.isArray(data?.categories) ? data.categories : [];
+  const safeRecentJoins = Array.isArray(data?.recentJoins) ? data.recentJoins : [];
+  const safeRecentActiveMembers = Array.isArray(data?.recentActiveMembers)
+    ? data.recentActiveMembers
+    : [];
+  const safeRecentFormerMembers = Array.isArray(data?.recentFormerMembers)
+    ? data.recentFormerMembers
+    : [];
 
   const allMemberRows =
     data?.guildMembers ||
@@ -370,6 +384,11 @@ export default function DashboardClient({ initialData, staffName }) {
                 <div className="row">
                   <span className="status-dot" />
                   <span>Current sync state: {isRefreshing ? "Refreshing..." : "Idle"}</span>
+                </div>
+
+                <div className="row">
+                  <span className="status-dot" />
+                  <span>Audit timeline is now merged from logs and system events</span>
                 </div>
               </div>
             </div>
