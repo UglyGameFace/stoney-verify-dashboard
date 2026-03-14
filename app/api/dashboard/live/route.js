@@ -1,6 +1,7 @@
 import { createServerSupabase } from "@/lib/supabase-server";
 import { env } from "@/lib/env";
 import { sortTickets } from "@/lib/priority";
+import { requireStaffSessionForRoute } from "@/lib/auth-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -215,6 +216,8 @@ function buildTimeline(auditLogs, auditEvents, guildMembers) {
 
 export async function GET() {
   try {
+    await requireStaffSessionForRoute();
+
     const supabase = createServerSupabase();
     const guildId = env.guildId || "";
 
@@ -563,9 +566,12 @@ export async function GET() {
       console.error("[dashboard/live] fatal error =", error);
     }
 
+    const message = error?.message || "Failed to load dashboard.";
+    const unauthorized = message === "Unauthorized";
+
     return Response.json(
-      { error: error?.message || "Failed to load dashboard." },
-      { status: 500 }
+      { error: message },
+      { status: unauthorized ? 401 : 500 }
     );
   }
 }
