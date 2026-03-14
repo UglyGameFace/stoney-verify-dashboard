@@ -9,25 +9,25 @@ function debugEnabled() {
   return String(process.env.DASHBOARD_DEBUG || "").toLowerCase() === "true";
 }
 
-function toJoinedTimestamp(value: any) {
+function toJoinedTimestamp(value) {
   const ts = new Date(value || 0).getTime();
   return Number.isFinite(ts) ? ts : 0;
 }
 
-function toTime(value: any) {
+function toTime(value) {
   const ts = new Date(value || 0).getTime();
   return Number.isFinite(ts) ? ts : 0;
 }
 
-function safeArray<T = any>(value: any): T[] {
+function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function normalizeString(value: any) {
+function normalizeString(value) {
   return String(value || "").trim();
 }
 
-function mergeJoinWithMember(joinRow: any, memberRow: any) {
+function mergeJoinWithMember(joinRow, memberRow) {
   return {
     ...(memberRow || {}),
     ...(joinRow || {}),
@@ -61,7 +61,7 @@ function mergeJoinWithMember(joinRow: any, memberRow: any) {
   };
 }
 
-function mapTicket(row: any) {
+function mapTicket(row) {
   return {
     ...row,
     channel_id: row?.channel_id || row?.discord_thread_id || null,
@@ -76,7 +76,7 @@ function mapTicket(row: any) {
   };
 }
 
-function mapGuildMember(row: any) {
+function mapGuildMember(row) {
   return {
     ...row,
     guild_id: row?.guild_id || null,
@@ -108,7 +108,7 @@ function mapGuildMember(row: any) {
   };
 }
 
-function computeRoleMemberCount(role: any, members: any[]) {
+function computeRoleMemberCount(role, members) {
   const roleId = normalizeString(role?.role_id);
   const roleName = normalizeString(role?.name).toLowerCase();
 
@@ -125,7 +125,7 @@ function computeRoleMemberCount(role: any, members: any[]) {
   }).length;
 }
 
-function prettifyAction(action: any) {
+function prettifyAction(action) {
   const raw = normalizeString(action);
   if (!raw) return "Audit Log";
 
@@ -136,9 +136,9 @@ function prettifyAction(action: any) {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
-function buildAuditDescription(row: any) {
+function buildAuditDescription(row) {
   const meta = row?.meta && typeof row.meta === "object" ? row.meta : {};
-  const pieces: string[] = [];
+  const pieces = [];
 
   if (meta?.reason) pieces.push(`Reason: ${String(meta.reason)}`);
   if (meta?.channel_id) pieces.push(`Channel: ${String(meta.channel_id)}`);
@@ -156,7 +156,7 @@ function buildAuditDescription(row: any) {
     : "Dashboard/bot audit log entry";
 }
 
-function mapAuditLogToTimeline(row: any) {
+function mapAuditLogToTimeline(row) {
   return {
     id: `audit-log-${row?.id ?? Math.random()}`,
     title: prettifyAction(row?.action),
@@ -170,7 +170,7 @@ function mapAuditLogToTimeline(row: any) {
   };
 }
 
-function mapAuditEventToTimeline(row: any) {
+function mapAuditEventToTimeline(row) {
   return {
     id: `audit-event-${row?.id ?? Math.random()}`,
     title: row?.title || "Audit Event",
@@ -184,7 +184,7 @@ function mapAuditEventToTimeline(row: any) {
   };
 }
 
-function buildTimeline(auditLogs: any[], auditEvents: any[], guildMembers: any[]) {
+function buildTimeline(auditLogs, auditEvents, guildMembers) {
   const memberMap = new Map(
     guildMembers.map((member) => [String(member.user_id), member])
   );
@@ -243,7 +243,7 @@ export async function GET() {
       formerMembersCountRes,
       pendingVerificationCountRes,
       verifiedMembersCountRes,
-      staffMembersCountRes
+      staffMembersCountRes,
     ] = await Promise.all([
       supabase
         .from("tickets")
@@ -369,7 +369,7 @@ export async function GET() {
         .select("*", { count: "exact", head: true })
         .eq("guild_id", guildId)
         .eq("in_guild", true)
-        .eq("has_staff_role", true)
+        .eq("has_staff_role", true),
     ]);
 
     const firstError =
@@ -421,18 +421,18 @@ export async function GET() {
       member_count: Math.max(
         Number(role?.member_count || 0),
         computeRoleMemberCount(role, guildMembers)
-      )
+      ),
     }));
 
     const joinUserIds = [
       ...new Set(
         memberJoins
-          .map((row: any) => String(row?.user_id || "").trim())
+          .map((row) => String(row?.user_id || "").trim())
           .filter(Boolean)
-      )
+      ),
     ];
 
-    let recentJoins: any[] = [];
+    let recentJoins = [];
 
     if (joinUserIds.length) {
       const memberMap = new Map(
@@ -440,7 +440,7 @@ export async function GET() {
       );
 
       recentJoins = memberJoins
-        .map((joinRow: any) =>
+        .map((joinRow) =>
           mergeJoinWithMember(joinRow, memberMap.get(String(joinRow.user_id)))
         )
         .sort(
@@ -489,7 +489,7 @@ export async function GET() {
             discord_thread_id: t.discord_thread_id || null,
             channel_id: t.channel_id || null,
             is_ghost: Boolean(t.is_ghost),
-            created_at: t.created_at
+            created_at: t.created_at,
           }))
         );
       } else {
@@ -522,13 +522,13 @@ export async function GET() {
         former: formerMembersCountRes.count || 0,
         pendingVerification: pendingVerificationCountRes.count || 0,
         verified: verifiedMembersCountRes.count || 0,
-        staff: staffMembersCountRes.count || 0
+        staff: staffMembersCountRes.count || 0,
       },
       counts: {
         openTickets: openTicketsRes.count || 0,
         warnsToday: warnsTodayRes.count || 0,
         raidAlerts: raidAlertsRes.count || 0,
-        fraudFlags: fraudFlagsRes.count || 0
+        fraudFlags: fraudFlagsRes.count || 0,
       },
       debug: debugEnabled()
         ? {
@@ -544,21 +544,21 @@ export async function GET() {
               former: formerMembersCountRes.count || 0,
               pendingVerification: pendingVerificationCountRes.count || 0,
               verified: verifiedMembersCountRes.count || 0,
-              staff: staffMembersCountRes.count || 0
+              staff: staffMembersCountRes.count || 0,
             },
             recentJoinsCount: recentJoins.length,
-            memberJoinsCount: memberJoins.length
+            memberJoinsCount: memberJoins.length,
           }
-        : undefined
+        : undefined,
     };
 
     return Response.json(payload, {
       status: 200,
       headers: {
-        "Cache-Control": "no-store, max-age=0"
-      }
+        "Cache-Control": "no-store, max-age=0",
+      },
     });
-  } catch (error: any) {
+  } catch (error) {
     if (debugEnabled()) {
       console.error("[dashboard/live] fatal error =", error);
     }
