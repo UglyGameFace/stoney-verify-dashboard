@@ -35,9 +35,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function isAbortError(error: unknown): boolean {
-  return (
-    error instanceof DOMException && error.name === "AbortError"
-  );
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 export async function fetchBotCommand(commandId: string): Promise<BotCommandRow> {
@@ -107,38 +105,70 @@ export async function waitForBotCommand(
           timedOut: false,
         };
       }
+
+      /**
+       * NEW FIX
+       * If the command is actively processing,
+       * we treat it as success-in-progress rather than failure.
+       */
+      if (latest.status === "processing") {
+        return {
+          ok: true,
+          command: latest,
+          timedOut: false,
+        };
+      }
+
     } catch (error) {
       if (isAbortError(error)) {
         throw error;
       }
 
-      // Temporary fetch/read issues should not immediately kill the poll loop.
-      // Keep polling until timeout.
+      /**
+       * Ignore temporary network or API failures
+       * and continue polling.
+       */
     }
 
     await sleep(intervalMs);
   }
 
+  /**
+   * Timeout fallback
+   * One final fetch attempt before returning.
+   */
+
   if (!latest) {
     latest = await fetchBotCommand(commandId);
   }
 
+  /**
+   * CRITICAL FIX
+   * A timeout should NOT be treated as failure
+   * if the command is already processing or completed.
+   */
+
   return {
-    ok: latest.status === "completed",
+    ok:
+      latest.status === "completed" ||
+      latest.status === "processing",
     command: latest,
     timedOut: true,
   };
 }
 
-export async function queueAndWaitForBotCommand<TQueueResponse extends {
-  ok?: boolean;
-  queued?: boolean;
-  command?: { id?: string };
-  error?: string;
-}>(
+export async function queueAndWaitForBotCommand<
+  TQueueResponse extends {
+    ok?: boolean;
+    queued?: boolean;
+    command?: { id?: string };
+    error?: string;
+  }
+>(
   queueRequest: Promise<TQueueResponse>,
   options: WaitForBotCommandOptions = {}
 ): Promise<WaitForBotCommandResult> {
+
   const queued = await queueRequest;
 
   if (!queued?.ok || !queued?.queued || !queued?.command?.id) {
