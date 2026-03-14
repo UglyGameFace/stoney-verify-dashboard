@@ -1,15 +1,69 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   syncMembersAction,
   reconcileDepartedMembersAction,
 } from "@/lib/dashboardActions";
 
-export default function QuickActions({ onRefresh, currentStaffId = null }) {
+function getActionSummary(name) {
+  if (name === "Full Member Sync") {
+    return "Rebuild live member records, roles, and dashboard tracking.";
+  }
+
+  if (name === "Reconcile Departed Members") {
+    return "Mark members who are no longer in the guild as departed.";
+  }
+
+  return "Run dashboard maintenance action.";
+}
+
+export default function QuickActions({
+  onRefresh,
+  currentStaffId = null,
+}) {
   const [running, setRunning] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [expandedAction, setExpandedAction] = useState("");
+
+  const actions = useMemo(
+    () => [
+      {
+        key: "sync-members",
+        name: "Full Member Sync",
+        compactLabel: "Sync Members",
+        description:
+          "Rebuild live member rows, roles, verification state, and dashboard counts.",
+        detail:
+          "Best when member counts, role stats, or verification states look outdated.",
+        runner: () =>
+          syncMembersAction({
+            staffId: currentStaffId,
+            requestedBy: currentStaffId,
+          }),
+      },
+      {
+        key: "reconcile-departed",
+        name: "Reconcile Departed Members",
+        compactLabel: "Reconcile Departed",
+        description:
+          "Find members who already left and mark them correctly in dashboard history.",
+        detail:
+          "Best when former members are still showing as active in the dashboard.",
+        runner: () =>
+          reconcileDepartedMembersAction({
+            staffId: currentStaffId,
+            requestedBy: currentStaffId,
+          }),
+      },
+    ],
+    [currentStaffId]
+  );
+
+  function toggleExpanded(key) {
+    setExpandedAction((prev) => (prev === key ? "" : key));
+  }
 
   async function runAction(name, runner) {
     setError("");
@@ -19,25 +73,9 @@ export default function QuickActions({ onRefresh, currentStaffId = null }) {
     try {
       const result = await runner();
 
-      /**
-       * CRITICAL FIX
-       *
-       * Previously the dashboard treated ANY non-ok result as failure.
-       * However commands can legitimately timeout while still processing.
-       *
-       * We now only treat it as failure if:
-       * - ok === false
-       * - AND timedOut !== true
-       */
-
       if (!result?.ok && !result?.timedOut) {
         throw new Error(result?.command?.error || `${name} failed.`);
       }
-
-      /**
-       * If the command timed out but is still processing,
-       * show a more accurate message.
-       */
 
       if (result?.timedOut) {
         setMessage(`${name} queued and still processing...`);
@@ -45,14 +83,9 @@ export default function QuickActions({ onRefresh, currentStaffId = null }) {
         setMessage(`${name} completed.`);
       }
 
-      /**
-       * Refresh dashboard metrics
-       */
-
       if (onRefresh) {
         await onRefresh();
       }
-
     } catch (err) {
       setError(err?.message || `${name} failed.`);
     } finally {
@@ -62,7 +95,33 @@ export default function QuickActions({ onRefresh, currentStaffId = null }) {
 
   return (
     <div className="card">
-      <h2 style={{ marginTop: 0 }}>Quick Actions</h2>
+      <div
+        className="row"
+        style={{
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 10,
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <h2 style={{ margin: 0 }}>Quick Actions</h2>
+          <div className="muted" style={{ marginTop: 6 }}>
+            Compact mobile controls with expandable action details.
+          </div>
+        </div>
+
+        <button
+          className="button ghost"
+          type="button"
+          style={{ width: "auto", minWidth: 110 }}
+          onClick={() => onRefresh && onRefresh()}
+          disabled={!!running}
+        >
+          Refresh
+        </button>
+      </div>
 
       {error ? (
         <div className="error-banner" style={{ marginBottom: 12 }}>
@@ -76,40 +135,191 @@ export default function QuickActions({ onRefresh, currentStaffId = null }) {
         </div>
       ) : null}
 
-      <div className="quick-actions">
-        <button
-          className="button"
-          disabled={running === "Full Member Sync"}
-          onClick={() =>
-            runAction("Full Member Sync", () =>
-              syncMembersAction({
-                staffId: currentStaffId,
-                requestedBy: currentStaffId,
-              })
-            )
-          }
-        >
-          {running === "Full Member Sync"
-            ? "Running Full Member Sync..."
-            : "Full Member Sync"}
-        </button>
+      <div
+        className="space"
+        style={{
+          display: "grid",
+          gap: 12,
+        }}
+      >
+        {actions.map((action) => {
+          const isRunning = running === action.name;
+          const isExpanded = expandedAction === action.key;
 
-        <button
-          className="button"
-          disabled={running === "Reconcile Departed Members"}
-          onClick={() =>
-            runAction("Reconcile Departed Members", () =>
-              reconcileDepartedMembersAction({
-                staffId: currentStaffId,
-                requestedBy: currentStaffId,
-              })
-            )
-          }
-        >
-          {running === "Reconcile Departed Members"
-            ? "Running Reconcile Departed Members..."
-            : "Reconcile Departed Members"}
-        </button>
+          return (
+            <div
+              key={action.key}
+              className="card"
+              style={{
+                padding: 14,
+                borderRadius: 18,
+                border: "1px solid rgba(255,255,255,0.08)",
+                background: isExpanded
+                  ? "rgba(59,130,246,0.06)"
+                  : "rgba(255,255,255,0.02)",
+              }}
+            >
+              <div
+                className="row"
+                style={{
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                  flexWrap: "nowrap",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleExpanded(action.key)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    padding: 0,
+                    textAlign: "left",
+                    cursor: "pointer",
+                    minWidth: 0,
+                    flex: 1,
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontWeight: 800,
+                        color: "var(--text-strong)",
+                        overflowWrap: "anywhere",
+                        lineHeight: 1.15,
+                      }}
+                    >
+                      {action.compactLabel}
+                    </div>
+
+                    <div
+                      className="muted"
+                      style={{
+                        marginTop: 4,
+                        fontSize: 13,
+                        overflowWrap: "anywhere",
+                      }}
+                    >
+                      {getActionSummary(action.name)}
+                    </div>
+                  </div>
+                </button>
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="badge"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => toggleExpanded(action.key)}
+                  >
+                    {isExpanded ? "Hide" : "Info"}
+                  </button>
+
+                  <button
+                    className="button"
+                    type="button"
+                    style={{ width: "auto", minWidth: 116 }}
+                    disabled={!!running}
+                    onClick={() => runAction(action.name, action.runner)}
+                  >
+                    {isRunning ? "Running..." : "Run"}
+                  </button>
+                </div>
+              </div>
+
+              {isExpanded ? (
+                <div
+                  style={{
+                    marginTop: 12,
+                    paddingTop: 12,
+                    borderTop: "1px solid rgba(255,255,255,0.08)",
+                  }}
+                >
+                  <div
+                    className="muted"
+                    style={{
+                      lineHeight: 1.5,
+                      marginBottom: 12,
+                    }}
+                  >
+                    {action.description}
+                  </div>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(150px, 1fr))",
+                      gap: 10,
+                    }}
+                  >
+                    <div className="member-detail-item">
+                      <span className="ticket-info-label">Action</span>
+                      <span>{action.name}</span>
+                    </div>
+
+                    <div className="member-detail-item">
+                      <span className="ticket-info-label">Requested By</span>
+                      <span>{currentStaffId || "Unknown Staff"}</span>
+                    </div>
+
+                    <div className="member-detail-item">
+                      <span className="ticket-info-label">Best Use</span>
+                      <span>{action.detail}</span>
+                    </div>
+
+                    <div className="member-detail-item">
+                      <span className="ticket-info-label">State</span>
+                      <span>
+                        {isRunning
+                          ? "Running"
+                          : running
+                          ? "Waiting"
+                          : "Ready"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      flexWrap: "wrap",
+                      marginTop: 12,
+                    }}
+                  >
+                    <button
+                      className="button"
+                      type="button"
+                      style={{ width: "auto", minWidth: 140 }}
+                      disabled={!!running}
+                      onClick={() => runAction(action.name, action.runner)}
+                    >
+                      {isRunning ? `Running ${action.compactLabel}...` : `Run ${action.compactLabel}`}
+                    </button>
+
+                    <button
+                      className="button ghost"
+                      type="button"
+                      style={{ width: "auto", minWidth: 110 }}
+                      onClick={() => toggleExpanded(action.key)}
+                    >
+                      Collapse
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
