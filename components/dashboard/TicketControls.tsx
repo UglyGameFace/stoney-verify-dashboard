@@ -21,6 +21,13 @@ type TicketLike = {
   claimed_by?: string | null;
   closed_by?: string | null;
   closed_reason?: string | null;
+  closed_at?: string | null;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+  transcript_url?: string | null;
+  transcript_message_id?: string | null;
+  transcript_channel_id?: string | null;
+  source?: string | null;
   is_ghost?: boolean | null;
 };
 
@@ -58,7 +65,24 @@ function normalizeBoolean(value: unknown): boolean {
   return value === true;
 }
 
-function buttonClass(kind: "primary" | "danger" | "secondary" | "success", disabled = false) {
+function safeText(value: unknown, fallback = "—"): string {
+  const text = String(value ?? "").trim();
+  return text || fallback;
+}
+
+function formatDateTime(value?: string | null): string {
+  if (!value) return "—";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+
+  return date.toLocaleString();
+}
+
+function buttonClass(
+  kind: "primary" | "danger" | "secondary" | "success",
+  disabled = false
+) {
   const base =
     "inline-flex items-center justify-center rounded-xl px-3 py-2 text-sm font-semibold transition border";
   const palette =
@@ -81,6 +105,18 @@ function inputClass() {
   return "w-full rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-zinc-500";
 }
 
+function detailCardClass() {
+  return "rounded-xl border border-zinc-800 bg-zinc-950/50 px-3 py-2";
+}
+
+function miniLabelClass() {
+  return "text-xs text-zinc-400";
+}
+
+function miniValueClass() {
+  return "mt-1 text-sm text-white break-words";
+}
+
 export default function TicketControls({
   ticket,
   currentStaffId,
@@ -93,6 +129,12 @@ export default function TicketControls({
   const deleted = isDeleted(ticket.status);
   const open = isOpen(ticket.status);
 
+  const transcriptUrl = safeText(ticket.transcript_url, "");
+  const transcriptMessageId = safeText(ticket.transcript_message_id, "");
+  const transcriptChannelId = safeText(ticket.transcript_channel_id, "");
+  const hasTranscript =
+    !!transcriptUrl || !!transcriptMessageId || !!transcriptChannelId;
+
   const [actionState, setActionState] = useState<ActionState>("idle");
   const [error, setError] = useState<string>("");
   const [message, setMessage] = useState<string>("");
@@ -103,6 +145,8 @@ export default function TicketControls({
 
   const [showClosePanel, setShowClosePanel] = useState(false);
   const [closeReason, setCloseReason] = useState("Resolved");
+
+  const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
 
   const busy = actionState !== "idle";
   const assignDisabled = busy || !channelId || !currentStaffId || deleted;
@@ -240,6 +284,7 @@ export default function TicketControls({
             : "Ghost ticket deleted."
           : "Ticket deleted after transcript posted."
       );
+
       setShowDeletePanel(false);
       await afterChange(true);
     } catch (err) {
@@ -297,6 +342,16 @@ export default function TicketControls({
         >
           Delete
         </button>
+
+        <button
+          type="button"
+          className={buttonClass("secondary", false)}
+          onClick={() => {
+            setShowTranscriptPanel((v) => !v);
+          }}
+        >
+          {showTranscriptPanel ? "Hide Transcript" : "Transcript"}
+        </button>
       </div>
 
       {showClosePanel && !deleted && (
@@ -343,7 +398,7 @@ export default function TicketControls({
           <div className="mb-2 text-xs text-zinc-400">
             {ghost
               ? "Ghost tickets do not require transcript posting, but staff can choose to include one."
-              : "Normal tickets must post a transcript before the channel is deleted."}
+              : "Normal tickets must post a transcript before the channel is deleted, just like the Discord workflow."}
           </div>
 
           <input
@@ -388,6 +443,189 @@ export default function TicketControls({
               {actionState === "deleting" ? "Deleting..." : "Confirm Delete"}
             </button>
           </div>
+        </div>
+      )}
+
+      {showTranscriptPanel && (
+        <div className={panelClass()}>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-sm font-semibold text-white">
+                Transcript & Ticket History
+              </div>
+              <div className="mt-1 text-xs text-zinc-400">
+                Mirrors your Discord-side workflow: transcript details, closure, and deletion history.
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {hasTranscript ? (
+                <span className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2.5 py-1 text-xs font-semibold text-emerald-300">
+                  Transcript Available
+                </span>
+              ) : (
+                <span className="rounded-full border border-zinc-800 bg-zinc-900/70 px-2.5 py-1 text-xs font-semibold text-zinc-300">
+                  No Transcript Yet
+                </span>
+              )}
+
+              {deleted ? (
+                <span className="rounded-full border border-red-800 bg-red-950/40 px-2.5 py-1 text-xs font-semibold text-red-300">
+                  Deleted
+                </span>
+              ) : closed ? (
+                <span className="rounded-full border border-amber-800 bg-amber-950/40 px-2.5 py-1 text-xs font-semibold text-amber-300">
+                  Closed
+                </span>
+              ) : (
+                <span className="rounded-full border border-blue-800 bg-blue-950/40 px-2.5 py-1 text-xs font-semibold text-blue-300">
+                  Open
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div className={detailCardClass()}>
+              <div className={miniLabelClass()}>Ticket</div>
+              <div className={miniValueClass()}>
+                {safeText(ticket.title || ticket.channel_name, "Untitled")}
+              </div>
+            </div>
+
+            <div className={detailCardClass()}>
+              <div className={miniLabelClass()}>Category</div>
+              <div className={miniValueClass()}>{safeText(ticket.category)}</div>
+            </div>
+
+            <div className={detailCardClass()}>
+              <div className={miniLabelClass()}>Channel ID</div>
+              <div className={miniValueClass()}>{safeText(channelId)}</div>
+            </div>
+
+            <div className={detailCardClass()}>
+              <div className={miniLabelClass()}>Transcript URL</div>
+              <div className={miniValueClass()}>
+                {transcriptUrl ? (
+                  <a
+                    href={transcriptUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-blue-300 underline underline-offset-2"
+                  >
+                    Open Transcript
+                  </a>
+                ) : (
+                  "—"
+                )}
+              </div>
+            </div>
+
+            <div className={detailCardClass()}>
+              <div className={miniLabelClass()}>Transcript Message ID</div>
+              <div className={miniValueClass()}>
+                {transcriptMessageId || "—"}
+              </div>
+            </div>
+
+            <div className={detailCardClass()}>
+              <div className={miniLabelClass()}>Transcript Channel ID</div>
+              <div className={miniValueClass()}>
+                {transcriptChannelId || "—"}
+              </div>
+            </div>
+
+            <div className={detailCardClass()}>
+              <div className={miniLabelClass()}>Closed By</div>
+              <div className={miniValueClass()}>{safeText(ticket.closed_by)}</div>
+            </div>
+
+            <div className={detailCardClass()}>
+              <div className={miniLabelClass()}>Closed At</div>
+              <div className={miniValueClass()}>
+                {formatDateTime(ticket.closed_at)}
+              </div>
+            </div>
+
+            <div className={detailCardClass()}>
+              <div className={miniLabelClass()}>Closed Reason</div>
+              <div className={miniValueClass()}>
+                {safeText(ticket.closed_reason)}
+              </div>
+            </div>
+
+            <div className={detailCardClass()}>
+              <div className={miniLabelClass()}>Deleted By</div>
+              <div className={miniValueClass()}>{safeText(ticket.deleted_by)}</div>
+            </div>
+
+            <div className={detailCardClass()}>
+              <div className={miniLabelClass()}>Deleted At</div>
+              <div className={miniValueClass()}>
+                {formatDateTime(ticket.deleted_at)}
+              </div>
+            </div>
+
+            <div className={detailCardClass()}>
+              <div className={miniLabelClass()}>Source</div>
+              <div className={miniValueClass()}>{safeText(ticket.source)}</div>
+            </div>
+          </div>
+
+          {hasTranscript ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {transcriptUrl ? (
+                <a
+                  href={transcriptUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={buttonClass("primary", false)}
+                >
+                  Open Transcript
+                </a>
+              ) : null}
+
+              {transcriptMessageId ? (
+                <button
+                  type="button"
+                  className={buttonClass("secondary", false)}
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(transcriptMessageId);
+                      setMessage("Transcript message ID copied.");
+                      setError("");
+                    } catch {
+                      setError("Could not copy transcript message ID.");
+                    }
+                  }}
+                >
+                  Copy Message ID
+                </button>
+              ) : null}
+
+              {transcriptChannelId ? (
+                <button
+                  type="button"
+                  className={buttonClass("secondary", false)}
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(transcriptChannelId);
+                      setMessage("Transcript channel ID copied.");
+                      setError("");
+                    } catch {
+                      setError("Could not copy transcript channel ID.");
+                    }
+                  }}
+                >
+                  Copy Channel ID
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-400">
+              Transcript data will appear here after the ticket is closed/deleted through the bot workflow.
+            </div>
+          )}
         </div>
       )}
 
