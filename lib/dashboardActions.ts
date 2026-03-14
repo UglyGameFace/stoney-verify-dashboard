@@ -45,7 +45,7 @@ function defaultWaitOptions(
   options?: WaitForBotCommandOptions
 ): WaitForBotCommandOptions {
   return {
-    timeoutMs: options?.timeoutMs ?? 45_000,
+    timeoutMs: options?.timeoutMs ?? 60_000,
     intervalMs: options?.intervalMs ?? 1_500,
     signal: options?.signal,
   };
@@ -174,7 +174,7 @@ export async function syncMembersAction(
       staffId: input?.staffId ?? null,
     }),
     {
-      timeoutMs: options?.timeoutMs ?? 90_000,
+      timeoutMs: options?.timeoutMs ?? 180_000,
       intervalMs: options?.intervalMs ?? 2_000,
       signal: options?.signal,
     }
@@ -194,7 +194,7 @@ export async function reconcileDepartedMembersAction(
       staffId: input?.staffId ?? null,
     }),
     {
-      timeoutMs: options?.timeoutMs ?? 90_000,
+      timeoutMs: options?.timeoutMs ?? 180_000,
       intervalMs: options?.intervalMs ?? 2_000,
       signal: options?.signal,
     }
@@ -216,7 +216,7 @@ export async function syncRoleMembersAction(
       staffId: input.staffId ?? null,
     }),
     {
-      timeoutMs: options?.timeoutMs ?? 60_000,
+      timeoutMs: options?.timeoutMs ?? 90_000,
       intervalMs: options?.intervalMs ?? 2_000,
       signal: options?.signal,
     }
