@@ -32,6 +32,8 @@ export type BotCommandRow = {
   completed_at: string | null;
 };
 
+let supabase: SupabaseClient | null = null;
+
 function requireEnv(name: string, value: string | undefined): string {
   const out = (value || "").trim();
   if (!out) {
@@ -49,25 +51,28 @@ function getGuildId(): string {
   );
 }
 
-function createAdminSupabase(): SupabaseClient {
+function getSupabase(): SupabaseClient {
+  if (supabase) return supabase;
+
   const url = requireEnv(
     "NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL",
     process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
   );
 
   const serviceRoleKey = requireEnv(
-    "SUPABASE_SERVICE_ROLE or NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SERVICE_ROLE_KEY",
+    "SUPABASE_SERVICE_ROLE",
     process.env.SUPABASE_SERVICE_ROLE ||
-      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY ||
       process.env.SUPABASE_SERVICE_ROLE_KEY
   );
 
-  return createClient(url, serviceRoleKey, {
+  supabase = createClient(url, serviceRoleKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
     },
   });
+
+  return supabase;
 }
 
 async function insertCommand(
@@ -75,19 +80,17 @@ async function insertCommand(
   payload: Record<string, Json>,
   requestedBy?: string | null
 ): Promise<BotCommandRow> {
-  const supabase = createAdminSupabase();
+  const supabase = getSupabase();
   const guildId = getGuildId();
-
-  const insertPayload = {
-    guild_id: guildId,
-    action,
-    payload,
-    requested_by: requestedBy ?? null,
-  };
 
   const { data, error } = await supabase
     .from("bot_commands")
-    .insert(insertPayload)
+    .insert({
+      guild_id: guildId,
+      action,
+      payload,
+      requested_by: requestedBy ?? null,
+    })
     .select("*")
     .single();
 
@@ -219,7 +222,7 @@ export async function queueSyncRoleMembers(input: {
 export async function getBotCommand(
   commandId: string
 ): Promise<BotCommandRow | null> {
-  const supabase = createAdminSupabase();
+  const supabase = getSupabase();
 
   const { data, error } = await supabase
     .from("bot_commands")
