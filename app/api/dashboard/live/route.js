@@ -1,33 +1,33 @@
-import { createServerSupabase } from "@/lib/supabase-server"
-import { env } from "@/lib/env"
-import { sortTickets } from "@/lib/priority"
+import { createServerSupabase } from "@/lib/supabase-server";
+import { env } from "@/lib/env";
+import { sortTickets } from "@/lib/priority";
 
-export const dynamic = "force-dynamic"
-export const revalidate = 0
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function debugEnabled() {
-  return String(process.env.DASHBOARD_DEBUG || "").toLowerCase() === "true"
+  return String(process.env.DASHBOARD_DEBUG || "").toLowerCase() === "true";
 }
 
-function toJoinedTimestamp(value) {
-  const ts = new Date(value || 0).getTime()
-  return Number.isFinite(ts) ? ts : 0
+function toJoinedTimestamp(value: any) {
+  const ts = new Date(value || 0).getTime();
+  return Number.isFinite(ts) ? ts : 0;
 }
 
-function toTime(value) {
-  const ts = new Date(value || 0).getTime()
-  return Number.isFinite(ts) ? ts : 0
+function toTime(value: any) {
+  const ts = new Date(value || 0).getTime();
+  return Number.isFinite(ts) ? ts : 0;
 }
 
-function safeArray(value) {
-  return Array.isArray(value) ? value : []
+function safeArray<T = any>(value: any): T[] {
+  return Array.isArray(value) ? value : [];
 }
 
-function normalizeString(value) {
-  return String(value || "").trim()
+function normalizeString(value: any) {
+  return String(value || "").trim();
 }
 
-function mergeJoinWithMember(joinRow, memberRow) {
+function mergeJoinWithMember(joinRow: any, memberRow: any) {
   return {
     ...(memberRow || {}),
     ...(joinRow || {}),
@@ -58,10 +58,10 @@ function mergeJoinWithMember(joinRow, memberRow) {
     last_seen_at: memberRow?.last_seen_at || null,
     left_at: memberRow?.left_at || null,
     rejoined_at: memberRow?.rejoined_at || null,
-  }
+  };
 }
 
-function mapTicket(row) {
+function mapTicket(row: any) {
   return {
     ...row,
     channel_id: row?.channel_id || row?.discord_thread_id || null,
@@ -73,10 +73,10 @@ function mapTicket(row) {
     transcript_message_id: row?.transcript_message_id || null,
     transcript_channel_id: row?.transcript_channel_id || null,
     source: row?.source || "discord",
-  }
+  };
 }
 
-function mapGuildMember(row) {
+function mapGuildMember(row: any) {
   return {
     ...row,
     guild_id: row?.guild_id || null,
@@ -105,40 +105,129 @@ function mapGuildMember(row) {
     previous_usernames: Array.isArray(row?.previous_usernames) ? row.previous_usernames : [],
     previous_display_names: Array.isArray(row?.previous_display_names) ? row.previous_display_names : [],
     previous_nicknames: Array.isArray(row?.previous_nicknames) ? row.previous_nicknames : [],
-  }
+  };
 }
 
-function computeRoleMemberCount(role, members) {
-  const roleId = normalizeString(role?.role_id)
-  const roleName = normalizeString(role?.name).toLowerCase()
+function computeRoleMemberCount(role: any, members: any[]) {
+  const roleId = normalizeString(role?.role_id);
+  const roleName = normalizeString(role?.name).toLowerCase();
 
   return members.filter((member) => {
-    const ids = safeArray(member?.role_ids).map((v) => normalizeString(v))
+    const ids = safeArray(member?.role_ids).map((v) => normalizeString(v));
     const names = safeArray(member?.role_names).map((v) =>
       normalizeString(v).toLowerCase()
-    )
+    );
 
     return (
       (roleId && ids.includes(roleId)) ||
       (roleName && names.includes(roleName))
-    )
-  }).length
+    );
+  }).length;
+}
+
+function prettifyAction(action: any) {
+  const raw = normalizeString(action);
+  if (!raw) return "Audit Log";
+
+  return raw
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function buildAuditDescription(row: any) {
+  const meta = row?.meta && typeof row.meta === "object" ? row.meta : {};
+  const pieces: string[] = [];
+
+  if (meta?.reason) pieces.push(`Reason: ${String(meta.reason)}`);
+  if (meta?.channel_id) pieces.push(`Channel: ${String(meta.channel_id)}`);
+  if (meta?.user_id) pieces.push(`User: ${String(meta.user_id)}`);
+  if (meta?.staff_id) pieces.push(`Staff: ${String(meta.staff_id)}`);
+  if (meta?.role_id) pieces.push(`Role: ${String(meta.role_id)}`);
+  if (meta?.command_id) pieces.push(`Command: ${String(meta.command_id)}`);
+
+  if (pieces.length) {
+    return pieces.join(" • ");
+  }
+
+  return row?.token
+    ? `Token: ${String(row.token)}`
+    : "Dashboard/bot audit log entry";
+}
+
+function mapAuditLogToTimeline(row: any) {
+  return {
+    id: `audit-log-${row?.id ?? Math.random()}`,
+    title: prettifyAction(row?.action),
+    description: buildAuditDescription(row),
+    event_type: "audit_log",
+    related_id: row?.staff_id || null,
+    created_at: row?.created_at || null,
+    actor_id: row?.staff_id || null,
+    meta: row?.meta || {},
+    source: "audit_logs",
+  };
+}
+
+function mapAuditEventToTimeline(row: any) {
+  return {
+    id: `audit-event-${row?.id ?? Math.random()}`,
+    title: row?.title || "Audit Event",
+    description: row?.description || "",
+    event_type: row?.event_type || "audit_event",
+    related_id: row?.related_id || null,
+    created_at: row?.created_at || null,
+    actor_id: null,
+    meta: {},
+    source: "audit_events",
+  };
+}
+
+function buildTimeline(auditLogs: any[], auditEvents: any[], guildMembers: any[]) {
+  const memberMap = new Map(
+    guildMembers.map((member) => [String(member.user_id), member])
+  );
+
+  const merged = [
+    ...safeArray(auditLogs).map(mapAuditLogToTimeline),
+    ...safeArray(auditEvents).map(mapAuditEventToTimeline),
+  ]
+    .sort((a, b) => toTime(b.created_at) - toTime(a.created_at))
+    .slice(0, 40)
+    .map((event) => {
+      const actorId = normalizeString(event.actor_id);
+      const actor = actorId ? memberMap.get(actorId) : null;
+
+      return {
+        ...event,
+        actor_name:
+          actor?.display_name ||
+          actor?.nickname ||
+          actor?.username ||
+          (actorId ? actorId : null),
+        actor_avatar_url: actor?.avatar_url || null,
+      };
+    });
+
+  return merged;
 }
 
 export async function GET() {
   try {
-    const supabase = createServerSupabase()
-    const guildId = env.guildId || ""
+    const supabase = createServerSupabase();
+    const guildId = env.guildId || "";
 
     if (debugEnabled()) {
-      console.log("[dashboard/live] env.guildId =", guildId)
-      console.log("[dashboard/live] DISCORD_GUILD_ID =", process.env.DISCORD_GUILD_ID || "")
-      console.log("[dashboard/live] GUILD_ID =", process.env.GUILD_ID || "")
+      console.log("[dashboard/live] env.guildId =", guildId);
+      console.log("[dashboard/live] DISCORD_GUILD_ID =", process.env.DISCORD_GUILD_ID || "");
+      console.log("[dashboard/live] GUILD_ID =", process.env.GUILD_ID || "");
     }
 
     const [
       ticketsRes,
-      eventsRes,
+      auditLogsRes,
+      auditEventsRes,
       rolesRes,
       metricsRes,
       categoriesRes,
@@ -164,10 +253,16 @@ export async function GET() {
         .limit(300),
 
       supabase
+        .from("audit_logs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(40),
+
+      supabase
         .from("audit_events")
         .select("*")
         .order("created_at", { ascending: false })
-        .limit(20),
+        .limit(40),
 
       supabase
         .from("guild_roles")
@@ -275,11 +370,12 @@ export async function GET() {
         .eq("guild_id", guildId)
         .eq("in_guild", true)
         .eq("has_staff_role", true)
-    ])
+    ]);
 
     const firstError =
       ticketsRes.error ||
-      eventsRes.error ||
+      auditLogsRes.error ||
+      auditEventsRes.error ||
       rolesRes.error ||
       metricsRes.error ||
       categoriesRes.error ||
@@ -295,27 +391,30 @@ export async function GET() {
       formerMembersCountRes.error ||
       pendingVerificationCountRes.error ||
       verifiedMembersCountRes.error ||
-      staffMembersCountRes.error
+      staffMembersCountRes.error;
 
     if (firstError) {
       if (debugEnabled()) {
-        console.error("[dashboard/live] query error =", firstError)
+        console.error("[dashboard/live] query error =", firstError);
       }
 
       return Response.json(
         { error: firstError.message || "Failed to load dashboard data." },
         { status: 500 }
-      )
+      );
     }
 
-    const tickets = safeArray(ticketsRes.data).map(mapTicket)
-    const events = eventsRes.data || []
-    const metrics = metricsRes.data || []
-    const categories = categoriesRes.data || []
-    const memberJoins = memberJoinsRes.data || []
-    const recentActiveMembers = safeArray(recentActiveMembersRes.data).map(mapGuildMember)
-    const recentFormerMembers = safeArray(recentFormerMembersRes.data).map(mapGuildMember)
-    const guildMembers = safeArray(allGuildMembersRes.data).map(mapGuildMember)
+    const tickets = safeArray(ticketsRes.data).map(mapTicket);
+    const auditLogs = safeArray(auditLogsRes.data);
+    const auditEvents = safeArray(auditEventsRes.data);
+    const metrics = metricsRes.data || [];
+    const categories = categoriesRes.data || [];
+    const memberJoins = memberJoinsRes.data || [];
+    const recentActiveMembers = safeArray(recentActiveMembersRes.data).map(mapGuildMember);
+    const recentFormerMembers = safeArray(recentFormerMembersRes.data).map(mapGuildMember);
+    const guildMembers = safeArray(allGuildMembersRes.data).map(mapGuildMember);
+
+    const events = buildTimeline(auditLogs, auditEvents, guildMembers);
 
     const roles = safeArray(rolesRes.data).map((role) => ({
       ...role,
@@ -323,25 +422,25 @@ export async function GET() {
         Number(role?.member_count || 0),
         computeRoleMemberCount(role, guildMembers)
       )
-    }))
+    }));
 
     const joinUserIds = [
       ...new Set(
         memberJoins
-          .map((row) => String(row?.user_id || "").trim())
+          .map((row: any) => String(row?.user_id || "").trim())
           .filter(Boolean)
       )
-    ]
+    ];
 
-    let recentJoins = []
+    let recentJoins: any[] = [];
 
     if (joinUserIds.length) {
       const memberMap = new Map(
         guildMembers.map((row) => [String(row.user_id), row])
-      )
+      );
 
       recentJoins = memberJoins
-        .map((joinRow) =>
+        .map((joinRow: any) =>
           mergeJoinWithMember(joinRow, memberMap.get(String(joinRow.user_id)))
         )
         .sort(
@@ -349,7 +448,7 @@ export async function GET() {
             toJoinedTimestamp(b.joined_at || b.created_at) -
             toJoinedTimestamp(a.joined_at || a.created_at)
         )
-        .slice(0, 25)
+        .slice(0, 25);
     }
 
     const memberRows = guildMembers
@@ -358,22 +457,25 @@ export async function GET() {
         (a, b) =>
           toTime(b.updated_at || b.last_seen_at || b.joined_at) -
           toTime(a.updated_at || a.last_seen_at || a.joined_at)
-      )
+      );
 
     if (debugEnabled()) {
-      console.log("[dashboard/live] tickets found =", tickets.length)
-      console.log("[dashboard/live] memberJoins found =", memberJoins.length)
-      console.log("[dashboard/live] recentJoins hydrated =", recentJoins.length)
-      console.log("[dashboard/live] recentActiveMembers found =", recentActiveMembers.length)
-      console.log("[dashboard/live] recentFormerMembers found =", recentFormerMembers.length)
-      console.log("[dashboard/live] guildMembers found =", guildMembers.length)
-      console.log("[dashboard/live] roles found =", roles.length)
-      console.log("[dashboard/live] categories found =", categories.length)
-      console.log("[dashboard/live] activeMembersCount =", activeMembersCountRes.count || 0)
-      console.log("[dashboard/live] formerMembersCount =", formerMembersCountRes.count || 0)
-      console.log("[dashboard/live] pendingVerificationCount =", pendingVerificationCountRes.count || 0)
-      console.log("[dashboard/live] verifiedMembersCount =", verifiedMembersCountRes.count || 0)
-      console.log("[dashboard/live] staffMembersCount =", staffMembersCountRes.count || 0)
+      console.log("[dashboard/live] tickets found =", tickets.length);
+      console.log("[dashboard/live] auditLogs found =", auditLogs.length);
+      console.log("[dashboard/live] auditEvents found =", auditEvents.length);
+      console.log("[dashboard/live] merged timeline events =", events.length);
+      console.log("[dashboard/live] memberJoins found =", memberJoins.length);
+      console.log("[dashboard/live] recentJoins hydrated =", recentJoins.length);
+      console.log("[dashboard/live] recentActiveMembers found =", recentActiveMembers.length);
+      console.log("[dashboard/live] recentFormerMembers found =", recentFormerMembers.length);
+      console.log("[dashboard/live] guildMembers found =", guildMembers.length);
+      console.log("[dashboard/live] roles found =", roles.length);
+      console.log("[dashboard/live] categories found =", categories.length);
+      console.log("[dashboard/live] activeMembersCount =", activeMembersCountRes.count || 0);
+      console.log("[dashboard/live] formerMembersCount =", formerMembersCountRes.count || 0);
+      console.log("[dashboard/live] pendingVerificationCount =", pendingVerificationCountRes.count || 0);
+      console.log("[dashboard/live] verifiedMembersCount =", verifiedMembersCountRes.count || 0);
+      console.log("[dashboard/live] staffMembersCount =", staffMembersCountRes.count || 0);
 
       if (tickets.length) {
         console.log(
@@ -389,16 +491,16 @@ export async function GET() {
             is_ghost: Boolean(t.is_ghost),
             created_at: t.created_at
           }))
-        )
+        );
       } else {
         const rawTicketCheck = await supabase
           .from("tickets")
           .select("id,guild_id,username,category,status,created_at")
           .order("created_at", { ascending: false })
-          .limit(10)
+          .limit(10);
 
-        console.log("[dashboard/live] no tickets matched env.guildId")
-        console.log("[dashboard/live] latest raw tickets =", rawTicketCheck.data || [])
+        console.log("[dashboard/live] no tickets matched env.guildId");
+        console.log("[dashboard/live] latest raw tickets =", rawTicketCheck.data || []);
       }
     }
 
@@ -435,6 +537,7 @@ export async function GET() {
             envDiscordGuildId: process.env.DISCORD_GUILD_ID || "",
             ticketCount: tickets.length,
             guildMembersCount: guildMembers.length,
+            timelineCount: events.length,
             memberCounts: {
               tracked: (activeMembersCountRes.count || 0) + (formerMembersCountRes.count || 0),
               active: activeMembersCountRes.count || 0,
@@ -447,22 +550,22 @@ export async function GET() {
             memberJoinsCount: memberJoins.length
           }
         : undefined
-    }
+    };
 
     return Response.json(payload, {
       status: 200,
       headers: {
         "Cache-Control": "no-store, max-age=0"
       }
-    })
-  } catch (error) {
+    });
+  } catch (error: any) {
     if (debugEnabled()) {
-      console.error("[dashboard/live] fatal error =", error)
+      console.error("[dashboard/live] fatal error =", error);
     }
 
     return Response.json(
-      { error: error.message || "Failed to load dashboard." },
+      { error: error?.message || "Failed to load dashboard." },
       { status: 500 }
-    )
+    );
   }
 }
