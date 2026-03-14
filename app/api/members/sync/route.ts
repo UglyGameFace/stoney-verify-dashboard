@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { queueSyncMembers } from "@/lib/botCommands";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function getRequestedBy(body: any): string | null {
   const candidates = [
@@ -36,19 +37,33 @@ export async function POST(req: NextRequest) {
       requestedBy: getRequestedBy(body),
     });
 
-    return NextResponse.json({
-      ok: true,
-      queued: true,
-      command,
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        queued: true,
+        command,
+      },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      }
+    );
   } catch (error) {
     return NextResponse.json(
       {
         ok: false,
+        queued: false,
         error:
           error instanceof Error ? error.message : "Unexpected server error",
       },
-      { status: 500 }
+      {
+        status: 500,
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      }
     );
   }
 }
