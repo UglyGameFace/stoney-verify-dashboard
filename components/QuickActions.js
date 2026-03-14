@@ -19,15 +19,40 @@ export default function QuickActions({ onRefresh, currentStaffId = null }) {
     try {
       const result = await runner();
 
-      if (!result?.ok) {
+      /**
+       * CRITICAL FIX
+       *
+       * Previously the dashboard treated ANY non-ok result as failure.
+       * However commands can legitimately timeout while still processing.
+       *
+       * We now only treat it as failure if:
+       * - ok === false
+       * - AND timedOut !== true
+       */
+
+      if (!result?.ok && !result?.timedOut) {
         throw new Error(result?.command?.error || `${name} failed.`);
       }
 
-      setMessage(`${name} completed.`);
+      /**
+       * If the command timed out but is still processing,
+       * show a more accurate message.
+       */
+
+      if (result?.timedOut) {
+        setMessage(`${name} queued and still processing...`);
+      } else {
+        setMessage(`${name} completed.`);
+      }
+
+      /**
+       * Refresh dashboard metrics
+       */
 
       if (onRefresh) {
         await onRefresh();
       }
+
     } catch (err) {
       setError(err?.message || `${name} failed.`);
     } finally {
