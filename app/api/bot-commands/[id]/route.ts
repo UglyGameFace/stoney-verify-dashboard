@@ -2,18 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { getBotCommand } from "@/lib/botCommands";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 type RouteContext = {
-  params: Promise<{
+  params: {
     id: string;
-  }>;
+  };
 };
 
 export async function GET(_req: NextRequest, context: RouteContext) {
   try {
-    const { id } = await context.params;
-
-    const commandId = typeof id === "string" ? id.trim() : "";
+    const commandId =
+      typeof context?.params?.id === "string"
+        ? context.params.id.trim()
+        : "";
 
     if (!commandId) {
       return NextResponse.json(
@@ -21,7 +23,12 @@ export async function GET(_req: NextRequest, context: RouteContext) {
           ok: false,
           error: "Missing command id",
         },
-        { status: 400 }
+        {
+          status: 400,
+          headers: {
+            "Cache-Control": "no-store, max-age=0",
+          },
+        }
       );
     }
 
@@ -33,14 +40,27 @@ export async function GET(_req: NextRequest, context: RouteContext) {
           ok: false,
           error: "Command not found",
         },
-        { status: 404 }
+        {
+          status: 404,
+          headers: {
+            "Cache-Control": "no-store, max-age=0",
+          },
+        }
       );
     }
 
-    return NextResponse.json({
-      ok: true,
-      command,
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        command,
+      },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      }
+    );
   } catch (error) {
     return NextResponse.json(
       {
@@ -48,7 +68,12 @@ export async function GET(_req: NextRequest, context: RouteContext) {
         error:
           error instanceof Error ? error.message : "Unexpected server error",
       },
-      { status: 500 }
+      {
+        status: 500,
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      }
     );
   }
 }
