@@ -16,7 +16,8 @@ export type BotCommandAction =
   | "assign_ticket"
   | "sync_members"
   | "reconcile_departed_members"
-  | "sync_role_members";
+  | "sync_role_members"
+  | "portal_ticket_reply";
 
 export type BotCommandRow = {
   id: string;
@@ -216,6 +217,29 @@ export async function queueSyncRoleMembers(input: {
       role_id: String(input.roleId),
     },
     input.requestedBy
+  );
+}
+
+export async function queuePortalTicketReply(input: {
+  ticketId: string;
+  channelId: string;
+  userId: string;
+  username?: string | null;
+  content: string;
+  messageId?: string | null;
+  requestedBy?: string | null;
+}) {
+  return insertCommand(
+    "portal_ticket_reply",
+    {
+      ticket_id: String(input.ticketId),
+      channel_id: String(input.channelId),
+      user_id: String(input.userId),
+      username: input.username ?? null,
+      content: String(input.content),
+      message_id: input.messageId ?? null,
+    },
+    input.requestedBy ?? input.userId
   );
 }
 
