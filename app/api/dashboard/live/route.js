@@ -190,7 +190,7 @@ function buildTimeline(auditLogs, auditEvents, guildMembers) {
     guildMembers.map((member) => [String(member.user_id), member])
   );
 
-  const merged = [
+  return [
     ...safeArray(auditLogs).map(mapAuditLogToTimeline),
     ...safeArray(auditEvents).map(mapAuditEventToTimeline),
   ]
@@ -210,8 +210,51 @@ function buildTimeline(auditLogs, auditEvents, guildMembers) {
         actor_avatar_url: actor?.avatar_url || null,
       };
     });
+}
 
-  return merged;
+function mapWarn(row, guildMembers) {
+  const member = guildMembers.find(
+    (m) => String(m.user_id) === String(row?.user_id || "")
+  );
+
+  return {
+    ...row,
+    display_name:
+      member?.display_name ||
+      member?.nickname ||
+      row?.username ||
+      row?.user_id ||
+      "Unknown User",
+    avatar_url: member?.avatar_url || null,
+  };
+}
+
+function mapFraud(row, guildMembers) {
+  const member = guildMembers.find(
+    (m) => String(m.user_id) === String(row?.user_id || "")
+  );
+
+  return {
+    ...row,
+    display_name:
+      member?.display_name ||
+      member?.nickname ||
+      row?.username ||
+      row?.user_id ||
+      "Unknown User",
+    avatar_url: member?.avatar_url || null,
+    reasons: Array.isArray(row?.reasons) ? row.reasons : [],
+  };
+}
+
+function mapRaid(row) {
+  return {
+    ...row,
+    summary: row?.summary || "Raid alert",
+    severity: row?.severity || "unknown",
+    join_count: Number(row?.join_count || 0),
+    window_seconds: Number(row?.window_seconds || 0),
+  };
 }
 
 export async function GET() {
@@ -226,6 +269,8 @@ export async function GET() {
       console.log("[dashboard/live] DISCORD_GUILD_ID =", process.env.DISCORD_GUILD_ID || "");
       console.log("[dashboard/live] GUILD_ID =", process.env.GUILD_ID || "");
     }
+
+    const last24hIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
     const [
       ticketsRes,
@@ -247,6 +292,9 @@ export async function GET() {
       pendingVerificationCountRes,
       verifiedMembersCountRes,
       staffMembersCountRes,
+      warnsRowsRes,
+      raidsRowsRes,
+      fraudRowsRes,
     ] = await Promise.all([
       supabase
         .from("tickets")
@@ -327,13 +375,13 @@ export async function GET() {
         .from("warns")
         .select("*", { count: "exact", head: true })
         .eq("guild_id", guildId)
-        .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
+        .gte("created_at", last24hIso),
 
       supabase
         .from("raid_events")
         .select("*", { count: "exact", head: true })
         .eq("guild_id", guildId)
-        .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
+        .gte("created_at", last24hIso),
 
       supabase
         .from("verification_flags")
@@ -373,6 +421,30 @@ export async function GET() {
         .eq("guild_id", guildId)
         .eq("in_guild", true)
         .eq("has_staff_role", true),
+
+      supabase
+        .from("warns")
+        .select("*")
+        .eq("guild_id", guildId)
+        .gte("created_at", last24hIso)
+        .order("created_at", { ascending: false })
+        .limit(25),
+
+      supabase
+        .from("raid_events")
+        .select("*")
+        .eq("guild_id", guildId)
+        .gte("created_at", last24hIso)
+        .order("created_at", { ascending: false })
+        .limit(25),
+
+      supabase
+        .from("verification_flags")
+        .select("*")
+        .eq("guild_id", guildId)
+        .eq("flagged", true)
+        .order("created_at", { ascending: false })
+        .limit(25),
     ]);
 
     const firstError =
@@ -394,7 +466,10 @@ export async function GET() {
       formerMembersCountRes.error ||
       pendingVerificationCountRes.error ||
       verifiedMembersCountRes.error ||
-      staffMembersCountRes.error;
+      staffMembersCountRes.error ||
+      warnsRowsRes.error ||
+      raidsRowsRes.error ||
+      fraudRowsRes.error;
 
     if (firstError) {
       if (debugEnabled()) {
@@ -426,6 +501,16 @@ export async function GET() {
         computeRoleMemberCount(role, guildMembers)
       ),
     }));
+
+    const warns = safeArray(warnsRowsRes.data).map((row) =>
+      mapWarn(row, guildMembers)
+    );
+
+    const raids = safeArray(raidsRowsRes.data).map(mapRaid);
+
+    const fraud = safeArray(fraudRowsRes.data).map((row) =>
+      mapFraud(row, guildMembers)
+    );
 
     const joinUserIds = [
       ...new Set(
@@ -467,6 +552,9 @@ export async function GET() {
       console.log("[dashboard/live] auditLogs found =", auditLogs.length);
       console.log("[dashboard/live] auditEvents found =", auditEvents.length);
       console.log("[dashboard/live] merged timeline events =", events.length);
+      console.log("[dashboard/live] warns found =", warns.length);
+      console.log("[dashboard/live] raids found =", raids.length);
+      console.log("[dashboard/live] fraud found =", fraud.length);
       console.log("[dashboard/live] memberJoins found =", memberJoins.length);
       console.log("[dashboard/live] recentJoins hydrated =", recentJoins.length);
       console.log("[dashboard/live] recentActiveMembers found =", recentActiveMembers.length);
@@ -479,37 +567,15 @@ export async function GET() {
       console.log("[dashboard/live] pendingVerificationCount =", pendingVerificationCountRes.count || 0);
       console.log("[dashboard/live] verifiedMembersCount =", verifiedMembersCountRes.count || 0);
       console.log("[dashboard/live] staffMembersCount =", staffMembersCountRes.count || 0);
-
-      if (tickets.length) {
-        console.log(
-          "[dashboard/live] latest ticket snapshot =",
-          tickets.slice(0, 3).map((t) => ({
-            id: t.id,
-            guild_id: t.guild_id,
-            username: t.username,
-            category: t.category,
-            status: t.status,
-            discord_thread_id: t.discord_thread_id || null,
-            channel_id: t.channel_id || null,
-            is_ghost: Boolean(t.is_ghost),
-            created_at: t.created_at,
-          }))
-        );
-      } else {
-        const rawTicketCheck = await supabase
-          .from("tickets")
-          .select("id,guild_id,username,category,status,created_at")
-          .order("created_at", { ascending: false })
-          .limit(10);
-
-        console.log("[dashboard/live] no tickets matched env.guildId");
-        console.log("[dashboard/live] latest raw tickets =", rawTicketCheck.data || []);
-      }
     }
 
     const payload = {
       tickets: sortTickets(tickets, "priority_desc"),
       events,
+      warns,
+      raids,
+      fraud,
+      fraudFlagsList: fraud,
       roles,
       metrics,
       categories,
@@ -541,6 +607,9 @@ export async function GET() {
             ticketCount: tickets.length,
             guildMembersCount: guildMembers.length,
             timelineCount: events.length,
+            warnsCount: warns.length,
+            raidsCount: raids.length,
+            fraudCount: fraud.length,
             memberCounts: {
               tracked: (activeMembersCountRes.count || 0) + (formerMembersCountRes.count || 0),
               active: activeMembersCountRes.count || 0,
