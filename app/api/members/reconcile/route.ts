@@ -1,79 +1,93 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { NextRequest, NextResponse } from "next/server";
+import { queueReconcileDepartedMembers } from "@/lib/botCommands";
+import { requireStaffSessionForRoute } from "@/lib/auth-server";
 
-type RequestBody = {
-  requestedBy?: string | null;
-  staffId?: string | null;
-};
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-export async function POST(req: Request) {
+function getActorId(session: any): string | null {
+  const candidates = [
+    session?.user?.id,
+    session?.user?.user_id,
+    session?.user?.discord_id,
+    session?.discordUser?.id,
+  ];
+
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  if (typeof candidates[0] === "number") {
+    return String(candidates[0]);
+  }
+
+  return null;
+}
+
+export async function POST(req: NextRequest) {
   try {
-    const body: RequestBody = await req.json().catch(() => ({}));
+    const session = await requireStaffSessionForRoute();
+    const actorId = getActorId(session);
 
-    const supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    const guildId = process.env.DISCORD_GUILD_ID;
-
-    if (!guildId) {
+    if (!actorId) {
       return NextResponse.json(
-        { error: "DISCORD_GUILD_ID not configured" },
-        { status: 500 }
-      );
-    }
-
-    const requestedBy = body?.requestedBy ?? body?.staffId ?? null;
-
-    // queue command for bot worker
-    const { data: command, error: commandError } = await supabase
-      .from("bot_commands")
-      .insert({
-        guild_id: guildId,
-        action: "reconcile_departed_members",
-        payload: {},
-        requested_by: requestedBy,
-        status: "pending",
-      })
-      .select()
-      .single();
-
-    if (commandError) {
-      console.error("Reconcile queue error:", commandError);
-
-      return NextResponse.json(
-        { error: commandError.message },
-        { status: 500 }
-      );
-    }
-
-    // audit log
-    try {
-      await supabase.from("audit_logs").insert({
-        action: "members_reconcile_requested",
-        staff_id: requestedBy,
-        meta: {
-          command_id: command?.id ?? null,
+        {
+          ok: false,
+          queued: false,
+          error: "Unauthorized",
         },
-      });
-    } catch (auditErr) {
-      console.warn("Audit log failed", auditErr);
+        {
+          status: 401,
+          headers: {
+            "Cache-Control": "no-store, max-age=0",
+          },
+        }
+      );
     }
 
-    return NextResponse.json({
-      ok: true,
-      queued: true,
-      command,
+    try {
+      await req.json();
+    } catch {
+      // ignore body intentionally
+    }
+
+    const command = await queueReconcileDepartedMembers({
+      requestedBy: actorId,
     });
-  } catch (err: any) {
-    console.error("Reconcile route error:", err);
 
     return NextResponse.json(
       {
-        error: err?.message ?? "Failed to queue reconcile command",
+        ok: true,
+        queued: true,
+        command,
       },
-      { status: 500 }
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      }
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to queue reconcile command";
+
+    return NextResponse.json(
+      {
+        ok: false,
+        queued: false,
+        error: message,
+      },
+      {
+        status: message === "Unauthorized" ? 401 : 500,
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      }
     );
   }
 }
