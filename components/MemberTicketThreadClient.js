@@ -128,6 +128,19 @@ function getInitials(name) {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
 }
 
+function normalizeMessage(row) {
+  return {
+    id: row?.id || "",
+    ticket_id: row?.ticket_id || "",
+    author_id: row?.author_id || "",
+    author_name: row?.author_name || "Unknown",
+    content: row?.content || "",
+    message_type: row?.message_type || "staff",
+    created_at: row?.created_at || null,
+    attachments: Array.isArray(row?.attachments) ? row.attachments : [],
+  };
+}
+
 function Bubble({ message, currentUserId }) {
   const isMine =
     String(message?.author_id || "") === String(currentUserId || "");
@@ -321,7 +334,13 @@ export default function MemberTicketThreadClient({
   ticket,
   initialMessages,
 }) {
-  const [messages] = useState(safeArray(initialMessages));
+  const [messages, setMessages] = useState(
+    safeArray(initialMessages).map(normalizeMessage)
+  );
+  const [reply, setReply] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [sendError, setSendError] = useState("");
+  const [sendSuccess, setSendSuccess] = useState("");
 
   const statusStyles = useMemo(
     () => statusTone(ticket?.status),
@@ -334,6 +353,63 @@ export default function MemberTicketThreadClient({
   );
 
   const transcriptAvailable = Boolean(ticket?.transcript_url);
+  const ticketClosed =
+    String(ticket?.status || "").toLowerCase() === "closed";
+  const ticketDeleted =
+    String(ticket?.status || "").toLowerCase() === "deleted";
+
+  async function submitReply(e) {
+    e.preventDefault();
+
+    const content = safeText(reply, "");
+
+    if (!content) {
+      setSendError("Reply cannot be empty.");
+      setSendSuccess("");
+      return;
+    }
+
+    setIsSending(true);
+    setSendError("");
+    setSendSuccess("");
+
+    try {
+      const res = await fetch(
+        `/api/portal/tickets/${ticket.id}/reply`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            content,
+          }),
+        }
+      );
+
+      const json = await res.json();
+
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || "Failed to send reply");
+      }
+
+      const newMessage = normalizeMessage(json?.message);
+
+      setMessages((prev) => [...prev, newMessage]);
+      setReply("");
+      setSendSuccess(
+        ticketClosed
+          ? "Reply sent. The ticket was reopened."
+          : "Reply sent."
+      );
+    } catch (error) {
+      setSendError(
+        error instanceof Error ? error.message : "Failed to send reply"
+      );
+    } finally {
+      setIsSending(false);
+    }
+  }
 
   return (
     <div className="thread-shell">
@@ -414,6 +490,69 @@ export default function MemberTicketThreadClient({
             <div className="empty-state">
               No ticket messages were found yet.
             </div>
+          )}
+        </div>
+
+        <div className="composer-card">
+          <div className="section-title" style={{ marginBottom: 6 }}>
+            Reply
+          </div>
+          <div className="section-subtitle" style={{ marginBottom: 14 }}>
+            Send a new message to staff from the portal.
+          </div>
+
+          {ticketDeleted ? (
+            <div className="empty-state">
+              This ticket has been deleted and can no longer receive replies.
+            </div>
+          ) : (
+            <form onSubmit={submitReply} className="composer-form">
+              <textarea
+                className="composer-textarea"
+                placeholder={
+                  ticketClosed
+                    ? "Type your reply here. Sending will reopen the ticket."
+                    : "Type your reply here..."
+                }
+                value={reply}
+                onChange={(e) => setReply(e.target.value)}
+                rows={6}
+                maxLength={4000}
+                disabled={isSending}
+              />
+
+              <div className="composer-footer">
+                <div className="composer-meta">
+                  <span>{reply.length}/4000</span>
+                  {ticketClosed ? (
+                    <span className="reopen-note">
+                      This reply will reopen the ticket.
+                    </span>
+                  ) : null}
+                </div>
+
+                <button
+                  type="submit"
+                  className="button-link"
+                  style={{
+                    border: "none",
+                    cursor: isSending ? "wait" : "pointer",
+                    opacity: isSending ? 0.75 : 1,
+                  }}
+                  disabled={isSending}
+                >
+                  {isSending ? "Sending..." : "Send Reply"}
+                </button>
+              </div>
+
+              {sendError ? (
+                <div className="form-error">{sendError}</div>
+              ) : null}
+
+              {sendSuccess ? (
+                <div className="form-success">{sendSuccess}</div>
+              ) : null}
+            </form>
           )}
         </div>
       </section>
@@ -499,6 +638,7 @@ export default function MemberTicketThreadClient({
 
         .thread-hero,
         .message-panel,
+        .composer-card,
         .sidebar-card {
           border: 1px solid rgba(255,255,255,0.08);
           background: rgba(255,255,255,0.04);
@@ -577,8 +717,13 @@ export default function MemberTicketThreadClient({
           border: 1px solid rgba(147,197,253,0.22);
         }
 
-        .message-panel {
+        .message-panel,
+        .composer-card {
           padding: 18px;
+        }
+
+        .message-panel {
+          margin-bottom: 18px;
         }
 
         .message-panel-header {
@@ -613,6 +758,63 @@ export default function MemberTicketThreadClient({
           padding: 18px;
           color: rgba(255,255,255,0.64);
           background: rgba(255,255,255,0.02);
+        }
+
+        .composer-form {
+          display: grid;
+          gap: 12px;
+        }
+
+        .composer-textarea {
+          width: 100%;
+          resize: vertical;
+          min-height: 140px;
+          border-radius: 16px;
+          border: 1px solid rgba(255,255,255,0.1);
+          background: rgba(255,255,255,0.04);
+          color: #fff;
+          padding: 14px 16px;
+          outline: none;
+          font: inherit;
+          line-height: 1.55;
+        }
+
+        .composer-textarea:focus {
+          border-color: rgba(147,197,253,0.5);
+          box-shadow: 0 0 0 3px rgba(59,130,246,0.16);
+        }
+
+        .composer-footer {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          align-items: center;
+          flex-wrap: wrap;
+        }
+
+        .composer-meta {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+          color: rgba(255,255,255,0.6);
+          font-size: 13px;
+        }
+
+        .reopen-note {
+          color: #fde68a;
+          font-weight: 700;
+        }
+
+        .form-error {
+          color: #fca5a5;
+          font-size: 13px;
+          font-weight: 600;
+        }
+
+        .form-success {
+          color: #86efac;
+          font-size: 13px;
+          font-weight: 600;
         }
 
         .thread-sidebar {
@@ -654,18 +856,22 @@ export default function MemberTicketThreadClient({
         @media (max-width: 640px) {
           .thread-hero,
           .message-panel,
+          .composer-card,
           .sidebar-card {
             border-radius: 18px;
-          }
-
-          .thread-hero,
-          .message-panel,
-          .sidebar-card {
             padding: 14px;
           }
 
           .thread-title {
             font-size: 28px;
+          }
+
+          .composer-footer {
+            align-items: stretch;
+          }
+
+          .button-link {
+            width: 100%;
           }
         }
       `}</style>
