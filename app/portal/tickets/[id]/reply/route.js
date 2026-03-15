@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth-server";
 import { createServerSupabase } from "@/lib/supabase-server";
+import { queuePortalTicketReply } from "@/lib/botCommands";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -81,7 +82,6 @@ export async function POST(req, { params }) {
     }
 
     const supabase = createServerSupabase();
-
     const ticket = await getOwnedTicket(supabase, ticketId, userId);
 
     if (!ticket) {
@@ -123,18 +123,40 @@ export async function POST(req, { params }) {
       throw new Error(insertError.message);
     }
 
+    const reopening = status === "closed";
+
     const { error: ticketUpdateError } = await supabase
       .from("tickets")
       .update({
         updated_at: new Date().toISOString(),
-        status: status === "closed" ? "open" : ticket.status,
-        reopened_at: status === "closed" ? new Date().toISOString() : ticket.reopened_at || null,
+        status: reopening ? "open" : ticket.status,
+        reopened_at: reopening ? new Date().toISOString() : ticket.reopened_at || null,
       })
       .eq("id", ticketId)
       .eq("user_id", userId);
 
     if (ticketUpdateError) {
       throw new Error(ticketUpdateError.message);
+    }
+
+    const channelId = safeText(ticket?.channel_id || ticket?.discord_thread_id);
+
+    let botCommand = null;
+
+    if (channelId) {
+      try {
+        botCommand = await queuePortalTicketReply({
+          ticketId,
+          channelId,
+          userId,
+          username,
+          content,
+          messageId: insertedMessage?.id || null,
+          requestedBy: userId,
+        });
+      } catch (botError) {
+        console.error("Failed to queue portal ticket reply bot command:", botError);
+      }
     }
 
     try {
@@ -145,6 +167,8 @@ export async function POST(req, { params }) {
           ticket_id: ticketId,
           user_id: userId,
           message_id: insertedMessage?.id || null,
+          bot_command_id: botCommand?.id || null,
+          mirrored_to_discord: Boolean(botCommand),
         },
       });
     } catch {
@@ -154,6 +178,9 @@ export async function POST(req, { params }) {
     return NextResponse.json({
       ok: true,
       message: insertedMessage,
+      mirroredToDiscord: Boolean(botCommand),
+      botCommandId: botCommand?.id || null,
+      reopened: reopening,
     });
   } catch (error) {
     return NextResponse.json(
