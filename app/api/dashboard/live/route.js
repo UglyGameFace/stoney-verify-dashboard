@@ -28,6 +28,22 @@ function normalizeString(value) {
   return String(value || "").trim();
 }
 
+function truncateText(value, max = 240) {
+  const text = normalizeString(value);
+  if (!text) return "";
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
+function pickMessageContent(row) {
+  return (
+    normalizeString(row?.content) ||
+    normalizeString(row?.message_content) ||
+    normalizeString(row?.body) ||
+    ""
+  );
+}
+
 function mergeJoinWithMember(joinRow, memberRow) {
   return {
     ...(memberRow || {}),
@@ -161,7 +177,7 @@ function mapAuditLogToTimeline(row) {
   return {
     id: `audit-log-${row?.id ?? Math.random()}`,
     title: prettifyAction(row?.action),
-    description: buildAuditDescription(row),
+    description: truncateText(buildAuditDescription(row), 220),
     event_type: "audit_log",
     related_id: row?.staff_id || null,
     created_at: row?.created_at || null,
@@ -175,7 +191,7 @@ function mapAuditEventToTimeline(row) {
   return {
     id: `audit-event-${row?.id ?? Math.random()}`,
     title: row?.title || "Audit Event",
-    description: row?.description || "",
+    description: truncateText(row?.description || "", 220),
     event_type: row?.event_type || "audit_event",
     related_id: row?.related_id || null,
     created_at: row?.created_at || null,
@@ -185,7 +201,43 @@ function mapAuditEventToTimeline(row) {
   };
 }
 
-function buildTimeline(auditLogs, auditEvents, guildMembers) {
+function mapStaffMessageToTimeline(row) {
+  const content = pickMessageContent(row);
+  const attachments = safeArray(row?.attachments);
+  const embeds = safeArray(row?.embeds);
+
+  let description = truncateText(content, 220);
+  if (!description) {
+    if (attachments.length) description = `${attachments.length} attachment(s)`;
+    else if (embeds.length) description = `${embeds.length} embed(s)`;
+    else description = "Staff message";
+  }
+
+  return {
+    id: `staff-message-${row?.message_id || row?.id || Math.random()}`,
+    title: row?.display_name || row?.username || "Staff Message",
+    description,
+    event_type: "staff_message",
+    related_id: row?.channel_id || null,
+    created_at: row?.created_at || row?.timestamp || null,
+    actor_id: row?.author_id || row?.user_id || null,
+    meta: {
+      channel_id: row?.channel_id || null,
+      message_id: row?.message_id || null,
+      attachments,
+      embeds,
+      full_content: content,
+    },
+    source: "dashboard_staff_messages",
+    actor_name:
+      row?.display_name || row?.username || row?.author_name || row?.author_id || null,
+    actor_avatar_url: row?.avatar_url || row?.author_avatar_url || null,
+    channel_id: row?.channel_id || null,
+    message_id: row?.message_id || null,
+  };
+}
+
+function buildTimeline(auditLogs, auditEvents, staffMessages, guildMembers) {
   const memberMap = new Map(
     guildMembers.map((member) => [String(member.user_id), member])
   );
@@ -193,10 +245,15 @@ function buildTimeline(auditLogs, auditEvents, guildMembers) {
   return [
     ...safeArray(auditLogs).map(mapAuditLogToTimeline),
     ...safeArray(auditEvents).map(mapAuditEventToTimeline),
+    ...safeArray(staffMessages).map(mapStaffMessageToTimeline),
   ]
     .sort((a, b) => toTime(b.created_at) - toTime(a.created_at))
-    .slice(0, 40)
+    .slice(0, 100)
     .map((event) => {
+      if (event.source === "dashboard_staff_messages") {
+        return event;
+      }
+
       const actorId = normalizeString(event.actor_id);
       const actor = actorId ? memberMap.get(actorId) : null;
 
@@ -276,6 +333,7 @@ export async function GET() {
       ticketsRes,
       auditLogsRes,
       auditEventsRes,
+      staffMessagesRes,
       rolesRes,
       metricsRes,
       categoriesRes,
@@ -314,6 +372,13 @@ export async function GET() {
         .select("*")
         .order("created_at", { ascending: false })
         .limit(40),
+
+      supabase
+        .from("dashboard_staff_messages")
+        .select("*")
+        .eq("guild_id", guildId)
+        .order("created_at", { ascending: false })
+        .limit(120),
 
       supabase
         .from("guild_roles")
@@ -451,6 +516,7 @@ export async function GET() {
       ticketsRes.error ||
       auditLogsRes.error ||
       auditEventsRes.error ||
+      staffMessagesRes.error ||
       rolesRes.error ||
       metricsRes.error ||
       categoriesRes.error ||
@@ -485,6 +551,7 @@ export async function GET() {
     const tickets = safeArray(ticketsRes.data).map(mapTicket);
     const auditLogs = safeArray(auditLogsRes.data);
     const auditEvents = safeArray(auditEventsRes.data);
+    const staffMessages = safeArray(staffMessagesRes.data);
     const metrics = metricsRes.data || [];
     const categories = categoriesRes.data || [];
     const memberJoins = memberJoinsRes.data || [];
@@ -492,7 +559,7 @@ export async function GET() {
     const recentFormerMembers = safeArray(recentFormerMembersRes.data).map(mapGuildMember);
     const guildMembers = safeArray(allGuildMembersRes.data).map(mapGuildMember);
 
-    const events = buildTimeline(auditLogs, auditEvents, guildMembers);
+    const events = buildTimeline(auditLogs, auditEvents, staffMessages, guildMembers);
 
     const roles = safeArray(rolesRes.data).map((role) => ({
       ...role,
@@ -551,6 +618,7 @@ export async function GET() {
       console.log("[dashboard/live] tickets found =", tickets.length);
       console.log("[dashboard/live] auditLogs found =", auditLogs.length);
       console.log("[dashboard/live] auditEvents found =", auditEvents.length);
+      console.log("[dashboard/live] staffMessages found =", staffMessages.length);
       console.log("[dashboard/live] merged timeline events =", events.length);
       console.log("[dashboard/live] warns found =", warns.length);
       console.log("[dashboard/live] raids found =", raids.length);
@@ -610,6 +678,7 @@ export async function GET() {
             warnsCount: warns.length,
             raidsCount: raids.length,
             fraudCount: fraud.length,
+            staffMessagesCount: staffMessages.length,
             memberCounts: {
               tracked: (activeMembersCountRes.count || 0) + (formerMembersCountRes.count || 0),
               active: activeMembersCountRes.count || 0,
