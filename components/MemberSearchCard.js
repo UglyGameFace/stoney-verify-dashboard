@@ -37,17 +37,7 @@ function getDisplayName(member) {
 function getTopRoleLabel(member) {
   if (member?.top_role) return member.top_role;
   if (member?.highest_role_name) return member.highest_role_name;
-
-  if (Array.isArray(member?.role_names) && member.role_names.length) {
-    return member.role_names[0];
-  }
-
-  if (Array.isArray(member?.roles) && member.roles.length) {
-    const first = member.roles[0];
-    if (typeof first === "string") return first;
-    if (first && typeof first === "object" && first.name) return first.name;
-  }
-
+  if (Array.isArray(member?.role_names) && member.role_names.length) return member.role_names[0];
   return "No top role";
 }
 
@@ -55,7 +45,6 @@ function getRolePreview(member) {
   if (Array.isArray(member?.role_names) && member.role_names.length) {
     return member.role_names.slice(0, 4);
   }
-
   if (Array.isArray(member?.roles) && member.roles.length) {
     return member.roles
       .map((role) => {
@@ -66,13 +55,11 @@ function getRolePreview(member) {
       .filter(Boolean)
       .slice(0, 4);
   }
-
   return [];
 }
 
 function formatTime(value) {
   if (!value) return "Unknown";
-
   try {
     return new Date(value).toLocaleString();
   } catch {
@@ -84,13 +71,26 @@ function mergeMemberSnapshotIntoList(rows, nextMember) {
   const nextId = String(nextMember?.user_id || nextMember?.id || "").trim();
   if (!nextId) return rows;
 
-  const found = rows.some((item) => String(item?.user_id || item?.id || "") === nextId);
-  if (!found) return rows;
-
   return rows.map((item) => {
     const itemId = String(item?.user_id || item?.id || "").trim();
     if (itemId !== nextId) return item;
     return { ...item, ...nextMember };
+  });
+}
+
+function sortResults(rows) {
+  return [...rows].sort((a, b) => {
+    const aConflict = String(a?.role_state || "").includes("conflict") ? 1 : 0;
+    const bConflict = String(b?.role_state || "").includes("conflict") ? 1 : 0;
+    if (aConflict !== bConflict) return bConflict - aConflict;
+
+    const aInGuild = a?.in_guild !== false ? 1 : 0;
+    const bInGuild = b?.in_guild !== false ? 1 : 0;
+    if (aInGuild !== bInGuild) return bInGuild - aInGuild;
+
+    const aUpdated = new Date(a?.updated_at || a?.last_seen_at || a?.joined_at || 0).getTime();
+    const bUpdated = new Date(b?.updated_at || b?.last_seen_at || b?.joined_at || 0).getTime();
+    return bUpdated - aUpdated;
   });
 }
 
@@ -101,7 +101,6 @@ export default function MemberSearchCard() {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
   const [selected, setSelected] = useState(null);
   const [expandedMemberId, setExpandedMemberId] = useState("");
 
@@ -110,7 +109,6 @@ export default function MemberSearchCard() {
 
     async function run() {
       const q = debouncedQuery.trim();
-
       if (!q) {
         setResults([]);
         setError("");
@@ -122,18 +120,14 @@ export default function MemberSearchCard() {
       setError("");
 
       try {
-        const res = await fetch(`/api/discord/member-search?q=${encodeURIComponent(q)}`, {
-          cache: "no-store",
-        });
-
-        const json = await res.json();
-
+        const res = await fetch(`/api/discord/member-search?q=${encodeURIComponent(q)}`, { cache: "no-store" });
+        const json = await res.json().catch(() => ({}));
         if (!res.ok) {
-          throw new Error(json.error || "Member search failed.");
+          throw new Error(json?.error || "Member search failed.");
         }
 
         if (!cancelled) {
-          setResults(Array.isArray(json.results) ? json.results : []);
+          setResults(sortResults(Array.isArray(json?.results) ? json.results : []));
         }
       } catch (err) {
         if (!cancelled) {
@@ -148,7 +142,6 @@ export default function MemberSearchCard() {
     }
 
     run();
-
     return () => {
       cancelled = true;
     };
@@ -159,43 +152,31 @@ export default function MemberSearchCard() {
     const inServer = results.filter((x) => x.in_guild !== false).length;
     const leftServer = results.filter((x) => x.in_guild === false).length;
     const verified = results.filter((x) => !!x.has_verified_role).length;
-    const pending = results.filter((x) => !x.has_verified_role).length;
+    const pending = results.filter((x) => !!x.has_unverified).length;
     const staff = results.filter((x) => !!x.has_staff_role).length;
     const conflicts = results.filter((x) => String(x?.role_state || "").includes("conflict")).length;
-
-    return {
-      total,
-      inServer,
-      leftServer,
-      verified,
-      pending,
-      staff,
-      conflicts,
-    };
+    return { total, inServer, leftServer, verified, pending, staff, conflicts };
   }, [results]);
 
   useEffect(() => {
     if (!selected) return;
-
-    const selectedId = selected.user_id || selected.id;
+    const selectedId = String(selected?.user_id || selected?.id || "").trim();
     if (!selectedId) return;
 
-    const updatedSelected = results.find((item) => (item.user_id || item.id) === selectedId);
-
+    const updatedSelected = results.find((item) => String(item?.user_id || item?.id || "").trim() === selectedId);
     if (updatedSelected) {
       setSelected(updatedSelected);
     }
   }, [results, selected]);
 
   function toggleExpanded(member) {
-    const memberId = member?.user_id || member?.id || "";
+    const memberId = String(member?.user_id || member?.id || "").trim();
     if (!memberId) return;
-
     setExpandedMemberId((prev) => (prev === memberId ? "" : memberId));
   }
 
   function handleMemberUpdated(nextMember) {
-    setResults((prev) => mergeMemberSnapshotIntoList(prev, nextMember));
+    setResults((prev) => sortResults(mergeMemberSnapshotIntoList(prev, nextMember)));
     setSelected((prev) => {
       const prevId = String(prev?.user_id || prev?.id || "").trim();
       const nextId = String(nextMember?.user_id || nextMember?.id || "").trim();
@@ -207,16 +188,7 @@ export default function MemberSearchCard() {
   return (
     <>
       <div className="card">
-        <div
-          className="row"
-          style={{
-            justifyContent: "space-between",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: 10,
-            marginBottom: 12,
-          }}
-        >
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
           <div style={{ minWidth: 0 }}>
             <h2 style={{ margin: 0 }}>Live Member Search</h2>
             <div className="muted" style={{ marginTop: 6 }}>
@@ -232,23 +204,12 @@ export default function MemberSearchCard() {
         </div>
 
         <div className="space">
-          <input
-            className="input"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search members..."
-            autoComplete="off"
-          />
+          <input className="input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search members..." autoComplete="off" />
 
           {error ? <div className="error-banner">{error}</div> : null}
-
           {!query.trim() ? <div className="empty-state">Start typing to search live member records.</div> : null}
-
           {loading ? <div className="loading-state">Searching members...</div> : null}
-
-          {query.trim() && !loading && !results.length && !error ? (
-            <div className="empty-state">No matching members found.</div>
-          ) : null}
+          {query.trim() && !loading && !results.length && !error ? <div className="empty-state">No matching members found.</div> : null}
 
           {!loading && results.length ? (
             <>
@@ -257,7 +218,7 @@ export default function MemberSearchCard() {
                 <span className="badge claimed">{summary.inServer} in server</span>
                 {summary.leftServer ? <span className="badge closed">{summary.leftServer} former</span> : null}
                 <span className="badge low">{summary.verified} verified</span>
-                <span className="badge medium">{summary.pending} pending</span>
+                <span className="badge medium">{summary.pending} unverified</span>
                 <span className="badge claimed">{summary.staff} staff</span>
                 {summary.conflicts ? <span className="badge danger">{summary.conflicts} conflicts</span> : null}
               </div>
@@ -271,189 +232,63 @@ export default function MemberSearchCard() {
                   const topRoleLabel = getTopRoleLabel(member);
                   const rolePreview = getRolePreview(member);
                   const expanded = expandedMemberId === memberId;
-                  const hasConflict = String(member?.role_state || "").includes("conflict");
+                  const conflict = String(member?.role_state || "").includes("conflict");
 
                   return (
-                    <div
-                      key={memberId}
-                      className="member-search-result"
-                      style={{
-                        border: "1px solid rgba(255,255,255,0.08)",
-                        background: hasConflict ? "rgba(127,29,29,0.12)" : "rgba(255,255,255,0.02)",
-                        borderRadius: 18,
-                        padding: 12,
-                      }}
-                    >
-                      <div
-                        className="row"
-                        style={{
-                          justifyContent: "space-between",
-                          alignItems: "flex-start",
-                          gap: 12,
-                          flexWrap: "nowrap",
-                        }}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => toggleExpanded(member)}
-                          style={{
-                            background: "transparent",
-                            border: "none",
-                            padding: 0,
-                            textAlign: "left",
-                            cursor: "pointer",
-                            minWidth: 0,
-                            flex: 1,
-                          }}
-                        >
+                    <div key={memberId} className="member-search-result" style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.02)", borderRadius: 18, padding: 12 }}>
+                      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "nowrap" }}>
+                        <button type="button" onClick={() => toggleExpanded(member)} style={{ background: "transparent", border: "none", padding: 0, textAlign: "left", cursor: "pointer", minWidth: 0, flex: 1 }}>
                           <div className="row" style={{ minWidth: 0, flex: 1, alignItems: "center", gap: 12 }}>
                             <div className="avatar">
                               {avatarUrl ? (
-                                <img
-                                  src={avatarUrl}
-                                  alt={displayName}
-                                  width="38"
-                                  height="38"
-                                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                                />
+                                <img src={avatarUrl} alt={displayName} width="38" height="38" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                               ) : (
                                 initials(displayName)
                               )}
                             </div>
 
                             <div style={{ minWidth: 0, flex: 1 }}>
-                              <div
-                                style={{
-                                  fontWeight: 800,
-                                  color: "var(--text-strong)",
-                                  overflowWrap: "anywhere",
-                                  lineHeight: 1.15,
-                                }}
-                              >
-                                {displayName}
-                              </div>
-
-                              <div className="muted" style={{ marginTop: 4, fontSize: 13, overflowWrap: "anywhere" }}>
-                                {memberId || "No user id"}
-                              </div>
-
+                              <div style={{ fontWeight: 800, color: "var(--text-strong)", overflowWrap: "anywhere", lineHeight: 1.15 }}>{displayName}</div>
+                              <div className="muted" style={{ marginTop: 4, fontSize: 13, overflowWrap: "anywhere" }}>{memberId || "No user id"}</div>
                               {member.nickname && member.nickname !== displayName ? (
-                                <div className="muted" style={{ marginTop: 4, fontSize: 12, overflowWrap: "anywhere" }}>
-                                  Nickname: {member.nickname}
-                                </div>
+                                <div className="muted" style={{ marginTop: 4, fontSize: 12, overflowWrap: "anywhere" }}>Nickname: {member.nickname}</div>
                               ) : null}
                             </div>
                           </div>
                         </button>
 
-                        <div
-                          className="member-search-badges"
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "flex-end",
-                            gap: 6,
-                            flexShrink: 0,
-                          }}
-                        >
-                          <button
-                            type="button"
-                            className={`badge ${inGuild ? "claimed" : "closed"}`}
-                            style={{ cursor: "pointer" }}
-                            onClick={() => toggleExpanded(member)}
-                          >
+                        <div className="member-search-badges" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
+                          <button type="button" className={`badge ${inGuild ? "claimed" : "closed"}`} style={{ cursor: "pointer" }} onClick={() => toggleExpanded(member)}>
                             {inGuild ? "In Server" : "Former"}
                           </button>
-
-                          <button
-                            type="button"
-                            className={`badge ${member.has_verified_role ? "low" : member.has_unverified ? "medium" : "open"}`}
-                            style={{ cursor: "pointer" }}
-                            onClick={() => toggleExpanded(member)}
-                          >
+                          <button type="button" className={`badge ${member.has_verified_role ? "low" : member.has_unverified ? "medium" : "open"}`} style={{ cursor: "pointer" }} onClick={() => toggleExpanded(member)}>
                             {member.has_verified_role ? "Verified" : member.has_unverified ? "Unverified" : "Unknown"}
                           </button>
-
-                          <button
-                            type="button"
-                            className={`badge ${member.has_staff_role ? "claimed" : "open"}`}
-                            style={{ cursor: "pointer" }}
-                            onClick={() => toggleExpanded(member)}
-                          >
+                          <button type="button" className={`badge ${member.has_staff_role ? "claimed" : "open"}`} style={{ cursor: "pointer" }} onClick={() => toggleExpanded(member)}>
                             {member.has_staff_role ? "Staff" : "Member"}
                           </button>
+                          {conflict ? <span className="badge danger">Conflict</span> : null}
                         </div>
                       </div>
 
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
                         <span className="badge">{topRoleLabel}</span>
-                        {hasConflict ? <span className="badge danger">{member.role_state}</span> : null}
-
                         {rolePreview.map((roleName) => (
-                          <span
-                            key={`${memberId}-${roleName}`}
-                            className="badge"
-                            style={{
-                              background: "rgba(255,255,255,0.06)",
-                              border: "1px solid rgba(255,255,255,0.08)",
-                              color: "var(--text-soft)",
-                            }}
-                          >
-                            {roleName}
-                          </span>
+                          <span key={`${memberId}-${roleName}`} className="badge" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", color: "var(--text-soft)" }}>{roleName}</span>
                         ))}
                       </div>
 
                       {expanded ? (
-                        <div
-                          style={{
-                            marginTop: 12,
-                            paddingTop: 12,
-                            borderTop: "1px solid rgba(255,255,255,0.08)",
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: "grid",
-                              gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-                              gap: 10,
-                              marginBottom: 12,
-                            }}
-                          >
-                            <div className="member-detail-item">
-                              <span className="ticket-info-label">Joined</span>
-                              <span>{formatTime(member.joined_at)}</span>
-                            </div>
-
-                            <div className="member-detail-item">
-                              <span className="ticket-info-label">Updated</span>
-                              <span>{formatTime(member.updated_at || member.last_seen_at)}</span>
-                            </div>
-
-                            <div className="member-detail-item">
-                              <span className="ticket-info-label">Role State</span>
-                              <span>{member.role_state || "unknown"}</span>
-                            </div>
+                        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 12 }}>
+                            <div className="member-detail-item"><span className="ticket-info-label">Joined</span><span>{formatTime(member.joined_at)}</span></div>
+                            <div className="member-detail-item"><span className="ticket-info-label">Updated</span><span>{formatTime(member.updated_at || member.last_seen_at)}</span></div>
+                            <div className="member-detail-item"><span className="ticket-info-label">Role State</span><span>{member.role_state || "unknown"}</span></div>
                           </div>
 
                           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                            <button
-                              type="button"
-                              className="button"
-                              style={{ width: "auto", minWidth: 130 }}
-                              onClick={() => setSelected(member)}
-                            >
-                              Open Profile
-                            </button>
-
-                            <button
-                              type="button"
-                              className="button ghost"
-                              style={{ width: "auto", minWidth: 130 }}
-                              onClick={() => toggleExpanded(member)}
-                            >
-                              Collapse
-                            </button>
+                            <button type="button" className="button" style={{ width: "auto", minWidth: 130 }} onClick={() => setSelected(member)}>Open Profile</button>
+                            <button type="button" className="button ghost" style={{ width: "auto", minWidth: 130 }} onClick={() => toggleExpanded(member)}>Collapse</button>
                           </div>
                         </div>
                       ) : null}
