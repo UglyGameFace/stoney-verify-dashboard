@@ -7,8 +7,7 @@ export const dynamic = "force-dynamic"
 export const revalidate = 0
 
 function isoTimeout(minutes) {
-  const ms = minutes * 60 * 1000
-  return new Date(Date.now() + ms).toISOString()
+  return new Date(Date.now() + minutes * 60 * 1000).toISOString()
 }
 
 function safeAuditReason(value) {
@@ -17,7 +16,6 @@ function safeAuditReason(value) {
 
 async function discordApi(path, { method = "GET", body, reason } = {}) {
   const token = process.env.DISCORD_TOKEN || env.discordToken || ""
-
   if (!token) {
     throw new Error("Missing DISCORD_TOKEN")
   }
@@ -35,31 +33,21 @@ async function discordApi(path, { method = "GET", body, reason } = {}) {
 
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`Discord API ${res.status}: ${text}`)
+    const error = new Error(`Discord API ${res.status}: ${text}`)
+    error.status = res.status
+    throw error
   }
 
   const text = await res.text()
   return text ? JSON.parse(text) : null
 }
 
-async function fetchGuildMember(guildId, userId) {
-  return discordApi(`/guilds/${guildId}/members/${userId}`)
-}
-
-async function fetchGuildRoleCatalog(guildId) {
-  return discordApi(`/guilds/${guildId}/roles`)
-}
-
-function normalizeMemberRoleIds(member) {
-  return Array.isArray(member?.roles) ? member.roles.map(String) : []
-}
-
 function normalizeGuildRoles(rows) {
   return Array.isArray(rows)
     ? rows
         .map((role) => ({
-          id: String(role?.id || role?.role_id || ""),
-          name: String(role?.name || role?.role_name || "").trim(),
+          id: String(role?.id || "").trim(),
+          name: String(role?.name || "").trim(),
           position: Number(role?.position || 0),
           managed: Boolean(role?.managed),
         }))
@@ -71,6 +59,7 @@ function resolveRoleGroups({ roleIds, roleNames, roleRules }) {
   const activeRules = Array.isArray(roleRules) ? roleRules.filter((rule) => rule?.active !== false) : []
   const byId = new Map(activeRules.map((rule) => [String(rule.role_id), String(rule.role_group || "")]))
   const byName = new Map(activeRules.map((rule) => [String(rule.role_name || "").toLowerCase(), String(rule.role_group || "")]))
+  const envStaffNames = env.staffRoleNames.map((value) => String(value || "").toLowerCase())
 
   const hits = {
     unverified: false,
@@ -88,9 +77,8 @@ function resolveRoleGroups({ roleIds, roleNames, roleRules }) {
     const lowered = roleName.toLowerCase()
 
     let group = byId.get(roleId) || byName.get(lowered) || ""
-
     if (!group) {
-      if (env.staffRoleIds.includes(roleId) || env.staffRoleNames.map((value) => value.toLowerCase()).includes(lowered)) {
+      if (env.staffRoleIds.includes(roleId) || envStaffNames.includes(lowered)) {
         group = "staff"
       } else if (lowered.includes("unverified")) {
         group = "unverified"
@@ -125,74 +113,30 @@ function resolveRoleGroups({ roleIds, roleNames, roleRules }) {
 
 function resolveRoleState({ inGuild, hasAnyRole, has_unverified, has_verified_role, has_staff_role, has_cosmetic_only }) {
   if (!inGuild) {
-    return {
-      data_health: "left_guild",
-      role_state: "left_guild",
-      role_state_reason: "Member is not currently present in Discord.",
-    }
+    return { data_health: "left_guild", role_state: "left_guild", role_state_reason: "Member is not currently present in Discord." }
   }
-
   if (has_staff_role && has_unverified) {
-    return {
-      data_health: "missing_role",
-      role_state: "staff_conflict",
-      role_state_reason: "Member has both Staff and Unverified.",
-    }
+    return { data_health: "missing_role", role_state: "staff_conflict", role_state_reason: "Member has both Staff and Unverified." }
   }
-
   if (has_staff_role) {
-    return {
-      data_health: "ok",
-      role_state: "staff_ok",
-      role_state_reason: "Member has staff access with no unverified conflict.",
-    }
+    return { data_health: "ok", role_state: "staff_ok", role_state_reason: "Member has staff access with no unverified conflict." }
   }
-
   if (has_verified_role && has_unverified) {
-    return {
-      data_health: "missing_role",
-      role_state: "verified_conflict",
-      role_state_reason: "Member has both Verified and Unverified roles.",
-    }
+    return { data_health: "missing_role", role_state: "verified_conflict", role_state_reason: "Member has both Verified and Unverified roles." }
   }
-
   if (has_verified_role) {
-    return {
-      data_health: "ok",
-      role_state: "verified_ok",
-      role_state_reason: "Member has a valid verified role set.",
-    }
+    return { data_health: "ok", role_state: "verified_ok", role_state_reason: "Member has a valid verified role set." }
   }
-
   if (has_unverified) {
-    return {
-      data_health: "ok",
-      role_state: "unverified_only",
-      role_state_reason: "Member is pending verification and only has unverified access.",
-    }
+    return { data_health: "ok", role_state: "unverified_only", role_state_reason: "Member is pending verification and only has unverified access." }
   }
-
   if (has_cosmetic_only) {
-    return {
-      data_health: "missing_role",
-      role_state: "booster_only",
-      role_state_reason: "Member has cosmetic roles but no core verification role.",
-    }
+    return { data_health: "missing_role", role_state: "booster_only", role_state_reason: "Member has cosmetic roles but no core verification role." }
   }
-
   if (!hasAnyRole) {
-    return {
-      data_health: "missing_role",
-      role_state: "missing_unverified",
-      role_state_reason: "Member has no tracked roles. Expected at least an unverified role.",
-    }
+    return { data_health: "missing_role", role_state: "missing_unverified", role_state_reason: "Member has no tracked roles. Expected at least an unverified role." }
   }
-
-  return {
-    data_health: "unknown",
-    role_state: "unknown",
-    role_state_reason: "Unable to determine member role state from current role set.",
-  }
+  return { data_health: "unknown", role_state: "unknown", role_state_reason: "Unable to determine member role state from current role set." }
 }
 
 function buildAvatarUrl(memberUser) {
@@ -207,77 +151,47 @@ function buildAvatarUrl(memberUser) {
 
 async function buildFreshMemberSnapshot({ supabase, guildId, userId }) {
   const [discordMember, discordRoles, storedMemberRes, roleRulesRes] = await Promise.all([
-    fetchGuildMember(guildId, userId),
-    fetchGuildRoleCatalog(guildId),
+    discordApi(`/guilds/${guildId}/members/${userId}`),
+    discordApi(`/guilds/${guildId}/roles`),
     supabase.from("guild_members").select("*").eq("guild_id", guildId).eq("user_id", userId).maybeSingle(),
     supabase.from("guild_role_rules").select("*").eq("guild_id", guildId).eq("active", true),
   ])
 
-  const storedMember = storedMemberRes?.data || null
   if (storedMemberRes?.error) {
     throw new Error(storedMemberRes.error.message || "Failed to load stored member record.")
   }
-
   if (roleRulesRes?.error) {
     throw new Error(roleRulesRes.error.message || "Failed to load role rules.")
   }
 
-  const allRoles = normalizeGuildRoles(discordRoles)
-  const roleMap = new Map(allRoles.map((role) => [role.id, role]))
-  const roleIds = normalizeMemberRoleIds(discordMember)
-  const fullRoles = roleIds
-    .map((roleId) => roleMap.get(roleId))
-    .filter(Boolean)
-    .sort((a, b) => b.position - a.position)
-
+  const storedMember = storedMemberRes?.data || null
+  const roleCatalog = normalizeGuildRoles(discordRoles)
+  const roleMap = new Map(roleCatalog.map((role) => [role.id, role]))
+  const roleIds = Array.isArray(discordMember?.roles) ? discordMember.roles.map(String) : []
+  const fullRoles = roleIds.map((roleId) => roleMap.get(roleId)).filter(Boolean).sort((a, b) => b.position - a.position)
   const roleNames = fullRoles.map((role) => role.name)
   const highestRole = fullRoles[0] || null
+  const grouped = resolveRoleGroups({ roleIds, roleNames, roleRules: roleRulesRes?.data || [] })
+  const roleState = resolveRoleState({ inGuild: true, hasAnyRole: roleIds.length > 0, ...grouped })
 
-  const grouped = resolveRoleGroups({
-    roleIds,
-    roleNames,
-    roleRules: roleRulesRes.data || [],
-  })
-
-  const hasAnyRole = roleIds.length > 0
-  const roleState = resolveRoleState({
-    inGuild: true,
-    hasAnyRole,
-    ...grouped,
-  })
-
-  const previousUsernames = Array.isArray(storedMember?.previous_usernames) ? [...storedMember.previous_usernames] : []
-  const previousDisplayNames = Array.isArray(storedMember?.previous_display_names) ? [...storedMember.previous_display_names] : []
-  const previousNicknames = Array.isArray(storedMember?.previous_nicknames) ? [...storedMember.previous_nicknames] : []
-
+  const now = new Date().toISOString()
   const currentUsername = String(discordMember?.user?.username || "").trim()
   const currentDisplayName = String(discordMember?.user?.global_name || discordMember?.nick || currentUsername).trim()
   const currentNickname = String(discordMember?.nick || "").trim()
-
-  if (storedMember?.last_seen_username && storedMember.last_seen_username !== currentUsername && !previousUsernames.includes(storedMember.last_seen_username)) {
-    previousUsernames.unshift(storedMember.last_seen_username)
-  }
-  if (storedMember?.last_seen_display_name && storedMember.last_seen_display_name !== currentDisplayName && !previousDisplayNames.includes(storedMember.last_seen_display_name)) {
-    previousDisplayNames.unshift(storedMember.last_seen_display_name)
-  }
-  if (storedMember?.last_seen_nickname && storedMember.last_seen_nickname !== currentNickname && !previousNicknames.includes(storedMember.last_seen_nickname)) {
-    previousNicknames.unshift(storedMember.last_seen_nickname)
-  }
-
-  const now = new Date().toISOString()
 
   const row = {
     guild_id: guildId,
     user_id: userId,
     username: currentUsername,
     display_name: currentDisplayName,
-    avatar_url: buildAvatarUrl(discordMember.user),
+    avatar_url: buildAvatarUrl(discordMember?.user),
     role_ids: roleIds,
     role_names: roleNames,
     highest_role_id: highestRole?.id || null,
     highest_role_name: highestRole?.name || null,
     in_guild: true,
-    has_any_role: hasAnyRole,
+    has_any_role: roleIds.length > 0,
+    data_health: roleState.data_health,
     synced_at: now,
     updated_at: now,
     has_unverified: grouped.has_unverified,
@@ -287,29 +201,20 @@ async function buildFreshMemberSnapshot({ supabase, guildId, userId }) {
     has_cosmetic_only: grouped.has_cosmetic_only,
     role_state: roleState.role_state,
     role_state_reason: roleState.role_state_reason,
-    data_health: roleState.data_health,
     avatar_hash: discordMember?.user?.avatar || null,
     nickname: discordMember?.nick || null,
     roles: fullRoles,
     top_role: highestRole?.name || null,
     joined_at: discordMember?.joined_at || storedMember?.joined_at || now,
-    previous_usernames: previousUsernames.slice(0, 25),
-    previous_display_names: previousDisplayNames.slice(0, 25),
-    previous_nicknames: previousNicknames.slice(0, 25),
     last_seen_username: currentUsername || null,
     last_seen_display_name: currentDisplayName || null,
     last_seen_nickname: currentNickname || null,
-    first_seen_at: storedMember?.first_seen_at || now,
     last_seen_at: now,
-    left_at: null,
-    rejoined_at: storedMember?.in_guild === false ? now : storedMember?.rejoined_at || null,
-    times_joined: Math.max(Number(storedMember?.times_joined || 1), 1),
-    times_left: Number(storedMember?.times_left || 0),
   }
 
   const { error: upsertError } = await supabase.from("guild_members").upsert(row, { onConflict: "guild_id,user_id" })
   if (upsertError) {
-    throw new Error(upsertError.message || "Failed to persist fresh member snapshot.")
+    throw new Error(upsertError.message || "Failed to persist member snapshot.")
   }
 
   return {
@@ -347,33 +252,21 @@ export async function POST(req) {
   try {
     const { session, refreshedTokens } = await requireStaffSessionForRoute()
     const supabase = createServerSupabase()
-
     const guildId = env.guildId || ""
-    const body = await req.json()
-
+    const body = await req.json().catch(() => ({}))
     const action = String(body.action || "").toLowerCase().trim()
     const userId = String(body.user_id || "").trim()
-    const roleId = String(body.role_id || "").trim()
-
     const reason = String(body.reason || "").trim() || "Action taken from Stoney Verify Dashboard"
     const rawMinutes = Number(body.minutes || 10)
-
     const timeoutMinutes = Number.isFinite(rawMinutes) ? Math.max(1, Math.min(rawMinutes, 40320)) : 10
-
     const staffName = session?.user?.username || session?.user?.name || env.defaultStaffName || "Dashboard Staff"
     const staffId = session?.user?.id || "unknown"
-    const auditReason = `${reason} — by ${staffName}`
 
     if (!guildId) {
       return NextResponse.json({ error: "Missing guild id" }, { status: 500 })
     }
-
     if (!userId) {
       return NextResponse.json({ error: "Missing user id" }, { status: 400 })
-    }
-
-    if (!["warn", "timeout", "untimeout", "kick", "ban", "add_role", "remove_role", "purge", "history"].includes(action)) {
-      return NextResponse.json({ error: "Unsupported action" }, { status: 400 })
     }
 
     if (action === "warn") {
@@ -381,126 +274,80 @@ export async function POST(req) {
         guild_id: guildId,
         user_id: userId,
         username: body.username || userId,
-        reason: auditReason,
+        reason: `${reason} — issued by ${staffName}`,
         source_message: null,
       })
-
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 })
       }
-    }
-
-    if (action === "timeout") {
+    } else if (action === "timeout") {
       await discordApi(`/guilds/${guildId}/members/${userId}`, {
         method: "PATCH",
-        body: {
-          communication_disabled_until: isoTimeout(timeoutMinutes),
-        },
-        reason: auditReason,
+        body: { communication_disabled_until: isoTimeout(timeoutMinutes) },
+        reason: `${reason} — by ${staffName}`,
       })
-    }
-
-    if (action === "untimeout") {
+    } else if (action === "untimeout") {
       await discordApi(`/guilds/${guildId}/members/${userId}`, {
         method: "PATCH",
-        body: {
-          communication_disabled_until: null,
-        },
-        reason: `Timeout removed — by ${staffName}`,
+        body: { communication_disabled_until: null },
+        reason: `Timeout removed by ${staffName}`,
       })
-    }
-
-    if (action === "kick") {
+    } else if (action === "kick") {
       await discordApi(`/guilds/${guildId}/members/${userId}`, {
         method: "DELETE",
-        reason: auditReason,
+        reason: `${reason} — by ${staffName}`,
       })
-    }
-
-    if (action === "ban") {
+    } else if (action === "ban") {
       await discordApi(`/guilds/${guildId}/bans/${userId}`, {
         method: "PUT",
-        body: {
-          delete_message_seconds: 0,
-        },
-        reason: auditReason,
+        body: { delete_message_seconds: 0 },
+        reason: `${reason} — by ${staffName}`,
       })
-    }
-
-    if (action === "add_role") {
+    } else if (action === "add_role" || action === "remove_role") {
+      const roleId = String(body.role_id || "").trim()
       if (!roleId) {
         return NextResponse.json({ error: "Missing role_id" }, { status: 400 })
       }
 
-      await fetchGuildMember(guildId, userId)
-      const roles = normalizeGuildRoles(await fetchGuildRoleCatalog(guildId))
-      const chosenRole = roles.find((role) => role.id === roleId)
-      if (!chosenRole) {
-        return NextResponse.json({ error: "Unknown role_id" }, { status: 404 })
+      const roleRows = normalizeGuildRoles(await discordApi(`/guilds/${guildId}/roles`))
+      const targetRole = roleRows.find((role) => role.id === roleId)
+      if (!targetRole) {
+        return NextResponse.json({ error: "Role not found in Discord." }, { status: 404 })
+      }
+      if (targetRole.managed) {
+        return NextResponse.json({ error: "Managed or integration roles cannot be changed here." }, { status: 400 })
       }
 
       await discordApi(`/guilds/${guildId}/members/${userId}/roles/${roleId}`, {
-        method: "PUT",
-        reason: `${auditReason} | add role ${chosenRole.name}`,
+        method: action === "add_role" ? "PUT" : "DELETE",
+        reason: `${reason} — by ${staffName}`,
       })
-    }
-
-    if (action === "remove_role") {
-      if (!roleId) {
-        return NextResponse.json({ error: "Missing role_id" }, { status: 400 })
-      }
-
-      const roles = normalizeGuildRoles(await fetchGuildRoleCatalog(guildId))
-      const chosenRole = roles.find((role) => role.id === roleId)
-
-      await discordApi(`/guilds/${guildId}/members/${userId}/roles/${roleId}`, {
-        method: "DELETE",
-        reason: `${auditReason}${chosenRole ? ` | remove role ${chosenRole.name}` : ""}`,
-      })
-    }
-
-    if (action === "purge") {
-      const channelId = String(body.channel_id || "")
-      const limit = Math.min(Math.max(Number(body.limit || 10), 1), 100)
-
-      const messages = await discordApi(`/channels/${channelId}/messages?limit=${limit}`)
-      for (const msg of messages) {
-        await discordApi(`/channels/${channelId}/messages/${msg.id}`, {
-          method: "DELETE",
-          reason: auditReason,
-        })
-      }
-    }
-
-    if (action === "history") {
-      const [{ data: warns }, { data: tickets }] = await Promise.all([
-        supabase.from("warns").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
-        supabase.from("tickets").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
-      ])
-
+    } else if (action === "history") {
+      const { data: warns } = await supabase.from("warns").select("*").eq("user_id", userId).order("created_at", { ascending: false })
+      const { data: tickets } = await supabase.from("tickets").select("*").eq("user_id", userId).order("created_at", { ascending: false })
       const response = NextResponse.json({ warns: warns || [], tickets: tickets || [] })
       applyAuthCookies(response, refreshedTokens)
       return response
-    }
-
-    let freshMember = null
-    if (["warn", "timeout", "add_role", "remove_role"].includes(action)) {
-      try {
-        freshMember = await buildFreshMemberSnapshot({ supabase, guildId, userId })
-      } catch {
-        freshMember = null
-      }
+    } else {
+      return NextResponse.json({ error: "Unsupported action" }, { status: 400 })
     }
 
     await supabase.from("audit_events").insert({
       title: `Member ${action}`,
-      description:
-        `${staffName} performed ${action} on ${userId}` +
-        (action === "timeout" ? ` for ${timeoutMinutes} minute(s)` : "") +
-        `. Reason: ${reason}`,
+      description: `${staffName} performed ${action} on ${userId}${action === "timeout" ? ` for ${timeoutMinutes} minute(s)` : ""}. Reason: ${reason}`,
       event_type: `member_${action}`,
       related_id: userId,
     })
+
+    let refreshedMember = null
+    let refreshWarning = null
+    if (["add_role", "remove_role", "timeout"].includes(action)) {
+      try {
+        refreshedMember = await buildFreshMemberSnapshot({ supabase, guildId, userId })
+      } catch (refreshError) {
+        refreshWarning = refreshError?.message || "Member refresh failed after Discord action."
+      }
+    }
 
     const response = NextResponse.json({
       ok: true,
@@ -508,7 +355,8 @@ export async function POST(req) {
       user_id: userId,
       timeout_minutes: action === "timeout" ? timeoutMinutes : null,
       staff_id: staffId,
-      member: freshMember,
+      member: refreshedMember,
+      refresh_warning: refreshWarning,
     })
 
     applyAuthCookies(response, refreshedTokens)
