@@ -6,16 +6,6 @@ function buildMention(id) {
   return id ? `<@${id}>` : ""
 }
 
-function normalizeRoleLabel(role) {
-  if (!role) return ""
-  if (typeof role === "string") return role
-  if (typeof role === "object") {
-    if (typeof role.name === "string" && role.name.trim()) return role.name
-    if (typeof role.id === "string" && role.id.trim()) return role.id
-  }
-  return ""
-}
-
 function formatTime(value) {
   if (!value) return "—"
   try {
@@ -23,20 +13,6 @@ function formatTime(value) {
   } catch {
     return "—"
   }
-}
-
-function truthBadgeTone(active, positive = "claimed", negative = "open") {
-  return active ? positive : negative
-}
-
-function getRoleIds(payload) {
-  return Array.isArray(payload?.role_ids) ? payload.role_ids.map(String) : []
-}
-
-function getRoleNames(payload) {
-  return Array.isArray(payload?.role_names)
-    ? payload.role_names.map((value) => String(value || "").trim()).filter(Boolean)
-    : []
 }
 
 function getDisplayName(member) {
@@ -51,172 +27,146 @@ function getDisplayName(member) {
   )
 }
 
+function getSourceMember(primary, fallback) {
+  return primary || fallback || null
+}
+
+function getMemberId(member) {
+  return String(member?.user_id || member?.id || "").trim()
+}
+
+function getRoleNames(member) {
+  if (Array.isArray(member?.role_names) && member.role_names.length) {
+    return member.role_names.map((value) => String(value || "").trim()).filter(Boolean)
+  }
+
+  if (Array.isArray(member?.roles) && member.roles.length) {
+    return member.roles
+      .map((role) => {
+        if (typeof role === "string") return role
+        if (role && typeof role === "object") return String(role.name || role.id || "").trim()
+        return ""
+      })
+      .filter(Boolean)
+  }
+
+  return []
+}
+
+function getRoleIds(member) {
+  if (Array.isArray(member?.role_ids) && member.role_ids.length) {
+    return member.role_ids.map((value) => String(value || "").trim()).filter(Boolean)
+  }
+
+  if (Array.isArray(member?.roles) && member.roles.length) {
+    return member.roles
+      .map((role) => {
+        if (role && typeof role === "object") return String(role.id || "").trim()
+        return ""
+      })
+      .filter(Boolean)
+  }
+
+  return []
+}
+
+function parseDiscordErrorDetails(message) {
+  const raw = String(message || "")
+  const statusMatch = raw.match(/Discord API\s+(\d+)/i)
+  const status = statusMatch ? Number(statusMatch[1]) : null
+
+  let retryAfter = null
+  const jsonStart = raw.indexOf("{")
+  if (jsonStart >= 0) {
+    try {
+      const payload = JSON.parse(raw.slice(jsonStart))
+      if (payload && Number.isFinite(Number(payload.retry_after))) {
+        retryAfter = Number(payload.retry_after)
+      }
+    } catch {
+      // ignore JSON parse failure
+    }
+  }
+
+  return {
+    status,
+    isRateLimited: status === 429 || /rate limit/i.test(raw),
+    isMissingMember: status === 404 || /unknown member/i.test(raw),
+    retryAfter,
+  }
+}
+
+function toneForVerification(member) {
+  if (member?.has_verified_role) return "low"
+  if (member?.has_unverified) return "medium"
+  return "open"
+}
+
+function labelForVerification(member) {
+  if (member?.has_verified_role) return "Verified"
+  if (member?.has_unverified) return "Unverified"
+  return "Unknown Verification"
+}
+
+function normalizeGuildRoles(rows) {
+  return Array.isArray(rows)
+    ? rows
+        .map((role) => ({
+          id: String(role?.role_id || role?.id || "").trim(),
+          name: String(role?.name || role?.role_name || "").trim(),
+          position: Number(role?.position || 0),
+          member_count: Number(role?.member_count || 0),
+        }))
+        .filter((role) => role.id && role.name)
+    : []
+}
+
 export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [loadingLive, setLoadingLive] = useState(false)
+  const [loadingRoles, setLoadingRoles] = useState(false)
+  const [liveMember, setLiveMember] = useState(null)
+  const [guildRoles, setGuildRoles] = useState([])
+  const [selectedRoleId, setSelectedRoleId] = useState("")
   const [modReason, setModReason] = useState("Dashboard moderation action")
   const [timeoutMinutes, setTimeoutMinutes] = useState("10")
-  const [liveMember, setLiveMember] = useState(null)
-  const [loadingLive, setLoadingLive] = useState(false)
-  const [discordUnavailable, setDiscordUnavailable] = useState(false)
-  const [guildRoles, setGuildRoles] = useState([])
-  const [loadingRoles, setLoadingRoles] = useState(false)
-  const [selectedRoleId, setSelectedRoleId] = useState("")
-
-  const displayName = getDisplayName(liveMember || member)
-  const sourceMember = liveMember || member || null
-  const memberId = sourceMember?.user_id || sourceMember?.id || ""
-  const avatarUrl = sourceMember?.avatar_url || sourceMember?.avatar || null
-  const inGuild = sourceMember?.in_guild !== false
+  const [rateLimitNotice, setRateLimitNotice] = useState("")
+  const [memberMissingOnDiscord, setMemberMissingOnDiscord] = useState(false)
 
   useEffect(() => {
     setLiveMember(member || null)
     setMessage("")
     setError("")
     setSelectedRoleId("")
+    setRateLimitNotice("")
+    setMemberMissingOnDiscord(Boolean(member?.discord_unavailable))
   }, [member])
 
-  useEffect(() => {
-    let cancelled = false
-
-    async function loadLiveMember() {
-      if (!memberId) {
-        setLiveMember(null)
-        return
-      }
-
-      setLoadingLive(true)
-      setDiscordUnavailable(false)
-
-      try {
-        const res = await fetch(`/api/discord/member-details?user_id=${encodeURIComponent(memberId)}`, {
-          cache: "no-store"
-        })
-
-        const json = await res.json()
-
-        if (!res.ok) {
-          throw new Error(json.error || "Failed to load live member roles.")
-        }
-
-        if (!cancelled) {
-          const nextMember = json.member || null
-          setLiveMember(nextMember)
-          setDiscordUnavailable(Boolean(nextMember?.discord_unavailable))
-          if (nextMember && typeof onMemberUpdated === "function") {
-            onMemberUpdated(nextMember)
-          }
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setDiscordUnavailable(true)
-          setError(err?.message || "Failed to load live member roles.")
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingLive(false)
-        }
-      }
-    }
-
-    if (member) {
-      loadLiveMember()
-    }
-
-    return () => {
-      cancelled = true
-    }
-  }, [member, memberId, onMemberUpdated])
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function loadGuildRoles() {
-      setLoadingRoles(true)
-
-      try {
-        const res = await fetch("/api/dashboard/live", { cache: "no-store" })
-        const json = await res.json()
-
-        if (!res.ok) {
-          throw new Error(json.error || "Failed to load role catalog.")
-        }
-
-        if (!cancelled) {
-          const rows = Array.isArray(json?.roles) ? json.roles : []
-          setGuildRoles(rows)
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setGuildRoles([])
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingRoles(false)
-        }
-      }
-    }
-
-    if (member) {
-      loadGuildRoles()
-    }
-
-    return () => {
-      cancelled = true
-    }
-  }, [member])
-
+  const sourceMember = getSourceMember(liveMember, member)
+  const memberId = getMemberId(sourceMember)
+  const displayName = getDisplayName(sourceMember)
+  const avatarUrl = sourceMember?.avatar_url || sourceMember?.avatar || null
+  const inGuild = sourceMember?.in_guild !== false
+  const roleNames = useMemo(() => getRoleNames(sourceMember), [sourceMember])
   const roleIds = useMemo(() => getRoleIds(sourceMember), [sourceMember])
-  const roleList = useMemo(() => {
-    const rawRoles =
-      (Array.isArray(sourceMember?.role_names) && sourceMember.role_names.length && sourceMember.role_names) ||
-      (Array.isArray(member?.roles) && member.roles.length ? member.roles : null) ||
-      (Array.isArray(member?.role_names) && member.role_names.length ? member.role_names : []) ||
-      []
-
-    return rawRoles
-      .map((role) => normalizeRoleLabel(role))
-      .filter(Boolean)
-  }, [sourceMember, member])
 
   const assignableRoles = useMemo(() => {
-    const assigned = new Set(roleIds)
-    return (Array.isArray(guildRoles) ? guildRoles : [])
-      .map((role) => ({
-        id: String(role.role_id || role.id || ""),
-        name: String(role.name || "Unnamed Role"),
-        position: Number(role.position || 0),
-      }))
-      .filter((role) => role.id && role.name && !assigned.has(role.id))
+    const assignedIdSet = new Set(roleIds)
+    const assignedNameSet = new Set(roleNames.map((name) => name.toLowerCase()))
+
+    return normalizeGuildRoles(guildRoles)
+      .filter((role) => role.name !== "@everyone")
+      .filter((role) => !assignedIdSet.has(role.id) && !assignedNameSet.has(role.name.toLowerCase()))
       .sort((a, b) => b.position - a.position)
-  }, [guildRoles, roleIds])
+  }, [guildRoles, roleIds, roleNames])
 
-  const selectedRoleName = useMemo(() => {
-    return assignableRoles.find((role) => role.id === selectedRoleId)?.name || ""
-  }, [assignableRoles, selectedRoleId])
-
-  const truth = useMemo(() => {
-    return {
-      hasVerified: Boolean(sourceMember?.has_verified_role),
-      hasUnverified: Boolean(sourceMember?.has_unverified),
-      hasStaff: Boolean(sourceMember?.has_staff_role),
-      roleState: sourceMember?.role_state || "unknown",
-      roleStateReason: sourceMember?.role_state_reason || "",
-      dataHealth: sourceMember?.data_health || "unknown",
-      topRole:
-        sourceMember?.top_role ||
-        sourceMember?.highest_role_name ||
-        member?.top_role ||
-        member?.highest_role_name ||
-        "—",
-      joinedAt: sourceMember?.joined_at || member?.joined_at || null,
-      updatedAt: sourceMember?.updated_at || sourceMember?.last_seen_at || member?.updated_at || null,
-    }
-  }, [sourceMember, member])
-
-  if (!member) return null
+  const selectedRole = useMemo(
+    () => assignableRoles.find((role) => role.id === selectedRoleId) || null,
+    [assignableRoles, selectedRoleId]
+  )
 
   async function copyText(value, successText) {
     try {
@@ -229,131 +179,170 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
     }
   }
 
-  async function refreshMemberDetails({ silent = false } = {}) {
-    if (!memberId) return null
-    if (!silent) {
-      setMessage("")
-      setError("")
-    }
+  async function loadGuildRoleCatalog({ silent = false } = {}) {
+    if (!member) return []
 
-    const res = await fetch(`/api/discord/member-details?user_id=${encodeURIComponent(memberId)}`, {
-      cache: "no-store"
-    })
-    const json = await res.json()
+    if (!silent) setLoadingRoles(true)
 
-    if (!res.ok) {
-      throw new Error(json.error || "Failed to refresh member details.")
-    }
+    try {
+      const res = await fetch("/api/dashboard/live", { cache: "no-store" })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(json?.error || "Failed to load role catalog.")
+      }
 
-    const nextMember = json.member || null
-    setLiveMember(nextMember)
-    setDiscordUnavailable(Boolean(nextMember?.discord_unavailable))
-    if (nextMember && typeof onMemberUpdated === "function") {
-      onMemberUpdated(nextMember)
+      const nextRoles = normalizeGuildRoles(json?.roles)
+      setGuildRoles(nextRoles)
+      return nextRoles
+    } catch (err) {
+      if (!silent) {
+        setError((prev) => prev || err?.message || "Failed to load role catalog.")
+      }
+      return []
+    } finally {
+      if (!silent) setLoadingRoles(false)
     }
-    return nextMember
   }
 
-  async function syncMemberNow({ successText = "Member sync completed.", silent = false } = {}) {
+  async function refreshMemberDetails({ silent = false } = {}) {
+    if (!memberId) return null
+
+    if (!silent) {
+      setLoadingLive(true)
+      setError("")
+      setMessage("")
+    } else {
+      setLoadingLive(true)
+    }
+
+    try {
+      const res = await fetch(`/api/discord/member-details?user_id=${encodeURIComponent(memberId)}`, {
+        cache: "no-store",
+      })
+      const json = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        throw new Error(json?.error || `Failed to load member details (${res.status}).`)
+      }
+
+      const nextMember = json?.member || null
+      if (nextMember) {
+        setLiveMember(nextMember)
+        setMemberMissingOnDiscord(Boolean(nextMember?.discord_unavailable))
+        setRateLimitNotice("")
+        if (typeof onMemberUpdated === "function") {
+          onMemberUpdated(nextMember)
+        }
+      }
+      return nextMember
+    } catch (err) {
+      const details = parseDiscordErrorDetails(err?.message)
+
+      if (details.isMissingMember) {
+        setMemberMissingOnDiscord(true)
+        setRateLimitNotice("")
+      } else if (details.isRateLimited) {
+        setMemberMissingOnDiscord(false)
+        const waitText = details.retryAfter ? ` Retry after about ${details.retryAfter.toFixed(1)}s.` : ""
+        setRateLimitNotice(`Discord rate limited the live refresh. Showing the last good member data instead.${waitText}`)
+      } else if (!silent) {
+        setMemberMissingOnDiscord(Boolean(sourceMember?.discord_unavailable))
+      }
+
+      if (!details.isRateLimited || !silent) {
+        setError(err?.message || "Failed to load live member roles.")
+      }
+      return null
+    } finally {
+      setLoadingLive(false)
+    }
+  }
+
+  async function syncMemberNow({ silent = false, successText = "Member sync completed." } = {}) {
     if (!memberId) return null
 
     setSyncing(true)
     if (!silent) {
       setBusy(true)
-      setMessage("")
       setError("")
+      setMessage("")
     }
 
     try {
       const res = await fetch("/api/discord/member-sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: memberId, reason: modReason.trim() || "Dashboard member sync" }),
+        body: JSON.stringify({
+          user_id: memberId,
+          reason: modReason.trim() || "Dashboard member sync",
+        }),
       })
-
       const json = await res.json().catch(() => ({}))
 
       if (!res.ok) {
-        throw new Error(json.error || "Member sync failed.")
+        throw new Error(json?.error || "Member sync failed.")
       }
 
-      if (json.member) {
-        setLiveMember(json.member)
-        setDiscordUnavailable(Boolean(json.member?.discord_unavailable))
+      const nextMember = json?.member || null
+      if (nextMember) {
+        setLiveMember(nextMember)
+        setMemberMissingOnDiscord(Boolean(nextMember?.discord_unavailable))
+        setRateLimitNotice("")
         if (typeof onMemberUpdated === "function") {
-          onMemberUpdated(json.member)
+          onMemberUpdated(nextMember)
         }
-      } else {
-        await refreshMemberDetails({ silent: true })
       }
 
       if (!silent) {
         setMessage(successText)
       }
 
-      return json.member || null
+      return nextMember
     } catch (err) {
-      if (!silent) {
+      const details = parseDiscordErrorDetails(err?.message)
+      if (details.isRateLimited) {
+        const waitText = details.retryAfter ? ` Retry after about ${details.retryAfter.toFixed(1)}s.` : ""
+        setRateLimitNotice(`Discord rate limited the sync refresh.${waitText}`)
+      } else if (!silent) {
         setError(err?.message || "Member sync failed.")
-        setMessage("")
       }
-      throw err
+      return null
     } finally {
       setSyncing(false)
-      if (!silent) {
-        setBusy(false)
-      }
+      if (!silent) setBusy(false)
     }
   }
 
   async function triggerFullRoleSync() {
     setBusy(true)
-    setMessage("")
     setError("")
+    setMessage("")
 
     try {
       const res = await fetch("/api/discord/role-sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       })
-
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
-        throw new Error(json.error || "Role sync failed.")
+        throw new Error(json?.error || "Role sync failed.")
       }
 
-      await syncMemberNow({ successText: "Full role sync ran and this member was refreshed." })
+      await syncMemberNow({ silent: true })
+      setMessage("Full role sync started and this member was refreshed.")
     } catch (err) {
       setError(err?.message || "Role sync failed.")
-      setMessage("")
+    } finally {
       setBusy(false)
     }
-  }
-
-  async function prepTicketSearch() {
-    await copyText(memberId, "User ID copied. Paste it into ticket search.")
-  }
-
-  async function copyStaffSummary() {
-    const lines = [
-      `Member: ${displayName}`,
-      `User ID: ${memberId || "unknown"}`,
-      `Status: ${inGuild ? "In Server" : "Left / Removed"}`,
-      `Role State: ${truth.roleState}`,
-      `Health: ${truth.dataHealth}`,
-      `Top Role: ${truth.topRole}`,
-      `Live Roles: ${roleList.join(", ") || "none"}`,
-    ]
-
-    await copyText(lines.join("\n"), "Staff summary copied.")
   }
 
   async function runModAction(action, extra = {}) {
     if (!memberId) return
 
     setBusy(true)
-    setMessage("")
     setError("")
+    setMessage("")
 
     try {
       const payload = {
@@ -370,10 +359,20 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
-
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
-        throw new Error(json.error || `${action} failed`)
+        throw new Error(json?.error || `${action} failed`)
+      }
+
+      if (json?.member) {
+        setLiveMember(json.member)
+        setMemberMissingOnDiscord(Boolean(json.member?.discord_unavailable))
+        setRateLimitNotice(json?.refresh_warning || "")
+        if (typeof onMemberUpdated === "function") {
+          onMemberUpdated(json.member)
+        }
+      } else if (["add_role", "remove_role", "timeout", "kick", "ban"].includes(action)) {
+        await syncMemberNow({ silent: true })
       }
 
       if (action === "timeout") {
@@ -385,22 +384,48 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
       } else if (action === "ban") {
         setMessage(`${displayName} was banned.`)
       } else if (action === "add_role") {
-        setMessage(`Added ${selectedRoleName || "role"} to ${displayName}.`)
+        setSelectedRoleId("")
+        setMessage(`Added ${selectedRole?.name || "role"} to ${displayName}.`)
       } else if (action === "remove_role") {
         setMessage(`Removed ${extra.role_name || "role"} from ${displayName}.`)
       }
 
-      if (["add_role", "remove_role", "timeout", "kick", "ban"].includes(action)) {
-        await syncMemberNow({ successText: action === "add_role" || action === "remove_role" ? `Discord action confirmed and member refreshed.` : undefined, silent: true })
-        await refreshMemberDetails({ silent: true }).catch(() => null)
-      }
+      await loadGuildRoleCatalog({ silent: true })
     } catch (err) {
+      const details = parseDiscordErrorDetails(err?.message)
+      if (details.isRateLimited) {
+        const waitText = details.retryAfter ? ` Retry after about ${details.retryAfter.toFixed(1)}s.` : ""
+        setRateLimitNotice(`Discord rate limited this action refresh.${waitText}`)
+      }
       setError(err?.message || "Moderation action failed.")
-      setMessage("")
     } finally {
       setBusy(false)
     }
   }
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function boot() {
+      if (!member) return
+      await Promise.all([
+        refreshMemberDetails({ silent: true }).catch(() => null),
+        loadGuildRoleCatalog({ silent: true }).catch(() => []),
+      ])
+      if (!cancelled) {
+        setLoadingRoles(false)
+      }
+    }
+
+    setLoadingRoles(true)
+    boot()
+
+    return () => {
+      cancelled = true
+    }
+  }, [member?.user_id, member?.id])
+
+  if (!member) return null
 
   return (
     <div className="drawer-backdrop" onClick={onClose}>
@@ -413,10 +438,7 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
       >
         <div className="member-drawer-handle" />
 
-        <div
-          className="row"
-          style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}
-        >
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
           <div style={{ minWidth: 0 }}>
             <h2 style={{ margin: 0 }}>Member Smoke Sheet</h2>
             <div className="muted" style={{ marginTop: 6 }}>
@@ -429,9 +451,15 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
           </button>
         </div>
 
-        {discordUnavailable ? (
+        {memberMissingOnDiscord ? (
           <div className="warning-banner" style={{ marginBottom: 12 }}>
             Discord no longer reports this member. Showing the latest stored record.
+          </div>
+        ) : null}
+
+        {rateLimitNotice ? (
+          <div className="warning-banner" style={{ marginBottom: 12 }}>
+            {rateLimitNotice}
           </div>
         ) : null}
 
@@ -451,27 +479,14 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
           <div className="row" style={{ alignItems: "flex-start" }}>
             <div className="avatar member-drawer-avatar">
               {avatarUrl ? (
-                <img
-                  src={avatarUrl}
-                  alt={displayName}
-                  width="52"
-                  height="52"
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
+                <img src={avatarUrl} alt={displayName} width="52" height="52" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               ) : (
                 displayName.slice(0, 1).toUpperCase()
               )}
             </div>
 
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div
-                style={{
-                  fontWeight: 800,
-                  fontSize: 22,
-                  color: "var(--text-strong)",
-                  overflowWrap: "anywhere",
-                }}
-              >
+              <div style={{ fontWeight: 800, fontSize: 22, color: "var(--text-strong)", overflowWrap: "anywhere" }}>
                 {displayName}
               </div>
 
@@ -481,15 +496,9 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
 
               <div className="member-drawer-badges">
                 <span className={`badge ${inGuild ? "claimed" : "closed"}`}>{inGuild ? "In Server" : "Former Member"}</span>
-                <span className={`badge ${truthBadgeTone(truth.hasVerified, "low", "medium")}`}>
-                  {truth.hasVerified ? "Verified" : truth.hasUnverified ? "Unverified" : "Unknown Verification"}
-                </span>
-                <span className={`badge ${truthBadgeTone(truth.hasStaff, "claimed", "open")}`}>
-                  {truth.hasStaff ? "Staff" : "Member"}
-                </span>
-                {truth.roleState && truth.roleState.includes("conflict") ? (
-                  <span className="badge danger">Conflict</span>
-                ) : null}
+                <span className={`badge ${toneForVerification(sourceMember)}`}>{labelForVerification(sourceMember)}</span>
+                <span className={`badge ${sourceMember?.has_staff_role ? "claimed" : "open"}`}>{sourceMember?.has_staff_role ? "Staff" : "Member"}</span>
+                {String(sourceMember?.role_state || "").includes("conflict") ? <span className="badge danger">Conflict</span> : null}
               </div>
             </div>
           </div>
@@ -497,32 +506,32 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
           <div className="member-detail-grid" style={{ marginTop: 16 }}>
             <div className="member-detail-item">
               <span className="ticket-info-label">Top Role</span>
-              <span>{truth.topRole}</span>
+              <span>{sourceMember?.top_role || sourceMember?.highest_role_name || "—"}</span>
             </div>
 
             <div className="member-detail-item">
               <span className="ticket-info-label">Role State</span>
-              <span>{truth.roleState}</span>
+              <span>{sourceMember?.role_state || "—"}</span>
             </div>
 
             <div className="member-detail-item">
               <span className="ticket-info-label">Health</span>
-              <span>{truth.dataHealth}</span>
+              <span>{sourceMember?.data_health || "—"}</span>
             </div>
 
             <div className="member-detail-item">
               <span className="ticket-info-label">Joined</span>
-              <span>{formatTime(truth.joinedAt)}</span>
+              <span>{formatTime(sourceMember?.joined_at)}</span>
             </div>
 
             <div className="member-detail-item full">
               <span className="ticket-info-label">Reason</span>
-              <span style={{ overflowWrap: "anywhere" }}>{truth.roleStateReason || "—"}</span>
+              <span style={{ overflowWrap: "anywhere" }}>{sourceMember?.role_state_reason || "—"}</span>
             </div>
 
             <div className="member-detail-item full">
               <span className="ticket-info-label">Last Refresh</span>
-              <span>{loadingLive || syncing ? "Refreshing…" : formatTime(truth.updatedAt)}</span>
+              <span>{formatTime(sourceMember?.updated_at || sourceMember?.last_seen_at || sourceMember?.synced_at)}</span>
             </div>
           </div>
         </div>
@@ -530,27 +539,24 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
         <div className="card" style={{ marginTop: 14 }}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <h2 style={{ margin: 0 }}>Live Discord Roles</h2>
-            <div className="muted" style={{ fontSize: 13 }}>
-              {loadingRoles ? "Loading catalog…" : `${roleList.length} assigned`}
-            </div>
+            <span className="muted" style={{ fontSize: 13 }}>{roleNames.length} assigned</span>
           </div>
 
-          <div className="roles" style={{ marginBottom: 12 }}>
-            {roleList.length ? (
-              roleList.map((roleName, index) => {
+          <div className="roles" style={{ marginBottom: 14 }}>
+            {roleNames.length ? (
+              roleNames.map((roleName, index) => {
                 const roleId = roleIds[index] || ""
                 return (
                   <button
                     key={`${roleId || roleName}-${index}`}
                     type="button"
                     className="badge"
-                    disabled={busy || !roleId || !inGuild}
-                    title={roleId ? `Remove ${roleName}` : roleName}
+                    disabled={busy || !inGuild}
                     onClick={() => runModAction("remove_role", { role_id: roleId, role_name: roleName })}
-                    style={{ cursor: roleId && inGuild ? "pointer" : "default" }}
+                    title={roleId ? `Remove ${roleName}` : `${roleName} has no stored role id yet`}
+                    style={{ cursor: roleId && !busy && inGuild ? "pointer" : "default" }}
                   >
-                    {roleName}
-                    {roleId && inGuild ? " ×" : ""}
+                    {roleName}{roleId ? " ×" : ""}
                   </button>
                 )
               })
@@ -560,15 +566,23 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
           </div>
 
           <div className="space">
-            <div className="row" style={{ alignItems: "stretch", gap: 10, flexWrap: "wrap" }}>
+            <div className="row" style={{ alignItems: "stretch", gap: 10 }}>
               <select
                 className="input"
                 value={selectedRoleId}
                 onChange={(e) => setSelectedRoleId(e.target.value)}
-                disabled={busy || !inGuild || loadingRoles}
-                style={{ flex: 1, minWidth: 180 }}
+                disabled={busy || loadingRoles || !assignableRoles.length || !inGuild}
+                style={{ flex: 1 }}
               >
-                <option value="">Add a server role…</option>
+                <option value="">
+                  {loadingRoles
+                    ? "Loading server roles..."
+                    : !inGuild
+                    ? "Former members cannot receive roles"
+                    : assignableRoles.length
+                    ? "Add a server role..."
+                    : "No assignable roles available"}
+                </option>
                 {assignableRoles.map((role) => (
                   <option key={role.id} value={role.id}>
                     {role.name}
@@ -577,19 +591,17 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
               </select>
 
               <button
+                type="button"
                 className="button"
-                disabled={busy || !inGuild || !selectedRoleId}
+                disabled={busy || !selectedRoleId || !selectedRole || !inGuild}
+                onClick={() => runModAction("add_role", { role_id: selectedRoleId, role_name: selectedRole?.name || "" })}
                 style={{ width: "auto", minWidth: 120 }}
-                onClick={async () => {
-                  await runModAction("add_role", { role_id: selectedRoleId })
-                  setSelectedRoleId("")
-                }}
               >
                 Add Role
               </button>
             </div>
 
-            <div className="muted" style={{ fontSize: 12 }}>
+            <div className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>
               Tap an assigned role to remove it. Discord permission and hierarchy failures will return exact errors instead of fake success.
             </div>
           </div>
@@ -598,31 +610,28 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
         <div className="card" style={{ marginTop: 14 }}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <h2 style={{ margin: 0 }}>Staff Tools</h2>
-            {syncing ? <span className="muted" style={{ fontSize: 13 }}>Syncing...</span> : null}
+            {syncing || loadingLive ? <span className="muted" style={{ fontSize: 13 }}>{syncing ? "Syncing..." : "Refreshing..."}</span> : null}
           </div>
 
           <div className="member-action-grid" style={{ marginBottom: 12 }}>
-            <button className="button" disabled={busy} onClick={() => copyText(memberId, "User ID copied.")}>
-              Copy User ID
-            </button>
-
-            <button className="button" disabled={busy} onClick={() => copyText(buildMention(memberId), "Mention copied.")}>
-              Copy Mention
-            </button>
-
-            <button className="button" disabled={busy || !memberId} onClick={() => syncMemberNow()}>
-              {syncing ? "Syncing Member..." : "Sync Member Now"}
-            </button>
-
-            <button className="button ghost" disabled={busy || !memberId} onClick={triggerFullRoleSync}>
-              Full Role Sync
-            </button>
-
-            <button className="button" disabled={busy} onClick={prepTicketSearch}>
-              Prep Ticket Search
-            </button>
-
-            <button className="button" disabled={busy} onClick={copyStaffSummary}>
+            <button className="button" disabled={busy} onClick={() => copyText(memberId, "User ID copied.")}>Copy User ID</button>
+            <button className="button" disabled={busy} onClick={() => copyText(buildMention(memberId), "Mention copied.")}>Copy Mention</button>
+            <button className="button" disabled={busy || !memberId} onClick={() => syncMemberNow()}>Sync Member Now</button>
+            <button className="button" disabled={busy} onClick={triggerFullRoleSync}>Run Role Sync</button>
+            <button className="button" disabled={busy} onClick={() => copyText(memberId, "User ID copied. Paste it into ticket search.")}>Prep Ticket Search</button>
+            <button
+              className="button"
+              disabled={busy}
+              onClick={() => copyText([
+                `Member: ${displayName}`,
+                `User ID: ${memberId || "unknown"}`,
+                `Status: ${inGuild ? "In Server" : "Left / Removed"}`,
+                `Role State: ${sourceMember?.role_state || "unknown"}`,
+                `Health: ${sourceMember?.data_health || "unknown"}`,
+                `Top Role: ${sourceMember?.top_role || sourceMember?.highest_role_name || "none"}`,
+                `Live Roles: ${roleNames.join(", ") || "none"}`,
+              ].join("\n"), "Staff summary copied.")}
+            >
               Copy Staff Summary
             </button>
           </div>
@@ -644,28 +653,15 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
                 placeholder="Timeout minutes"
                 inputMode="numeric"
               />
-              <button
-                className="button"
-                disabled={busy || !memberId}
-                onClick={() => runModAction("timeout")}
-                style={{ width: "auto", minWidth: 120 }}
-              >
+              <button className="button" disabled={busy || !memberId} onClick={() => runModAction("timeout")} style={{ width: "auto", minWidth: 120 }}>
                 Timeout
               </button>
             </div>
 
             <div className="member-action-grid">
-              <button className="button" disabled={busy || !memberId} onClick={() => runModAction("warn")}>
-                Warn
-              </button>
-
-              <button className="button danger" disabled={busy || !memberId} onClick={() => runModAction("kick")}>
-                Kick
-              </button>
-
-              <button className="button danger" disabled={busy || !memberId} onClick={() => runModAction("ban")}>
-                Ban
-              </button>
+              <button className="button" disabled={busy || !memberId} onClick={() => runModAction("warn")}>Warn</button>
+              <button className="button danger" disabled={busy || !memberId} onClick={() => runModAction("kick")}>Kick</button>
+              <button className="button danger" disabled={busy || !memberId} onClick={() => runModAction("ban")}>Ban</button>
             </div>
           </div>
         </div>
