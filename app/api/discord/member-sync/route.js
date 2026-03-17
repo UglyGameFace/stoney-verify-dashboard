@@ -1,0 +1,438 @@
+import { NextResponse } from "next/server"
+import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server"
+import { createServerSupabase } from "@/lib/supabase-server"
+import { env } from "@/lib/env"
+
+export const dynamic = "force-dynamic"
+export const revalidate = 0
+
+function safeAuditReason(value) {
+  return encodeURIComponent(String(value || "").slice(0, 512))
+}
+
+async function discordApi(path, { method = "GET", body, reason } = {}) {
+  const token = process.env.DISCORD_TOKEN || env.discordToken || ""
+  if (!token) {
+    throw new Error("Missing DISCORD_TOKEN")
+  }
+
+  const res = await fetch(`https://discord.com/api/v10${path}`, {
+    method,
+    headers: {
+      Authorization: `Bot ${token}`,
+      "Content-Type": "application/json",
+      ...(reason ? { "X-Audit-Log-Reason": safeAuditReason(reason) } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+    cache: "no-store",
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    const error = new Error(`Discord API ${res.status}: ${text}`)
+    error.status = res.status
+    throw error
+  }
+
+  const text = await res.text()
+  return text ? JSON.parse(text) : null
+}
+
+function normalizeGuildRoles(rows) {
+  return Array.isArray(rows)
+    ? rows
+        .map((role) => ({
+          id: String(role?.id || role?.role_id || ""),
+          name: String(role?.name || role?.role_name || "").trim(),
+          position: Number(role?.position || 0),
+          managed: Boolean(role?.managed),
+        }))
+        .filter((role) => role.id && role.name)
+    : []
+}
+
+function resolveRoleGroups({ roleIds, roleNames, roleRules }) {
+  const activeRules = Array.isArray(roleRules) ? roleRules.filter((rule) => rule?.active !== false) : []
+  const byId = new Map(activeRules.map((rule) => [String(rule.role_id), String(rule.role_group || "")]))
+  const byName = new Map(activeRules.map((rule) => [String(rule.role_name || "").toLowerCase(), String(rule.role_group || "")]))
+
+  const hits = {
+    unverified: false,
+    verified: false,
+    secondary_verified: false,
+    staff: false,
+    admin: false,
+    cosmetic: false,
+    excluded: false,
+  }
+
+  const envStaffNames = env.staffRoleNames.map((value) => String(value || "").toLowerCase())
+
+  for (let i = 0; i < Math.max(roleIds.length, roleNames.length); i += 1) {
+    const roleId = String(roleIds[i] || "")
+    const roleName = String(roleNames[i] || "").trim()
+    const lowered = roleName.toLowerCase()
+
+    let group = byId.get(roleId) || byName.get(lowered) || ""
+
+    if (!group) {
+      if (env.staffRoleIds.includes(roleId) || envStaffNames.includes(lowered)) {
+        group = "staff"
+      } else if (lowered.includes("unverified")) {
+        group = "unverified"
+      } else if (lowered.includes("verified")) {
+        group = "verified"
+      } else if (/\b(staff|mod|moderator|admin|owner)\b/i.test(roleName)) {
+        group = "staff"
+      } else if (/\b(booster|nitro|resident|perm|dickheads|drunken|stoner|musicbot)\b/i.test(roleName)) {
+        group = "cosmetic"
+      }
+    }
+
+    if (group && Object.prototype.hasOwnProperty.call(hits, group)) {
+      hits[group] = true
+    }
+  }
+
+  return {
+    has_unverified: hits.unverified,
+    has_verified_role: hits.verified || hits.secondary_verified,
+    has_secondary_verified_role: hits.secondary_verified,
+    has_staff_role: hits.staff || hits.admin,
+    has_cosmetic_only:
+      !hits.unverified &&
+      !hits.verified &&
+      !hits.secondary_verified &&
+      !hits.staff &&
+      !hits.admin &&
+      (hits.cosmetic || roleIds.length > 0),
+  }
+}
+
+function resolveRoleState({ inGuild, hasAnyRole, has_unverified, has_verified_role, has_staff_role, has_cosmetic_only }) {
+  if (!inGuild) {
+    return {
+      data_health: "left_guild",
+      role_state: "left_guild",
+      role_state_reason: "Member is not currently present in Discord.",
+    }
+  }
+
+  if (has_staff_role && has_unverified) {
+    return {
+      data_health: "missing_role",
+      role_state: "staff_conflict",
+      role_state_reason: "Member has both Staff and Unverified.",
+    }
+  }
+
+  if (has_staff_role) {
+    return {
+      data_health: "ok",
+      role_state: "staff_ok",
+      role_state_reason: "Member has staff access with no unverified conflict.",
+    }
+  }
+
+  if (has_verified_role && has_unverified) {
+    return {
+      data_health: "missing_role",
+      role_state: "verified_conflict",
+      role_state_reason: "Member has both Verified and Unverified roles.",
+    }
+  }
+
+  if (has_verified_role) {
+    return {
+      data_health: "ok",
+      role_state: "verified_ok",
+      role_state_reason: "Member has a valid verified role set.",
+    }
+  }
+
+  if (has_unverified) {
+    return {
+      data_health: "ok",
+      role_state: "unverified_only",
+      role_state_reason: "Member is pending verification and only has unverified access.",
+    }
+  }
+
+  if (has_cosmetic_only) {
+    return {
+      data_health: "missing_role",
+      role_state: "booster_only",
+      role_state_reason: "Member has cosmetic roles but no core verification role.",
+    }
+  }
+
+  if (!hasAnyRole) {
+    return {
+      data_health: "missing_role",
+      role_state: "missing_unverified",
+      role_state_reason: "Member has no tracked roles. Expected at least an unverified role.",
+    }
+  }
+
+  return {
+    data_health: "unknown",
+    role_state: "unknown",
+    role_state_reason: "Unable to determine member role state from current role set.",
+  }
+}
+
+function buildAvatarUrl(memberUser) {
+  const avatar = memberUser?.avatar || ""
+  const userId = String(memberUser?.id || "")
+  const discrim = Number(memberUser?.discriminator || 0) % 5
+  if (avatar && userId) {
+    return `https://cdn.discordapp.com/avatars/${userId}/${avatar}.png?size=128`
+  }
+  return `https://cdn.discordapp.com/embed/avatars/${discrim}.png`
+}
+
+function buildStoredUnavailableMember(storedMember, userId) {
+  const storedRoles = Array.isArray(storedMember?.roles)
+    ? storedMember.roles
+    : (Array.isArray(storedMember?.role_names) ? storedMember.role_names : []).map((name, index) => ({
+        id: storedMember?.role_ids?.[index] || `stored-${index}`,
+        name,
+        position: 0,
+      }))
+
+  return {
+    user_id: storedMember?.user_id || userId,
+    username: storedMember?.username || "",
+    display_name: storedMember?.display_name || "",
+    global_name: storedMember?.display_name || "",
+    avatar: storedMember?.avatar_hash || "",
+    avatar_url: storedMember?.avatar_url || "",
+    nickname: storedMember?.nickname || "",
+    joined_at: storedMember?.joined_at || null,
+    role_ids: Array.isArray(storedMember?.role_ids) ? storedMember.role_ids : storedRoles.map((role) => role.id),
+    role_names: Array.isArray(storedMember?.role_names) ? storedMember.role_names : storedRoles.map((role) => role.name),
+    top_role: storedMember?.top_role || storedMember?.highest_role_name || storedRoles[0]?.name || null,
+    roles: storedRoles,
+    in_guild: false,
+    discord_unavailable: true,
+    data_health: storedMember?.data_health || "left_guild",
+    role_state: storedMember?.role_state || "left_guild",
+    role_state_reason: storedMember?.role_state_reason || "",
+    has_unverified: storedMember?.has_unverified || false,
+    has_verified_role: storedMember?.has_verified_role || false,
+    has_staff_role: storedMember?.has_staff_role || false,
+    has_secondary_verified_role: storedMember?.has_secondary_verified_role || false,
+    has_cosmetic_only: storedMember?.has_cosmetic_only || false,
+    synced_at: storedMember?.synced_at || null,
+    updated_at: storedMember?.updated_at || null,
+    highest_role_id: storedMember?.highest_role_id || null,
+    highest_role_name: storedMember?.highest_role_name || null,
+    last_seen_at: storedMember?.last_seen_at || storedMember?.updated_at || null,
+  }
+}
+
+export async function POST(req) {
+  try {
+    const { session, refreshedTokens } = await requireStaffSessionForRoute()
+    const supabase = createServerSupabase()
+    const guildId = env.guildId || ""
+    const body = await req.json().catch(() => ({}))
+    const userId = String(body.user_id || "").trim()
+    const reason = String(body.reason || "").trim() || "Dashboard member sync"
+
+    if (!guildId) {
+      return NextResponse.json({ error: "Missing guild id" }, { status: 500 })
+    }
+
+    if (!userId) {
+      return NextResponse.json({ error: "Missing user id" }, { status: 400 })
+    }
+
+    const [{ data: storedMember, error: storedError }, { data: roleRules, error: rulesError }] = await Promise.all([
+      supabase.from("guild_members").select("*").eq("guild_id", guildId).eq("user_id", userId).maybeSingle(),
+      supabase.from("guild_role_rules").select("*").eq("guild_id", guildId).eq("active", true),
+    ])
+
+    if (storedError) {
+      throw new Error(storedError.message || "Failed to load stored member record.")
+    }
+
+    if (rulesError) {
+      throw new Error(rulesError.message || "Failed to load role rules.")
+    }
+
+    let discordMember = null
+    let discordRoles = []
+
+    try {
+      ;[discordMember, discordRoles] = await Promise.all([
+        discordApi(`/guilds/${guildId}/members/${userId}`),
+        discordApi(`/guilds/${guildId}/roles`),
+      ])
+    } catch (error) {
+      if (error?.status === 404) {
+        const now = new Date().toISOString()
+        if (storedMember) {
+          const { error: updateError } = await supabase
+            .from("guild_members")
+            .update({
+              in_guild: false,
+              data_health: "left_guild",
+              role_state: "left_guild",
+              role_state_reason: "Not present in Discord during member-specific sync.",
+              left_at: now,
+              synced_at: now,
+              updated_at: now,
+              last_seen_at: now,
+            })
+            .eq("guild_id", guildId)
+            .eq("user_id", userId)
+
+          if (updateError) {
+            throw new Error(updateError.message || "Failed to mark member as left guild.")
+          }
+        }
+
+        const response = NextResponse.json({
+          ok: true,
+          member: buildStoredUnavailableMember(storedMember, userId),
+          in_guild: false,
+        })
+        applyAuthCookies(response, refreshedTokens)
+        return response
+      }
+
+      throw error
+    }
+
+    const allRoles = normalizeGuildRoles(discordRoles)
+    const roleMap = new Map(allRoles.map((role) => [role.id, role]))
+    const roleIds = Array.isArray(discordMember?.roles) ? discordMember.roles.map(String) : []
+    const fullRoles = roleIds
+      .map((roleId) => roleMap.get(roleId))
+      .filter(Boolean)
+      .sort((a, b) => b.position - a.position)
+
+    const roleNames = fullRoles.map((role) => role.name)
+    const highestRole = fullRoles[0] || null
+    const grouped = resolveRoleGroups({ roleIds, roleNames, roleRules: roleRules || [] })
+    const roleState = resolveRoleState({
+      inGuild: true,
+      hasAnyRole: roleIds.length > 0,
+      ...grouped,
+    })
+
+    const currentUsername = String(discordMember?.user?.username || "").trim()
+    const currentDisplayName = String(discordMember?.user?.global_name || discordMember?.nick || currentUsername).trim()
+    const currentNickname = String(discordMember?.nick || "").trim()
+
+    const previousUsernames = Array.isArray(storedMember?.previous_usernames) ? [...storedMember.previous_usernames] : []
+    const previousDisplayNames = Array.isArray(storedMember?.previous_display_names) ? [...storedMember.previous_display_names] : []
+    const previousNicknames = Array.isArray(storedMember?.previous_nicknames) ? [...storedMember.previous_nicknames] : []
+
+    if (storedMember?.last_seen_username && storedMember.last_seen_username !== currentUsername && !previousUsernames.includes(storedMember.last_seen_username)) {
+      previousUsernames.unshift(storedMember.last_seen_username)
+    }
+    if (storedMember?.last_seen_display_name && storedMember.last_seen_display_name !== currentDisplayName && !previousDisplayNames.includes(storedMember.last_seen_display_name)) {
+      previousDisplayNames.unshift(storedMember.last_seen_display_name)
+    }
+    if (storedMember?.last_seen_nickname && storedMember.last_seen_nickname !== currentNickname && !previousNicknames.includes(storedMember.last_seen_nickname)) {
+      previousNicknames.unshift(storedMember.last_seen_nickname)
+    }
+
+    const now = new Date().toISOString()
+    const nextTimesJoined = storedMember?.in_guild === false ? Number(storedMember?.times_joined || 1) + 1 : Math.max(Number(storedMember?.times_joined || 1), 1)
+
+    const row = {
+      guild_id: guildId,
+      user_id: userId,
+      username: currentUsername,
+      display_name: currentDisplayName,
+      avatar_url: buildAvatarUrl(discordMember.user),
+      role_ids: roleIds,
+      role_names: roleNames,
+      highest_role_id: highestRole?.id || null,
+      highest_role_name: highestRole?.name || null,
+      in_guild: true,
+      has_any_role: roleIds.length > 0,
+      data_health: roleState.data_health,
+      synced_at: now,
+      updated_at: now,
+      has_unverified: grouped.has_unverified,
+      has_verified_role: grouped.has_verified_role,
+      has_staff_role: grouped.has_staff_role,
+      has_secondary_verified_role: grouped.has_secondary_verified_role,
+      has_cosmetic_only: grouped.has_cosmetic_only,
+      role_state: roleState.role_state,
+      role_state_reason: roleState.role_state_reason,
+      avatar_hash: discordMember?.user?.avatar || null,
+      nickname: discordMember?.nick || null,
+      roles: fullRoles,
+      top_role: highestRole?.name || null,
+      joined_at: discordMember?.joined_at || storedMember?.joined_at || now,
+      previous_usernames: previousUsernames.slice(0, 25),
+      previous_display_names: previousDisplayNames.slice(0, 25),
+      previous_nicknames: previousNicknames.slice(0, 25),
+      last_seen_username: currentUsername || null,
+      last_seen_display_name: currentDisplayName || null,
+      last_seen_nickname: currentNickname || null,
+      first_seen_at: storedMember?.first_seen_at || now,
+      last_seen_at: now,
+      left_at: null,
+      rejoined_at: storedMember?.in_guild === false ? now : storedMember?.rejoined_at || null,
+      times_joined: nextTimesJoined,
+      times_left: Number(storedMember?.times_left || 0),
+    }
+
+    const { error: upsertError } = await supabase.from("guild_members").upsert(row, { onConflict: "guild_id,user_id" })
+    if (upsertError) {
+      throw new Error(upsertError.message || "Failed to persist member sync.")
+    }
+
+    await supabase.from("audit_events").insert({
+      title: "Member sync completed",
+      description: `${session?.user?.username || env.defaultStaffName || "Dashboard Staff"} refreshed member ${userId}. Reason: ${reason}`,
+      event_type: "member_sync",
+      related_id: userId,
+    })
+
+    const response = NextResponse.json({
+      ok: true,
+      in_guild: true,
+      member: {
+        user_id: row.user_id,
+        username: row.username,
+        display_name: row.display_name,
+        global_name: row.display_name,
+        avatar: row.avatar_hash,
+        avatar_url: row.avatar_url,
+        nickname: row.nickname,
+        joined_at: row.joined_at,
+        role_ids: row.role_ids,
+        role_names: row.role_names,
+        top_role: row.top_role,
+        roles: row.roles,
+        in_guild: true,
+        discord_unavailable: false,
+        data_health: row.data_health,
+        role_state: row.role_state,
+        role_state_reason: row.role_state_reason,
+        has_unverified: row.has_unverified,
+        has_verified_role: row.has_verified_role,
+        has_staff_role: row.has_staff_role,
+        has_secondary_verified_role: row.has_secondary_verified_role,
+        has_cosmetic_only: row.has_cosmetic_only,
+        synced_at: row.synced_at,
+        updated_at: row.updated_at,
+        highest_role_id: row.highest_role_id,
+        highest_role_name: row.highest_role_name,
+        last_seen_at: row.last_seen_at,
+      },
+    })
+
+    applyAuthCookies(response, refreshedTokens)
+    return response
+  } catch (error) {
+    return NextResponse.json({ error: error.message || "Member sync failed" }, { status: 500 })
+  }
+}
