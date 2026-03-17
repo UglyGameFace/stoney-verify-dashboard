@@ -42,7 +42,7 @@ function normalizeGuildRoles(rows) {
   return Array.isArray(rows)
     ? rows
         .map((role) => ({
-          id: String(role?.id || role?.role_id || ""),
+          id: String(role?.id || role?.role_id || "").trim(),
           name: String(role?.name || role?.role_name || "").trim(),
           position: Number(role?.position || 0),
           managed: Boolean(role?.managed),
@@ -55,6 +55,7 @@ function resolveRoleGroups({ roleIds, roleNames, roleRules }) {
   const activeRules = Array.isArray(roleRules) ? roleRules.filter((rule) => rule?.active !== false) : []
   const byId = new Map(activeRules.map((rule) => [String(rule.role_id), String(rule.role_group || "")]))
   const byName = new Map(activeRules.map((rule) => [String(rule.role_name || "").toLowerCase(), String(rule.role_group || "")]))
+  const envStaffNames = env.staffRoleNames.map((value) => String(value || "").toLowerCase())
 
   const hits = {
     unverified: false,
@@ -66,15 +67,12 @@ function resolveRoleGroups({ roleIds, roleNames, roleRules }) {
     excluded: false,
   }
 
-  const envStaffNames = env.staffRoleNames.map((value) => String(value || "").toLowerCase())
-
   for (let i = 0; i < Math.max(roleIds.length, roleNames.length); i += 1) {
     const roleId = String(roleIds[i] || "")
     const roleName = String(roleNames[i] || "").trim()
     const lowered = roleName.toLowerCase()
 
     let group = byId.get(roleId) || byName.get(lowered) || ""
-
     if (!group) {
       if (env.staffRoleIds.includes(roleId) || envStaffNames.includes(lowered)) {
         group = "staff"
@@ -84,7 +82,7 @@ function resolveRoleGroups({ roleIds, roleNames, roleRules }) {
         group = "verified"
       } else if (/\b(staff|mod|moderator|admin|owner)\b/i.test(roleName)) {
         group = "staff"
-      } else if (/\b(booster|nitro|resident|perm|dickheads|drunken|stoner|musicbot)\b/i.test(roleName)) {
+      } else if (/\b(booster|musicbot|nitro|resident|perm|dickheads|drunken|stoner)\b/i.test(roleName)) {
         group = "cosmetic"
       }
     }
@@ -111,74 +109,30 @@ function resolveRoleGroups({ roleIds, roleNames, roleRules }) {
 
 function resolveRoleState({ inGuild, hasAnyRole, has_unverified, has_verified_role, has_staff_role, has_cosmetic_only }) {
   if (!inGuild) {
-    return {
-      data_health: "left_guild",
-      role_state: "left_guild",
-      role_state_reason: "Member is not currently present in Discord.",
-    }
+    return { data_health: "left_guild", role_state: "left_guild", role_state_reason: "Member is not currently present in Discord." }
   }
-
   if (has_staff_role && has_unverified) {
-    return {
-      data_health: "missing_role",
-      role_state: "staff_conflict",
-      role_state_reason: "Member has both Staff and Unverified.",
-    }
+    return { data_health: "missing_role", role_state: "staff_conflict", role_state_reason: "Member has both Staff and Unverified." }
   }
-
   if (has_staff_role) {
-    return {
-      data_health: "ok",
-      role_state: "staff_ok",
-      role_state_reason: "Member has staff access with no unverified conflict.",
-    }
+    return { data_health: "ok", role_state: "staff_ok", role_state_reason: "Member has staff access with no unverified conflict." }
   }
-
   if (has_verified_role && has_unverified) {
-    return {
-      data_health: "missing_role",
-      role_state: "verified_conflict",
-      role_state_reason: "Member has both Verified and Unverified roles.",
-    }
+    return { data_health: "missing_role", role_state: "verified_conflict", role_state_reason: "Member has both Verified and Unverified roles." }
   }
-
   if (has_verified_role) {
-    return {
-      data_health: "ok",
-      role_state: "verified_ok",
-      role_state_reason: "Member has a valid verified role set.",
-    }
+    return { data_health: "ok", role_state: "verified_ok", role_state_reason: "Member has a valid verified role set." }
   }
-
   if (has_unverified) {
-    return {
-      data_health: "ok",
-      role_state: "unverified_only",
-      role_state_reason: "Member is pending verification and only has unverified access.",
-    }
+    return { data_health: "ok", role_state: "unverified_only", role_state_reason: "Member is pending verification and only has unverified access." }
   }
-
   if (has_cosmetic_only) {
-    return {
-      data_health: "missing_role",
-      role_state: "booster_only",
-      role_state_reason: "Member has cosmetic roles but no core verification role.",
-    }
+    return { data_health: "missing_role", role_state: "booster_only", role_state_reason: "Member has cosmetic roles but no core verification role." }
   }
-
   if (!hasAnyRole) {
-    return {
-      data_health: "missing_role",
-      role_state: "missing_unverified",
-      role_state_reason: "Member has no tracked roles. Expected at least an unverified role.",
-    }
+    return { data_health: "missing_role", role_state: "missing_unverified", role_state_reason: "Member has no tracked roles. Expected at least an unverified role." }
   }
-
-  return {
-    data_health: "unknown",
-    role_state: "unknown",
-    role_state_reason: "Unable to determine member role state from current role set.",
-  }
+  return { data_health: "unknown", role_state: "unknown", role_state_reason: "Unable to determine member role state from current role set." }
 }
 
 function buildAvatarUrl(memberUser) {
@@ -243,7 +197,6 @@ export async function POST(req) {
     if (!guildId) {
       return NextResponse.json({ error: "Missing guild id" }, { status: 500 })
     }
-
     if (!userId) {
       return NextResponse.json({ error: "Missing user id" }, { status: 400 })
     }
@@ -253,13 +206,8 @@ export async function POST(req) {
       supabase.from("guild_role_rules").select("*").eq("guild_id", guildId).eq("active", true),
     ])
 
-    if (storedError) {
-      throw new Error(storedError.message || "Failed to load stored member record.")
-    }
-
-    if (rulesError) {
-      throw new Error(rulesError.message || "Failed to load role rules.")
-    }
+    if (storedError) throw new Error(storedError.message || "Failed to load stored member record.")
+    if (rulesError) throw new Error(rulesError.message || "Failed to load role rules.")
 
     let discordMember = null
     let discordRoles = []
@@ -293,11 +241,7 @@ export async function POST(req) {
           }
         }
 
-        const response = NextResponse.json({
-          ok: true,
-          member: buildStoredUnavailableMember(storedMember, userId),
-          in_guild: false,
-        })
+        const response = NextResponse.json({ ok: true, member: buildStoredUnavailableMember(storedMember, userId), in_guild: false })
         applyAuthCookies(response, refreshedTokens)
         return response
       }
@@ -308,47 +252,23 @@ export async function POST(req) {
     const allRoles = normalizeGuildRoles(discordRoles)
     const roleMap = new Map(allRoles.map((role) => [role.id, role]))
     const roleIds = Array.isArray(discordMember?.roles) ? discordMember.roles.map(String) : []
-    const fullRoles = roleIds
-      .map((roleId) => roleMap.get(roleId))
-      .filter(Boolean)
-      .sort((a, b) => b.position - a.position)
-
+    const fullRoles = roleIds.map((roleId) => roleMap.get(roleId)).filter(Boolean).sort((a, b) => b.position - a.position)
     const roleNames = fullRoles.map((role) => role.name)
     const highestRole = fullRoles[0] || null
     const grouped = resolveRoleGroups({ roleIds, roleNames, roleRules: roleRules || [] })
-    const roleState = resolveRoleState({
-      inGuild: true,
-      hasAnyRole: roleIds.length > 0,
-      ...grouped,
-    })
+    const roleState = resolveRoleState({ inGuild: true, hasAnyRole: roleIds.length > 0, ...grouped })
 
+    const now = new Date().toISOString()
     const currentUsername = String(discordMember?.user?.username || "").trim()
     const currentDisplayName = String(discordMember?.user?.global_name || discordMember?.nick || currentUsername).trim()
     const currentNickname = String(discordMember?.nick || "").trim()
-
-    const previousUsernames = Array.isArray(storedMember?.previous_usernames) ? [...storedMember.previous_usernames] : []
-    const previousDisplayNames = Array.isArray(storedMember?.previous_display_names) ? [...storedMember.previous_display_names] : []
-    const previousNicknames = Array.isArray(storedMember?.previous_nicknames) ? [...storedMember.previous_nicknames] : []
-
-    if (storedMember?.last_seen_username && storedMember.last_seen_username !== currentUsername && !previousUsernames.includes(storedMember.last_seen_username)) {
-      previousUsernames.unshift(storedMember.last_seen_username)
-    }
-    if (storedMember?.last_seen_display_name && storedMember.last_seen_display_name !== currentDisplayName && !previousDisplayNames.includes(storedMember.last_seen_display_name)) {
-      previousDisplayNames.unshift(storedMember.last_seen_display_name)
-    }
-    if (storedMember?.last_seen_nickname && storedMember.last_seen_nickname !== currentNickname && !previousNicknames.includes(storedMember.last_seen_nickname)) {
-      previousNicknames.unshift(storedMember.last_seen_nickname)
-    }
-
-    const now = new Date().toISOString()
-    const nextTimesJoined = storedMember?.in_guild === false ? Number(storedMember?.times_joined || 1) + 1 : Math.max(Number(storedMember?.times_joined || 1), 1)
 
     const row = {
       guild_id: guildId,
       user_id: userId,
       username: currentUsername,
       display_name: currentDisplayName,
-      avatar_url: buildAvatarUrl(discordMember.user),
+      avatar_url: buildAvatarUrl(discordMember?.user),
       role_ids: roleIds,
       role_names: roleNames,
       highest_role_id: highestRole?.id || null,
@@ -370,24 +290,14 @@ export async function POST(req) {
       roles: fullRoles,
       top_role: highestRole?.name || null,
       joined_at: discordMember?.joined_at || storedMember?.joined_at || now,
-      previous_usernames: previousUsernames.slice(0, 25),
-      previous_display_names: previousDisplayNames.slice(0, 25),
-      previous_nicknames: previousNicknames.slice(0, 25),
       last_seen_username: currentUsername || null,
       last_seen_display_name: currentDisplayName || null,
       last_seen_nickname: currentNickname || null,
-      first_seen_at: storedMember?.first_seen_at || now,
       last_seen_at: now,
-      left_at: null,
-      rejoined_at: storedMember?.in_guild === false ? now : storedMember?.rejoined_at || null,
-      times_joined: nextTimesJoined,
-      times_left: Number(storedMember?.times_left || 0),
     }
 
     const { error: upsertError } = await supabase.from("guild_members").upsert(row, { onConflict: "guild_id,user_id" })
-    if (upsertError) {
-      throw new Error(upsertError.message || "Failed to persist member sync.")
-    }
+    if (upsertError) throw new Error(upsertError.message || "Failed to persist member sync.")
 
     await supabase.from("audit_events").insert({
       title: "Member sync completed",
