@@ -53,7 +53,7 @@ function getTopRoleLabel(member) {
 
 function getRolePreview(member) {
   if (Array.isArray(member?.role_names) && member.role_names.length) {
-    return member.role_names.slice(0, 3);
+    return member.role_names.slice(0, 4);
   }
 
   if (Array.isArray(member?.roles) && member.roles.length) {
@@ -64,7 +64,7 @@ function getRolePreview(member) {
         return null;
       })
       .filter(Boolean)
-      .slice(0, 3);
+      .slice(0, 4);
   }
 
   return [];
@@ -78,6 +78,20 @@ function formatTime(value) {
   } catch {
     return "Unknown";
   }
+}
+
+function mergeMemberSnapshotIntoList(rows, nextMember) {
+  const nextId = String(nextMember?.user_id || nextMember?.id || "").trim();
+  if (!nextId) return rows;
+
+  const found = rows.some((item) => String(item?.user_id || item?.id || "") === nextId);
+  if (!found) return rows;
+
+  return rows.map((item) => {
+    const itemId = String(item?.user_id || item?.id || "").trim();
+    if (itemId !== nextId) return item;
+    return { ...item, ...nextMember };
+  });
 }
 
 export default function MemberSearchCard() {
@@ -108,10 +122,9 @@ export default function MemberSearchCard() {
       setError("");
 
       try {
-        const res = await fetch(
-          `/api/discord/member-search?q=${encodeURIComponent(q)}`,
-          { cache: "no-store" }
-        );
+        const res = await fetch(`/api/discord/member-search?q=${encodeURIComponent(q)}`, {
+          cache: "no-store",
+        });
 
         const json = await res.json();
 
@@ -148,6 +161,7 @@ export default function MemberSearchCard() {
     const verified = results.filter((x) => !!x.has_verified_role).length;
     const pending = results.filter((x) => !x.has_verified_role).length;
     const staff = results.filter((x) => !!x.has_staff_role).length;
+    const conflicts = results.filter((x) => String(x?.role_state || "").includes("conflict")).length;
 
     return {
       total,
@@ -156,6 +170,7 @@ export default function MemberSearchCard() {
       verified,
       pending,
       staff,
+      conflicts,
     };
   }, [results]);
 
@@ -165,9 +180,7 @@ export default function MemberSearchCard() {
     const selectedId = selected.user_id || selected.id;
     if (!selectedId) return;
 
-    const updatedSelected = results.find(
-      (item) => (item.user_id || item.id) === selectedId
-    );
+    const updatedSelected = results.find((item) => (item.user_id || item.id) === selectedId);
 
     if (updatedSelected) {
       setSelected(updatedSelected);
@@ -179,6 +192,16 @@ export default function MemberSearchCard() {
     if (!memberId) return;
 
     setExpandedMemberId((prev) => (prev === memberId ? "" : memberId));
+  }
+
+  function handleMemberUpdated(nextMember) {
+    setResults((prev) => mergeMemberSnapshotIntoList(prev, nextMember));
+    setSelected((prev) => {
+      const prevId = String(prev?.user_id || prev?.id || "").trim();
+      const nextId = String(nextMember?.user_id || nextMember?.id || "").trim();
+      if (!prevId || prevId !== nextId) return prev;
+      return { ...prev, ...nextMember };
+    });
   }
 
   return (
@@ -197,7 +220,7 @@ export default function MemberSearchCard() {
           <div style={{ minWidth: 0 }}>
             <h2 style={{ margin: 0 }}>Live Member Search</h2>
             <div className="muted" style={{ marginTop: 6 }}>
-              Search username, display name, nickname, or ID with compact expandable results
+              Search username, display name, nickname, or ID with expandable real-action member controls
             </div>
           </div>
 
@@ -219,15 +242,9 @@ export default function MemberSearchCard() {
 
           {error ? <div className="error-banner">{error}</div> : null}
 
-          {!query.trim() ? (
-            <div className="empty-state">
-              Start typing to search live member records.
-            </div>
-          ) : null}
+          {!query.trim() ? <div className="empty-state">Start typing to search live member records.</div> : null}
 
-          {loading ? (
-            <div className="loading-state">Searching members...</div>
-          ) : null}
+          {loading ? <div className="loading-state">Searching members...</div> : null}
 
           {query.trim() && !loading && !results.length && !error ? (
             <div className="empty-state">No matching members found.</div>
@@ -235,22 +252,14 @@ export default function MemberSearchCard() {
 
           {!loading && results.length ? (
             <>
-              <div
-                className="member-search-summary"
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: 8,
-                }}
-              >
+              <div className="member-search-summary" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 <span className="badge">{summary.total} tracked</span>
                 <span className="badge claimed">{summary.inServer} in server</span>
-                {summary.leftServer ? (
-                  <span className="badge closed">{summary.leftServer} former</span>
-                ) : null}
+                {summary.leftServer ? <span className="badge closed">{summary.leftServer} former</span> : null}
                 <span className="badge low">{summary.verified} verified</span>
                 <span className="badge medium">{summary.pending} pending</span>
                 <span className="badge claimed">{summary.staff} staff</span>
+                {summary.conflicts ? <span className="badge danger">{summary.conflicts} conflicts</span> : null}
               </div>
 
               <div className="member-search-results">
@@ -262,6 +271,7 @@ export default function MemberSearchCard() {
                   const topRoleLabel = getTopRoleLabel(member);
                   const rolePreview = getRolePreview(member);
                   const expanded = expandedMemberId === memberId;
+                  const hasConflict = String(member?.role_state || "").includes("conflict");
 
                   return (
                     <div
@@ -269,7 +279,7 @@ export default function MemberSearchCard() {
                       className="member-search-result"
                       style={{
                         border: "1px solid rgba(255,255,255,0.08)",
-                        background: "rgba(255,255,255,0.02)",
+                        background: hasConflict ? "rgba(127,29,29,0.12)" : "rgba(255,255,255,0.02)",
                         borderRadius: 18,
                         padding: 12,
                       }}
@@ -296,15 +306,7 @@ export default function MemberSearchCard() {
                             flex: 1,
                           }}
                         >
-                          <div
-                            className="row"
-                            style={{
-                              minWidth: 0,
-                              flex: 1,
-                              alignItems: "center",
-                              gap: 12,
-                            }}
-                          >
+                          <div className="row" style={{ minWidth: 0, flex: 1, alignItems: "center", gap: 12 }}>
                             <div className="avatar">
                               {avatarUrl ? (
                                 <img
@@ -312,11 +314,7 @@ export default function MemberSearchCard() {
                                   alt={displayName}
                                   width="38"
                                   height="38"
-                                  style={{
-                                    width: "100%",
-                                    height: "100%",
-                                    objectFit: "cover",
-                                  }}
+                                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
                                 />
                               ) : (
                                 initials(displayName)
@@ -335,26 +333,12 @@ export default function MemberSearchCard() {
                                 {displayName}
                               </div>
 
-                              <div
-                                className="muted"
-                                style={{
-                                  marginTop: 4,
-                                  fontSize: 13,
-                                  overflowWrap: "anywhere",
-                                }}
-                              >
+                              <div className="muted" style={{ marginTop: 4, fontSize: 13, overflowWrap: "anywhere" }}>
                                 {memberId || "No user id"}
                               </div>
 
                               {member.nickname && member.nickname !== displayName ? (
-                                <div
-                                  className="muted"
-                                  style={{
-                                    marginTop: 4,
-                                    fontSize: 12,
-                                    overflowWrap: "anywhere",
-                                  }}
-                                >
+                                <div className="muted" style={{ marginTop: 4, fontSize: 12, overflowWrap: "anywhere" }}>
                                   Nickname: {member.nickname}
                                 </div>
                               ) : null}
@@ -383,11 +367,11 @@ export default function MemberSearchCard() {
 
                           <button
                             type="button"
-                            className={`badge ${member.has_verified_role ? "low" : "medium"}`}
+                            className={`badge ${member.has_verified_role ? "low" : member.has_unverified ? "medium" : "open"}`}
                             style={{ cursor: "pointer" }}
                             onClick={() => toggleExpanded(member)}
                           >
-                            {member.has_verified_role ? "Verified" : "Pending"}
+                            {member.has_verified_role ? "Verified" : member.has_unverified ? "Unverified" : "Unknown"}
                           </button>
 
                           <button
@@ -401,15 +385,9 @@ export default function MemberSearchCard() {
                         </div>
                       </div>
 
-                      <div
-                        style={{
-                          display: "flex",
-                          flexWrap: "wrap",
-                          gap: 8,
-                          marginTop: 12,
-                        }}
-                      >
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
                         <span className="badge">{topRoleLabel}</span>
+                        {hasConflict ? <span className="badge danger">{member.role_state}</span> : null}
 
                         {rolePreview.map((roleName) => (
                           <span
@@ -437,8 +415,7 @@ export default function MemberSearchCard() {
                           <div
                             style={{
                               display: "grid",
-                              gridTemplateColumns:
-                                "repeat(auto-fit, minmax(140px, 1fr))",
+                              gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
                               gap: 10,
                               marginBottom: 12,
                             }}
@@ -459,13 +436,7 @@ export default function MemberSearchCard() {
                             </div>
                           </div>
 
-                          <div
-                            style={{
-                              display: "flex",
-                              gap: 10,
-                              flexWrap: "wrap",
-                            }}
-                          >
+                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                             <button
                               type="button"
                               className="button"
@@ -495,7 +466,7 @@ export default function MemberSearchCard() {
         </div>
       </div>
 
-      <MemberDrawer member={selected} onClose={() => setSelected(null)} />
+      <MemberDrawer member={selected} onClose={() => setSelected(null)} onMemberUpdated={handleMemberUpdated} />
     </>
   );
 }
