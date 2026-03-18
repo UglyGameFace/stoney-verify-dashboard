@@ -82,39 +82,38 @@ function formatDateTime(value?: string | null): string {
 function buttonClass(
   kind: "primary" | "danger" | "secondary" | "success",
   disabled = false
-) {
-  const base =
-    "inline-flex items-center justify-center rounded-xl px-3 py-2 text-sm font-semibold transition border";
-  const palette =
+): string {
+  const base = "button";
+  const tone =
     kind === "primary"
-      ? "bg-blue-600 text-white border-blue-600 hover:bg-blue-700"
+      ? " primary"
       : kind === "danger"
-      ? "bg-red-600 text-white border-red-600 hover:bg-red-700"
+      ? " danger"
       : kind === "success"
-      ? "bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700"
-      : "bg-zinc-900 text-white border-zinc-700 hover:bg-zinc-800";
-  const off = disabled ? " opacity-50 cursor-not-allowed hover:bg-inherit" : "";
-  return `${base} ${palette}${off}`;
+      ? " primary"
+      : " ghost";
+
+  return `${base}${tone}${disabled ? " is-disabled" : ""}`;
 }
 
-function panelClass() {
-  return "rounded-2xl border border-zinc-800 bg-zinc-950/80 p-3";
+function panelClass(): string {
+  return "ticket-controls-panel";
 }
 
-function inputClass() {
-  return "w-full rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-zinc-500";
+function inputClass(): string {
+  return "input";
 }
 
-function detailCardClass() {
-  return "rounded-xl border border-zinc-800 bg-zinc-950/50 px-3 py-2";
+function detailCardClass(): string {
+  return "member-detail-item";
 }
 
-function miniLabelClass() {
-  return "text-xs text-zinc-400";
+function miniLabelClass(): string {
+  return "ticket-info-label";
 }
 
-function miniValueClass() {
-  return "mt-1 text-sm text-white break-words";
+function miniValueClass(): string {
+  return "ticket-controls-mini-value";
 }
 
 export default function TicketControls({
@@ -295,8 +294,8 @@ export default function TicketControls({
   }
 
   return (
-    <div className={`space-y-3 ${className}`}>
-      <div className="flex flex-wrap gap-2">
+    <div className={`ticket-controls ${className}`}>
+      <div className="ticket-controls-bar">
         <button
           type="button"
           className={buttonClass("primary", assignDisabled)}
@@ -356,11 +355,10 @@ export default function TicketControls({
 
       {showClosePanel && !deleted && (
         <div className={panelClass()}>
-          <div className="mb-2 text-sm font-semibold text-white">
-            Close Ticket
-          </div>
-          <div className="mb-2 text-xs text-zinc-400">
-            This keeps the ticket record and channel, but marks the ticket as closed.
+          <div className="ticket-controls-title">Close Ticket</div>
+          <div className="ticket-controls-copy">
+            This keeps the ticket record and channel, but marks the ticket as
+            closed.
           </div>
           <input
             className={inputClass()}
@@ -368,7 +366,7 @@ export default function TicketControls({
             onChange={(e) => setCloseReason(e.target.value)}
             placeholder="Reason for closing"
           />
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="ticket-controls-actions">
             <button
               type="button"
               className={buttonClass("secondary", busy)}
@@ -391,11 +389,11 @@ export default function TicketControls({
 
       {showDeletePanel && !deleted && (
         <div className={panelClass()}>
-          <div className="mb-2 text-sm font-semibold text-white">
+          <div className="ticket-controls-title">
             {ghost ? "Delete Ghost Ticket" : "Delete Ticket"}
           </div>
 
-          <div className="mb-2 text-xs text-zinc-400">
+          <div className="ticket-controls-copy">
             {ghost
               ? "Ghost tickets do not require transcript posting, but staff can choose to include one."
               : "Normal tickets must post a transcript before the channel is deleted, just like the Discord workflow."}
@@ -409,23 +407,23 @@ export default function TicketControls({
           />
 
           {ghost && (
-            <label className="mt-3 flex items-center gap-2 text-sm text-zinc-300">
+            <label className="ticket-controls-check">
               <input
                 type="checkbox"
                 checked={forceTranscript}
                 onChange={(e) => setForceTranscript(e.target.checked)}
               />
-              Post transcript before deleting this ghost ticket
+              <span>Post transcript before deleting this ghost ticket</span>
             </label>
           )}
 
           {!ghost && (
-            <div className="mt-3 rounded-xl border border-emerald-800 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-300">
+            <div className="info-banner">
               Transcript posting is automatically required for normal tickets.
             </div>
           )}
 
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="ticket-controls-actions">
             <button
               type="button"
               className={buttonClass("secondary", busy)}
@@ -448,44 +446,44 @@ export default function TicketControls({
 
       {showTranscriptPanel && (
         <div className={panelClass()}>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div className="text-sm font-semibold text-white">
+          <div
+            className="row"
+            style={{
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              gap: 12,
+              marginBottom: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div className="ticket-controls-title">
                 Transcript & Ticket History
               </div>
-              <div className="mt-1 text-xs text-zinc-400">
-                Mirrors your Discord-side workflow: transcript details, closure, and deletion history.
+              <div className="ticket-controls-copy">
+                Mirrors your Discord-side workflow: transcript details,
+                closure, and deletion history.
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="roles" style={{ justifyContent: "flex-end" }}>
               {hasTranscript ? (
-                <span className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2.5 py-1 text-xs font-semibold text-emerald-300">
-                  Transcript Available
-                </span>
+                <span className="badge claimed">Transcript Available</span>
               ) : (
-                <span className="rounded-full border border-zinc-800 bg-zinc-900/70 px-2.5 py-1 text-xs font-semibold text-zinc-300">
-                  No Transcript Yet
-                </span>
+                <span className="badge">No Transcript Yet</span>
               )}
 
               {deleted ? (
-                <span className="rounded-full border border-red-800 bg-red-950/40 px-2.5 py-1 text-xs font-semibold text-red-300">
-                  Deleted
-                </span>
+                <span className="badge danger">Deleted</span>
               ) : closed ? (
-                <span className="rounded-full border border-amber-800 bg-amber-950/40 px-2.5 py-1 text-xs font-semibold text-amber-300">
-                  Closed
-                </span>
+                <span className="badge medium">Closed</span>
               ) : (
-                <span className="rounded-full border border-blue-800 bg-blue-950/40 px-2.5 py-1 text-xs font-semibold text-blue-300">
-                  Open
-                </span>
+                <span className="badge open">Open</span>
               )}
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="ticket-controls-info-grid">
             <div className={detailCardClass()}>
               <div className={miniLabelClass()}>Ticket</div>
               <div className={miniValueClass()}>
@@ -511,7 +509,7 @@ export default function TicketControls({
                     href={transcriptUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-blue-300 underline underline-offset-2"
+                    className="ticket-inline-link"
                   >
                     Open Transcript
                   </a>
@@ -573,7 +571,7 @@ export default function TicketControls({
           </div>
 
           {hasTranscript ? (
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="ticket-controls-actions">
               {transcriptUrl ? (
                 <a
                   href={transcriptUrl}
@@ -622,40 +620,32 @@ export default function TicketControls({
               ) : null}
             </div>
           ) : (
-            <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-400">
-              Transcript data will appear here after the ticket is closed/deleted through the bot workflow.
+            <div className="empty-state" style={{ padding: 12 }}>
+              Transcript data will appear here after the ticket is closed or
+              deleted through the bot workflow.
             </div>
           )}
         </div>
       )}
 
-      {!!message && (
-        <div className="rounded-xl border border-emerald-800 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-300">
-          {message}
-        </div>
-      )}
+      {!!message && <div className="info-banner">{message}</div>}
+      {!!error && <div className="error-banner">{error}</div>}
 
-      {!!error && (
-        <div className="rounded-xl border border-red-800 bg-red-950/30 px-3 py-2 text-sm text-red-300">
-          {error}
-        </div>
-      )}
-
-      <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-xs text-zinc-400">
+      <div className="ticket-controls-footnote">
         <div>
-          <span className="font-semibold text-zinc-300">Ticket:</span>{" "}
+          <span className="ticket-controls-footnote-label">Ticket:</span>{" "}
           {ticket.title || ticket.channel_name || "Untitled"}
         </div>
         <div>
-          <span className="font-semibold text-zinc-300">Channel ID:</span>{" "}
+          <span className="ticket-controls-footnote-label">Channel ID:</span>{" "}
           {channelId || "Missing"}
         </div>
         <div>
-          <span className="font-semibold text-zinc-300">Status:</span>{" "}
+          <span className="ticket-controls-footnote-label">Status:</span>{" "}
           {ticket.status || "unknown"}
         </div>
         <div>
-          <span className="font-semibold text-zinc-300">Ghost:</span>{" "}
+          <span className="ticket-controls-footnote-label">Ghost:</span>{" "}
           {ghost ? "yes" : "no"}
         </div>
       </div>
