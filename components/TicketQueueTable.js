@@ -14,8 +14,8 @@ function badgeClass(value) {
   if (v === "claimed") return "badge claimed";
 
   if (v === "low") return "badge";
-  if (v === "medium") return "badge";
-  if (v === "high") return "badge";
+  if (v === "medium") return "badge medium";
+  if (v === "high") return "badge danger";
   if (v === "urgent") return "badge danger";
 
   return "badge";
@@ -73,7 +73,7 @@ export default function TicketQueueTable({
           marginBottom: 14,
         }}
       >
-        <div>
+        <div style={{ minWidth: 0 }}>
           <h2 style={{ margin: 0 }}>Ticket Queue</h2>
           <div className="muted" style={{ marginTop: 6 }}>
             Rich desktop table with mobile ticket cards
@@ -128,6 +128,7 @@ export default function TicketQueueTable({
                       alignItems: "flex-start",
                       gap: 10,
                       marginBottom: 10,
+                      flexWrap: "nowrap",
                     }}
                   >
                     <div style={{ minWidth: 0, flex: 1 }}>
@@ -136,6 +137,7 @@ export default function TicketQueueTable({
                           fontWeight: 800,
                           fontSize: 16,
                           overflowWrap: "anywhere",
+                          lineHeight: 1.15,
                         }}
                       >
                         {getTicketUserLabel(ticket)}
@@ -147,13 +149,22 @@ export default function TicketQueueTable({
                           marginTop: 6,
                           fontSize: 13,
                           overflowWrap: "anywhere",
+                          lineHeight: 1.35,
                         }}
                       >
                         {getTicketTitle(ticket)}
                       </div>
                     </div>
 
-                    <div className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                    <div
+                      className="muted"
+                      style={{
+                        fontSize: 12,
+                        whiteSpace: "nowrap",
+                        flexShrink: 0,
+                        textAlign: "right",
+                      }}
+                    >
                       {timeAgo(ticket.updated_at || ticket.created_at)}
                     </div>
                   </div>
@@ -181,9 +192,11 @@ export default function TicketQueueTable({
                       <span>{safeText(ticket.claimed_by)}</span>
                     </div>
 
-                    <div className="ticket-mobile-meta-item">
+                    <div className="ticket-mobile-meta-item full">
                       <span className="ticket-mobile-meta-label">Channel</span>
-                      <span>{channelId || "Missing"}</span>
+                      <span style={{ overflowWrap: "anywhere" }}>
+                        {channelId || "Missing"}
+                      </span>
                     </div>
 
                     <div className="ticket-mobile-meta-item">
@@ -252,7 +265,16 @@ export default function TicketQueueTable({
                       <tr key={ticket.id}>
                         <td>
                           <div style={{ fontWeight: 800 }}>{getTicketUserLabel(ticket)}</div>
-                          <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
+                          <div
+                            className="muted"
+                            style={{
+                              fontSize: 13,
+                              marginTop: 4,
+                              whiteSpace: "normal",
+                              overflowWrap: "anywhere",
+                              lineHeight: 1.35,
+                            }}
+                          >
                             {getTicketTitle(ticket)}
                           </div>
                           {isGhost(ticket) ? (
@@ -262,7 +284,7 @@ export default function TicketQueueTable({
                           ) : null}
                         </td>
 
-                        <td>{safeText(ticket.category)}</td>
+                        <td style={{ whiteSpace: "normal" }}>{safeText(ticket.category)}</td>
 
                         <td>
                           <span className={badgeClass(status)}>{safeText(ticket.status)}</span>
@@ -274,10 +296,16 @@ export default function TicketQueueTable({
                           </span>
                         </td>
 
-                        <td>{safeText(ticket.claimed_by)}</td>
+                        <td style={{ whiteSpace: "normal" }}>{safeText(ticket.claimed_by)}</td>
 
                         <td>
-                          <div style={{ fontSize: 13, overflowWrap: "anywhere" }}>
+                          <div
+                            style={{
+                              fontSize: 13,
+                              overflowWrap: "anywhere",
+                              whiteSpace: "normal",
+                            }}
+                          >
                             {channelId || "Missing"}
                           </div>
                         </td>
@@ -326,11 +354,20 @@ export default function TicketQueueTable({
                             fontWeight: 800,
                             fontSize: 16,
                             overflowWrap: "anywhere",
+                            lineHeight: 1.15,
                           }}
                         >
                           {getTicketUserLabel(ticket)}
                         </div>
-                        <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
+                        <div
+                          className="muted"
+                          style={{
+                            marginTop: 4,
+                            fontSize: 13,
+                            overflowWrap: "anywhere",
+                            lineHeight: 1.35,
+                          }}
+                        >
                           {getTicketTitle(ticket)}
                         </div>
                       </div>
