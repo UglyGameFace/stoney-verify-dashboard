@@ -10,6 +10,160 @@ import {
 } from "@/lib/auth-server";
 import { env } from "@/lib/env";
 
+function normalizeStaffKey(value) {
+  return String(value || "").trim();
+}
+
+function normalizeStaffLabel(value, fallback = "Unknown Staff") {
+  const text = String(value || "").trim();
+  return text || fallback;
+}
+
+function parseDateMs(value) {
+  const ms = new Date(value || 0).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function isClosedLikeStatus(status) {
+  const value = String(status || "").trim().toLowerCase();
+  return value === "closed" || value === "deleted";
+}
+
+function hasUsableChannel(ticket) {
+  return Boolean(
+    String(ticket?.channel_id || ticket?.discord_thread_id || "").trim()
+  );
+}
+
+function shouldHideStaleTicket(ticket) {
+  const status = String(ticket?.status || "").trim().toLowerCase();
+  const missingChannel = !hasUsableChannel(ticket);
+
+  if (!missingChannel) return false;
+  if (!isClosedLikeStatus(status)) return false;
+
+  const closedAtMs = parseDateMs(ticket?.closed_at);
+  const updatedAtMs = parseDateMs(ticket?.updated_at);
+  const createdAtMs = parseDateMs(ticket?.created_at);
+  const newestMs = Math.max(closedAtMs, updatedAtMs, createdAtMs);
+  const ageMs = Date.now() - newestMs;
+
+  // Hide dead DB-only closed/deleted rows with no live Discord channel
+  // after a short grace period so recently changed rows can still settle.
+  return ageMs > 5 * 60 * 1000;
+}
+
+function deriveMetricsFromTickets(tickets = [], existingMetrics = []) {
+  const byStaff = new Map();
+
+  function ensureRow(key, label) {
+    const safeKey = normalizeStaffKey(key);
+    if (!safeKey) return null;
+
+    if (!byStaff.has(safeKey)) {
+      byStaff.set(safeKey, {
+        staff_id: safeKey,
+        staff_name: normalizeStaffLabel(label, safeKey),
+        tickets_handled: 0,
+        approvals: 0,
+        denials: 0,
+        avg_response_minutes: 0,
+        last_active: null,
+      });
+    }
+
+    return byStaff.get(safeKey);
+  }
+
+  // Seed from existing metrics first
+  for (const row of Array.isArray(existingMetrics) ? existingMetrics : []) {
+    const key = normalizeStaffKey(row?.staff_id || row?.staff_name);
+    if (!key) continue;
+
+    byStaff.set(key, {
+      staff_id: key,
+      staff_name: normalizeStaffLabel(row?.staff_name, key),
+      tickets_handled: Number(row?.tickets_handled || 0),
+      approvals: Number(row?.approvals || 0),
+      denials: Number(row?.denials || 0),
+      avg_response_minutes: Number(row?.avg_response_minutes || 0),
+      last_active: row?.last_active || null,
+    });
+  }
+
+  for (const ticket of Array.isArray(tickets) ? tickets : []) {
+    const status = String(ticket?.status || "").trim().toLowerCase();
+    const category = String(ticket?.category || "").trim().toLowerCase();
+
+    const staffId = normalizeStaffKey(
+      ticket?.closed_by ||
+        ticket?.claimed_by ||
+        ticket?.assigned_to ||
+        ticket?.staff_id
+    );
+
+    const staffName = normalizeStaffLabel(
+      ticket?.closed_by_name ||
+        ticket?.claimed_by_name ||
+        ticket?.assigned_to_name ||
+        ticket?.staff_name ||
+        staffId
+    );
+
+    if (!staffId) continue;
+
+    const row = ensureRow(staffId, staffName);
+    if (!row) continue;
+
+    const updatedAt =
+      ticket?.updated_at || ticket?.closed_at || ticket?.created_at || null;
+
+    if (
+      updatedAt &&
+      (!row.last_active || parseDateMs(updatedAt) > parseDateMs(row.last_active))
+    ) {
+      row.last_active = updatedAt;
+    }
+
+    // Count any closed/deleted ticket with a staff actor as handled.
+    if (status === "closed" || status === "deleted") {
+      row.tickets_handled += 1;
+
+      // Treat verification issue closes as approvals unless clearly denied/rejected.
+      const reasonText = String(
+        ticket?.closed_reason || ticket?.reason || ticket?.mod_suggestion || ""
+      ).toLowerCase();
+
+      const denied =
+        /\b(deny|denied|reject|rejected|decline|declined|failed)\b/.test(
+          reasonText
+        );
+
+      if (category.includes("verification")) {
+        if (denied) {
+          row.denials += 1;
+        } else {
+          row.approvals += 1;
+        }
+      }
+    }
+  }
+
+  return [...byStaff.values()].sort((a, b) => {
+    const handledDiff =
+      Number(b?.tickets_handled || 0) - Number(a?.tickets_handled || 0);
+    if (handledDiff !== 0) return handledDiff;
+
+    const approvalsDiff =
+      Number(b?.approvals || 0) - Number(a?.approvals || 0);
+    if (approvalsDiff !== 0) return approvalsDiff;
+
+    return String(a?.staff_name || a?.staff_id || "").localeCompare(
+      String(b?.staff_name || b?.staff_id || "")
+    );
+  });
+}
+
 async function getDashboardData() {
   const supabase = createServerSupabase();
   const guildId = env.guildId || "";
@@ -25,7 +179,6 @@ async function getDashboardData() {
     recentActiveMembersRes,
     recentFormerMembersRes,
     allGuildMembersRes,
-    openTicketsRes,
     warnsTodayRes,
     raidAlertsRes,
     fraudFlagsRes,
@@ -108,22 +261,22 @@ async function getDashboardData() {
       .limit(2000),
 
     supabase
-      .from("tickets")
-      .select("*", { count: "exact", head: true })
-      .eq("guild_id", guildId)
-      .in("status", ["open", "claimed"]),
-
-    supabase
       .from("warns")
       .select("*", { count: "exact", head: true })
       .eq("guild_id", guildId)
-      .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
+      .gte(
+        "created_at",
+        new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+      ),
 
     supabase
       .from("raid_events")
       .select("*", { count: "exact", head: true })
       .eq("guild_id", guildId)
-      .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
+      .gte(
+        "created_at",
+        new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+      ),
 
     supabase
       .from("verification_flags")
@@ -168,7 +321,10 @@ async function getDashboardData() {
       .from("warns")
       .select("*")
       .eq("guild_id", guildId)
-      .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .gte(
+        "created_at",
+        new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+      )
       .order("created_at", { ascending: false })
       .limit(25),
 
@@ -176,7 +332,10 @@ async function getDashboardData() {
       .from("raid_events")
       .select("*")
       .eq("guild_id", guildId)
-      .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .gte(
+        "created_at",
+        new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+      )
       .order("created_at", { ascending: false })
       .limit(25),
 
@@ -189,7 +348,7 @@ async function getDashboardData() {
       .limit(25),
   ]);
 
-  const tickets = (ticketsRes.data || []).map((ticket) => ({
+  const rawTickets = (ticketsRes.data || []).map((ticket) => ({
     ...ticket,
     priority: ticket.priority || derivePriority(ticket),
     channel_id: ticket.channel_id || ticket.discord_thread_id || null,
@@ -197,6 +356,14 @@ async function getDashboardData() {
     transcript_message_id: ticket.transcript_message_id || null,
     transcript_channel_id: ticket.transcript_channel_id || null,
   }));
+
+  const visibleTickets = rawTickets.filter(
+    (ticket) => !shouldHideStaleTicket(ticket)
+  );
+
+  const openTicketsCount = visibleTickets.filter((ticket) =>
+    ["open", "claimed"].includes(String(ticket?.status || "").toLowerCase())
+  ).length;
 
   const events = [
     ...(auditLogsRes.data || []).map((row) => ({
@@ -239,14 +406,19 @@ async function getDashboardData() {
       source: "audit_events",
     })),
   ]
-    .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
+    .sort(
+      (a, b) =>
+        new Date(b.created_at || 0).getTime() -
+        new Date(a.created_at || 0).getTime()
+    )
     .slice(0, 40);
 
   const roles = (rolesRes.data || []).map((role) => ({
     ...role,
   }));
 
-  const metrics = metricsRes.data || [];
+  const metrics = deriveMetricsFromTickets(rawTickets, metricsRes.data || []);
+
   const categories = categoriesRes.data || [];
   const recentJoins = memberJoinsRes.data || [];
   const recentActiveMembers = recentActiveMembersRes.data || [];
@@ -257,7 +429,7 @@ async function getDashboardData() {
   const fraud = fraudRowsRes.data || [];
 
   return {
-    tickets: sortTickets(tickets, "priority_desc"),
+    tickets: sortTickets(visibleTickets, "priority_desc"),
     events,
     warns,
     raids,
@@ -273,7 +445,8 @@ async function getDashboardData() {
     members: guildMembers,
     memberRows: guildMembers,
     memberCounts: {
-      tracked: (activeMembersCountRes.count || 0) + (formerMembersCountRes.count || 0),
+      tracked:
+        (activeMembersCountRes.count || 0) + (formerMembersCountRes.count || 0),
       active: activeMembersCountRes.count || 0,
       former: formerMembersCountRes.count || 0,
       pendingVerification: pendingVerificationCountRes.count || 0,
@@ -281,7 +454,7 @@ async function getDashboardData() {
       staff: staffMembersCountRes.count || 0,
     },
     counts: {
-      openTickets: openTicketsRes.count || 0,
+      openTickets: openTicketsCount,
       warnsToday: warnsTodayRes.count || 0,
       raidAlerts: raidAlertsRes.count || 0,
       fraudFlags: fraudFlagsRes.count || 0,
