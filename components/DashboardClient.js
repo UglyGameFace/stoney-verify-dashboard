@@ -29,15 +29,35 @@ import RecentJoinsCard from "@/components/RecentJoinsCard";
 import MemberSnapshot from "@/components/dashboard/MemberSnapshot";
 
 const MOBILE_TABS = ["home", "tickets", "members", "categories"];
-
 const STALE_VISIBLE_REFRESH_MS = 20_000;
 const BACKUP_REFRESH_INTERVAL_MS = 45_000;
 
 function formatTime(value) {
   if (!value) return "—";
-
   try {
     return new Date(value).toLocaleString();
+  } catch {
+    return "—";
+  }
+}
+
+function timeAgo(value) {
+  if (!value) return "—";
+  try {
+    const ms = new Date(value).getTime();
+    if (!Number.isFinite(ms)) return "—";
+
+    const diff = Date.now() - ms;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+
+    if (seconds < 15) return "just now";
+    if (minutes < 1) return `${seconds}s ago`;
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    return `${days}d ago`;
   } catch {
     return "—";
   }
@@ -113,6 +133,13 @@ function getSeverityColor(level) {
   return "#4ade80";
 }
 
+function getPanelToneClass(level) {
+  const value = String(level || "").toLowerCase();
+  if (value.includes("critical") || value.includes("high")) return "danger";
+  if (value.includes("moderate") || value.includes("medium")) return "warn";
+  return "ok";
+}
+
 function buildModeratorIntelligence(data) {
   const counts = data?.counts || {};
   const tickets = safeArray(data?.tickets);
@@ -129,15 +156,15 @@ function buildModeratorIntelligence(data) {
   const claimedTickets = getTicketStatusCount(tickets, "claimed");
 
   let serverHealth = "Stable";
-  if (fraudFlags >= 5 || raidAlerts >= 3 || openTickets >= 20) {
+  if (fraudFlags >= 4 || raidAlerts >= 2 || openTickets >= 14) {
     serverHealth = "Elevated";
   }
-  if (fraudFlags >= 10 || raidAlerts >= 5 || openTickets >= 35) {
+  if (fraudFlags >= 8 || raidAlerts >= 4 || openTickets >= 24) {
     serverHealth = "Critical";
   }
 
   let raidRisk = "Low";
-  if (raidAlerts >= 1 || formerMembers >= 10) {
+  if (raidAlerts >= 1) {
     raidRisk = "Moderate";
   }
   if (raidAlerts >= 3) {
@@ -145,7 +172,7 @@ function buildModeratorIntelligence(data) {
   }
 
   let fraudRisk = "Low";
-  if (fraudFlags >= 1 || pendingVerification >= 10) {
+  if (fraudFlags >= 1 || pendingVerification >= 12) {
     fraudRisk = "Moderate";
   }
   if (fraudFlags >= 5) {
@@ -153,10 +180,10 @@ function buildModeratorIntelligence(data) {
   }
 
   let ticketPressure = "Low";
-  if (openTickets >= 8 || claimedTickets >= 5) {
+  if (openTickets >= 6 || claimedTickets >= 4) {
     ticketPressure = "Moderate";
   }
-  if (openTickets >= 16 || claimedTickets >= 10) {
+  if (openTickets >= 14 || claimedTickets >= 8) {
     ticketPressure = "High";
   }
 
@@ -351,28 +378,19 @@ function IntelligencePanel({
       onToggle={onToggle}
       defaultOpen
     >
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: 12,
-          marginBottom: 14,
-        }}
-      >
+      <div className="intelligence-grid">
         {intelligence.summaryItems.map((item) => (
           <div
             key={item.key}
-            className="member-detail-item"
-            style={{
-              border: `1px solid ${getSeverityColor(item.tone)}33`,
-              background: `${getSeverityColor(item.tone)}10`,
-            }}
+            className={`intel-tile ${getPanelToneClass(item.tone)}`}
           >
             <span className="ticket-info-label">{item.label}</span>
             <span
               style={{
                 fontWeight: 800,
                 color: getSeverityColor(item.tone),
+                fontSize: 28,
+                lineHeight: 1.05,
               }}
             >
               {item.value}
@@ -426,23 +444,10 @@ function IntelligencePanel({
         </button>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 12,
-        }}
-      >
-        <div className="card" style={{ padding: 14 }}>
-          <div
-            style={{
-              fontWeight: 800,
-              marginBottom: 8,
-            }}
-          >
-            Immediate Signals
-          </div>
-          <div className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>
+      <div className="detail-grid-3">
+        <div className="card compact-detail-card">
+          <div className="detail-card-title">Immediate Signals</div>
+          <div className="muted detail-list">
             <div>Open Tickets: {intelligence.openTickets}</div>
             <div>Claimed Tickets: {intelligence.claimedTickets}</div>
             <div>Warns Today: {intelligence.warnsToday}</div>
@@ -451,16 +456,9 @@ function IntelligencePanel({
           </div>
         </div>
 
-        <div className="card" style={{ padding: 14 }}>
-          <div
-            style={{
-              fontWeight: 800,
-              marginBottom: 8,
-            }}
-          >
-            Verification Pressure
-          </div>
-          <div className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>
+        <div className="card compact-detail-card">
+          <div className="detail-card-title">Verification Pressure</div>
+          <div className="muted detail-list">
             <div>Pending Verification: {intelligence.pendingVerification}</div>
             <div>Verified Members: {intelligence.verifiedMembers}</div>
             <div>Former Members Tracked: {intelligence.formerMembers}</div>
@@ -468,21 +466,11 @@ function IntelligencePanel({
           </div>
         </div>
 
-        <div className="card" style={{ padding: 14 }}>
-          <div
-            style={{
-              fontWeight: 800,
-              marginBottom: 8,
-            }}
-          >
-            Conflict Watch
-          </div>
+        <div className="card compact-detail-card">
+          <div className="detail-card-title">Conflict Watch</div>
 
           {intelligence.flaggedMembers.length ? (
-            <div
-              className="muted"
-              style={{ fontSize: 13, lineHeight: 1.6 }}
-            >
+            <div className="muted detail-list">
               {intelligence.flaggedMembers.map((member) => (
                 <div key={member.user_id}>
                   {getMemberDisplay(member)} — {safeText(member.role_state)}
@@ -490,7 +478,7 @@ function IntelligencePanel({
               ))}
             </div>
           ) : (
-            <div className="muted" style={{ fontSize: 13 }}>
+            <div className="muted detail-list">
               No role conflict members detected in the current payload.
             </div>
           )}
@@ -500,11 +488,7 @@ function IntelligencePanel({
   );
 }
 
-function SimpleFeedPanel({
-  rows,
-  emptyMessage,
-  renderRow,
-}) {
+function SimpleFeedPanel({ rows, emptyMessage, renderRow }) {
   if (!rows.length) {
     return <div className="empty-state">{emptyMessage}</div>;
   }
@@ -614,14 +598,17 @@ export default function DashboardClient({
       }
 
       try {
-        const res = await fetch(`/api/dashboard/live?_ts=${now}&reason=${encodeURIComponent(reason)}`, {
-          method: "GET",
-          cache: "no-store",
-          headers: {
-            "Cache-Control": "no-store, max-age=0",
-            Pragma: "no-cache",
-          },
-        });
+        const res = await fetch(
+          `/api/dashboard/live?_ts=${now}&reason=${encodeURIComponent(reason)}`,
+          {
+            method: "GET",
+            cache: "no-store",
+            headers: {
+              "Cache-Control": "no-store, max-age=0",
+              Pragma: "no-cache",
+            },
+          }
+        );
 
         const json = await res.json().catch(() => null);
 
@@ -787,13 +774,15 @@ export default function DashboardClient({
         )
         .subscribe((status) => {
           if (status === "SUBSCRIBED") {
-            refresh({ silent: true, force: true, reason: "realtime-subscribed" });
+            refresh({
+              silent: true,
+              force: true,
+              reason: "realtime-subscribed",
+            });
           }
         });
     } catch (err) {
-      setError(
-        err?.message || "Realtime client unavailable."
-      );
+      setError(err?.message || "Realtime client unavailable.");
     }
 
     window.addEventListener("focus", handleWindowFocus);
@@ -864,25 +853,21 @@ export default function DashboardClient({
           t.closed_reason,
         ]
           .filter(Boolean)
-          .some((v) =>
-            String(v).toLowerCase().includes(q)
-          )
+          .some((v) => String(v).toLowerCase().includes(q))
       );
     }
 
     if (statusFilter !== "all") {
       rows = rows.filter(
         (t) =>
-          String(t.status || "").toLowerCase() ===
-          statusFilter
+          String(t.status || "").toLowerCase() === statusFilter
       );
     }
 
     if (priorityFilter !== "all") {
       rows = rows.filter(
         (t) =>
-          String(t.priority || "").toLowerCase() ===
-          priorityFilter
+          String(t.priority || "").toLowerCase() === priorityFilter
       );
     }
 
@@ -924,6 +909,8 @@ export default function DashboardClient({
     [openOnlyPanel]
   );
 
+  const lastRefreshLabel = timeAgo(lastRefreshAtRef.current);
+
   return (
     <>
       <Topbar />
@@ -934,6 +921,49 @@ export default function DashboardClient({
             activeTab={activeTab}
             onChange={setActiveTab}
           />
+        </div>
+
+        <div className="card" style={{ marginBottom: 16, padding: 12 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <div className="muted" style={{ fontSize: 13 }}>
+              Last successful refresh: {lastRefreshLabel}
+            </div>
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="button ghost"
+                style={{ width: "auto", minWidth: 120 }}
+                onClick={() => refresh({ force: true, reason: "manual-header-refresh" })}
+              >
+                Refresh Now
+              </button>
+
+              <button
+                type="button"
+                className="button ghost"
+                style={{ width: "auto", minWidth: 140 }}
+                disabled={isMaintaining}
+                onClick={() =>
+                  handleReconcileTickets({
+                    includeOpenWithMissingChannel: true,
+                    includeTranscriptBackfill: true,
+                    dryRun: true,
+                  })
+                }
+              >
+                {isMaintaining ? "Working..." : "Preview Reconcile"}
+              </button>
+            </div>
+          </div>
         </div>
 
         {error ? (
@@ -961,18 +991,14 @@ export default function DashboardClient({
         ) : null}
 
         <section
-          className={`mobile-tab-panel ${
-            activeTab === "home" ? "active" : ""
-          }`}
+          className={`mobile-tab-panel ${activeTab === "home" ? "active" : ""}`}
         >
           <div className="dashboard-home-grid">
             <IntelligencePanel
               intelligence={intelligence}
               expanded={expandedPanels.intelligence}
               onToggle={() => togglePanel("intelligence")}
-              onJumpToTickets={() =>
-                jumpToTickets({ status: "open" })
-              }
+              onJumpToTickets={() => jumpToTickets({ status: "open" })}
               onJumpToWarns={() => jumpToPanel("warns")}
               onJumpToRaids={() => jumpToPanel("raids")}
               onJumpToFraud={() => jumpToPanel("fraud")}
@@ -1024,7 +1050,7 @@ export default function DashboardClient({
 
             <DashboardSection
               title="Warn Intelligence"
-              subtitle="Warnings detected in the current dashboard payload"
+              subtitle={`${safeWarns.length} warn row${safeWarns.length === 1 ? "" : "s"} in the last 24 hours`}
               expanded={expandedPanels.warns}
               onToggle={() => togglePanel("warns")}
               actions={
@@ -1040,7 +1066,7 @@ export default function DashboardClient({
             >
               <SimpleFeedPanel
                 rows={homeSummary.recentWarns}
-                emptyMessage="No warn details are available in the current API payload yet. The counter is live, but warn row details still need to be returned from the route."
+                emptyMessage="No warns were recorded in the last 24 hours."
                 renderRow={(warn, index) => (
                   <div
                     key={warn?.id || `warn-${index}`}
@@ -1069,13 +1095,13 @@ export default function DashboardClient({
 
             <DashboardSection
               title="Raid Intelligence"
-              subtitle="Recent raid detections and join pressure"
+              subtitle={`${safeRaids.length} raid alert${safeRaids.length === 1 ? "" : "s"} in the last 24 hours`}
               expanded={expandedPanels.raids}
               onToggle={() => togglePanel("raids")}
             >
               <SimpleFeedPanel
                 rows={homeSummary.recentRaids}
-                emptyMessage="No raid detail rows are available in the current API payload yet."
+                emptyMessage="No raid alerts were recorded in the last 24 hours."
                 renderRow={(raid, index) => (
                   <div
                     key={raid?.id || `raid-${index}`}
@@ -1106,7 +1132,7 @@ export default function DashboardClient({
 
             <DashboardSection
               title="Fraud Intelligence"
-              subtitle="Suspicious verification and conflict signals"
+              subtitle={`${safeFraud.length} flagged row${safeFraud.length === 1 ? "" : "s"} in the current dataset`}
               expanded={expandedPanels.fraud}
               onToggle={() => togglePanel("fraud")}
             >
@@ -1173,7 +1199,7 @@ export default function DashboardClient({
                     ))
                   ) : (
                     <div className="empty-state">
-                      No fraud detail rows are available in the current API payload yet.
+                      No fraud flags or role conflicts are present in the current dataset.
                     </div>
                   )}
                 </div>
@@ -1183,9 +1209,7 @@ export default function DashboardClient({
         </section>
 
         <section
-          className={`mobile-tab-panel ${
-            activeTab === "tickets" ? "active" : ""
-          }`}
+          className={`mobile-tab-panel ${activeTab === "tickets" ? "active" : ""}`}
         >
           <div className="card">
             <div
@@ -1346,9 +1370,7 @@ export default function DashboardClient({
         </section>
 
         <section
-          className={`mobile-tab-panel ${
-            activeTab === "members" ? "active" : ""
-          }`}
+          className={`mobile-tab-panel ${activeTab === "members" ? "active" : ""}`}
         >
           <div className="dashboard-members-grid">
             <DashboardSection
@@ -1399,9 +1421,7 @@ export default function DashboardClient({
         </section>
 
         <section
-          className={`mobile-tab-panel ${
-            activeTab === "categories" ? "active" : ""
-          }`}
+          className={`mobile-tab-panel ${activeTab === "categories" ? "active" : ""}`}
         >
           <div className="card">
             <CategoryManager
@@ -1433,6 +1453,57 @@ export default function DashboardClient({
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 12px;
+        }
+
+        .intelligence-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 12px;
+          margin-bottom: 14px;
+        }
+
+        .intel-tile {
+          border-radius: 18px;
+          padding: 14px;
+          display: grid;
+          gap: 8px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.02);
+        }
+
+        .intel-tile.ok {
+          border-color: rgba(74, 222, 128, 0.2);
+          background: rgba(74, 222, 128, 0.08);
+        }
+
+        .intel-tile.warn {
+          border-color: rgba(251, 191, 36, 0.2);
+          background: rgba(251, 191, 36, 0.08);
+        }
+
+        .intel-tile.danger {
+          border-color: rgba(248, 113, 113, 0.2);
+          background: rgba(248, 113, 113, 0.08);
+        }
+
+        .detail-grid-3 {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: 12px;
+        }
+
+        .compact-detail-card {
+          padding: 14px;
+        }
+
+        .detail-card-title {
+          font-weight: 800;
+          margin-bottom: 8px;
+        }
+
+        .detail-list {
+          font-size: 13px;
+          line-height: 1.6;
         }
 
         @media (min-width: 768px) {
