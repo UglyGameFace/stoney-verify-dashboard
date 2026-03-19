@@ -276,6 +276,66 @@ export async function syncRoleMembersAction(
 }
 
 /**
+ * NEW
+ * Reconcile tickets that are stale against dashboard truth.
+ * This is intended to clean up tickets that are already closed/deleted
+ * or otherwise inconsistent with what the dashboard should show.
+ */
+export async function reconcileTicketsAction(
+  input?: {
+    requestedBy?: string | null;
+    staffId?: string | null;
+    includeOpenWithMissingChannel?: boolean;
+  },
+  options?: WaitForBotCommandOptions
+): Promise<{
+  ok: boolean;
+  scanned: number;
+  hidden: number;
+  updated: number;
+  removed: number;
+  tickets?: unknown[];
+}> {
+  return postJson("/api/tickets/reconcile", {
+    includeOpenWithMissingChannel: Boolean(
+      input?.includeOpenWithMissingChannel
+    ),
+    ...withActor(input),
+  });
+}
+
+/**
+ * NEW
+ * Purge dead stale tickets directly from dashboard persistence.
+ * Intended for ghost / DB-only rows that no longer have a usable channel/thread
+ * and should not remain visible forever.
+ */
+export async function purgeStaleTicketsAction(
+  input?: {
+    requestedBy?: string | null;
+    staffId?: string | null;
+    dryRun?: boolean;
+    olderThanMinutes?: number;
+  },
+  options?: WaitForBotCommandOptions
+): Promise<{
+  ok: boolean;
+  dryRun: boolean;
+  scanned: number;
+  removed: number;
+  candidates: unknown[];
+}> {
+  return postJson("/api/tickets/purge-stale", {
+    dryRun: Boolean(input?.dryRun),
+    olderThanMinutes:
+      typeof input?.olderThanMinutes === "number"
+        ? Math.max(1, Math.floor(input.olderThanMinutes))
+        : 5,
+    ...withActor(input),
+  });
+}
+
+/**
  * Lightweight helpers for UI-only transcript handling.
  * These do not mutate server state directly; they help the dashboard
  * present transcript records consistently when the ticket row already
