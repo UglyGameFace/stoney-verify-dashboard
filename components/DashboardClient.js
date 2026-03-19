@@ -386,11 +386,10 @@ function IntelligencePanel({
           >
             <span className="ticket-info-label">{item.label}</span>
             <span
+              className="intel-value"
               style={{
                 fontWeight: 800,
                 color: getSeverityColor(item.tone),
-                fontSize: 28,
-                lineHeight: 1.05,
               }}
             >
               {item.value}
@@ -559,6 +558,10 @@ export default function DashboardClient({
   const refreshInFlightRef = useRef(false);
   const lastRefreshAtRef = useRef(Date.now());
   const backupIntervalRef = useRef(null);
+
+  const warnsSectionRef = useRef(null);
+  const raidsSectionRef = useRef(null);
+  const fraudSectionRef = useRef(null);
 
   const currentStaffId = useMemo(
     () => getStaffUserId(initialData, staffName),
@@ -897,6 +900,12 @@ export default function DashboardClient({
       if (typeof query === "string") {
         setSearch(query);
       }
+
+      if (typeof window !== "undefined") {
+        requestAnimationFrame(() => {
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        });
+      }
     },
     []
   );
@@ -905,6 +914,29 @@ export default function DashboardClient({
     (panelName) => {
       setActiveTab("home");
       openOnlyPanel(panelName);
+
+      const refMap = {
+        warns: warnsSectionRef,
+        raids: raidsSectionRef,
+        fraud: fraudSectionRef,
+      };
+
+      const targetRef = refMap[panelName];
+
+      if (typeof window !== "undefined") {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (targetRef?.current) {
+              targetRef.current.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+              });
+            } else {
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }
+          });
+        });
+      }
     },
     [openOnlyPanel]
   );
@@ -923,7 +955,7 @@ export default function DashboardClient({
           />
         </div>
 
-        <div className="card" style={{ marginBottom: 16, padding: 12 }}>
+        <div className="card dashboard-refresh-card" style={{ marginBottom: 16, padding: 12 }}>
           <div
             style={{
               display: "flex",
@@ -937,7 +969,7 @@ export default function DashboardClient({
               Last successful refresh: {lastRefreshLabel}
             </div>
 
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div className="dashboard-refresh-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button
                 type="button"
                 className="button ghost"
@@ -1048,163 +1080,169 @@ export default function DashboardClient({
               <AuditTimeline events={safeEvents} />
             </DashboardSection>
 
-            <DashboardSection
-              title="Warn Intelligence"
-              subtitle={`${safeWarns.length} warn row${safeWarns.length === 1 ? "" : "s"} in the last 24 hours`}
-              expanded={expandedPanels.warns}
-              onToggle={() => togglePanel("warns")}
-              actions={
-                <button
-                  type="button"
-                  className="button ghost"
-                  style={{ width: "auto", minWidth: 120 }}
-                  onClick={() => jumpToTickets({ status: "open" })}
-                >
-                  Open Tickets
-                </button>
-              }
-            >
-              <SimpleFeedPanel
-                rows={homeSummary.recentWarns}
-                emptyMessage="No warns were recorded in the last 24 hours."
-                renderRow={(warn, index) => (
-                  <div
-                    key={warn?.id || `warn-${index}`}
-                    className="card"
-                    style={{ padding: 14 }}
+            <div ref={warnsSectionRef}>
+              <DashboardSection
+                title="Warn Intelligence"
+                subtitle={`${safeWarns.length} warn row${safeWarns.length === 1 ? "" : "s"} in the last 24 hours`}
+                expanded={expandedPanels.warns}
+                onToggle={() => togglePanel("warns")}
+                actions={
+                  <button
+                    type="button"
+                    className="button ghost"
+                    style={{ width: "auto", minWidth: 120 }}
+                    onClick={() => jumpToTickets({ status: "open" })}
                   >
-                    <div style={{ fontWeight: 800 }}>
-                      {safeText(warn?.display_name || warn?.username, "Unknown user")}
-                    </div>
-                    <div
-                      className="muted"
-                      style={{ marginTop: 6, fontSize: 13 }}
-                    >
-                      {safeText(warn?.reason, "No reason provided")}
-                    </div>
-                    <div
-                      className="muted"
-                      style={{ marginTop: 8, fontSize: 12 }}
-                    >
-                      {formatTime(warn?.created_at)}
-                    </div>
-                  </div>
-                )}
-              />
-            </DashboardSection>
-
-            <DashboardSection
-              title="Raid Intelligence"
-              subtitle={`${safeRaids.length} raid alert${safeRaids.length === 1 ? "" : "s"} in the last 24 hours`}
-              expanded={expandedPanels.raids}
-              onToggle={() => togglePanel("raids")}
-            >
-              <SimpleFeedPanel
-                rows={homeSummary.recentRaids}
-                emptyMessage="No raid alerts were recorded in the last 24 hours."
-                renderRow={(raid, index) => (
-                  <div
-                    key={raid?.id || `raid-${index}`}
-                    className="card"
-                    style={{ padding: 14 }}
-                  >
-                    <div style={{ fontWeight: 800 }}>
-                      {safeText(raid?.summary, "Raid event")}
-                    </div>
-                    <div
-                      className="muted"
-                      style={{ marginTop: 6, fontSize: 13 }}
-                    >
-                      Join count: {safeText(raid?.join_count, "—")} • Window:{" "}
-                      {safeText(raid?.window_seconds, "—")}s • Severity:{" "}
-                      {safeText(raid?.severity, "unknown")}
-                    </div>
-                    <div
-                      className="muted"
-                      style={{ marginTop: 8, fontSize: 12 }}
-                    >
-                      {formatTime(raid?.created_at)}
-                    </div>
-                  </div>
-                )}
-              />
-            </DashboardSection>
-
-            <DashboardSection
-              title="Fraud Intelligence"
-              subtitle={`${safeFraud.length} flagged row${safeFraud.length === 1 ? "" : "s"} in the current dataset`}
-              expanded={expandedPanels.fraud}
-              onToggle={() => togglePanel("fraud")}
-            >
-              {homeSummary.recentFraud.length ? (
+                    Open Tickets
+                  </button>
+                }
+              >
                 <SimpleFeedPanel
-                  rows={homeSummary.recentFraud}
-                  emptyMessage="No fraud items."
-                  renderRow={(fraud, index) => (
+                  rows={homeSummary.recentWarns}
+                  emptyMessage="No warns were recorded in the last 24 hours."
+                  renderRow={(warn, index) => (
                     <div
-                      key={fraud?.id || `fraud-${index}`}
+                      key={warn?.id || `warn-${index}`}
                       className="card"
                       style={{ padding: 14 }}
                     >
                       <div style={{ fontWeight: 800 }}>
-                        {safeText(fraud?.display_name || fraud?.username, "Suspicious member")}
+                        {safeText(warn?.display_name || warn?.username, "Unknown user")}
                       </div>
                       <div
                         className="muted"
                         style={{ marginTop: 6, fontSize: 13 }}
                       >
-                        Score: {safeText(fraud?.score, "0")} • Flagged:{" "}
-                        {String(Boolean(fraud?.flagged))}
+                        {safeText(warn?.reason, "No reason provided")}
                       </div>
-
-                      {Array.isArray(fraud?.reasons) && fraud.reasons.length ? (
-                        <div
-                          className="muted"
-                          style={{ marginTop: 8, fontSize: 12 }}
-                        >
-                          {fraud.reasons.join(" • ")}
-                        </div>
-                      ) : null}
+                      <div
+                        className="muted"
+                        style={{ marginTop: 8, fontSize: 12 }}
+                      >
+                        {formatTime(warn?.created_at)}
+                      </div>
                     </div>
                   )}
                 />
-              ) : (
-                <div className="space">
-                  {intelligence.flaggedMembers.length ? (
-                    intelligence.flaggedMembers.map((member) => (
+              </DashboardSection>
+            </div>
+
+            <div ref={raidsSectionRef}>
+              <DashboardSection
+                title="Raid Intelligence"
+                subtitle={`${safeRaids.length} raid alert${safeRaids.length === 1 ? "" : "s"} in the last 24 hours`}
+                expanded={expandedPanels.raids}
+                onToggle={() => togglePanel("raids")}
+              >
+                <SimpleFeedPanel
+                  rows={homeSummary.recentRaids}
+                  emptyMessage="No raid alerts were recorded in the last 24 hours."
+                  renderRow={(raid, index) => (
+                    <div
+                      key={raid?.id || `raid-${index}`}
+                      className="card"
+                      style={{ padding: 14 }}
+                    >
+                      <div style={{ fontWeight: 800 }}>
+                        {safeText(raid?.summary, "Raid event")}
+                      </div>
                       <div
-                        key={member.user_id}
+                        className="muted"
+                        style={{ marginTop: 6, fontSize: 13 }}
+                      >
+                        Join count: {safeText(raid?.join_count, "—")} • Window:{" "}
+                        {safeText(raid?.window_seconds, "—")}s • Severity:{" "}
+                        {safeText(raid?.severity, "unknown")}
+                      </div>
+                      <div
+                        className="muted"
+                        style={{ marginTop: 8, fontSize: 12 }}
+                      >
+                        {formatTime(raid?.created_at)}
+                      </div>
+                    </div>
+                  )}
+                />
+              </DashboardSection>
+            </div>
+
+            <div ref={fraudSectionRef}>
+              <DashboardSection
+                title="Fraud Intelligence"
+                subtitle={`${safeFraud.length} flagged row${safeFraud.length === 1 ? "" : "s"} in the current dataset`}
+                expanded={expandedPanels.fraud}
+                onToggle={() => togglePanel("fraud")}
+              >
+                {homeSummary.recentFraud.length ? (
+                  <SimpleFeedPanel
+                    rows={homeSummary.recentFraud}
+                    emptyMessage="No fraud items."
+                    renderRow={(fraud, index) => (
+                      <div
+                        key={fraud?.id || `fraud-${index}`}
                         className="card"
                         style={{ padding: 14 }}
                       >
                         <div style={{ fontWeight: 800 }}>
-                          {getMemberDisplay(member)}
+                          {safeText(fraud?.display_name || fraud?.username, "Suspicious member")}
                         </div>
                         <div
                           className="muted"
                           style={{ marginTop: 6, fontSize: 13 }}
                         >
-                          Role state: {safeText(member?.role_state)}
+                          Score: {safeText(fraud?.score, "0")} • Flagged:{" "}
+                          {String(Boolean(fraud?.flagged))}
                         </div>
-                        <div
-                          className="muted"
-                          style={{ marginTop: 6, fontSize: 12 }}
-                        >
-                          {safeText(
-                            member?.role_state_reason,
-                            "Role conflict detected"
-                          )}
-                        </div>
+
+                        {Array.isArray(fraud?.reasons) && fraud.reasons.length ? (
+                          <div
+                            className="muted"
+                            style={{ marginTop: 8, fontSize: 12 }}
+                          >
+                            {fraud.reasons.join(" • ")}
+                          </div>
+                        ) : null}
                       </div>
-                    ))
-                  ) : (
-                    <div className="empty-state">
-                      No fraud flags or role conflicts are present in the current dataset.
-                    </div>
-                  )}
-                </div>
-              )}
-            </DashboardSection>
+                    )}
+                  />
+                ) : (
+                  <div className="space">
+                    {intelligence.flaggedMembers.length ? (
+                      intelligence.flaggedMembers.map((member) => (
+                        <div
+                          key={member.user_id}
+                          className="card"
+                          style={{ padding: 14 }}
+                        >
+                          <div style={{ fontWeight: 800 }}>
+                            {getMemberDisplay(member)}
+                          </div>
+                          <div
+                            className="muted"
+                            style={{ marginTop: 6, fontSize: 13 }}
+                          >
+                            Role state: {safeText(member?.role_state)}
+                          </div>
+                          <div
+                            className="muted"
+                            style={{ marginTop: 6, fontSize: 12 }}
+                          >
+                            {safeText(
+                              member?.role_state_reason,
+                              "Role conflict detected"
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="empty-state">
+                        No fraud flags or role conflicts are present in the current dataset.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </DashboardSection>
+            </div>
           </div>
         </section>
 
@@ -1457,9 +1495,10 @@ export default function DashboardClient({
 
         .intelligence-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 12px;
           margin-bottom: 14px;
+          align-items: stretch;
         }
 
         .intel-tile {
@@ -1469,6 +1508,8 @@ export default function DashboardClient({
           gap: 8px;
           border: 1px solid rgba(255,255,255,0.08);
           background: rgba(255,255,255,0.02);
+          min-width: 0;
+          overflow: hidden;
         }
 
         .intel-tile.ok {
@@ -1486,9 +1527,16 @@ export default function DashboardClient({
           background: rgba(248, 113, 113, 0.08);
         }
 
+        .intel-value {
+          font-size: clamp(20px, 5vw, 28px);
+          line-height: 1.05;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
+
         .detail-grid-3 {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          grid-template-columns: 1fr;
           gap: 12px;
         }
 
@@ -1504,11 +1552,20 @@ export default function DashboardClient({
         .detail-list {
           font-size: 13px;
           line-height: 1.6;
+          overflow-wrap: anywhere;
         }
 
         @media (min-width: 768px) {
           .metrics-grid {
             grid-template-columns: repeat(4, minmax(0, 1fr));
+          }
+
+          .intelligence-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+
+          .detail-grid-3 {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
           }
         }
 
@@ -1520,6 +1577,21 @@ export default function DashboardClient({
           .dashboard-home-grid,
           .dashboard-members-grid {
             gap: 18px;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .intelligence-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .dashboard-refresh-actions {
+            width: 100%;
+          }
+
+          .dashboard-refresh-actions :global(button) {
+            flex: 1 1 0;
+            min-width: 0 !important;
           }
         }
       `}</style>
