@@ -1447,4 +1447,11 @@ export default function DashboardClient({
           }
 
           .dashboard-home-grid,
-          .dashboard-members
+          .dashboard-members-grid {
+            gap: 18px;
+          }
+        }
+      `}</style>
+    </>
+  );
+}
