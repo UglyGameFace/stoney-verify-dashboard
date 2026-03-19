@@ -40,9 +40,18 @@ function parseDateMs(value) {
   return Number.isFinite(ms) ? ms : 0;
 }
 
+function normalizeStatus(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 function isClosedLikeStatus(status) {
-  const value = String(status || "").trim().toLowerCase();
+  const value = normalizeStatus(status);
   return value === "closed" || value === "deleted";
+}
+
+function isOpenLikeStatus(status) {
+  const value = normalizeStatus(status);
+  return value === "open" || value === "claimed";
 }
 
 function hasUsableChannel(ticket) {
@@ -51,8 +60,16 @@ function hasUsableChannel(ticket) {
   );
 }
 
+function hasTranscriptEvidence(ticket) {
+  return Boolean(
+    String(ticket?.transcript_url || "").trim() ||
+      String(ticket?.transcript_message_id || "").trim() ||
+      String(ticket?.transcript_channel_id || "").trim()
+  );
+}
+
 function shouldHideStaleTicket(ticket) {
-  const status = String(ticket?.status || "").trim().toLowerCase();
+  const status = normalizeStatus(ticket?.status);
   const missingChannel = !hasUsableChannel(ticket);
 
   if (!missingChannel) return false;
@@ -65,6 +82,99 @@ function shouldHideStaleTicket(ticket) {
   const ageMs = Date.now() - newestMs;
 
   return ageMs > 5 * 60 * 1000;
+}
+
+function ticketFreshnessScore(ticket) {
+  const status = normalizeStatus(ticket?.status);
+  const now = Date.now();
+  const updatedAt = parseDateMs(ticket?.updated_at);
+  const createdAt = parseDateMs(ticket?.created_at);
+  const closedAt = parseDateMs(ticket?.closed_at);
+  const deletedAt = parseDateMs(ticket?.deleted_at);
+  const newest = Math.max(updatedAt, createdAt, closedAt, deletedAt);
+
+  let score = 0;
+
+  if (hasUsableChannel(ticket)) score += 50;
+  if (hasTranscriptEvidence(ticket)) score += 25;
+  if (status === "claimed") score += 20;
+  if (status === "open") score += 15;
+  if (status === "closed") score -= 10;
+  if (status === "deleted") score -= 20;
+
+  const ageMinutes = newest > 0 ? (now - newest) / 60000 : 999999;
+  if (ageMinutes <= 30) score += 30;
+  else if (ageMinutes <= 180) score += 15;
+  else if (ageMinutes <= 1440) score += 5;
+  else if (ageMinutes > 2880) score -= 20;
+
+  if (isOpenLikeStatus(status) && hasTranscriptEvidence(ticket)) {
+    score -= 40;
+  }
+
+  return score;
+}
+
+function canonicalTicketKey(ticket) {
+  const channelId = normalizeString(
+    ticket?.channel_id || ticket?.discord_thread_id
+  );
+  if (channelId) return `channel:${channelId}`;
+
+  const userId = normalizeString(ticket?.user_id || ticket?.owner_id);
+  const category = normalizeString(ticket?.category).toLowerCase();
+  const username = normalizeString(ticket?.username).toLowerCase();
+
+  if (userId) return `user:${userId}:${category || "unknown"}`;
+  if (username) return `username:${username}:${category || "unknown"}`;
+
+  return `row:${normalizeString(ticket?.id)}`;
+}
+
+function canonicalizeTickets(rawTickets) {
+  const visibleBase = rawTickets.filter(
+    (ticket) => !shouldHideStaleTicket(ticket)
+  );
+  const grouped = new Map();
+
+  for (const ticket of visibleBase) {
+    const key = canonicalTicketKey(ticket);
+    if (!grouped.has(key)) {
+      grouped.set(key, []);
+    }
+    grouped.get(key).push(ticket);
+  }
+
+  const chosenIds = new Set();
+
+  for (const [, group] of grouped.entries()) {
+    group.sort((a, b) => {
+      const statusA = normalizeStatus(a?.status);
+      const statusB = normalizeStatus(b?.status);
+
+      const scoreDiff = ticketFreshnessScore(b) - ticketFreshnessScore(a);
+      if (scoreDiff !== 0) return scoreDiff;
+
+      if (isOpenLikeStatus(statusA) !== isOpenLikeStatus(statusB)) {
+        return isOpenLikeStatus(statusB) ? 1 : -1;
+      }
+
+      return (
+        parseDateMs(b?.updated_at || b?.created_at) -
+        parseDateMs(a?.updated_at || a?.created_at)
+      );
+    });
+
+    chosenIds.add(String(group[0]?.id));
+  }
+
+  return visibleBase
+    .filter((ticket) => chosenIds.has(String(ticket?.id)))
+    .sort(
+      (a, b) =>
+        parseDateMs(b?.updated_at || b?.created_at) -
+        parseDateMs(a?.updated_at || a?.created_at)
+    );
 }
 
 function normalizeStaffKey(value) {
@@ -114,7 +224,7 @@ function deriveMetricsFromTickets(tickets = [], existingMetrics = []) {
   }
 
   for (const ticket of Array.isArray(tickets) ? tickets : []) {
-    const status = String(ticket?.status || "").trim().toLowerCase();
+    const status = normalizeStatus(ticket?.status);
     const category = String(ticket?.category || "").trim().toLowerCase();
 
     const staffId = normalizeStaffKey(
@@ -700,18 +810,27 @@ export async function GET() {
     }
 
     const rawTickets = safeArray(ticketsRes.data).map(mapTicket);
-    const tickets = rawTickets.filter((ticket) => !shouldHideStaleTicket(ticket));
+    const tickets = canonicalizeTickets(rawTickets);
 
     const auditLogs = safeArray(auditLogsRes.data);
     const auditEvents = safeArray(auditEventsRes.data);
     const staffMessages = safeArray(staffMessagesRes.data);
     const categories = categoriesRes.data || [];
     const memberJoins = memberJoinsRes.data || [];
-    const recentActiveMembers = safeArray(recentActiveMembersRes.data).map(mapGuildMember);
-    const recentFormerMembers = safeArray(recentFormerMembersRes.data).map(mapGuildMember);
+    const recentActiveMembers = safeArray(recentActiveMembersRes.data).map(
+      mapGuildMember
+    );
+    const recentFormerMembers = safeArray(recentFormerMembersRes.data).map(
+      mapGuildMember
+    );
     const guildMembers = safeArray(allGuildMembersRes.data).map(mapGuildMember);
 
-    const events = buildTimeline(auditLogs, auditEvents, staffMessages, guildMembers);
+    const events = buildTimeline(
+      auditLogs,
+      auditEvents,
+      staffMessages,
+      guildMembers
+    );
 
     const roles = safeArray(rolesRes.data).map((role) => ({
       ...role,
@@ -769,12 +888,12 @@ export async function GET() {
     const metrics = deriveMetricsFromTickets(rawTickets, metricsRes.data || []);
 
     const openTicketsCount = tickets.filter((ticket) =>
-      ["open", "claimed"].includes(String(ticket?.status || "").toLowerCase())
+      isOpenLikeStatus(ticket?.status)
     ).length;
 
     if (debugEnabled()) {
       console.log("[dashboard/live] raw tickets found =", rawTickets.length);
-      console.log("[dashboard/live] visible tickets found =", tickets.length);
+      console.log("[dashboard/live] canonical tickets found =", tickets.length);
       console.log("[dashboard/live] auditLogs found =", auditLogs.length);
       console.log("[dashboard/live] auditEvents found =", auditEvents.length);
       console.log("[dashboard/live] staffMessages found =", staffMessages.length);
@@ -784,16 +903,37 @@ export async function GET() {
       console.log("[dashboard/live] fraud found =", fraud.length);
       console.log("[dashboard/live] memberJoins found =", memberJoins.length);
       console.log("[dashboard/live] recentJoins hydrated =", recentJoins.length);
-      console.log("[dashboard/live] recentActiveMembers found =", recentActiveMembers.length);
-      console.log("[dashboard/live] recentFormerMembers found =", recentFormerMembers.length);
+      console.log(
+        "[dashboard/live] recentActiveMembers found =",
+        recentActiveMembers.length
+      );
+      console.log(
+        "[dashboard/live] recentFormerMembers found =",
+        recentFormerMembers.length
+      );
       console.log("[dashboard/live] guildMembers found =", guildMembers.length);
       console.log("[dashboard/live] roles found =", roles.length);
       console.log("[dashboard/live] categories found =", categories.length);
-      console.log("[dashboard/live] activeMembersCount =", activeMembersCountRes.count || 0);
-      console.log("[dashboard/live] formerMembersCount =", formerMembersCountRes.count || 0);
-      console.log("[dashboard/live] pendingVerificationCount =", pendingVerificationCountRes.count || 0);
-      console.log("[dashboard/live] verifiedMembersCount =", verifiedMembersCountRes.count || 0);
-      console.log("[dashboard/live] staffMembersCount =", staffMembersCountRes.count || 0);
+      console.log(
+        "[dashboard/live] activeMembersCount =",
+        activeMembersCountRes.count || 0
+      );
+      console.log(
+        "[dashboard/live] formerMembersCount =",
+        formerMembersCountRes.count || 0
+      );
+      console.log(
+        "[dashboard/live] pendingVerificationCount =",
+        pendingVerificationCountRes.count || 0
+      );
+      console.log(
+        "[dashboard/live] verifiedMembersCount =",
+        verifiedMembersCountRes.count || 0
+      );
+      console.log(
+        "[dashboard/live] staffMembersCount =",
+        staffMembersCountRes.count || 0
+      );
     }
 
     const payload = {
@@ -813,7 +953,9 @@ export async function GET() {
       members: guildMembers,
       memberRows,
       memberCounts: {
-        tracked: (activeMembersCountRes.count || 0) + (formerMembersCountRes.count || 0),
+        tracked:
+          (activeMembersCountRes.count || 0) +
+          (formerMembersCountRes.count || 0),
         active: activeMembersCountRes.count || 0,
         former: formerMembersCountRes.count || 0,
         pendingVerification: pendingVerificationCountRes.count || 0,
@@ -840,7 +982,9 @@ export async function GET() {
             fraudCount: fraud.length,
             staffMessagesCount: staffMessages.length,
             memberCounts: {
-              tracked: (activeMembersCountRes.count || 0) + (formerMembersCountRes.count || 0),
+              tracked:
+                (activeMembersCountRes.count || 0) +
+                (formerMembersCountRes.count || 0),
               active: activeMembersCountRes.count || 0,
               former: formerMembersCountRes.count || 0,
               pendingVerification: pendingVerificationCountRes.count || 0,
