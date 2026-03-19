@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { queueAssignTicket } from "@/lib/botCommands";
-import { requireStaffSessionForRoute } from "@/lib/auth-server";
+import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function getActorId(session: any): string | null {
   const candidates = [
@@ -27,7 +28,7 @@ function getActorId(session: any): string | null {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await requireStaffSessionForRoute();
+    const { session, refreshedTokens } = await requireStaffSessionForRoute();
     const actorId = getActorId(session);
 
     if (!actorId) {
@@ -36,11 +37,16 @@ export async function POST(req: NextRequest) {
           ok: false,
           error: "Unauthorized",
         },
-        { status: 401 }
+        {
+          status: 401,
+          headers: {
+            "Cache-Control": "no-store, max-age=0",
+          },
+        }
       );
     }
 
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
 
     const channelId =
       typeof body?.channelId === "string" && body.channelId.trim()
@@ -62,7 +68,12 @@ export async function POST(req: NextRequest) {
           ok: false,
           error: "Missing channelId",
         },
-        { status: 400 }
+        {
+          status: 400,
+          headers: {
+            "Cache-Control": "no-store, max-age=0",
+          },
+        }
       );
     }
 
@@ -72,7 +83,12 @@ export async function POST(req: NextRequest) {
           ok: false,
           error: "Missing staffId",
         },
-        { status: 400 }
+        {
+          status: 400,
+          headers: {
+            "Cache-Control": "no-store, max-age=0",
+          },
+        }
       );
     }
 
@@ -82,11 +98,22 @@ export async function POST(req: NextRequest) {
       requestedBy: actorId,
     });
 
-    return NextResponse.json({
-      ok: true,
-      queued: true,
-      command,
-    });
+    const response = NextResponse.json(
+      {
+        ok: true,
+        queued: true,
+        command,
+      },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      }
+    );
+
+    applyAuthCookies(response, refreshedTokens);
+    return response;
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unexpected server error";
@@ -96,7 +123,12 @@ export async function POST(req: NextRequest) {
         ok: false,
         error: message,
       },
-      { status: message === "Unauthorized" ? 401 : 500 }
+      {
+        status: message === "Unauthorized" ? 401 : 500,
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      }
     );
   }
 }
