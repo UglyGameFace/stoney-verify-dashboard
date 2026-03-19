@@ -1,6 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase-server";
 import { env } from "@/lib/env";
-import { sortTickets } from "@/lib/priority";
+import { sortTickets, derivePriority } from "@/lib/priority";
 import { requireStaffSessionForRoute } from "@/lib/auth-server";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +33,155 @@ function truncateText(value, max = 240) {
   if (!text) return "";
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
+function parseDateMs(value) {
+  const ms = new Date(value || 0).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function isClosedLikeStatus(status) {
+  const value = String(status || "").trim().toLowerCase();
+  return value === "closed" || value === "deleted";
+}
+
+function hasUsableChannel(ticket) {
+  return Boolean(
+    String(ticket?.channel_id || ticket?.discord_thread_id || "").trim()
+  );
+}
+
+function shouldHideStaleTicket(ticket) {
+  const status = String(ticket?.status || "").trim().toLowerCase();
+  const missingChannel = !hasUsableChannel(ticket);
+
+  if (!missingChannel) return false;
+  if (!isClosedLikeStatus(status)) return false;
+
+  const closedAtMs = parseDateMs(ticket?.closed_at);
+  const updatedAtMs = parseDateMs(ticket?.updated_at);
+  const createdAtMs = parseDateMs(ticket?.created_at);
+  const newestMs = Math.max(closedAtMs, updatedAtMs, createdAtMs);
+  const ageMs = Date.now() - newestMs;
+
+  return ageMs > 5 * 60 * 1000;
+}
+
+function normalizeStaffKey(value) {
+  return String(value || "").trim();
+}
+
+function normalizeStaffLabel(value, fallback = "Unknown Staff") {
+  const text = String(value || "").trim();
+  return text || fallback;
+}
+
+function deriveMetricsFromTickets(tickets = [], existingMetrics = []) {
+  const byStaff = new Map();
+
+  function ensureRow(key, label) {
+    const safeKey = normalizeStaffKey(key);
+    if (!safeKey) return null;
+
+    if (!byStaff.has(safeKey)) {
+      byStaff.set(safeKey, {
+        staff_id: safeKey,
+        staff_name: normalizeStaffLabel(label, safeKey),
+        tickets_handled: 0,
+        approvals: 0,
+        denials: 0,
+        avg_response_minutes: 0,
+        last_active: null,
+      });
+    }
+
+    return byStaff.get(safeKey);
+  }
+
+  for (const row of Array.isArray(existingMetrics) ? existingMetrics : []) {
+    const key = normalizeStaffKey(row?.staff_id || row?.staff_name);
+    if (!key) continue;
+
+    byStaff.set(key, {
+      staff_id: key,
+      staff_name: normalizeStaffLabel(row?.staff_name, key),
+      tickets_handled: Number(row?.tickets_handled || 0),
+      approvals: Number(row?.approvals || 0),
+      denials: Number(row?.denials || 0),
+      avg_response_minutes: Number(row?.avg_response_minutes || 0),
+      last_active: row?.last_active || null,
+    });
+  }
+
+  for (const ticket of Array.isArray(tickets) ? tickets : []) {
+    const status = String(ticket?.status || "").trim().toLowerCase();
+    const category = String(ticket?.category || "").trim().toLowerCase();
+
+    const staffId = normalizeStaffKey(
+      ticket?.closed_by ||
+        ticket?.claimed_by ||
+        ticket?.assigned_to ||
+        ticket?.staff_id
+    );
+
+    const staffName = normalizeStaffLabel(
+      ticket?.closed_by_name ||
+        ticket?.claimed_by_name ||
+        ticket?.assigned_to_name ||
+        ticket?.staff_name ||
+        staffId
+    );
+
+    if (!staffId) continue;
+
+    const row = ensureRow(staffId, staffName);
+    if (!row) continue;
+
+    const updatedAt =
+      ticket?.updated_at || ticket?.closed_at || ticket?.created_at || null;
+
+    if (
+      updatedAt &&
+      (!row.last_active || parseDateMs(updatedAt) > parseDateMs(row.last_active))
+    ) {
+      row.last_active = updatedAt;
+    }
+
+    if (status === "closed" || status === "deleted") {
+      row.tickets_handled += 1;
+
+      const reasonText = String(
+        ticket?.closed_reason || ticket?.reason || ticket?.mod_suggestion || ""
+      ).toLowerCase();
+
+      const denied =
+        /\b(deny|denied|reject|rejected|decline|declined|failed)\b/.test(
+          reasonText
+        );
+
+      if (category.includes("verification")) {
+        if (denied) {
+          row.denials += 1;
+        } else {
+          row.approvals += 1;
+        }
+      }
+    }
+  }
+
+  return [...byStaff.values()].sort((a, b) => {
+    const handledDiff =
+      Number(b?.tickets_handled || 0) - Number(a?.tickets_handled || 0);
+    if (handledDiff !== 0) return handledDiff;
+
+    const approvalsDiff =
+      Number(b?.approvals || 0) - Number(a?.approvals || 0);
+    if (approvalsDiff !== 0) return approvalsDiff;
+
+    return String(a?.staff_name || a?.staff_id || "").localeCompare(
+      String(b?.staff_name || b?.staff_id || "")
+    );
+  });
 }
 
 function pickMessageContent(row) {
@@ -81,6 +230,7 @@ function mergeJoinWithMember(joinRow, memberRow) {
 function mapTicket(row) {
   return {
     ...row,
+    priority: row?.priority || derivePriority(row),
     channel_id: row?.channel_id || row?.discord_thread_id || null,
     channel_name: row?.channel_name || null,
     is_ghost: Boolean(row?.is_ghost),
@@ -119,9 +269,15 @@ function mapGuildMember(row) {
     last_seen_at: row?.last_seen_at || null,
     left_at: row?.left_at || null,
     rejoined_at: row?.rejoined_at || null,
-    previous_usernames: Array.isArray(row?.previous_usernames) ? row.previous_usernames : [],
-    previous_display_names: Array.isArray(row?.previous_display_names) ? row.previous_display_names : [],
-    previous_nicknames: Array.isArray(row?.previous_nicknames) ? row.previous_nicknames : [],
+    previous_usernames: Array.isArray(row?.previous_usernames)
+      ? row.previous_usernames
+      : [],
+    previous_display_names: Array.isArray(row?.previous_display_names)
+      ? row.previous_display_names
+      : [],
+    previous_nicknames: Array.isArray(row?.previous_nicknames)
+      ? row.previous_nicknames
+      : [],
   };
 }
 
@@ -323,7 +479,10 @@ export async function GET() {
 
     if (debugEnabled()) {
       console.log("[dashboard/live] env.guildId =", guildId);
-      console.log("[dashboard/live] DISCORD_GUILD_ID =", process.env.DISCORD_GUILD_ID || "");
+      console.log(
+        "[dashboard/live] DISCORD_GUILD_ID =",
+        process.env.DISCORD_GUILD_ID || ""
+      );
       console.log("[dashboard/live] GUILD_ID =", process.env.GUILD_ID || "");
     }
 
@@ -341,7 +500,6 @@ export async function GET() {
       recentActiveMembersRes,
       recentFormerMembersRes,
       allGuildMembersRes,
-      openTicketsRes,
       warnsTodayRes,
       raidAlertsRes,
       fraudFlagsRes,
@@ -431,12 +589,6 @@ export async function GET() {
         .limit(2000),
 
       supabase
-        .from("tickets")
-        .select("*", { count: "exact", head: true })
-        .eq("guild_id", guildId)
-        .in("status", ["open", "claimed"]),
-
-      supabase
         .from("warns")
         .select("*", { count: "exact", head: true })
         .eq("guild_id", guildId)
@@ -524,7 +676,6 @@ export async function GET() {
       recentActiveMembersRes.error ||
       recentFormerMembersRes.error ||
       allGuildMembersRes.error ||
-      openTicketsRes.error ||
       warnsTodayRes.error ||
       raidAlertsRes.error ||
       fraudFlagsRes.error ||
@@ -548,11 +699,12 @@ export async function GET() {
       );
     }
 
-    const tickets = safeArray(ticketsRes.data).map(mapTicket);
+    const rawTickets = safeArray(ticketsRes.data).map(mapTicket);
+    const tickets = rawTickets.filter((ticket) => !shouldHideStaleTicket(ticket));
+
     const auditLogs = safeArray(auditLogsRes.data);
     const auditEvents = safeArray(auditEventsRes.data);
     const staffMessages = safeArray(staffMessagesRes.data);
-    const metrics = metricsRes.data || [];
     const categories = categoriesRes.data || [];
     const memberJoins = memberJoinsRes.data || [];
     const recentActiveMembers = safeArray(recentActiveMembersRes.data).map(mapGuildMember);
@@ -614,8 +766,15 @@ export async function GET() {
           toTime(a.updated_at || a.last_seen_at || a.joined_at)
       );
 
+    const metrics = deriveMetricsFromTickets(rawTickets, metricsRes.data || []);
+
+    const openTicketsCount = tickets.filter((ticket) =>
+      ["open", "claimed"].includes(String(ticket?.status || "").toLowerCase())
+    ).length;
+
     if (debugEnabled()) {
-      console.log("[dashboard/live] tickets found =", tickets.length);
+      console.log("[dashboard/live] raw tickets found =", rawTickets.length);
+      console.log("[dashboard/live] visible tickets found =", tickets.length);
       console.log("[dashboard/live] auditLogs found =", auditLogs.length);
       console.log("[dashboard/live] auditEvents found =", auditEvents.length);
       console.log("[dashboard/live] staffMessages found =", staffMessages.length);
@@ -662,7 +821,7 @@ export async function GET() {
         staff: staffMembersCountRes.count || 0,
       },
       counts: {
-        openTickets: openTicketsRes.count || 0,
+        openTickets: openTicketsCount,
         warnsToday: warnsTodayRes.count || 0,
         raidAlerts: raidAlertsRes.count || 0,
         fraudFlags: fraudFlagsRes.count || 0,
@@ -672,7 +831,8 @@ export async function GET() {
             guildId,
             envGuildId: process.env.GUILD_ID || "",
             envDiscordGuildId: process.env.DISCORD_GUILD_ID || "",
-            ticketCount: tickets.length,
+            rawTicketCount: rawTickets.length,
+            visibleTicketCount: tickets.length,
             guildMembersCount: guildMembers.length,
             timelineCount: events.length,
             warnsCount: warns.length,
