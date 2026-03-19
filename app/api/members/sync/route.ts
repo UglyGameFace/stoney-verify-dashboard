@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { queueSyncMembers } from "@/lib/botCommands";
-import { requireStaffSessionForRoute } from "@/lib/auth-server";
+import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,7 +28,7 @@ function getActorId(session: any): string | null {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await requireStaffSessionForRoute();
+    const { session, refreshedTokens } = await requireStaffSessionForRoute();
     const actorId = getActorId(session);
 
     if (!actorId) {
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
       requestedBy: actorId,
     });
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         ok: true,
         queued: true,
@@ -70,6 +70,9 @@ export async function POST(req: NextRequest) {
         },
       }
     );
+
+    applyAuthCookies(response, refreshedTokens);
+    return response;
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unexpected server error";
