@@ -10,6 +10,10 @@ import {
 
 import { getBrowserSupabase } from "@/lib/supabase-browser";
 import { sortTickets } from "@/lib/priority";
+import {
+  reconcileTicketsAction,
+  purgeStaleTicketsAction,
+} from "@/lib/dashboardActions";
 
 import Topbar from "@/components/Topbar";
 import StatCard from "@/components/StatCard";
@@ -570,6 +574,9 @@ export default function DashboardClient({
 }) {
   const [data, setData] = useState(initialData);
   const [error, setError] = useState("");
+  const [maintenanceMessage, setMaintenanceMessage] = useState("");
+  const [maintenanceError, setMaintenanceError] = useState("");
+  const [isMaintaining, setIsMaintaining] = useState(false);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -640,6 +647,93 @@ export default function DashboardClient({
     },
     []
   );
+
+  const handleReconcileTickets = useCallback(
+    async ({ includeOpenWithMissingChannel = true } = {}) => {
+      setIsMaintaining(true);
+      setMaintenanceError("");
+      setMaintenanceMessage("");
+
+      try {
+        const result = await reconcileTicketsAction({
+          requestedBy: currentStaffId,
+          staffId: currentStaffId,
+          includeOpenWithMissingChannel,
+        });
+
+        setMaintenanceMessage(
+          `Reconcile finished. Scanned ${Number(result?.scanned || 0)} tickets, updated ${Number(
+            result?.updated || 0
+          )}, hidden candidates ${Number(result?.hidden || 0)}.`
+        );
+
+        await refresh({ silent: true });
+      } catch (err) {
+        setMaintenanceError(
+          err?.message || "Failed to reconcile tickets."
+        );
+      } finally {
+        setIsMaintaining(false);
+      }
+    },
+    [currentStaffId, refresh]
+  );
+
+  const handlePreviewPurge = useCallback(async () => {
+    setIsMaintaining(true);
+    setMaintenanceError("");
+    setMaintenanceMessage("");
+
+    try {
+      const result = await purgeStaleTicketsAction({
+        requestedBy: currentStaffId,
+        staffId: currentStaffId,
+        dryRun: true,
+        olderThanMinutes: 5,
+      });
+
+      setMaintenanceMessage(
+        `Purge preview finished. Scanned ${Number(result?.scanned || 0)} tickets, found ${safeArray(
+          result?.candidates
+        ).length} stale candidates, removed 0.`
+      );
+    } catch (err) {
+      setMaintenanceError(
+        err?.message || "Failed to preview stale purge."
+      );
+    } finally {
+      setIsMaintaining(false);
+    }
+  }, [currentStaffId]);
+
+  const handlePurgeStale = useCallback(async () => {
+    setIsMaintaining(true);
+    setMaintenanceError("");
+    setMaintenanceMessage("");
+
+    try {
+      const result = await purgeStaleTicketsAction({
+        requestedBy: currentStaffId,
+        staffId: currentStaffId,
+        dryRun: false,
+        olderThanMinutes: 5,
+      });
+
+      setMaintenanceMessage(
+        `Purge finished. Scanned ${Number(result?.scanned || 0)} tickets, removed ${Number(
+          result?.removed || 0
+        )} stale ticket rows.`
+      );
+
+      await refresh({ silent: true });
+    } catch (err) {
+      setMaintenanceError(
+        err?.message || "Failed to purge stale tickets."
+      );
+    } finally {
+      setIsMaintaining(false);
+    }
+  }, [currentStaffId, refresh]);
 
   useEffect(() => {
     let supabase;
@@ -803,6 +897,18 @@ export default function DashboardClient({
         {error ? (
           <div className="error-banner" style={{ marginBottom: 16 }}>
             {error}
+          </div>
+        ) : null}
+
+        {maintenanceError ? (
+          <div className="error-banner" style={{ marginBottom: 16 }}>
+            {maintenanceError}
+          </div>
+        ) : null}
+
+        {maintenanceMessage ? (
+          <div className="info-banner" style={{ marginBottom: 16 }}>
+            {maintenanceMessage}
           </div>
         ) : null}
 
@@ -1098,7 +1204,53 @@ export default function DashboardClient({
                 >
                   Refresh Queue
                 </button>
+
+                <button
+                  type="button"
+                  className="button ghost"
+                  style={{ width: "auto", minWidth: 140 }}
+                  disabled={isMaintaining}
+                  onClick={() =>
+                    handleReconcileTickets({
+                      includeOpenWithMissingChannel: true,
+                    })
+                  }
+                >
+                  {isMaintaining ? "Working..." : "Reconcile Tickets"}
+                </button>
+
+                <button
+                  type="button"
+                  className="button ghost"
+                  style={{ width: "auto", minWidth: 140 }}
+                  disabled={isMaintaining}
+                  onClick={handlePreviewPurge}
+                >
+                  {isMaintaining ? "Working..." : "Preview Purge"}
+                </button>
+
+                <button
+                  type="button"
+                  className="button danger"
+                  style={{ width: "auto", minWidth: 140 }}
+                  disabled={isMaintaining}
+                  onClick={handlePurgeStale}
+                >
+                  {isMaintaining ? "Working..." : "Purge Stale"}
+                </button>
               </div>
+            </div>
+
+            <div
+              className="muted"
+              style={{
+                marginBottom: 14,
+                fontSize: 12,
+                lineHeight: 1.5,
+              }}
+            >
+              Reconcile fixes stale ticket rows that no longer reflect Discord truth.
+              Purge removes dead closed/deleted rows that no longer have a usable channel or thread.
             </div>
 
             <div
