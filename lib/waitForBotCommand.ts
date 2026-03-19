@@ -107,16 +107,13 @@ export async function waitForBotCommand(
       }
 
       /**
-       * NEW FIX
-       * If the command is actively processing,
-       * we treat it as success-in-progress rather than failure.
+       * FIXED
+       * If the command is still processing,
+       * we KEEP WAITING instead of treating it as success.
+       * Processing is not final truth yet.
        */
       if (latest.status === "processing") {
-        return {
-          ok: true,
-          command: latest,
-          timedOut: false,
-        };
+        // keep polling
       }
 
     } catch (error) {
@@ -144,14 +141,13 @@ export async function waitForBotCommand(
 
   /**
    * CRITICAL FIX
-   * A timeout should NOT be treated as failure
-   * if the command is already processing or completed.
+   * A timeout should only be treated as success
+   * if the command is actually completed.
+   * "processing" is still not done.
    */
 
   return {
-    ok:
-      latest.status === "completed" ||
-      latest.status === "processing",
+    ok: latest.status === "completed",
     command: latest,
     timedOut: true,
   };
