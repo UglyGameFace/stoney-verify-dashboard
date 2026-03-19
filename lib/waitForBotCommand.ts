@@ -108,12 +108,13 @@ export async function waitForBotCommand(
 
       /**
        * FIXED
-       * If the command is still processing,
-       * we KEEP WAITING instead of treating it as success.
-       * Processing is not final truth yet.
+       * If the command is actively processing,
+       * we DO NOT treat it as success yet.
+       * Processing means the bot has started,
+       * not that the final state is ready.
        */
       if (latest.status === "processing") {
-        // keep polling
+        // keep polling until completed or failed
       }
 
     } catch (error) {
@@ -141,9 +142,9 @@ export async function waitForBotCommand(
 
   /**
    * CRITICAL FIX
-   * A timeout should only be treated as success
-   * if the command is actually completed.
-   * "processing" is still not done.
+   * A timeout should NOT be treated as success
+   * if the command is only processing.
+   * Only completed is true success.
    */
 
   return {
