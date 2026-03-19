@@ -27,6 +27,8 @@ export default function QuickActions({
   const [message, setMessage] = useState("");
   const [expandedAction, setExpandedAction] = useState("");
 
+  const hasStaffId = Boolean(String(currentStaffId || "").trim());
+
   const actions = useMemo(
     () => [
       {
@@ -68,19 +70,27 @@ export default function QuickActions({
   async function runAction(name, runner) {
     setError("");
     setMessage("");
+
+    if (!hasStaffId) {
+      setError(
+        "Dashboard session is missing your staff ID. Refresh the page and make sure you are fully logged in with staff access."
+      );
+      return;
+    }
+
     setRunning(name);
 
     try {
       const result = await runner();
 
       if (!result?.ok && !result?.timedOut) {
-        throw new Error(result?.command?.error || `${name} failed.`);
+        throw new Error(result?.command?.error || result?.error || `${name} failed.`);
       }
 
       if (result?.timedOut) {
-        setMessage(`${name} queued and still processing...`);
+        setMessage(`${name} queued and is still processing...`);
       } else {
-        setMessage(`${name} completed.`);
+        setMessage(`${name} completed successfully.`);
       }
 
       if (onRefresh) {
@@ -122,6 +132,12 @@ export default function QuickActions({
           Refresh
         </button>
       </div>
+
+      {!hasStaffId ? (
+        <div className="error-banner" style={{ marginBottom: 12 }}>
+          Staff identity is missing in the dashboard session. Action buttons are locked until the session refreshes correctly.
+        </div>
+      ) : null}
 
       {error ? (
         <div className="error-banner" style={{ marginBottom: 12 }}>
@@ -227,7 +243,7 @@ export default function QuickActions({
                     className="button"
                     type="button"
                     style={{ width: "auto", minWidth: 116 }}
-                    disabled={!!running}
+                    disabled={!!running || !hasStaffId}
                     onClick={() => runAction(action.name, action.runner)}
                   >
                     {isRunning ? "Running..." : "Run"}
@@ -256,8 +272,7 @@ export default function QuickActions({
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns:
-                        "repeat(auto-fit, minmax(150px, 1fr))",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
                       gap: 10,
                     }}
                   >
@@ -268,7 +283,7 @@ export default function QuickActions({
 
                     <div className="member-detail-item">
                       <span className="ticket-info-label">Requested By</span>
-                      <span>{currentStaffId || "Unknown Staff"}</span>
+                      <span>{currentStaffId || "Missing staff session"}</span>
                     </div>
 
                     <div className="member-detail-item">
@@ -279,7 +294,9 @@ export default function QuickActions({
                     <div className="member-detail-item">
                       <span className="ticket-info-label">State</span>
                       <span>
-                        {isRunning
+                        {!hasStaffId
+                          ? "Blocked"
+                          : isRunning
                           ? "Running"
                           : running
                           ? "Waiting"
@@ -300,10 +317,12 @@ export default function QuickActions({
                       className="button"
                       type="button"
                       style={{ width: "auto", minWidth: 140 }}
-                      disabled={!!running}
+                      disabled={!!running || !hasStaffId}
                       onClick={() => runAction(action.name, action.runner)}
                     >
-                      {isRunning ? `Running ${action.compactLabel}...` : `Run ${action.compactLabel}`}
+                      {isRunning
+                        ? `Running ${action.compactLabel}...`
+                        : `Run ${action.compactLabel}`}
                     </button>
 
                     <button
