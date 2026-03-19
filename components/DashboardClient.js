@@ -30,32 +30,14 @@ import MemberSnapshot from "@/components/dashboard/MemberSnapshot";
 
 const MOBILE_TABS = ["home", "tickets", "members", "categories"];
 
+const STALE_VISIBLE_REFRESH_MS = 20_000;
+const BACKUP_REFRESH_INTERVAL_MS = 45_000;
+
 function formatTime(value) {
   if (!value) return "—";
 
   try {
     return new Date(value).toLocaleString();
-  } catch {
-    return "—";
-  }
-}
-
-function timeAgo(value) {
-  if (!value) return "—";
-
-  try {
-    const ms = new Date(value).getTime();
-    if (!Number.isFinite(ms)) return "—";
-
-    const diff = Date.now() - ms;
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-
-    if (minutes < 1) return "just now";
-    if (minutes < 60) return `${minutes}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    return `${days}d ago`;
   } catch {
     return "—";
   }
@@ -519,22 +501,15 @@ function IntelligencePanel({
 }
 
 function SimpleFeedPanel({
-  title,
   rows,
   emptyMessage,
   renderRow,
 }) {
   if (!rows.length) {
-    return (
-      <div className="empty-state">{emptyMessage}</div>
-    );
+    return <div className="empty-state">{emptyMessage}</div>;
   }
 
-  return (
-    <div className="space">
-      {rows.map(renderRow)}
-    </div>
-  );
+  return <div className="space">{rows.map(renderRow)}</div>;
 }
 
 function DesktopTabBar({ activeTab, onChange }) {
@@ -597,6 +572,9 @@ export default function DashboardClient({
   });
 
   const refreshTimer = useRef(null);
+  const refreshInFlightRef = useRef(false);
+  const lastRefreshAtRef = useRef(Date.now());
+  const backupIntervalRef = useRef(null);
 
   const currentStaffId = useMemo(
     () => getStaffUserId(initialData, staffName),
@@ -618,38 +596,71 @@ export default function DashboardClient({
   }, []);
 
   const refresh = useCallback(
-    async ({ silent = false } = {}) => {
-      if (!silent) setIsRefreshing(true);
+    async ({
+      silent = false,
+      force = false,
+      reason = "manual",
+    } = {}) => {
+      const now = Date.now();
 
-      setError("");
+      if (!force && refreshInFlightRef.current) {
+        return;
+      }
+
+      refreshInFlightRef.current = true;
+
+      if (!silent) {
+        setIsRefreshing(true);
+      }
 
       try {
-        const res = await fetch("/api/dashboard/live", {
+        const res = await fetch(`/api/dashboard/live?_ts=${now}&reason=${encodeURIComponent(reason)}`, {
+          method: "GET",
           cache: "no-store",
+          headers: {
+            "Cache-Control": "no-store, max-age=0",
+            Pragma: "no-cache",
+          },
         });
 
-        const json = await res.json();
+        const json = await res.json().catch(() => null);
 
         if (!res.ok) {
-          throw new Error(
-            json?.error || "Failed to refresh dashboard."
-          );
+          throw new Error(json?.error || "Failed to refresh dashboard.");
         }
 
         setData(json);
+        setError("");
+        lastRefreshAtRef.current = Date.now();
       } catch (err) {
-        setError(
-          err?.message || "Failed to refresh dashboard."
-        );
+        setError(err?.message || "Failed to refresh dashboard.");
       } finally {
-        if (!silent) setIsRefreshing(false);
+        refreshInFlightRef.current = false;
+
+        if (!silent) {
+          setIsRefreshing(false);
+        }
       }
     },
     []
   );
 
+  const maybeRefreshIfStale = useCallback(
+    async (reason) => {
+      const age = Date.now() - lastRefreshAtRef.current;
+      if (age >= STALE_VISIBLE_REFRESH_MS) {
+        await refresh({ silent: true, force: false, reason });
+      }
+    },
+    [refresh]
+  );
+
   const handleReconcileTickets = useCallback(
-    async ({ includeOpenWithMissingChannel = true } = {}) => {
+    async ({
+      includeOpenWithMissingChannel = true,
+      includeTranscriptBackfill = true,
+      dryRun = false,
+    } = {}) => {
       setIsMaintaining(true);
       setMaintenanceError("");
       setMaintenanceMessage("");
@@ -659,15 +670,17 @@ export default function DashboardClient({
           requestedBy: currentStaffId,
           staffId: currentStaffId,
           includeOpenWithMissingChannel,
+          includeTranscriptBackfill,
+          dryRun,
         });
 
         setMaintenanceMessage(
-          `Reconcile finished. Scanned ${Number(result?.scanned || 0)} tickets, updated ${Number(
-            result?.updated || 0
-          )}, hidden candidates ${Number(result?.hidden || 0)}.`
+          dryRun
+            ? `Reconcile preview finished. Scanned ${Number(result?.scanned || 0)} tickets, found ${safeArray(result?.tickets).length} candidate row(s).`
+            : `Reconcile finished. Scanned ${Number(result?.scanned || 0)} tickets, updated ${Number(result?.updated || 0)}, hidden candidates ${Number(result?.hidden || 0)}.`
         );
 
-        await refresh({ silent: true });
+        await refresh({ silent: true, force: true, reason: "reconcile" });
       } catch (err) {
         setMaintenanceError(
           err?.message || "Failed to reconcile tickets."
@@ -693,9 +706,7 @@ export default function DashboardClient({
       });
 
       setMaintenanceMessage(
-        `Purge preview finished. Scanned ${Number(result?.scanned || 0)} tickets, found ${safeArray(
-          result?.candidates
-        ).length} stale candidates, removed 0.`
+        `Purge preview finished. Scanned ${Number(result?.scanned || 0)} tickets, found ${safeArray(result?.candidates).length} stale candidate row(s), removed 0.`
       );
     } catch (err) {
       setMaintenanceError(
@@ -720,12 +731,10 @@ export default function DashboardClient({
       });
 
       setMaintenanceMessage(
-        `Purge finished. Scanned ${Number(result?.scanned || 0)} tickets, removed ${Number(
-          result?.removed || 0
-        )} stale ticket rows.`
+        `Purge finished. Scanned ${Number(result?.scanned || 0)} tickets, removed ${Number(result?.removed || 0)} stale ticket row(s).`
       );
 
-      await refresh({ silent: true });
+      await refresh({ silent: true, force: true, reason: "purge-stale" });
     } catch (err) {
       setMaintenanceError(
         err?.message || "Failed to purge stale tickets."
@@ -741,11 +750,30 @@ export default function DashboardClient({
 
     function handleRealtimeChange() {
       clearTimeout(refreshTimer.current);
-
       refreshTimer.current = setTimeout(() => {
-        refresh({ silent: true });
-      }, 600);
+        refresh({ silent: true, force: false, reason: "realtime" });
+      }, 500);
     }
+
+    function handleWindowFocus() {
+      maybeRefreshIfStale("focus");
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        maybeRefreshIfStale("visible");
+      }
+    }
+
+    function handleOnline() {
+      refresh({ silent: true, force: true, reason: "online" });
+    }
+
+    async function initialRefresh() {
+      await refresh({ silent: true, force: true, reason: "mount" });
+    }
+
+    initialRefresh();
 
     try {
       supabase = getBrowserSupabase();
@@ -759,7 +787,7 @@ export default function DashboardClient({
         )
         .subscribe((status) => {
           if (status === "SUBSCRIBED") {
-            refresh({ silent: true });
+            refresh({ silent: true, force: true, reason: "realtime-subscribed" });
           }
         });
     } catch (err) {
@@ -768,14 +796,32 @@ export default function DashboardClient({
       );
     }
 
+    window.addEventListener("focus", handleWindowFocus);
+    window.addEventListener("online", handleOnline);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    backupIntervalRef.current = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        maybeRefreshIfStale("backup-interval");
+      }
+    }, BACKUP_REFRESH_INTERVAL_MS);
+
     return () => {
       clearTimeout(refreshTimer.current);
+
+      if (backupIntervalRef.current) {
+        clearInterval(backupIntervalRef.current);
+      }
+
+      window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("online", handleOnline);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
 
       if (supabase && channel) {
         supabase.removeChannel(channel);
       }
     };
-  }, [refresh]);
+  }, [maybeRefreshIfStale, refresh]);
 
   const counts = data?.counts || {
     openTickets: 0,
@@ -882,11 +928,7 @@ export default function DashboardClient({
     <>
       <Topbar />
 
-      <div
-        style={{
-          paddingBottom: 96,
-        }}
-      >
+      <div style={{ paddingBottom: 96 }}>
         <div className="desktop-only-nav">
           <DesktopTabBar
             activeTab={activeTab}
@@ -913,15 +955,11 @@ export default function DashboardClient({
         ) : null}
 
         {isRefreshing ? (
-          <div
-            className="info-banner"
-            style={{ marginBottom: 16 }}
-          >
+          <div className="info-banner" style={{ marginBottom: 16 }}>
             Refreshing dashboard…
           </div>
         ) : null}
 
-        {/* HOME */}
         <section
           className={`mobile-tab-panel ${
             activeTab === "home" ? "active" : ""
@@ -945,9 +983,7 @@ export default function DashboardClient({
                 title="Open Tickets"
                 value={counts.openTickets}
                 subtitle="Tap to open queue"
-                onClick={() =>
-                  jumpToTickets({ status: "open" })
-                }
+                onClick={() => jumpToTickets({ status: "open" })}
               />
 
               <ClickableStatCard
@@ -973,7 +1009,7 @@ export default function DashboardClient({
             </div>
 
             <QuickActions
-              onRefresh={refresh}
+              onRefresh={() => refresh({ force: true, reason: "quick-actions" })}
               currentStaffId={currentStaffId}
             />
 
@@ -1003,7 +1039,6 @@ export default function DashboardClient({
               }
             >
               <SimpleFeedPanel
-                title="Warns"
                 rows={homeSummary.recentWarns}
                 emptyMessage="No warn details are available in the current API payload yet. The counter is live, but warn row details still need to be returned from the route."
                 renderRow={(warn, index) => (
@@ -1013,7 +1048,7 @@ export default function DashboardClient({
                     style={{ padding: 14 }}
                   >
                     <div style={{ fontWeight: 800 }}>
-                      {safeText(warn?.username, "Unknown user")}
+                      {safeText(warn?.display_name || warn?.username, "Unknown user")}
                     </div>
                     <div
                       className="muted"
@@ -1039,9 +1074,8 @@ export default function DashboardClient({
               onToggle={() => togglePanel("raids")}
             >
               <SimpleFeedPanel
-                title="Raids"
                 rows={homeSummary.recentRaids}
-                emptyMessage="No raid detail rows are available in the current API payload yet. The counter is live, but raid row details still need to be returned from the route."
+                emptyMessage="No raid detail rows are available in the current API payload yet."
                 renderRow={(raid, index) => (
                   <div
                     key={raid?.id || `raid-${index}`}
@@ -1078,7 +1112,6 @@ export default function DashboardClient({
             >
               {homeSummary.recentFraud.length ? (
                 <SimpleFeedPanel
-                  title="Fraud"
                   rows={homeSummary.recentFraud}
                   emptyMessage="No fraud items."
                   renderRow={(fraud, index) => (
@@ -1088,7 +1121,7 @@ export default function DashboardClient({
                       style={{ padding: 14 }}
                     >
                       <div style={{ fontWeight: 800 }}>
-                        {safeText(fraud?.username, "Suspicious member")}
+                        {safeText(fraud?.display_name || fraud?.username, "Suspicious member")}
                       </div>
                       <div
                         className="muted"
@@ -1140,7 +1173,7 @@ export default function DashboardClient({
                     ))
                   ) : (
                     <div className="empty-state">
-                      No fraud detail rows are available in the current API payload yet. The counter is live, and conflict members are also clear right now.
+                      No fraud detail rows are available in the current API payload yet.
                     </div>
                   )}
                 </div>
@@ -1149,7 +1182,6 @@ export default function DashboardClient({
           </div>
         </section>
 
-        {/* TICKETS */}
         <section
           className={`mobile-tab-panel ${
             activeTab === "tickets" ? "active" : ""
@@ -1168,10 +1200,7 @@ export default function DashboardClient({
             >
               <div>
                 <h2 style={{ margin: 0 }}>Ticket Queue</h2>
-                <div
-                  className="muted"
-                  style={{ marginTop: 6 }}
-                >
+                <div className="muted" style={{ marginTop: 6 }}>
                   Interactive queue with transcript-ready controls and moderator filters
                 </div>
               </div>
@@ -1200,7 +1229,7 @@ export default function DashboardClient({
                   type="button"
                   className="button ghost"
                   style={{ width: "auto", minWidth: 120 }}
-                  onClick={() => refresh()}
+                  onClick={() => refresh({ force: true, reason: "manual-ticket-refresh" })}
                 >
                   Refresh Queue
                 </button>
@@ -1213,6 +1242,8 @@ export default function DashboardClient({
                   onClick={() =>
                     handleReconcileTickets({
                       includeOpenWithMissingChannel: true,
+                      includeTranscriptBackfill: true,
+                      dryRun: false,
                     })
                   }
                 >
@@ -1309,12 +1340,11 @@ export default function DashboardClient({
             <TicketQueueTable
               tickets={filteredTickets}
               currentStaffId={currentStaffId}
-              onRefresh={refresh}
+              onRefresh={() => refresh({ force: true, reason: "ticket-controls" })}
             />
           </div>
         </section>
 
-        {/* MEMBERS */}
         <section
           className={`mobile-tab-panel ${
             activeTab === "members" ? "active" : ""
@@ -1349,7 +1379,7 @@ export default function DashboardClient({
                 roles={safeRoles}
                 members={safeMembers}
                 staffUserId={currentStaffId}
-                refreshDashboardData={refresh}
+                refreshDashboardData={() => refresh({ force: true, reason: "role-hierarchy" })}
               />
             </DashboardSection>
 
@@ -1368,7 +1398,6 @@ export default function DashboardClient({
           </div>
         </section>
 
-        {/* CATEGORIES */}
         <section
           className={`mobile-tab-panel ${
             activeTab === "categories" ? "active" : ""
@@ -1377,7 +1406,7 @@ export default function DashboardClient({
           <div className="card">
             <CategoryManager
               categories={safeCategories}
-              onRefresh={refresh}
+              onRefresh={() => refresh({ force: true, reason: "categories" })}
             />
           </div>
         </section>
@@ -1418,11 +1447,4 @@ export default function DashboardClient({
           }
 
           .dashboard-home-grid,
-          .dashboard-members-grid {
-            gap: 18px;
-          }
-        }
-      `}</style>
-    </>
-  );
-}
+          .dashboard-members
