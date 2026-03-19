@@ -389,6 +389,12 @@ tbody tr:hover {
   border-color: rgba(255,255,255,.10);
 }
 
+.badge.danger {
+  background: rgba(255,106,106,.18);
+  color: #ffd0d0;
+  border-color: rgba(255,106,106,.20);
+}
+
 .avatar {
   width: 38px;
   height: 38px;
@@ -579,6 +585,90 @@ tbody tr:hover {
   display: grid;
   grid-template-columns: repeat(3, minmax(0,1fr));
   gap: 10px;
+}
+
+.ticket-controls {
+  display: grid;
+  gap: 12px;
+}
+
+.ticket-controls-bar,
+.ticket-controls-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ticket-controls-bar .button,
+.ticket-controls-actions .button {
+  width: auto;
+  min-width: 120px;
+}
+
+.ticket-controls-panel {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 14px;
+  background:
+    radial-gradient(circle at top right, rgba(82,242,154,.05), transparent 42%),
+    rgba(255,255,255,.025);
+}
+
+.ticket-controls-title {
+  font-weight: 800;
+  color: var(--text-strong);
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+
+.ticket-controls-copy {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+
+.ticket-controls-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.ticket-controls-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 12px;
+}
+
+.ticket-controls-mini-value {
+  margin-top: 1px;
+  color: var(--text-strong);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.ticket-inline-link {
+  color: #bfe3ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ticket-controls-footnote {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: rgba(255,255,255,.02);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.ticket-controls-footnote-label {
+  font-weight: 700;
+  color: var(--text-strong);
 }
 
 .auth-status-card {
@@ -804,7 +894,8 @@ tbody tr:hover {
   .members-bottom-grid,
   .member-action-grid,
   .ticket-info-grid,
-  .member-detail-grid {
+  .member-detail-grid,
+  .ticket-controls-info-grid {
     grid-template-columns: 1fr;
   }
 
@@ -900,6 +991,28 @@ tbody tr:hover {
   .member-search-result {
     padding: 12px;
   }
+
+  .ticket-mobile-list {
+    display: grid;
+    gap: 12px;
+  }
+
+  .ticket-desktop-table {
+    display: none;
+  }
+
+  .ticket-controls-bar,
+  .ticket-controls-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0,1fr));
+    gap: 10px;
+  }
+
+  .ticket-controls-bar .button,
+  .ticket-controls-actions .button {
+    width: 100%;
+    min-width: 0;
+  }
 }
 
 @media (max-width: 520px) {
@@ -910,6 +1023,11 @@ tbody tr:hover {
   .filters,
   .ticket-mobile-meta,
   .ticket-mobile-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .ticket-controls-bar,
+  .ticket-controls-actions {
     grid-template-columns: 1fr;
   }
 
