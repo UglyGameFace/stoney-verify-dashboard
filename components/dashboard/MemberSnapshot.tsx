@@ -2,476 +2,492 @@
 
 import { useMemo, useState } from "react";
 
-type SnapshotMember = {
-  guild_id?: string | null;
-  user_id?: string | null;
-  id?: string | null;
-  username?: string | null;
-  display_name?: string | null;
-  nickname?: string | null;
-  avatar_url?: string | null;
-  has_verified_role?: boolean | null;
-  has_unverified?: boolean | null;
-  has_staff_role?: boolean | null;
-  in_guild?: boolean | null;
-  role_state?: string | null;
-  role_names?: string[] | null;
-  joined_at?: string | null;
-  updated_at?: string | null;
-  last_seen_at?: string | null;
-};
-
-type MemberSnapshotProps = {
-  members: SnapshotMember[];
-  className?: string;
-  title?: string;
-};
-
-type BucketKey = "verified" | "unverified" | "staff";
-
-function normalizeBool(value: unknown): boolean {
-  return value === true;
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
 }
 
-function getMemberId(member: SnapshotMember): string {
-  return String(member.user_id || member.id || "").trim();
+function safeText(value, fallback = "—") {
+  const text = String(value ?? "").trim();
+  return text || fallback;
 }
 
-function getDisplayName(member: SnapshotMember): string {
+function normalizeText(value) {
+  return String(value ?? "").trim();
+}
+
+function getMemberName(member) {
   return (
-    String(member.display_name || "").trim() ||
-    String(member.nickname || "").trim() ||
-    String(member.username || "").trim() ||
+    member?.display_name ||
+    member?.nickname ||
+    member?.username ||
+    member?.user_id ||
     "Unknown Member"
   );
 }
 
-function getSubtitle(member: SnapshotMember): string {
-  const username = String(member.username || "").trim();
-  const id = getMemberId(member);
-  if (username && id) return `${username} • ${id}`;
-  if (username) return username;
-  if (id) return id;
-  return "Unknown";
+function getMemberAvatar(member) {
+  return normalizeText(member?.avatar_url) || null;
 }
 
-function formatDate(value?: string | null): string {
+function getRoleCount(member) {
+  const roles = safeArray(member?.role_names || member?.roles || member?.role_ids);
+  return roles.length;
+}
+
+function formatDateTime(value) {
   if (!value) return "Unknown";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Unknown";
-  return date.toLocaleString();
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return "Unknown";
+  }
 }
 
-function bubbleStyle(kind: BucketKey) {
-  if (kind === "verified") {
-    return {
-      border: "1px solid rgba(52, 211, 153, 0.28)",
-      background: "linear-gradient(180deg, rgba(16,185,129,0.16), rgba(16,185,129,0.08))",
-      color: "#d1fae5",
-    };
-  }
-
-  if (kind === "unverified") {
-    return {
-      border: "1px solid rgba(245, 158, 11, 0.28)",
-      background: "linear-gradient(180deg, rgba(245,158,11,0.16), rgba(245,158,11,0.08))",
-      color: "#fef3c7",
-    };
-  }
-
-  return {
-    border: "1px solid rgba(59, 130, 246, 0.28)",
-    background: "linear-gradient(180deg, rgba(59,130,246,0.16), rgba(59,130,246,0.08))",
-    color: "#dbeafe",
-  };
+function initialsFromName(name) {
+  const cleaned = safeText(name, "U");
+  const parts = cleaned.split(/\s+/).filter(Boolean).slice(0, 2);
+  if (!parts.length) return "U";
+  return parts.map((part) => part[0]?.toUpperCase() || "").join("") || "U";
 }
 
-function chipStyle(kind: "verified" | "unverified" | "staff") {
-  if (kind === "verified") {
-    return {
-      border: "1px solid rgba(52, 211, 153, 0.28)",
-      background: "rgba(16,185,129,0.12)",
-      color: "#d1fae5",
-    };
-  }
-  if (kind === "unverified") {
-    return {
-      border: "1px solid rgba(245, 158, 11, 0.28)",
-      background: "rgba(245,158,11,0.12)",
-      color: "#fef3c7",
-    };
-  }
-  return {
-    border: "1px solid rgba(59, 130, 246, 0.28)",
-    background: "rgba(59,130,246,0.12)",
-    color: "#dbeafe",
-  };
+function getMemberState(member) {
+  if (member?.in_guild === false) return "Former";
+  if (member?.has_staff_role) return "Staff";
+  if (member?.has_verified_role) return "Verified";
+  if (member?.has_unverified) return "Pending";
+  return safeText(member?.role_state, "Tracked");
 }
 
-export default function MemberSnapshot({
-  members,
-  className = "",
-  title = "Member Control Snapshot",
-}: MemberSnapshotProps) {
-  const activeMembers = useMemo(
-    () => members.filter((m) => normalizeBool(m.in_guild) || m.in_guild == null),
-    [members]
-  );
+function getStateTone(member) {
+  if (member?.in_guild === false) return "closed";
+  if (member?.has_staff_role) return "claimed";
+  if (member?.has_verified_role) return "low";
+  if (member?.has_unverified) return "medium";
+  return "open";
+}
 
-  const verifiedMembers = useMemo(
-    () => activeMembers.filter((m) => normalizeBool(m.has_verified_role)),
-    [activeMembers]
-  );
+function sortMembers(rows, mode) {
+  const list = [...rows];
 
-  const unverifiedMembers = useMemo(
-    () =>
-      activeMembers.filter(
-        (m) =>
-          normalizeBool(m.has_unverified) ||
-          (!normalizeBool(m.has_verified_role) && !normalizeBool(m.has_staff_role))
-      ),
-    [activeMembers]
-  );
+  list.sort((a, b) => {
+    if (mode === "recent") {
+      const aTime = new Date(
+        a?.updated_at || a?.last_seen_at || a?.joined_at || 0
+      ).getTime();
+      const bTime = new Date(
+        b?.updated_at || b?.last_seen_at || b?.joined_at || 0
+      ).getTime();
+      return bTime - aTime;
+    }
 
-  const staffMembers = useMemo(
-    () => activeMembers.filter((m) => normalizeBool(m.has_staff_role)),
-    [activeMembers]
-  );
+    if (mode === "roles") {
+      return getRoleCount(b) - getRoleCount(a);
+    }
 
-  const [activeBucket, setActiveBucket] = useState<BucketKey | null>(null);
-  const [search, setSearch] = useState("");
+    return getMemberName(a).localeCompare(getMemberName(b));
+  });
 
-  const currentMembers = useMemo(() => {
-    const base =
-      activeBucket === "verified"
-        ? verifiedMembers
-        : activeBucket === "unverified"
-        ? unverifiedMembers
-        : activeBucket === "staff"
-        ? staffMembers
-        : [];
+  return list;
+}
 
-    const term = search.trim().toLowerCase();
-    if (!term) return base;
+export default function MemberSnapshot({ members = [] }) {
+  const safeMembers = safeArray(members);
+  const [query, setQuery] = useState("");
+  const [stateFilter, setStateFilter] = useState("all");
+  const [sortMode, setSortMode] = useState("recent");
+  const [selected, setSelected] = useState(null);
 
-    return base.filter((member) => {
-      const haystack = [
-        getDisplayName(member),
-        member.username || "",
-        member.nickname || "",
-        getMemberId(member),
-        ...(member.role_names || []),
-      ]
-        .join(" ")
-        .toLowerCase();
+  const summary = useMemo(() => {
+    const total = safeMembers.length;
+    const active = safeMembers.filter((m) => m?.in_guild !== false).length;
+    const former = safeMembers.filter((m) => m?.in_guild === false).length;
+    const staff = safeMembers.filter((m) => !!m?.has_staff_role).length;
+    const verified = safeMembers.filter((m) => !!m?.has_verified_role).length;
+    const pending = safeMembers.filter((m) => !!m?.has_unverified).length;
 
-      return haystack.includes(term);
-    });
-  }, [activeBucket, verifiedMembers, unverifiedMembers, staffMembers, search]);
+    return {
+      total,
+      active,
+      former,
+      staff,
+      verified,
+      pending,
+    };
+  }, [safeMembers]);
 
-  const bucketTitle =
-    activeBucket === "verified"
-      ? "Verified Members"
-      : activeBucket === "unverified"
-      ? "Unverified Members"
-      : activeBucket === "staff"
-      ? "Staff Members"
-      : "";
+  const filteredMembers = useMemo(() => {
+    let rows = [...safeMembers];
+
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+
+      rows = rows.filter((member) =>
+        [
+          member?.display_name,
+          member?.nickname,
+          member?.username,
+          member?.user_id,
+          ...(safeArray(member?.role_names)),
+          ...(safeArray(member?.previous_usernames)),
+          ...(safeArray(member?.previous_display_names)),
+          ...(safeArray(member?.previous_nicknames)),
+        ]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(q))
+      );
+    }
+
+    if (stateFilter !== "all") {
+      rows = rows.filter((member) => {
+        if (stateFilter === "active") return member?.in_guild !== false;
+        if (stateFilter === "former") return member?.in_guild === false;
+        if (stateFilter === "staff") return !!member?.has_staff_role;
+        if (stateFilter === "verified") return !!member?.has_verified_role;
+        if (stateFilter === "pending") return !!member?.has_unverified;
+        return true;
+      });
+    }
+
+    return sortMembers(rows, sortMode).slice(0, 60);
+  }, [safeMembers, query, stateFilter, sortMode]);
 
   return (
-    <div className={className}>
-      <div className="card" style={{ marginBottom: 18 }}>
-        <div
-          className="row"
-          style={{
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-            gap: 12,
-            flexWrap: "wrap",
-            marginBottom: 14,
-          }}
-        >
-          <div>
-            <h2 style={{ margin: 0 }}>{title}</h2>
-            <div className="muted" style={{ marginTop: 6 }}>
-              Tap any bubble to open the matching member list.
-            </div>
-          </div>
-
-          <div className="badge" style={{ alignSelf: "flex-start" }}>
-            Total Active: {activeMembers.length}
-          </div>
+    <>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+          gap: 10,
+          marginBottom: 14,
+        }}
+      >
+        <div className="member-detail-item">
+          <span className="ticket-info-label">Total</span>
+          <span>{summary.total}</span>
         </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-            gap: 12,
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setActiveBucket("verified");
-              setSearch("");
-            }}
-            style={{
-              ...bubbleStyle("verified"),
-              borderRadius: 18,
-              padding: "16px 14px",
-              textAlign: "left",
-              cursor: "pointer",
-            }}
-          >
-            <div style={{ fontSize: 12, fontWeight: 800, opacity: 0.9 }}>VERIFIED</div>
-            <div style={{ fontSize: 34, fontWeight: 800, lineHeight: 1.1, marginTop: 10 }}>
-              {verifiedMembers.length}
-            </div>
-            <div style={{ marginTop: 8, fontSize: 14, opacity: 0.95 }}>
-              Open verified member list
-            </div>
-          </button>
+        <div className="member-detail-item">
+          <span className="ticket-info-label">Active</span>
+          <span>{summary.active}</span>
+        </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveBucket("unverified");
-              setSearch("");
-            }}
-            style={{
-              ...bubbleStyle("unverified"),
-              borderRadius: 18,
-              padding: "16px 14px",
-              textAlign: "left",
-              cursor: "pointer",
-            }}
-          >
-            <div style={{ fontSize: 12, fontWeight: 800, opacity: 0.9 }}>UNVERIFIED</div>
-            <div style={{ fontSize: 34, fontWeight: 800, lineHeight: 1.1, marginTop: 10 }}>
-              {unverifiedMembers.length}
-            </div>
-            <div style={{ marginTop: 8, fontSize: 14, opacity: 0.95 }}>
-              Open unverified member list
-            </div>
-          </button>
+        <div className="member-detail-item">
+          <span className="ticket-info-label">Former</span>
+          <span>{summary.former}</span>
+        </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveBucket("staff");
-              setSearch("");
-            }}
-            style={{
-              ...bubbleStyle("staff"),
-              borderRadius: 18,
-              padding: "16px 14px",
-              textAlign: "left",
-              cursor: "pointer",
-            }}
-          >
-            <div style={{ fontSize: 12, fontWeight: 800, opacity: 0.9 }}>STAFF</div>
-            <div style={{ fontSize: 34, fontWeight: 800, lineHeight: 1.1, marginTop: 10 }}>
-              {staffMembers.length}
-            </div>
-            <div style={{ marginTop: 8, fontSize: 14, opacity: 0.95 }}>
-              Open staff member list
-            </div>
-          </button>
+        <div className="member-detail-item">
+          <span className="ticket-info-label">Staff</span>
+          <span>{summary.staff}</span>
+        </div>
+
+        <div className="member-detail-item">
+          <span className="ticket-info-label">Verified</span>
+          <span>{summary.verified}</span>
+        </div>
+
+        <div className="member-detail-item">
+          <span className="ticket-info-label">Pending</span>
+          <span>{summary.pending}</span>
         </div>
       </div>
 
-      {activeBucket ? (
-        <div className="card">
-          <div
-            className="row"
-            style={{
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-              gap: 12,
-              flexWrap: "wrap",
-              marginBottom: 14,
-            }}
-          >
-            <div>
-              <h2 style={{ margin: 0 }}>{bucketTitle}</h2>
-              <div className="muted" style={{ marginTop: 6 }}>
-                Showing {currentMembers.length} member{currentMembers.length === 1 ? "" : "s"}
-              </div>
-            </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: 10,
+          marginBottom: 14,
+        }}
+      >
+        <input
+          className="input"
+          placeholder="Search members"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
 
-            <div
-              style={{
-                display: "flex",
-                gap: 10,
-                flexWrap: "wrap",
-                width: "100%",
-                maxWidth: 460,
-              }}
-            >
-              <input
-                className="input"
-                style={{ flex: 1, minWidth: 180 }}
-                placeholder="Search members, IDs, or roles..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
+        <select
+          className="input"
+          value={stateFilter}
+          onChange={(e) => setStateFilter(e.target.value)}
+        >
+          <option value="all">All members</option>
+          <option value="active">Active only</option>
+          <option value="former">Former only</option>
+          <option value="staff">Staff only</option>
+          <option value="verified">Verified only</option>
+          <option value="pending">Pending only</option>
+        </select>
 
+        <select
+          className="input"
+          value={sortMode}
+          onChange={(e) => setSortMode(e.target.value)}
+        >
+          <option value="recent">Recently updated</option>
+          <option value="name">Name</option>
+          <option value="roles">Role count</option>
+        </select>
+      </div>
+
+      {!filteredMembers.length ? (
+        <div className="empty-state">
+          No member records matched your current filters.
+        </div>
+      ) : (
+        <div className="space">
+          {filteredMembers.map((member, index) => {
+            const name = getMemberName(member);
+            const avatar = getMemberAvatar(member);
+            const state = getMemberState(member);
+            const tone = getStateTone(member);
+
+            return (
               <button
+                key={`${member?.user_id || "member"}-${index}`}
                 type="button"
-                className="button ghost"
-                onClick={() => {
-                  setActiveBucket(null);
-                  setSearch("");
+                onClick={() => setSelected(member)}
+                style={{
+                  textAlign: "left",
+                  width: "100%",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(255,255,255,0.02)",
+                  borderRadius: 18,
+                  padding: 12,
                 }}
-                style={{ width: "auto", minWidth: 92 }}
               >
-                Close
-              </button>
-            </div>
-          </div>
-
-          <div className="space">
-            {currentMembers.length === 0 ? (
-              <div className="empty-state">No members found for this filter.</div>
-            ) : (
-              currentMembers.map((member) => (
                 <div
-                  key={`${getMemberId(member)}-${member.updated_at || member.last_seen_at || ""}`}
-                  className="card"
+                  className="row"
                   style={{
-                    padding: 14,
-                    borderRadius: 18,
-                    border: "1px solid rgba(255,255,255,0.08)",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    gap: 12,
+                    flexWrap: "nowrap",
                   }}
                 >
-                  <div className="row" style={{ alignItems: "flex-start", gap: 12 }}>
-                    <div
-                      style={{
-                        width: 48,
-                        height: 48,
-                        minWidth: 48,
-                        borderRadius: "999px",
-                        overflow: "hidden",
-                        border: "1px solid rgba(255,255,255,0.08)",
-                        background: "rgba(255,255,255,0.06)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontWeight: 800,
-                        color: "var(--text-strong)",
-                      }}
-                    >
-                      {member.avatar_url ? (
+                  <div
+                    className="row"
+                    style={{
+                      minWidth: 0,
+                      flex: 1,
+                      alignItems: "center",
+                      gap: 12,
+                    }}
+                  >
+                    <div className="avatar">
+                      {avatar ? (
                         <img
-                          src={member.avatar_url}
-                          alt={getDisplayName(member)}
-                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          src={avatar}
+                          alt={name}
+                          width="38"
+                          height="38"
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                          }}
                         />
                       ) : (
-                        getDisplayName(member).slice(0, 2).toUpperCase()
+                        initialsFromName(name)
                       )}
                     </div>
 
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div
-                        className="row"
                         style={{
-                          gap: 8,
-                          alignItems: "center",
-                          flexWrap: "wrap",
-                          marginBottom: 6,
+                          fontWeight: 800,
+                          overflowWrap: "anywhere",
+                          lineHeight: 1.15,
                         }}
                       >
-                        <div
-                          style={{
-                            fontWeight: 800,
-                            color: "var(--text-strong)",
-                            overflowWrap: "anywhere",
-                          }}
-                        >
-                          {getDisplayName(member)}
-                        </div>
-
-                        {normalizeBool(member.has_verified_role) ? (
-                          <span className="badge" style={chipStyle("verified")}>
-                            Verified
-                          </span>
-                        ) : null}
-
-                        {normalizeBool(member.has_unverified) ? (
-                          <span className="badge" style={chipStyle("unverified")}>
-                            Unverified
-                          </span>
-                        ) : null}
-
-                        {normalizeBool(member.has_staff_role) ? (
-                          <span className="badge" style={chipStyle("staff")}>
-                            Staff
-                          </span>
-                        ) : null}
-                      </div>
-
-                      <div className="muted" style={{ fontSize: 13, overflowWrap: "anywhere" }}>
-                        {getSubtitle(member)}
+                        {name}
                       </div>
 
                       <div
+                        className="muted"
                         style={{
-                          display: "grid",
-                          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-                          gap: 10,
-                          marginTop: 12,
+                          marginTop: 4,
+                          fontSize: 13,
+                          overflowWrap: "anywhere",
                         }}
                       >
-                        <div className="member-detail-item">
-                          <span className="ticket-info-label">Role State</span>
-                          <span>{member.role_state || "unknown"}</span>
-                        </div>
-
-                        <div className="member-detail-item">
-                          <span className="ticket-info-label">Joined</span>
-                          <span>{formatDate(member.joined_at)}</span>
-                        </div>
-
-                        <div className="member-detail-item">
-                          <span className="ticket-info-label">Last Seen</span>
-                          <span>{formatDate(member.last_seen_at || member.updated_at)}</span>
-                        </div>
+                        {safeText(member?.user_id, "No member ID")}
                       </div>
-
-                      {member.role_names && member.role_names.length > 0 ? (
-                        <div
-                          style={{
-                            display: "flex",
-                            flexWrap: "wrap",
-                            gap: 8,
-                            marginTop: 12,
-                          }}
-                        >
-                          {member.role_names.map((roleName) => (
-                            <span
-                              key={`${getMemberId(member)}-${roleName}`}
-                              className="badge"
-                              style={{
-                                background: "rgba(255,255,255,0.06)",
-                                border: "1px solid rgba(255,255,255,0.08)",
-                                color: "var(--text-soft)",
-                              }}
-                            >
-                              {roleName}
-                            </span>
-                          ))}
-                        </div>
-                      ) : null}
                     </div>
                   </div>
+
+                  <span className={`badge ${tone}`}>{state}</span>
                 </div>
-              ))
-            )}
+
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+                    gap: 10,
+                  }}
+                >
+                  <div className="member-detail-item">
+                    <span className="ticket-info-label">Top Role</span>
+                    <span>
+                      {safeText(
+                        member?.top_role || member?.highest_role_name,
+                        "None"
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="member-detail-item">
+                    <span className="ticket-info-label">Roles</span>
+                    <span>{getRoleCount(member)}</span>
+                  </div>
+
+                  <div className="member-detail-item">
+                    <span className="ticket-info-label">Joined</span>
+                    <span>{formatDateTime(member?.joined_at)}</span>
+                  </div>
+
+                  <div className="member-detail-item">
+                    <span className="ticket-info-label">Updated</span>
+                    <span>
+                      {formatDateTime(
+                        member?.updated_at || member?.last_seen_at || member?.synced_at
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                {member?.role_state_reason ? (
+                  <div
+                    className="muted"
+                    style={{
+                      marginTop: 10,
+                      fontSize: 12,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {member.role_state_reason}
+                  </div>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {selected ? (
+        <div
+          style={{
+            marginTop: 16,
+            border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(255,255,255,0.02)",
+            borderRadius: 20,
+            padding: 16,
+          }}
+        >
+          <div
+            className="row"
+            style={{
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+              marginBottom: 12,
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 18 }}>
+                {getMemberName(selected)}
+              </div>
+              <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
+                {safeText(selected?.user_id, "No member ID")}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="button ghost"
+              style={{ width: "auto", minWidth: 110 }}
+              onClick={() => setSelected(null)}
+            >
+              Close
+            </button>
           </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+              gap: 10,
+              marginBottom: 12,
+            }}
+          >
+            <div className="member-detail-item">
+              <span className="ticket-info-label">Display Name</span>
+              <span>{safeText(selected?.display_name, "Unknown")}</span>
+            </div>
+
+            <div className="member-detail-item">
+              <span className="ticket-info-label">Username</span>
+              <span>{safeText(selected?.username, "Unknown")}</span>
+            </div>
+
+            <div className="member-detail-item">
+              <span className="ticket-info-label">Nickname</span>
+              <span>{safeText(selected?.nickname, "None")}</span>
+            </div>
+
+            <div className="member-detail-item">
+              <span className="ticket-info-label">State</span>
+              <span>{safeText(selected?.role_state, "unknown")}</span>
+            </div>
+
+            <div className="member-detail-item">
+              <span className="ticket-info-label">In Guild</span>
+              <span>{selected?.in_guild === false ? "No" : "Yes"}</span>
+            </div>
+
+            <div className="member-detail-item">
+              <span className="ticket-info-label">Last Seen</span>
+              <span>
+                {formatDateTime(
+                  selected?.last_seen_at || selected?.updated_at || selected?.synced_at
+                )}
+              </span>
+            </div>
+          </div>
+
+          <div className="member-detail-item" style={{ marginBottom: 12 }}>
+            <span className="ticket-info-label">Current Roles</span>
+            <span>
+              {safeArray(selected?.role_names).length
+                ? safeArray(selected.role_names).join(", ")
+                : "No roles tracked"}
+            </span>
+          </div>
+
+          {safeArray(selected?.previous_usernames).length ? (
+            <div className="member-detail-item" style={{ marginBottom: 12 }}>
+              <span className="ticket-info-label">Previous Usernames</span>
+              <span>{safeArray(selected.previous_usernames).join(", ")}</span>
+            </div>
+          ) : null}
+
+          {safeArray(selected?.previous_display_names).length ? (
+            <div className="member-detail-item" style={{ marginBottom: 12 }}>
+              <span className="ticket-info-label">Previous Display Names</span>
+              <span>{safeArray(selected.previous_display_names).join(", ")}</span>
+            </div>
+          ) : null}
+
+          {safeArray(selected?.previous_nicknames).length ? (
+            <div className="member-detail-item">
+              <span className="ticket-info-label">Previous Nicknames</span>
+              <span>{safeArray(selected.previous_nicknames).join(", ")}</span>
+            </div>
+          ) : null}
         </div>
       ) : null}
-    </div>
+    </>
   );
 }
