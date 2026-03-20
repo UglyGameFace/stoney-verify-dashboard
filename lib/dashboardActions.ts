@@ -34,10 +34,7 @@ function normalizeNullable(value: unknown): string | null {
   return text || null;
 }
 
-async function postJson<T extends QueueResponse>(
-  url: string,
-  body: JsonObject
-): Promise<T> {
+async function postJson<T>(url: string, body: JsonObject): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -51,7 +48,7 @@ async function postJson<T extends QueueResponse>(
 
   if (!res.ok) {
     throw new Error(
-      data?.error || `Request failed for ${url} (${res.status})`
+      (data as any)?.error || `Request failed for ${url} (${res.status})`
     );
   }
 
@@ -275,19 +272,12 @@ export async function syncRoleMembersAction(
   });
 }
 
-/**
- * NEW
- * Reconcile tickets that are stale against dashboard truth.
- * This is intended to clean up tickets that are already closed/deleted
- * or otherwise inconsistent with what the dashboard should show.
- */
 export async function reconcileTicketsAction(
   input?: {
     requestedBy?: string | null;
     staffId?: string | null;
     includeOpenWithMissingChannel?: boolean;
-  },
-  options?: WaitForBotCommandOptions
+  }
 ): Promise<{
   ok: boolean;
   scanned: number;
@@ -304,20 +294,13 @@ export async function reconcileTicketsAction(
   });
 }
 
-/**
- * NEW
- * Purge dead stale tickets directly from dashboard persistence.
- * Intended for ghost / DB-only rows that no longer have a usable channel/thread
- * and should not remain visible forever.
- */
 export async function purgeStaleTicketsAction(
   input?: {
     requestedBy?: string | null;
     staffId?: string | null;
     dryRun?: boolean;
     olderThanMinutes?: number;
-  },
-  options?: WaitForBotCommandOptions
+  }
 ): Promise<{
   ok: boolean;
   dryRun: boolean;
@@ -335,12 +318,37 @@ export async function purgeStaleTicketsAction(
   });
 }
 
-/**
- * Lightweight helpers for UI-only transcript handling.
- * These do not mutate server state directly; they help the dashboard
- * present transcript records consistently when the ticket row already
- * contains transcript metadata from Supabase.
- */
+export async function syncActiveTicketsAction(
+  input?: {
+    requestedBy?: string | null;
+    staffId?: string | null;
+    dryRun?: boolean;
+    includeClosedVisibleChannels?: boolean;
+  }
+): Promise<{
+  ok: boolean;
+  summary?: {
+    guild_id?: string;
+    categories_scanned?: number;
+    channels_scanned?: number;
+    matched_ticket_channels?: number;
+    inserted?: number;
+    updated?: number;
+    unchanged?: number;
+    skipped?: number;
+    errors?: number;
+    rows?: unknown[];
+    dry_run?: boolean;
+  } | null;
+}> {
+  return postJson("/api/tickets/sync-active", {
+    dryRun: Boolean(input?.dryRun),
+    includeClosedVisibleChannels: Boolean(
+      input?.includeClosedVisibleChannels ?? true
+    ),
+    ...withActor(input),
+  });
+}
 
 export function getTicketTranscriptState(ticket: {
   transcript_url?: string | null;
