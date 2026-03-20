@@ -324,29 +324,19 @@ export async function syncActiveTicketsAction(
     staffId?: string | null;
     dryRun?: boolean;
     includeClosedVisibleChannels?: boolean;
-  }
-): Promise<{
-  ok: boolean;
-  summary?: {
-    guild_id?: string;
-    categories_scanned?: number;
-    channels_scanned?: number;
-    matched_ticket_channels?: number;
-    inserted?: number;
-    updated?: number;
-    unchanged?: number;
-    skipped?: number;
-    errors?: number;
-    rows?: unknown[];
-    dry_run?: boolean;
-  } | null;
-}> {
-  return postJson("/api/tickets/sync-active", {
-    dryRun: Boolean(input?.dryRun),
-    includeClosedVisibleChannels: Boolean(
-      input?.includeClosedVisibleChannels ?? true
-    ),
-    ...withActor(input),
+  },
+  options?: WaitForBotCommandOptions
+): Promise<WaitForBotCommandResult> {
+  return queueAction({
+    url: "/api/tickets/sync-active",
+    body: {
+      dryRun: Boolean(input?.dryRun),
+      includeClosedVisibleChannels: Boolean(
+        input?.includeClosedVisibleChannels ?? true
+      ),
+      ...withActor(input),
+    },
+    wait: longWaitOptions(options),
   });
 }
 
