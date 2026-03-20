@@ -17,6 +17,7 @@ export type BotCommandAction =
   | "sync_members"
   | "reconcile_departed_members"
   | "sync_role_members"
+  | "sync_active_tickets"
   | "portal_ticket_reply";
 
 export type BotCommandRow = {
@@ -217,6 +218,22 @@ export async function queueSyncRoleMembers(input: {
       role_id: String(input.roleId),
     },
     input.requestedBy
+  );
+}
+
+export async function queueSyncActiveTickets(input?: {
+  requestedBy?: string | null;
+  includeClosedVisibleChannels?: boolean;
+  dryRun?: boolean;
+}) {
+  return insertCommand(
+    "sync_active_tickets",
+    {
+      include_closed_visible_channels:
+        input?.includeClosedVisibleChannels ?? true,
+      dry_run: Boolean(input?.dryRun),
+    },
+    input?.requestedBy
   );
 }
 
