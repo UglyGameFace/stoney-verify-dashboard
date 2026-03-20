@@ -13,7 +13,7 @@ function badgeClass(value) {
   if (v === "deleted") return "badge closed";
   if (v === "claimed") return "badge claimed";
 
-  if (v === "low") return "badge";
+  if (v === "low") return "badge low";
   if (v === "medium") return "badge medium";
   if (v === "high") return "badge danger";
   if (v === "urgent") return "badge danger";
@@ -54,6 +54,67 @@ function isGhost(ticket) {
   return ticket?.is_ghost === true;
 }
 
+function hasMissingChannel(ticket) {
+  return !getChannelId(ticket);
+}
+
+function getPriority(ticket) {
+  return String(ticket?.priority || "").trim().toLowerCase();
+}
+
+function countByStatus(tickets, status) {
+  return tickets.filter(
+    (ticket) => String(ticket?.status || "").toLowerCase() === status
+  ).length;
+}
+
+function countByPriority(tickets, priority) {
+  return tickets.filter(
+    (ticket) => String(ticket?.priority || "").toLowerCase() === priority
+  ).length;
+}
+
+function getSummaryStats(tickets) {
+  return {
+    total: tickets.length,
+    open: countByStatus(tickets, "open"),
+    claimed: countByStatus(tickets, "claimed"),
+    urgent: countByPriority(tickets, "urgent"),
+    high: countByPriority(tickets, "high"),
+    missingChannel: tickets.filter((ticket) => hasMissingChannel(ticket)).length,
+    ghosts: tickets.filter((ticket) => isGhost(ticket)).length,
+  };
+}
+
+function summaryChip(label, value, tone = "default") {
+  return (
+    <div className={`queue-summary-chip ${tone}`}>
+      <span className="queue-summary-chip-label">{label}</span>
+      <span className="queue-summary-chip-value">{value}</span>
+    </div>
+  );
+}
+
+function metaBlock(label, value, full = false) {
+  return (
+    <div className={`ticket-mobile-meta-item ${full ? "full" : ""}`}>
+      <span className="ticket-mobile-meta-label">{label}</span>
+      <span style={{ overflowWrap: "anywhere" }}>{value}</span>
+    </div>
+  );
+}
+
+function desktopMiniField(label, value) {
+  return (
+    <div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+        {label}
+      </div>
+      <div style={{ overflowWrap: "anywhere" }}>{value}</div>
+    </div>
+  );
+}
+
 export default function TicketQueueTable({
   tickets = [],
   currentStaffId = null,
@@ -61,6 +122,8 @@ export default function TicketQueueTable({
   createTicketUserId = null,
   createTicketTargetName = "",
 }) {
+  const stats = getSummaryStats(tickets);
+
   return (
     <div className="card" id="tickets">
       <div
@@ -74,9 +137,9 @@ export default function TicketQueueTable({
         }}
       >
         <div style={{ minWidth: 0 }}>
-          <h2 style={{ margin: 0 }}>Ticket Queue</h2>
+          <h2 style={{ margin: 0 }}>Active Ticket Queue</h2>
           <div className="muted" style={{ marginTop: 6 }}>
-            Rich desktop table with mobile ticket cards
+            Live active tickets only — open and claimed work ready for staff action
           </div>
         </div>
 
@@ -90,7 +153,7 @@ export default function TicketQueueTable({
           }}
         >
           <div className="muted" style={{ fontSize: 14 }}>
-            {tickets.length} ticket{tickets.length === 1 ? "" : "s"}
+            {tickets.length} active ticket{tickets.length === 1 ? "" : "s"}
           </div>
 
           {createTicketUserId ? (
@@ -108,19 +171,44 @@ export default function TicketQueueTable({
         </div>
       </div>
 
+      <div className="queue-summary-grid" style={{ marginBottom: 14 }}>
+        {summaryChip("Total", stats.total)}
+        {summaryChip("Open", stats.open, "open")}
+        {summaryChip("Claimed", stats.claimed, "claimed")}
+        {summaryChip("Urgent", stats.urgent, "danger")}
+        {summaryChip("High", stats.high, "warn")}
+        {summaryChip("Missing Channel", stats.missingChannel, stats.missingChannel ? "danger" : "default")}
+        {summaryChip("Ghost", stats.ghosts, stats.ghosts ? "warn" : "default")}
+      </div>
+
       {!tickets.length ? (
-        <div className="empty-state">No tickets match the current filters.</div>
+        <div className="empty-state">
+          No active tickets match the current filters.
+        </div>
       ) : null}
 
       {!!tickets.length ? (
         <>
-          <div className="ticket-mobile-list">
+          <div className="ticket-mobile-list" style={{ display: "grid", gap: 12 }}>
             {tickets.map((ticket) => {
               const status = getStatus(ticket);
               const channelId = getChannelId(ticket);
+              const missingChannel = hasMissingChannel(ticket);
+              const ghost = isGhost(ticket);
 
               return (
-                <div key={ticket.id} className="ticket-mobile-card">
+                <div
+                  key={ticket.id}
+                  className="ticket-mobile-card"
+                  style={{
+                    border: missingChannel
+                      ? "1px solid rgba(248,113,113,0.28)"
+                      : undefined,
+                    boxShadow: missingChannel
+                      ? "0 0 0 1px rgba(248,113,113,0.08)"
+                      : undefined,
+                  }}
+                >
                   <div
                     className="row"
                     style={{
@@ -132,6 +220,27 @@ export default function TicketQueueTable({
                     }}
                   >
                     <div style={{ minWidth: 0, flex: 1 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          flexWrap: "wrap",
+                          gap: 8,
+                          alignItems: "center",
+                          marginBottom: 6,
+                        }}
+                      >
+                        <span className={badgeClass(status)}>
+                          {safeText(ticket.status)}
+                        </span>
+                        <span className={badgeClass(ticket.priority)}>
+                          {safeText(ticket.priority)}
+                        </span>
+                        {ghost ? <span className="badge">Ghost</span> : null}
+                        {missingChannel ? (
+                          <span className="badge danger">Missing Channel</span>
+                        ) : null}
+                      </div>
+
                       <div
                         style={{
                           fontWeight: 800,
@@ -170,63 +279,32 @@ export default function TicketQueueTable({
                   </div>
 
                   <div className="ticket-mobile-meta">
-                    <div className="ticket-mobile-meta-item">
-                      <span className="ticket-mobile-meta-label">Category</span>
-                      <span>{safeText(ticket.category)}</span>
-                    </div>
-
-                    <div className="ticket-mobile-meta-item">
-                      <span className="ticket-mobile-meta-label">Status</span>
-                      <span className={badgeClass(status)}>{safeText(ticket.status)}</span>
-                    </div>
-
-                    <div className="ticket-mobile-meta-item">
-                      <span className="ticket-mobile-meta-label">Priority</span>
-                      <span className={badgeClass(ticket.priority)}>
-                        {safeText(ticket.priority)}
-                      </span>
-                    </div>
-
-                    <div className="ticket-mobile-meta-item">
-                      <span className="ticket-mobile-meta-label">Claimed</span>
-                      <span>{safeText(ticket.claimed_by)}</span>
-                    </div>
-
-                    <div className="ticket-mobile-meta-item full">
-                      <span className="ticket-mobile-meta-label">Channel</span>
-                      <span style={{ overflowWrap: "anywhere" }}>
-                        {channelId || "Missing"}
-                      </span>
-                    </div>
-
-                    <div className="ticket-mobile-meta-item">
-                      <span className="ticket-mobile-meta-label">Ghost</span>
-                      <span>{isGhost(ticket) ? "yes" : "no"}</span>
-                    </div>
-
-                    <div className="ticket-mobile-meta-item full">
-                      <span className="ticket-mobile-meta-label">Suggestion</span>
-                      <span style={{ overflowWrap: "anywhere" }}>
-                        {ticket.mod_suggestion || "—"}
-                      </span>
-                    </div>
+                    {metaBlock("Category", safeText(ticket.category))}
+                    {metaBlock("Claimed By", safeText(ticket.claimed_by))}
+                    {metaBlock("Priority", safeText(ticket.priority))}
+                    {metaBlock("Status", safeText(ticket.status))}
+                    {metaBlock("Channel", channelId || "Missing", true)}
+                    {metaBlock("User ID", safeText(ticket.user_id), true)}
+                    {metaBlock("Ghost", ghost ? "yes" : "no")}
+                    {metaBlock("Updated", timeAgo(ticket.updated_at || ticket.created_at))}
+                    {metaBlock("Suggestion", ticket.mod_suggestion || "—", true)}
 
                     {!!ticket.closed_reason ? (
-                      <div className="ticket-mobile-meta-item full">
-                        <span className="ticket-mobile-meta-label">Closed Reason</span>
-                        <span style={{ overflowWrap: "anywhere" }}>
-                          {ticket.closed_reason}
-                        </span>
-                      </div>
+                      metaBlock("Closed Reason", ticket.closed_reason, true)
                     ) : null}
                   </div>
 
                   <div
                     className="ticket-mobile-actions"
-                    style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 8,
+                      marginBottom: 12,
+                    }}
                   >
                     <Link className="button ghost" href={`/tickets/${ticket.id}`}>
-                      Open
+                      Open Ticket View
                     </Link>
                   </div>
 
@@ -260,11 +338,46 @@ export default function TicketQueueTable({
                   {tickets.map((ticket) => {
                     const channelId = getChannelId(ticket);
                     const status = getStatus(ticket);
+                    const missingChannel = hasMissingChannel(ticket);
+                    const ghost = isGhost(ticket);
 
                     return (
-                      <tr key={ticket.id}>
+                      <tr
+                        key={ticket.id}
+                        style={
+                          missingChannel
+                            ? {
+                                background: "rgba(248,113,113,0.04)",
+                              }
+                            : undefined
+                        }
+                      >
                         <td>
-                          <div style={{ fontWeight: 800 }}>{getTicketUserLabel(ticket)}</div>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexWrap: "wrap",
+                              gap: 8,
+                              marginBottom: 6,
+                              alignItems: "center",
+                            }}
+                          >
+                            <span className={badgeClass(status)}>
+                              {safeText(ticket.status)}
+                            </span>
+                            <span className={badgeClass(ticket.priority)}>
+                              {safeText(ticket.priority)}
+                            </span>
+                            {ghost ? <span className="badge">Ghost</span> : null}
+                            {missingChannel ? (
+                              <span className="badge danger">Missing Channel</span>
+                            ) : null}
+                          </div>
+
+                          <div style={{ fontWeight: 800 }}>
+                            {getTicketUserLabel(ticket)}
+                          </div>
+
                           <div
                             className="muted"
                             style={{
@@ -277,17 +390,16 @@ export default function TicketQueueTable({
                           >
                             {getTicketTitle(ticket)}
                           </div>
-                          {isGhost(ticket) ? (
-                            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                              Ghost ticket
-                            </div>
-                          ) : null}
                         </td>
 
-                        <td style={{ whiteSpace: "normal" }}>{safeText(ticket.category)}</td>
+                        <td style={{ whiteSpace: "normal" }}>
+                          {safeText(ticket.category)}
+                        </td>
 
                         <td>
-                          <span className={badgeClass(status)}>{safeText(ticket.status)}</span>
+                          <span className={badgeClass(status)}>
+                            {safeText(ticket.status)}
+                          </span>
                         </td>
 
                         <td>
@@ -296,7 +408,9 @@ export default function TicketQueueTable({
                           </span>
                         </td>
 
-                        <td style={{ whiteSpace: "normal" }}>{safeText(ticket.claimed_by)}</td>
+                        <td style={{ whiteSpace: "normal" }}>
+                          {safeText(ticket.claimed_by)}
+                        </td>
 
                         <td>
                           <div
@@ -304,6 +418,8 @@ export default function TicketQueueTable({
                               fontSize: 13,
                               overflowWrap: "anywhere",
                               whiteSpace: "normal",
+                              color: missingChannel ? "#fca5a5" : undefined,
+                              fontWeight: missingChannel ? 700 : undefined,
                             }}
                           >
                             {channelId || "Missing"}
@@ -327,6 +443,8 @@ export default function TicketQueueTable({
             <div style={{ marginTop: 16, display: "grid", gap: 14 }}>
               {tickets.map((ticket) => {
                 const channelId = getChannelId(ticket);
+                const missingChannel = hasMissingChannel(ticket);
+                const ghost = isGhost(ticket);
 
                 return (
                   <div
@@ -335,7 +453,12 @@ export default function TicketQueueTable({
                     style={{
                       padding: 16,
                       borderRadius: 18,
-                      border: "1px solid rgba(255,255,255,0.08)",
+                      border: missingChannel
+                        ? "1px solid rgba(248,113,113,0.24)"
+                        : "1px solid rgba(255,255,255,0.08)",
+                      background: missingChannel
+                        ? "rgba(248,113,113,0.04)"
+                        : undefined,
                     }}
                   >
                     <div
@@ -351,6 +474,27 @@ export default function TicketQueueTable({
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div
                           style={{
+                            display: "flex",
+                            gap: 8,
+                            flexWrap: "wrap",
+                            alignItems: "center",
+                            marginBottom: 8,
+                          }}
+                        >
+                          <span className={badgeClass(ticket.status)}>
+                            {safeText(ticket.status)}
+                          </span>
+                          <span className={badgeClass(ticket.priority)}>
+                            {safeText(ticket.priority)}
+                          </span>
+                          {ghost ? <span className="badge">Ghost</span> : null}
+                          {missingChannel ? (
+                            <span className="badge danger">Missing Channel</span>
+                          ) : null}
+                        </div>
+
+                        <div
+                          style={{
                             fontWeight: 800,
                             fontSize: 16,
                             overflowWrap: "anywhere",
@@ -359,6 +503,7 @@ export default function TicketQueueTable({
                         >
                           {getTicketUserLabel(ticket)}
                         </div>
+
                         <div
                           className="muted"
                           style={{
@@ -380,12 +525,8 @@ export default function TicketQueueTable({
                           alignItems: "center",
                         }}
                       >
-                        <span className={badgeClass(ticket.status)}>{safeText(ticket.status)}</span>
-                        <span className={badgeClass(ticket.priority)}>
-                          {safeText(ticket.priority)}
-                        </span>
                         <Link className="button ghost" href={`/tickets/${ticket.id}`}>
-                          Open
+                          Open Ticket View
                         </Link>
                       </div>
                     </div>
@@ -398,52 +539,42 @@ export default function TicketQueueTable({
                         marginBottom: 14,
                       }}
                     >
-                      <div>
-                        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                          Category
-                        </div>
-                        <div>{safeText(ticket.category)}</div>
-                      </div>
-
-                      <div>
-                        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                          Claimed By
-                        </div>
-                        <div>{safeText(ticket.claimed_by)}</div>
-                      </div>
-
-                      <div>
-                        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                          Channel ID
-                        </div>
-                        <div style={{ overflowWrap: "anywhere" }}>
-                          {channelId || "Missing"}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                          Updated
-                        </div>
-                        <div>{timeAgo(ticket.updated_at || ticket.created_at)}</div>
-                      </div>
+                      {desktopMiniField("Category", safeText(ticket.category))}
+                      {desktopMiniField("Claimed By", safeText(ticket.claimed_by))}
+                      {desktopMiniField("Channel ID", channelId || "Missing")}
+                      {desktopMiniField("User ID", safeText(ticket.user_id))}
+                      {desktopMiniField(
+                        "Updated",
+                        timeAgo(ticket.updated_at || ticket.created_at)
+                      )}
+                      {desktopMiniField("Ghost", ghost ? "yes" : "no")}
                     </div>
 
                     {!!ticket.mod_suggestion ? (
                       <div style={{ marginBottom: 14 }}>
-                        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+                        <div
+                          className="muted"
+                          style={{ fontSize: 12, marginBottom: 4 }}
+                        >
                           Suggestion
                         </div>
-                        <div style={{ overflowWrap: "anywhere" }}>{ticket.mod_suggestion}</div>
+                        <div style={{ overflowWrap: "anywhere" }}>
+                          {ticket.mod_suggestion}
+                        </div>
                       </div>
                     ) : null}
 
                     {!!ticket.closed_reason ? (
                       <div style={{ marginBottom: 14 }}>
-                        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+                        <div
+                          className="muted"
+                          style={{ fontSize: 12, marginBottom: 4 }}
+                        >
                           Closed Reason
                         </div>
-                        <div style={{ overflowWrap: "anywhere" }}>{ticket.closed_reason}</div>
+                        <div style={{ overflowWrap: "anywhere" }}>
+                          {ticket.closed_reason}
+                        </div>
                       </div>
                     ) : null}
 
@@ -459,6 +590,69 @@ export default function TicketQueueTable({
           </div>
         </>
       ) : null}
+
+      <style jsx>{`
+        .queue-summary-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .queue-summary-chip {
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          background: rgba(255, 255, 255, 0.025);
+          border-radius: 16px;
+          padding: 12px;
+          display: grid;
+          gap: 6px;
+          min-width: 0;
+        }
+
+        .queue-summary-chip.open {
+          border-color: rgba(96, 165, 250, 0.2);
+          background: rgba(96, 165, 250, 0.08);
+        }
+
+        .queue-summary-chip.claimed {
+          border-color: rgba(74, 222, 128, 0.2);
+          background: rgba(74, 222, 128, 0.08);
+        }
+
+        .queue-summary-chip.warn {
+          border-color: rgba(251, 191, 36, 0.2);
+          background: rgba(251, 191, 36, 0.08);
+        }
+
+        .queue-summary-chip.danger {
+          border-color: rgba(248, 113, 113, 0.24);
+          background: rgba(248, 113, 113, 0.08);
+        }
+
+        .queue-summary-chip-label {
+          font-size: 12px;
+          color: var(--muted);
+        }
+
+        .queue-summary-chip-value {
+          font-size: 20px;
+          font-weight: 800;
+          color: var(--text-strong);
+          line-height: 1;
+          overflow-wrap: anywhere;
+        }
+
+        @media (min-width: 768px) {
+          .queue-summary-grid {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+          }
+        }
+
+        @media (min-width: 1200px) {
+          .queue-summary-grid {
+            grid-template-columns: repeat(7, minmax(0, 1fr));
+          }
+        }
+      `}</style>
     </div>
   );
 }
