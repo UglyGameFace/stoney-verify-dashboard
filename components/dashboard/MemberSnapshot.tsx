@@ -163,32 +163,32 @@ export default function MemberSnapshot({ members = [] }) {
       >
         <div className="member-detail-item">
           <span className="ticket-info-label">Total</span>
-          <span>{summary.total}</span>
+          <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.total}</span>
         </div>
 
         <div className="member-detail-item">
           <span className="ticket-info-label">Active</span>
-          <span>{summary.active}</span>
+          <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.active}</span>
         </div>
 
         <div className="member-detail-item">
           <span className="ticket-info-label">Former</span>
-          <span>{summary.former}</span>
+          <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.former}</span>
         </div>
 
         <div className="member-detail-item">
           <span className="ticket-info-label">Staff</span>
-          <span>{summary.staff}</span>
+          <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.staff}</span>
         </div>
 
         <div className="member-detail-item">
           <span className="ticket-info-label">Verified</span>
-          <span>{summary.verified}</span>
+          <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.verified}</span>
         </div>
 
         <div className="member-detail-item">
           <span className="ticket-info-label">Pending</span>
-          <span>{summary.pending}</span>
+          <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.pending}</span>
         </div>
       </div>
 
@@ -205,12 +205,14 @@ export default function MemberSnapshot({ members = [] }) {
           placeholder="Search members"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          style={{ color: "var(--text-strong, #f8fafc)" }}
         />
 
         <select
           className="input"
           value={stateFilter}
           onChange={(e) => setStateFilter(e.target.value)}
+          style={{ color: "var(--text-strong, #f8fafc)" }}
         >
           <option value="all">All members</option>
           <option value="active">Active only</option>
@@ -224,6 +226,7 @@ export default function MemberSnapshot({ members = [] }) {
           className="input"
           value={sortMode}
           onChange={(e) => setSortMode(e.target.value)}
+          style={{ color: "var(--text-strong, #f8fafc)" }}
         >
           <option value="recent">Recently updated</option>
           <option value="name">Name</option>
@@ -255,6 +258,7 @@ export default function MemberSnapshot({ members = [] }) {
                   background: "rgba(255,255,255,0.02)",
                   borderRadius: 18,
                   padding: 12,
+                  color: "var(--text-strong, #f8fafc)",
                 }}
               >
                 <div
@@ -299,17 +303,18 @@ export default function MemberSnapshot({ members = [] }) {
                           fontWeight: 800,
                           overflowWrap: "anywhere",
                           lineHeight: 1.15,
+                          color: "var(--text-strong, #f8fafc)",
                         }}
                       >
                         {name}
                       </div>
 
                       <div
-                        className="muted"
                         style={{
                           marginTop: 4,
                           fontSize: 13,
                           overflowWrap: "anywhere",
+                          color: "var(--text-muted, rgba(255,255,255,0.72))",
                         }}
                       >
                         {safeText(member?.user_id, "No member ID")}
@@ -330,7 +335,7 @@ export default function MemberSnapshot({ members = [] }) {
                 >
                   <div className="member-detail-item">
                     <span className="ticket-info-label">Top Role</span>
-                    <span>
+                    <span style={{ color: "var(--text-strong, #f8fafc)" }}>
                       {safeText(
                         member?.top_role || member?.highest_role_name,
                         "None"
@@ -340,17 +345,21 @@ export default function MemberSnapshot({ members = [] }) {
 
                   <div className="member-detail-item">
                     <span className="ticket-info-label">Roles</span>
-                    <span>{getRoleCount(member)}</span>
+                    <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+                      {getRoleCount(member)}
+                    </span>
                   </div>
 
                   <div className="member-detail-item">
                     <span className="ticket-info-label">Joined</span>
-                    <span>{formatDateTime(member?.joined_at)}</span>
+                    <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+                      {formatDateTime(member?.joined_at)}
+                    </span>
                   </div>
 
                   <div className="member-detail-item">
                     <span className="ticket-info-label">Updated</span>
-                    <span>
+                    <span style={{ color: "var(--text-strong, #f8fafc)" }}>
                       {formatDateTime(
                         member?.updated_at || member?.last_seen_at || member?.synced_at
                       )}
@@ -360,11 +369,11 @@ export default function MemberSnapshot({ members = [] }) {
 
                 {member?.role_state_reason ? (
                   <div
-                    className="muted"
                     style={{
                       marginTop: 10,
                       fontSize: 12,
                       lineHeight: 1.5,
+                      color: "var(--text-muted, rgba(255,255,255,0.72))",
                     }}
                   >
                     {member.role_state_reason}
@@ -384,6 +393,7 @@ export default function MemberSnapshot({ members = [] }) {
             background: "rgba(255,255,255,0.02)",
             borderRadius: 20,
             padding: 16,
+            color: "var(--text-strong, #f8fafc)",
           }}
         >
           <div
@@ -396,10 +406,22 @@ export default function MemberSnapshot({ members = [] }) {
             }}
           >
             <div>
-              <div style={{ fontWeight: 800, fontSize: 18 }}>
+              <div
+                style={{
+                  fontWeight: 800,
+                  fontSize: 18,
+                  color: "var(--text-strong, #f8fafc)",
+                }}
+              >
                 {getMemberName(selected)}
               </div>
-              <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 13,
+                  color: "var(--text-muted, rgba(255,255,255,0.72))",
+                }}
+              >
                 {safeText(selected?.user_id, "No member ID")}
               </div>
             </div>
@@ -424,32 +446,42 @@ export default function MemberSnapshot({ members = [] }) {
           >
             <div className="member-detail-item">
               <span className="ticket-info-label">Display Name</span>
-              <span>{safeText(selected?.display_name, "Unknown")}</span>
+              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+                {safeText(selected?.display_name, "Unknown")}
+              </span>
             </div>
 
             <div className="member-detail-item">
               <span className="ticket-info-label">Username</span>
-              <span>{safeText(selected?.username, "Unknown")}</span>
+              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+                {safeText(selected?.username, "Unknown")}
+              </span>
             </div>
 
             <div className="member-detail-item">
               <span className="ticket-info-label">Nickname</span>
-              <span>{safeText(selected?.nickname, "None")}</span>
+              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+                {safeText(selected?.nickname, "None")}
+              </span>
             </div>
 
             <div className="member-detail-item">
               <span className="ticket-info-label">State</span>
-              <span>{safeText(selected?.role_state, "unknown")}</span>
+              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+                {safeText(selected?.role_state, "unknown")}
+              </span>
             </div>
 
             <div className="member-detail-item">
               <span className="ticket-info-label">In Guild</span>
-              <span>{selected?.in_guild === false ? "No" : "Yes"}</span>
+              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+                {selected?.in_guild === false ? "No" : "Yes"}
+              </span>
             </div>
 
             <div className="member-detail-item">
               <span className="ticket-info-label">Last Seen</span>
-              <span>
+              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
                 {formatDateTime(
                   selected?.last_seen_at || selected?.updated_at || selected?.synced_at
                 )}
@@ -459,7 +491,7 @@ export default function MemberSnapshot({ members = [] }) {
 
           <div className="member-detail-item" style={{ marginBottom: 12 }}>
             <span className="ticket-info-label">Current Roles</span>
-            <span>
+            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
               {safeArray(selected?.role_names).length
                 ? safeArray(selected.role_names).join(", ")
                 : "No roles tracked"}
@@ -469,21 +501,27 @@ export default function MemberSnapshot({ members = [] }) {
           {safeArray(selected?.previous_usernames).length ? (
             <div className="member-detail-item" style={{ marginBottom: 12 }}>
               <span className="ticket-info-label">Previous Usernames</span>
-              <span>{safeArray(selected.previous_usernames).join(", ")}</span>
+              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+                {safeArray(selected.previous_usernames).join(", ")}
+              </span>
             </div>
           ) : null}
 
           {safeArray(selected?.previous_display_names).length ? (
             <div className="member-detail-item" style={{ marginBottom: 12 }}>
               <span className="ticket-info-label">Previous Display Names</span>
-              <span>{safeArray(selected.previous_display_names).join(", ")}</span>
+              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+                {safeArray(selected.previous_display_names).join(", ")}
+              </span>
             </div>
           ) : null}
 
           {safeArray(selected?.previous_nicknames).length ? (
             <div className="member-detail-item">
               <span className="ticket-info-label">Previous Nicknames</span>
-              <span>{safeArray(selected.previous_nicknames).join(", ")}</span>
+              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+                {safeArray(selected.previous_nicknames).join(", ")}
+              </span>
             </div>
           ) : null}
         </div>
