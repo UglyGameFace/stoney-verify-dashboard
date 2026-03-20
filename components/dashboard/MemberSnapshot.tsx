@@ -43,6 +43,19 @@ function formatDateTime(value) {
   }
 }
 
+function formatCompactDateTime(value) {
+  if (!value) return "Unknown";
+  try {
+    const date = new Date(value);
+    return date.toLocaleDateString() + " " + date.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return "Unknown";
+  }
+}
+
 function initialsFromName(name) {
   const cleaned = safeText(name, "U");
   const parts = cleaned.split(/\s+/).filter(Boolean).slice(0, 2);
@@ -66,18 +79,46 @@ function getStateTone(member) {
   return "open";
 }
 
+function getSortTimestamp(member) {
+  return new Date(
+    member?.updated_at || member?.last_seen_at || member?.joined_at || 0
+  ).getTime();
+}
+
+function memberMatchesQuery(member, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+
+  return [
+    member?.display_name,
+    member?.nickname,
+    member?.username,
+    member?.user_id,
+    ...(safeArray(member?.role_names)),
+    ...(safeArray(member?.previous_usernames)),
+    ...(safeArray(member?.previous_display_names)),
+    ...(safeArray(member?.previous_nicknames)),
+  ]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(q));
+}
+
+function memberMatchesFilter(member, filter) {
+  if (filter === "all") return true;
+  if (filter === "active") return member?.in_guild !== false;
+  if (filter === "former") return member?.in_guild === false;
+  if (filter === "staff") return !!member?.has_staff_role;
+  if (filter === "verified") return !!member?.has_verified_role;
+  if (filter === "pending") return !!member?.has_unverified;
+  return true;
+}
+
 function sortMembers(rows, mode) {
   const list = [...rows];
 
   list.sort((a, b) => {
     if (mode === "recent") {
-      const aTime = new Date(
-        a?.updated_at || a?.last_seen_at || a?.joined_at || 0
-      ).getTime();
-      const bTime = new Date(
-        b?.updated_at || b?.last_seen_at || b?.joined_at || 0
-      ).getTime();
-      return bTime - aTime;
+      return getSortTimestamp(b) - getSortTimestamp(a);
     }
 
     if (mode === "roles") {
@@ -90,12 +131,152 @@ function sortMembers(rows, mode) {
   return list;
 }
 
+function MemberCard({ member, onSelect }) {
+  const name = getMemberName(member);
+  const avatar = getMemberAvatar(member);
+  const state = getMemberState(member);
+  const tone = getStateTone(member);
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(member)}
+      style={{
+        textAlign: "left",
+        width: "100%",
+        border: "1px solid rgba(255,255,255,0.08)",
+        background: "rgba(255,255,255,0.02)",
+        borderRadius: 18,
+        padding: 12,
+        color: "var(--text-strong, #f8fafc)",
+      }}
+    >
+      <div
+        className="row"
+        style={{
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 12,
+          flexWrap: "nowrap",
+        }}
+      >
+        <div
+          className="row"
+          style={{
+            minWidth: 0,
+            flex: 1,
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <div className="avatar">
+            {avatar ? (
+              <img
+                src={avatar}
+                alt={name}
+                width="38"
+                height="38"
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                }}
+              />
+            ) : (
+              initialsFromName(name)
+            )}
+          </div>
+
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div
+              style={{
+                fontWeight: 800,
+                overflowWrap: "anywhere",
+                lineHeight: 1.15,
+                color: "var(--text-strong, #f8fafc)",
+              }}
+            >
+              {name}
+            </div>
+
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 13,
+                overflowWrap: "anywhere",
+                color: "var(--text-muted, rgba(255,255,255,0.72))",
+              }}
+            >
+              {safeText(member?.user_id, "No member ID")}
+            </div>
+          </div>
+        </div>
+
+        <span className={`badge ${tone}`}>{state}</span>
+      </div>
+
+      <div
+        style={{
+          marginTop: 12,
+          display: "grid",
+          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+          gap: 10,
+        }}
+      >
+        <div className="member-detail-item">
+          <span className="ticket-info-label">Top Role</span>
+          <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+            {safeText(member?.top_role || member?.highest_role_name, "None")}
+          </span>
+        </div>
+
+        <div className="member-detail-item">
+          <span className="ticket-info-label">Roles</span>
+          <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+            {getRoleCount(member)}
+          </span>
+        </div>
+
+        <div className="member-detail-item">
+          <span className="ticket-info-label">Joined</span>
+          <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+            {formatCompactDateTime(member?.joined_at)}
+          </span>
+        </div>
+
+        <div className="member-detail-item">
+          <span className="ticket-info-label">Updated</span>
+          <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+            {formatCompactDateTime(
+              member?.updated_at || member?.last_seen_at || member?.synced_at
+            )}
+          </span>
+        </div>
+      </div>
+
+      {member?.role_state_reason ? (
+        <div
+          style={{
+            marginTop: 10,
+            fontSize: 12,
+            lineHeight: 1.45,
+            color: "var(--text-muted, rgba(255,255,255,0.72))",
+          }}
+        >
+          {member.role_state_reason}
+        </div>
+      ) : null}
+    </button>
+  );
+}
+
 export default function MemberSnapshot({ members = [] }) {
   const safeMembers = safeArray(members);
   const [query, setQuery] = useState("");
-  const [stateFilter, setStateFilter] = useState("all");
+  const [stateFilter, setStateFilter] = useState("active");
   const [sortMode, setSortMode] = useState("recent");
   const [selected, setSelected] = useState(null);
+  const [showFormer, setShowFormer] = useState(false);
 
   const summary = useMemo(() => {
     const total = safeMembers.length;
@@ -116,40 +297,28 @@ export default function MemberSnapshot({ members = [] }) {
   }, [safeMembers]);
 
   const filteredMembers = useMemo(() => {
-    let rows = [...safeMembers];
+    let rows = safeMembers.filter(
+      (member) =>
+        memberMatchesQuery(member, query) && memberMatchesFilter(member, stateFilter)
+    );
 
-    if (query.trim()) {
-      const q = query.trim().toLowerCase();
-
-      rows = rows.filter((member) =>
-        [
-          member?.display_name,
-          member?.nickname,
-          member?.username,
-          member?.user_id,
-          ...(safeArray(member?.role_names)),
-          ...(safeArray(member?.previous_usernames)),
-          ...(safeArray(member?.previous_display_names)),
-          ...(safeArray(member?.previous_nicknames)),
-        ]
-          .filter(Boolean)
-          .some((value) => String(value).toLowerCase().includes(q))
-      );
-    }
-
-    if (stateFilter !== "all") {
-      rows = rows.filter((member) => {
-        if (stateFilter === "active") return member?.in_guild !== false;
-        if (stateFilter === "former") return member?.in_guild === false;
-        if (stateFilter === "staff") return !!member?.has_staff_role;
-        if (stateFilter === "verified") return !!member?.has_verified_role;
-        if (stateFilter === "pending") return !!member?.has_unverified;
-        return true;
-      });
-    }
-
-    return sortMembers(rows, sortMode).slice(0, 60);
+    return sortMembers(rows, sortMode);
   }, [safeMembers, query, stateFilter, sortMode]);
+
+  const activeRows = useMemo(
+    () => filteredMembers.filter((member) => member?.in_guild !== false).slice(0, 40),
+    [filteredMembers]
+  );
+
+  const formerRows = useMemo(
+    () => filteredMembers.filter((member) => member?.in_guild === false),
+    [filteredMembers]
+  );
+
+  const visibleFormerRows = useMemo(
+    () => (showFormer ? formerRows.slice(0, 40) : formerRows.slice(0, 8)),
+    [formerRows, showFormer]
+  );
 
   return (
     <>
@@ -214,8 +383,8 @@ export default function MemberSnapshot({ members = [] }) {
           onChange={(e) => setStateFilter(e.target.value)}
           style={{ color: "var(--text-strong, #f8fafc)" }}
         >
+          <option value="active">Active members</option>
           <option value="all">All members</option>
-          <option value="active">Active only</option>
           <option value="former">Former only</option>
           <option value="staff">Staff only</option>
           <option value="verified">Verified only</option>
@@ -239,150 +408,103 @@ export default function MemberSnapshot({ members = [] }) {
           No member records matched your current filters.
         </div>
       ) : (
-        <div className="space">
-          {filteredMembers.map((member, index) => {
-            const name = getMemberName(member);
-            const avatar = getMemberAvatar(member);
-            const state = getMemberState(member);
-            const tone = getStateTone(member);
-
-            return (
-              <button
-                key={`${member?.user_id || "member"}-${index}`}
-                type="button"
-                onClick={() => setSelected(member)}
+        <>
+          {activeRows.length ? (
+            <div style={{ marginBottom: 16 }}>
+              <div
                 style={{
-                  textAlign: "left",
-                  width: "100%",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(255,255,255,0.02)",
-                  borderRadius: 18,
-                  padding: 12,
-                  color: "var(--text-strong, #f8fafc)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                  marginBottom: 10,
+                  flexWrap: "wrap",
                 }}
               >
                 <div
-                  className="row"
                   style={{
-                    justifyContent: "space-between",
-                    alignItems: "flex-start",
-                    gap: 12,
-                    flexWrap: "nowrap",
+                    fontWeight: 800,
+                    color: "var(--text-strong, #f8fafc)",
                   }}
                 >
-                  <div
-                    className="row"
-                    style={{
-                      minWidth: 0,
-                      flex: 1,
-                      alignItems: "center",
-                      gap: 12,
-                    }}
-                  >
-                    <div className="avatar">
-                      {avatar ? (
-                        <img
-                          src={avatar}
-                          alt={name}
-                          width="38"
-                          height="38"
-                          style={{
-                            width: "100%",
-                            height: "100%",
-                            objectFit: "cover",
-                          }}
-                        />
-                      ) : (
-                        initialsFromName(name)
-                      )}
-                    </div>
-
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div
-                        style={{
-                          fontWeight: 800,
-                          overflowWrap: "anywhere",
-                          lineHeight: 1.15,
-                          color: "var(--text-strong, #f8fafc)",
-                        }}
-                      >
-                        {name}
-                      </div>
-
-                      <div
-                        style={{
-                          marginTop: 4,
-                          fontSize: 13,
-                          overflowWrap: "anywhere",
-                          color: "var(--text-muted, rgba(255,255,255,0.72))",
-                        }}
-                      >
-                        {safeText(member?.user_id, "No member ID")}
-                      </div>
-                    </div>
-                  </div>
-
-                  <span className={`badge ${tone}`}>{state}</span>
+                  Active Members
                 </div>
-
                 <div
                   style={{
-                    marginTop: 12,
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-                    gap: 10,
+                    fontSize: 12,
+                    color: "var(--text-muted, rgba(255,255,255,0.72))",
                   }}
                 >
-                  <div className="member-detail-item">
-                    <span className="ticket-info-label">Top Role</span>
-                    <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-                      {safeText(
-                        member?.top_role || member?.highest_role_name,
-                        "None"
-                      )}
-                    </span>
-                  </div>
-
-                  <div className="member-detail-item">
-                    <span className="ticket-info-label">Roles</span>
-                    <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-                      {getRoleCount(member)}
-                    </span>
-                  </div>
-
-                  <div className="member-detail-item">
-                    <span className="ticket-info-label">Joined</span>
-                    <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-                      {formatDateTime(member?.joined_at)}
-                    </span>
-                  </div>
-
-                  <div className="member-detail-item">
-                    <span className="ticket-info-label">Updated</span>
-                    <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-                      {formatDateTime(
-                        member?.updated_at || member?.last_seen_at || member?.synced_at
-                      )}
-                    </span>
-                  </div>
+                  Showing {activeRows.length} active record{activeRows.length === 1 ? "" : "s"}
                 </div>
+              </div>
 
-                {member?.role_state_reason ? (
+              <div className="space">
+                {activeRows.map((member, index) => (
+                  <MemberCard
+                    key={`${member?.user_id || "active"}-${index}`}
+                    member={member}
+                    onSelect={setSelected}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {formerRows.length ? (
+            <div>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                  marginBottom: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div>
                   <div
                     style={{
-                      marginTop: 10,
+                      fontWeight: 800,
+                      color: "var(--text-strong, #f8fafc)",
+                    }}
+                  >
+                    Former Members
+                  </div>
+                  <div
+                    style={{
+                      marginTop: 4,
                       fontSize: 12,
-                      lineHeight: 1.5,
                       color: "var(--text-muted, rgba(255,255,255,0.72))",
                     }}
                   >
-                    {member.role_state_reason}
+                    Archived separately so they do not take over the live roster
                   </div>
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="button ghost"
+                  style={{ width: "auto", minWidth: 130 }}
+                  onClick={() => setShowFormer((prev) => !prev)}
+                >
+                  {showFormer ? "Show Fewer" : `Show More (${formerRows.length})`}
+                </button>
+              </div>
+
+              <div className="space">
+                {visibleFormerRows.map((member, index) => (
+                  <MemberCard
+                    key={`${member?.user_id || "former"}-${index}`}
+                    member={member}
+                    onSelect={setSelected}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </>
       )}
 
       {selected ? (
