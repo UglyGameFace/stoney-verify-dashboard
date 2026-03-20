@@ -1274,20 +1274,6 @@ export async function GET() {
     const message = error?.message || "Failed to load dashboard.";
     const unauthorized = message === "Unauthorized";
 
-    return Response.json(payload, {
-      status: 200,
-      headers: {
-        "Cache-Control": "no-store, max-age=0",
-      },
-    });
-  } catch (error) {
-    if (debugEnabled()) {
-      console.error("[dashboard/live] fatal error =", error);
-    }
-
-    const message = error?.message || "Failed to load dashboard.";
-    const unauthorized = message === "Unauthorized";
-
     return Response.json(
       { error: message },
       {
