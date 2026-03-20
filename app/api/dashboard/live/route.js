@@ -102,13 +102,10 @@ function shouldHideStaleOpenTicket(ticket) {
   const hasTranscript = hasTranscriptEvidence(ticket);
   const ageMinutes = ageMinutesFromTicket(ticket);
 
-  // Open/claimed rows with no usable channel are stale once they age out a bit.
   if (missingChannel && ageMinutes > 5) {
     return true;
   }
 
-  // If a row still says open/claimed but already has transcript evidence,
-  // it is almost certainly a stale dashboard leftover and should not count as active.
   if (hasTranscript && ageMinutes > 2) {
     return true;
   }
@@ -219,22 +216,150 @@ function normalizeStaffKey(value) {
   return String(value || "").trim();
 }
 
-function normalizeStaffLabel(value, fallback = "Unknown Staff") {
-  const text = String(value || "").trim();
-  return text || fallback;
+function looksLikeDiscordId(value) {
+  const text = normalizeString(value);
+  return /^\d{16,22}$/.test(text);
 }
 
-function deriveMetricsFromTickets(tickets = [], existingMetrics = []) {
+function normalizeStaffName(value) {
+  return normalizeString(value);
+}
+
+function cleanDisplayName(value) {
+  const text = normalizeStaffName(value);
+  if (!text) return "";
+  if (looksLikeDiscordId(text)) return "";
+  return text;
+}
+
+function pickBestStaffDisplayName(candidates, fallback = "Unknown Staff") {
+  const cleaned = safeArray(candidates)
+    .map(cleanDisplayName)
+    .filter(Boolean);
+
+  if (!cleaned.length) return fallback;
+
+  cleaned.sort((a, b) => {
+    const score = (name) => {
+      let s = 0;
+      if (/[A-Z]/.test(name)) s += 5;
+      if (!name.includes("#")) s += 2;
+      if (!/^\d+$/.test(name)) s += 5;
+      s += Math.min(name.length, 32) / 10;
+      return s;
+    };
+
+    const diff = score(b) - score(a);
+    if (diff !== 0) return diff;
+
+    return a.localeCompare(b);
+  });
+
+  return cleaned[0] || fallback;
+}
+
+function buildMemberIdentityMaps(guildMembers) {
+  const byId = new Map();
+  const nameToId = new Map();
+
+  for (const member of safeArray(guildMembers)) {
+    const userId = normalizeString(member?.user_id);
+    const names = [
+      member?.display_name,
+      member?.nickname,
+      member?.username,
+      ...(Array.isArray(member?.previous_usernames)
+        ? member.previous_usernames
+        : []),
+      ...(Array.isArray(member?.previous_display_names)
+        ? member.previous_display_names
+        : []),
+      ...(Array.isArray(member?.previous_nicknames)
+        ? member.previous_nicknames
+        : []),
+    ]
+      .map((v) => normalizeString(v))
+      .filter(Boolean);
+
+    if (userId) {
+      byId.set(userId, member);
+    }
+
+    for (const name of names) {
+      const key = name.toLowerCase();
+      if (key && userId) {
+        if (!nameToId.has(key)) {
+          nameToId.set(key, userId);
+        }
+      }
+    }
+  }
+
+  return { byId, nameToId };
+}
+
+function resolveStaffIdentity(value, memberMaps) {
+  const raw = normalizeStaffKey(value);
+  if (!raw) return { key: "", member: null, rawName: "" };
+
+  if (looksLikeDiscordId(raw)) {
+    return {
+      key: raw,
+      member: memberMaps.byId.get(raw) || null,
+      rawName: "",
+    };
+  }
+
+  const matchedId = memberMaps.nameToId.get(raw.toLowerCase()) || "";
+  if (matchedId) {
+    return {
+      key: matchedId,
+      member: memberMaps.byId.get(matchedId) || null,
+      rawName: raw,
+    };
+  }
+
+  return {
+    key: `name:${raw.toLowerCase()}`,
+    member: null,
+    rawName: raw,
+  };
+}
+
+function deriveMetricsFromTickets(
+  tickets = [],
+  existingMetrics = [],
+  guildMembers = []
+) {
+  const memberMaps = buildMemberIdentityMaps(guildMembers);
   const byStaff = new Map();
 
-  function ensureRow(key, label) {
-    const safeKey = normalizeStaffKey(key);
-    if (!safeKey) return null;
+  function ensureRow(identityKey, seed = {}) {
+    const key = normalizeStaffKey(identityKey);
+    if (!key) return null;
 
-    if (!byStaff.has(safeKey)) {
-      byStaff.set(safeKey, {
-        staff_id: safeKey,
-        staff_name: normalizeStaffLabel(label, safeKey),
+    if (!byStaff.has(key)) {
+      const member = seed.member || null;
+      byStaff.set(key, {
+        staff_id:
+          looksLikeDiscordId(key)
+            ? key
+            : normalizeStaffKey(seed?.staff_id || ""),
+        staff_name: pickBestStaffDisplayName(
+          [
+            seed?.staff_name,
+            seed?.rawName,
+            member?.display_name,
+            member?.nickname,
+            member?.username,
+          ],
+          member?.display_name ||
+            member?.nickname ||
+            member?.username ||
+            seed?.staff_name ||
+            seed?.rawName ||
+            "Unknown Staff"
+        ),
         tickets_handled: 0,
         approvals: 0,
         denials: 0,
@@ -243,16 +368,38 @@ function deriveMetricsFromTickets(tickets = [], existingMetrics = []) {
       });
     }
 
-    return byStaff.get(safeKey);
+    return byStaff.get(key);
   }
 
-  for (const row of Array.isArray(existingMetrics) ? existingMetrics : []) {
-    const key = normalizeStaffKey(row?.staff_id || row?.staff_name);
-    if (!key) continue;
+  for (const row of safeArray(existingMetrics)) {
+    const idIdentity = resolveStaffIdentity(row?.staff_id, memberMaps);
+    const nameIdentity = resolveStaffIdentity(row?.staff_name, memberMaps);
 
-    byStaff.set(key, {
-      staff_id: key,
-      staff_name: normalizeStaffLabel(row?.staff_name, key),
+    const identityKey =
+      idIdentity.key ||
+      nameIdentity.key ||
+      normalizeStaffKey(row?.staff_id || row?.staff_name);
+
+    if (!identityKey) continue;
+
+    const preferredMember = idIdentity.member || nameIdentity.member || null;
+
+    byStaff.set(identityKey, {
+      staff_id: preferredMember?.user_id || (looksLikeDiscordId(identityKey) ? identityKey : ""),
+      staff_name: pickBestStaffDisplayName(
+        [
+          row?.staff_name,
+          nameIdentity.rawName,
+          preferredMember?.display_name,
+          preferredMember?.nickname,
+          preferredMember?.username,
+        ],
+        preferredMember?.display_name ||
+          preferredMember?.nickname ||
+          preferredMember?.username ||
+          row?.staff_name ||
+          "Unknown Staff"
+      ),
       tickets_handled: Number(row?.tickets_handled || 0),
       approvals: Number(row?.approvals || 0),
       denials: Number(row?.denials || 0),
@@ -261,28 +408,53 @@ function deriveMetricsFromTickets(tickets = [], existingMetrics = []) {
     });
   }
 
-  for (const ticket of Array.isArray(tickets) ? tickets : []) {
+  for (const ticket of safeArray(tickets)) {
     const status = normalizeStatus(ticket?.status);
     const category = String(ticket?.category || "").trim().toLowerCase();
 
-    const staffId = normalizeStaffKey(
-      ticket?.closed_by ||
-        ticket?.claimed_by ||
-        ticket?.assigned_to ||
-        ticket?.staff_id
-    );
+    const candidates = [
+      ticket?.closed_by,
+      ticket?.claimed_by,
+      ticket?.assigned_to,
+      ticket?.staff_id,
+      ticket?.closed_by_name,
+      ticket?.claimed_by_name,
+      ticket?.assigned_to_name,
+      ticket?.staff_name,
+    ];
 
-    const staffName = normalizeStaffLabel(
-      ticket?.closed_by_name ||
-        ticket?.claimed_by_name ||
-        ticket?.assigned_to_name ||
-        ticket?.staff_name ||
-        staffId
-    );
+    let identity = { key: "", member: null, rawName: "" };
 
-    if (!staffId) continue;
+    for (const candidate of candidates) {
+      identity = resolveStaffIdentity(candidate, memberMaps);
+      if (identity.key) break;
+    }
 
-    const row = ensureRow(staffId, staffName);
+    if (!identity.key) continue;
+
+    const row = ensureRow(identity.key, {
+      staff_id: identity.member?.user_id || (looksLikeDiscordId(identity.key) ? identity.key : ""),
+      staff_name: pickBestStaffDisplayName(
+        [
+          ticket?.closed_by_name,
+          ticket?.claimed_by_name,
+          ticket?.assigned_to_name,
+          ticket?.staff_name,
+          identity.rawName,
+          identity.member?.display_name,
+          identity.member?.nickname,
+          identity.member?.username,
+        ],
+        identity.member?.display_name ||
+          identity.member?.nickname ||
+          identity.member?.username ||
+          identity.rawName ||
+          "Unknown Staff"
+      ),
+      rawName: identity.rawName,
+      member: identity.member,
+    });
+
     if (!row) continue;
 
     const updatedAt =
@@ -293,6 +465,27 @@ function deriveMetricsFromTickets(tickets = [], existingMetrics = []) {
       (!row.last_active || parseDateMs(updatedAt) > parseDateMs(row.last_active))
     ) {
       row.last_active = updatedAt;
+    }
+
+    row.staff_name = pickBestStaffDisplayName(
+      [
+        row.staff_name,
+        ticket?.closed_by_name,
+        ticket?.claimed_by_name,
+        ticket?.assigned_to_name,
+        ticket?.staff_name,
+        identity.rawName,
+        identity.member?.display_name,
+        identity.member?.nickname,
+        identity.member?.username,
+      ],
+      row.staff_name || "Unknown Staff"
+    );
+
+    if (!row.staff_id && identity.member?.user_id) {
+      row.staff_id = String(identity.member.user_id);
+    } else if (!row.staff_id && looksLikeDiscordId(identity.key)) {
+      row.staff_id = identity.key;
     }
 
     if (status === "closed" || status === "deleted") {
@@ -317,19 +510,21 @@ function deriveMetricsFromTickets(tickets = [], existingMetrics = []) {
     }
   }
 
-  return [...byStaff.values()].sort((a, b) => {
-    const handledDiff =
-      Number(b?.tickets_handled || 0) - Number(a?.tickets_handled || 0);
-    if (handledDiff !== 0) return handledDiff;
+  return [...byStaff.values()]
+    .filter((row) => row.staff_id || row.staff_name)
+    .sort((a, b) => {
+      const handledDiff =
+        Number(b?.tickets_handled || 0) - Number(a?.tickets_handled || 0);
+      if (handledDiff !== 0) return handledDiff;
 
-    const approvalsDiff =
-      Number(b?.approvals || 0) - Number(a?.approvals || 0);
-    if (approvalsDiff !== 0) return approvalsDiff;
+      const approvalsDiff =
+        Number(b?.approvals || 0) - Number(a?.approvals || 0);
+      if (approvalsDiff !== 0) return approvalsDiff;
 
-    return String(a?.staff_name || a?.staff_id || "").localeCompare(
-      String(b?.staff_name || b?.staff_id || "")
-    );
-  });
+      return String(a?.staff_name || a?.staff_id || "").localeCompare(
+        String(b?.staff_name || b?.staff_id || "")
+      );
+    });
 }
 
 function pickMessageContent(row) {
@@ -702,7 +897,7 @@ export async function GET() {
         .select("*")
         .eq("guild_id", guildId)
         .order("tickets_handled", { ascending: false })
-        .limit(25),
+        .limit(50),
 
       supabase
         .from("ticket_categories")
@@ -854,17 +1049,6 @@ export async function GET() {
     const rawTickets = safeArray(ticketsRes.data).map(mapTicket);
     const canonicalTickets = canonicalizeTickets(rawTickets);
 
-    const activeTickets = canonicalTickets.filter((ticket) => {
-      if (!isOpenLikeStatus(ticket?.status)) return false;
-      if (shouldHideStaleOpenTicket(ticket)) return false;
-      return true;
-    });
-
-    const closedTickets = canonicalTickets.filter(
-      (ticket) =>
-        isClosedLikeStatus(ticket?.status) || shouldHideStaleOpenTicket(ticket)
-    );
-
     const auditLogs = safeArray(auditLogsRes.data);
     const auditEvents = safeArray(auditEventsRes.data);
     const staffMessages = safeArray(staffMessagesRes.data);
@@ -877,6 +1061,17 @@ export async function GET() {
       mapGuildMember
     );
     const guildMembers = safeArray(allGuildMembersRes.data).map(mapGuildMember);
+
+    const activeTickets = canonicalTickets.filter((ticket) => {
+      if (!isOpenLikeStatus(ticket?.status)) return false;
+      if (shouldHideStaleOpenTicket(ticket)) return false;
+      return true;
+    });
+
+    const closedTickets = canonicalTickets.filter(
+      (ticket) =>
+        isClosedLikeStatus(ticket?.status) || shouldHideStaleOpenTicket(ticket)
+    );
 
     const events = buildTimeline(
       auditLogs,
@@ -938,7 +1133,11 @@ export async function GET() {
           toTime(a.updated_at || a.last_seen_at || a.joined_at)
       );
 
-    const metrics = deriveMetricsFromTickets(rawTickets, metricsRes.data || []);
+    const metrics = deriveMetricsFromTickets(
+      rawTickets,
+      metricsRes.data || [],
+      guildMembers
+    );
 
     const openTicketsCount = activeTickets.length;
     const closedTicketsCount = closedTickets.length;
@@ -951,6 +1150,7 @@ export async function GET() {
       );
       console.log("[dashboard/live] active tickets found =", activeTickets.length);
       console.log("[dashboard/live] closed tickets found =", closedTickets.length);
+      console.log("[dashboard/live] metrics found =", metrics.length);
       console.log("[dashboard/live] auditLogs found =", auditLogs.length);
       console.log("[dashboard/live] auditEvents found =", auditEvents.length);
       console.log("[dashboard/live] staffMessages found =", staffMessages.length);
@@ -1037,6 +1237,7 @@ export async function GET() {
             canonicalTicketCount: canonicalTickets.length,
             activeTicketCount: activeTickets.length,
             closedTicketCount: closedTickets.length,
+            metricsCount: metrics.length,
             guildMembersCount: guildMembers.length,
             timelineCount: events.length,
             warnsCount: warns.length,
@@ -1075,7 +1276,4 @@ export async function GET() {
 
     return Response.json(
       { error: message },
-      { status: unauthorized ? 401 : 500 }
-    );
-  }
-}
+      { status: unauthorized ? 401 : 500
