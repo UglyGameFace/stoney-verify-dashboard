@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   syncMembersAction,
   reconcileDepartedMembersAction,
+  syncActiveTicketsAction,
 } from "@/lib/dashboardActions";
 
 function getActionSummary(name) {
@@ -15,7 +16,31 @@ function getActionSummary(name) {
     return "Mark members who are no longer in the guild as departed.";
   }
 
+  if (name === "Sync Active Tickets") {
+    return "Scan real Discord ticket channels and repair missing or stale dashboard ticket rows.";
+  }
+
   return "Run dashboard maintenance action.";
+}
+
+function getSuccessMessage(name, result) {
+  if (name === "Sync Active Tickets") {
+    const summary = result?.summary || {};
+    return (
+      `Ticket sync complete. ` +
+      `Scanned ${Number(summary?.channels_scanned || 0)} channels, ` +
+      `matched ${Number(summary?.matched_ticket_channels || 0)}, ` +
+      `inserted ${Number(summary?.inserted || 0)}, ` +
+      `updated ${Number(summary?.updated || 0)}, ` +
+      `errors ${Number(summary?.errors || 0)}.`
+    );
+  }
+
+  if (result?.timedOut) {
+    return `${name} queued and is still processing...`;
+  }
+
+  return `${name} completed successfully.`;
 }
 
 export default function QuickActions({
@@ -59,6 +84,22 @@ export default function QuickActions({
             requestedBy: currentStaffId,
           }),
       },
+      {
+        key: "sync-active-tickets",
+        name: "Sync Active Tickets",
+        compactLabel: "Sync Tickets",
+        description:
+          "Ask the bot to scan real Discord ticket channels and backfill / repair missing ticket rows.",
+        detail:
+          "Best when Discord clearly has an active ticket but the dashboard queue does not show it.",
+        runner: () =>
+          syncActiveTicketsAction({
+            staffId: currentStaffId,
+            requestedBy: currentStaffId,
+            includeClosedVisibleChannels: true,
+            dryRun: false,
+          }),
+      },
     ],
     [currentStaffId]
   );
@@ -83,15 +124,13 @@ export default function QuickActions({
     try {
       const result = await runner();
 
-      if (!result?.ok && !result?.timedOut) {
-        throw new Error(result?.command?.error || result?.error || `${name} failed.`);
+      if (result?.ok === false && !result?.timedOut) {
+        throw new Error(
+          result?.command?.error || result?.error || `${name} failed.`
+        );
       }
 
-      if (result?.timedOut) {
-        setMessage(`${name} queued and is still processing...`);
-      } else {
-        setMessage(`${name} completed successfully.`);
-      }
+      setMessage(getSuccessMessage(name, result));
 
       if (onRefresh) {
         await onRefresh();
