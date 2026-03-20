@@ -256,7 +256,9 @@ function buildModeratorIntelligence(data) {
     claimedTickets,
     summaryItems,
     flaggedMembers: members
-      .filter((m) => String(m?.role_state || "").toLowerCase().includes("conflict"))
+      .filter((m) =>
+        String(m?.role_state || "").toLowerCase().includes("conflict")
+      )
       .slice(0, 8),
   };
 }
@@ -373,7 +375,7 @@ function IntelligencePanel({
   return (
     <DashboardSection
       title="Moderator Intelligence"
-      subtitle="Live risk summary, moderation pressure, and queue health"
+      subtitle="Live risk summary, moderation load, and verification pressure"
       expanded={expanded}
       onToggle={onToggle}
       defaultOpen
@@ -478,7 +480,7 @@ function IntelligencePanel({
             </div>
           ) : (
             <div className="muted detail-list">
-              No role conflict members detected in the current payload.
+              No role conflicts are present in the current dataset.
             </div>
           )}
         </div>
@@ -666,8 +668,8 @@ export default function DashboardClient({
 
         setMaintenanceMessage(
           dryRun
-            ? `Reconcile preview finished. Scanned ${Number(result?.scanned || 0)} tickets, found ${safeArray(result?.tickets).length} candidate row(s).`
-            : `Reconcile finished. Scanned ${Number(result?.scanned || 0)} tickets, updated ${Number(result?.updated || 0)}, hidden candidates ${Number(result?.hidden || 0)}.`
+            ? `Reconcile preview finished. Scanned ${Number(result?.scanned || 0)} tickets and found ${safeArray(result?.tickets).length} candidate row(s).`
+            : `Reconcile finished. Scanned ${Number(result?.scanned || 0)} tickets, updated ${Number(result?.updated || 0)}, and hid ${Number(result?.hidden || 0)} stale candidate row(s).`
         );
 
         await refresh({ silent: true, force: true, reason: "reconcile" });
@@ -696,7 +698,7 @@ export default function DashboardClient({
       });
 
       setMaintenanceMessage(
-        `Purge preview finished. Scanned ${Number(result?.scanned || 0)} tickets, found ${safeArray(result?.candidates).length} stale candidate row(s), removed 0.`
+        `Purge preview finished. Scanned ${Number(result?.scanned || 0)} tickets and found ${safeArray(result?.candidates).length} stale candidate row(s).`
       );
     } catch (err) {
       setMaintenanceError(
@@ -721,7 +723,7 @@ export default function DashboardClient({
       });
 
       setMaintenanceMessage(
-        `Purge finished. Scanned ${Number(result?.scanned || 0)} tickets, removed ${Number(result?.removed || 0)} stale ticket row(s).`
+        `Purge finished. Scanned ${Number(result?.scanned || 0)} tickets and removed ${Number(result?.removed || 0)} stale row(s).`
       );
 
       await refresh({ silent: true, force: true, reason: "purge-stale" });
@@ -1083,7 +1085,7 @@ export default function DashboardClient({
             <div ref={warnsSectionRef}>
               <DashboardSection
                 title="Warn Intelligence"
-                subtitle={`${safeWarns.length} warn row${safeWarns.length === 1 ? "" : "s"} in the last 24 hours`}
+                subtitle={`${safeWarns.length} warning record${safeWarns.length === 1 ? "" : "s"} in the last 24 hours`}
                 expanded={expandedPanels.warns}
                 onToggle={() => togglePanel("warns")}
                 actions={
@@ -1099,7 +1101,7 @@ export default function DashboardClient({
               >
                 <SimpleFeedPanel
                   rows={homeSummary.recentWarns}
-                  emptyMessage="No warns were recorded in the last 24 hours."
+                  emptyMessage="No warnings were recorded in the last 24 hours."
                   renderRow={(warn, index) => (
                     <div
                       key={warn?.id || `warn-${index}`}
@@ -1169,7 +1171,7 @@ export default function DashboardClient({
             <div ref={fraudSectionRef}>
               <DashboardSection
                 title="Fraud Intelligence"
-                subtitle={`${safeFraud.length} flagged row${safeFraud.length === 1 ? "" : "s"} in the current dataset`}
+                subtitle={`${safeFraud.length} flagged record${safeFraud.length === 1 ? "" : "s"} in the current dataset`}
                 expanded={expandedPanels.fraud}
                 onToggle={() => togglePanel("fraud")}
               >
@@ -1263,7 +1265,7 @@ export default function DashboardClient({
               <div>
                 <h2 style={{ margin: 0 }}>Ticket Queue</h2>
                 <div className="muted" style={{ marginTop: 6 }}>
-                  Interactive queue with transcript-ready controls and moderator filters
+                  Live moderation queue with repair, transcript, and filtering controls
                 </div>
               </div>
 
@@ -1342,8 +1344,8 @@ export default function DashboardClient({
                 lineHeight: 1.5,
               }}
             >
-              Reconcile fixes stale ticket rows that no longer reflect Discord truth.
-              Purge removes dead closed/deleted rows that no longer have a usable channel or thread.
+              Reconcile repairs stale ticket rows that no longer reflect Discord truth.
+              Purge removes dead closed or deleted rows that no longer have a usable live channel.
             </div>
 
             <div
@@ -1413,7 +1415,7 @@ export default function DashboardClient({
           <div className="dashboard-members-grid">
             <DashboardSection
               title="Fresh Entrants"
-              subtitle={`${safeRecentJoins.length} tracked joins in the current response`}
+              subtitle={`${safeRecentJoins.length} recent join record${safeRecentJoins.length === 1 ? "" : "s"} loaded`}
               expanded={expandedPanels.joins}
               onToggle={() => togglePanel("joins")}
             >
@@ -1422,7 +1424,7 @@ export default function DashboardClient({
 
             <DashboardSection
               title="Member Snapshot"
-              subtitle={`${safeMembers.length} member rows loaded`}
+              subtitle={`${safeMembers.length} member record${safeMembers.length === 1 ? "" : "s"} loaded`}
               expanded={expandedPanels.members}
               onToggle={() => togglePanel("members")}
             >
@@ -1430,8 +1432,17 @@ export default function DashboardClient({
             </DashboardSection>
 
             <DashboardSection
+              title="Staff Metrics"
+              subtitle={`${safeMetrics.length} staff record${safeMetrics.length === 1 ? "" : "s"} loaded`}
+              expanded={expandedPanels.staff}
+              onToggle={() => togglePanel("staff")}
+            >
+              <StaffMetricsCard metrics={safeMetrics} />
+            </DashboardSection>
+
+            <DashboardSection
               title="Role Hierarchy"
-              subtitle={`${safeRoles.length} roles loaded`}
+              subtitle={`${safeRoles.length} role record${safeRoles.length === 1 ? "" : "s"} loaded`}
               expanded={expandedPanels.roles}
               onToggle={() => togglePanel("roles")}
             >
@@ -1444,17 +1455,13 @@ export default function DashboardClient({
             </DashboardSection>
 
             <DashboardSection
-              title="Staff Metrics"
-              subtitle={`${safeMetrics.length} staff records loaded`}
-              expanded={expandedPanels.staff}
-              onToggle={() => togglePanel("staff")}
+              title="Member Search"
+              subtitle="Search the tracked guild member dataset"
+              expanded={true}
+              onToggle={null}
             >
-              <StaffMetricsCard metrics={safeMetrics} />
-            </DashboardSection>
-
-            <div className="card">
               <MemberSearchCard />
-            </div>
+            </DashboardSection>
           </div>
         </section>
 
@@ -1485,6 +1492,10 @@ export default function DashboardClient({
         .dashboard-members-grid {
           display: grid;
           gap: 16px;
+        }
+
+        .dashboard-members-grid {
+          align-items: start;
         }
 
         .metrics-grid {
@@ -1577,6 +1588,16 @@ export default function DashboardClient({
           .dashboard-home-grid,
           .dashboard-members-grid {
             gap: 18px;
+          }
+
+          .dashboard-members-grid {
+            grid-template-columns: 1.2fr 1.2fr;
+          }
+
+          .dashboard-members-grid :global(.compact-panel:nth-child(3)),
+          .dashboard-members-grid :global(.compact-panel:nth-child(4)),
+          .dashboard-members-grid :global(.compact-panel:nth-child(5)) {
+            grid-column: span 1;
           }
         }
 
