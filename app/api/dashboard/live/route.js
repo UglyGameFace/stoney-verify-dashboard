@@ -810,7 +810,15 @@ export async function GET() {
     }
 
     const rawTickets = safeArray(ticketsRes.data).map(mapTicket);
-    const tickets = canonicalizeTickets(rawTickets);
+    const canonicalTickets = canonicalizeTickets(rawTickets);
+
+    const activeTickets = canonicalTickets.filter((ticket) =>
+      isOpenLikeStatus(ticket?.status)
+    );
+
+    const closedTickets = canonicalTickets.filter((ticket) =>
+      isClosedLikeStatus(ticket?.status)
+    );
 
     const auditLogs = safeArray(auditLogsRes.data);
     const auditEvents = safeArray(auditEventsRes.data);
@@ -887,13 +895,14 @@ export async function GET() {
 
     const metrics = deriveMetricsFromTickets(rawTickets, metricsRes.data || []);
 
-    const openTicketsCount = tickets.filter((ticket) =>
-      isOpenLikeStatus(ticket?.status)
-    ).length;
+    const openTicketsCount = activeTickets.length;
+    const closedTicketsCount = closedTickets.length;
 
     if (debugEnabled()) {
       console.log("[dashboard/live] raw tickets found =", rawTickets.length);
-      console.log("[dashboard/live] canonical tickets found =", tickets.length);
+      console.log("[dashboard/live] canonical tickets found =", canonicalTickets.length);
+      console.log("[dashboard/live] active tickets found =", activeTickets.length);
+      console.log("[dashboard/live] closed tickets found =", closedTickets.length);
       console.log("[dashboard/live] auditLogs found =", auditLogs.length);
       console.log("[dashboard/live] auditEvents found =", auditEvents.length);
       console.log("[dashboard/live] staffMessages found =", staffMessages.length);
@@ -937,7 +946,9 @@ export async function GET() {
     }
 
     const payload = {
-      tickets: sortTickets(tickets, "priority_desc"),
+      tickets: sortTickets(activeTickets, "priority_desc"),
+      activeTickets: sortTickets(activeTickets, "priority_desc"),
+      closedTickets: sortTickets(closedTickets, "updated_desc"),
       events,
       warns,
       raids,
@@ -964,6 +975,7 @@ export async function GET() {
       },
       counts: {
         openTickets: openTicketsCount,
+        closedTickets: closedTicketsCount,
         warnsToday: warnsTodayRes.count || 0,
         raidAlerts: raidAlertsRes.count || 0,
         fraudFlags: fraudFlagsRes.count || 0,
@@ -974,7 +986,9 @@ export async function GET() {
             envGuildId: process.env.GUILD_ID || "",
             envDiscordGuildId: process.env.DISCORD_GUILD_ID || "",
             rawTicketCount: rawTickets.length,
-            visibleTicketCount: tickets.length,
+            canonicalTicketCount: canonicalTickets.length,
+            activeTicketCount: activeTickets.length,
+            closedTicketCount: closedTickets.length,
             guildMembersCount: guildMembers.length,
             timelineCount: events.length,
             warnsCount: warns.length,
