@@ -68,20 +68,52 @@ function hasTranscriptEvidence(ticket) {
   );
 }
 
-function shouldHideStaleTicket(ticket) {
+function newestTicketTimestamp(ticket) {
+  return Math.max(
+    parseDateMs(ticket?.updated_at),
+    parseDateMs(ticket?.created_at),
+    parseDateMs(ticket?.closed_at),
+    parseDateMs(ticket?.deleted_at)
+  );
+}
+
+function ageMinutesFromTicket(ticket) {
+  const newest = newestTicketTimestamp(ticket);
+  if (!newest) return 999999;
+  return Math.max(0, (Date.now() - newest) / 60000);
+}
+
+function shouldHideStaleClosedTicket(ticket) {
   const status = normalizeStatus(ticket?.status);
   const missingChannel = !hasUsableChannel(ticket);
 
   if (!missingChannel) return false;
   if (!isClosedLikeStatus(status)) return false;
 
-  const closedAtMs = parseDateMs(ticket?.closed_at);
-  const updatedAtMs = parseDateMs(ticket?.updated_at);
-  const createdAtMs = parseDateMs(ticket?.created_at);
-  const newestMs = Math.max(closedAtMs, updatedAtMs, createdAtMs);
-  const ageMs = Date.now() - newestMs;
+  return ageMinutesFromTicket(ticket) > 5;
+}
 
-  return ageMs > 5 * 60 * 1000;
+function shouldHideStaleOpenTicket(ticket) {
+  const status = normalizeStatus(ticket?.status);
+
+  if (!isOpenLikeStatus(status)) return false;
+
+  const missingChannel = !hasUsableChannel(ticket);
+  const hasTranscript = hasTranscriptEvidence(ticket);
+  const ageMinutes = ageMinutesFromTicket(ticket);
+
+  // Open/claimed rows with no usable channel are stale once they age out a bit.
+  if (missingChannel && ageMinutes > 5) {
+    return true;
+  }
+
+  // If a row still says open/claimed but already has transcript evidence,
+  // it is almost certainly a stale dashboard leftover and should not count as active.
+  if (hasTranscript && ageMinutes > 2) {
+    return true;
+  }
+
+  return false;
 }
 
 function ticketFreshnessScore(ticket) {
@@ -112,6 +144,10 @@ function ticketFreshnessScore(ticket) {
     score -= 40;
   }
 
+  if (shouldHideStaleOpenTicket(ticket)) {
+    score -= 1000;
+  }
+
   return score;
 }
 
@@ -133,8 +169,10 @@ function canonicalTicketKey(ticket) {
 
 function canonicalizeTickets(rawTickets) {
   const visibleBase = rawTickets.filter(
-    (ticket) => !shouldHideStaleTicket(ticket)
+    (ticket) =>
+      !shouldHideStaleClosedTicket(ticket) && !shouldHideStaleOpenTicket(ticket)
   );
+
   const grouped = new Map();
 
   for (const ticket of visibleBase) {
@@ -496,7 +534,11 @@ function mapStaffMessageToTimeline(row) {
     },
     source: "dashboard_staff_messages",
     actor_name:
-      row?.display_name || row?.username || row?.author_name || row?.author_id || null,
+      row?.display_name ||
+      row?.username ||
+      row?.author_name ||
+      row?.author_id ||
+      null,
     actor_avatar_url: row?.avatar_url || row?.author_avatar_url || null,
     channel_id: row?.channel_id || null,
     message_id: row?.message_id || null,
@@ -812,12 +854,15 @@ export async function GET() {
     const rawTickets = safeArray(ticketsRes.data).map(mapTicket);
     const canonicalTickets = canonicalizeTickets(rawTickets);
 
-    const activeTickets = canonicalTickets.filter((ticket) =>
-      isOpenLikeStatus(ticket?.status)
-    );
+    const activeTickets = canonicalTickets.filter((ticket) => {
+      if (!isOpenLikeStatus(ticket?.status)) return false;
+      if (shouldHideStaleOpenTicket(ticket)) return false;
+      return true;
+    });
 
-    const closedTickets = canonicalTickets.filter((ticket) =>
-      isClosedLikeStatus(ticket?.status)
+    const closedTickets = canonicalTickets.filter(
+      (ticket) =>
+        isClosedLikeStatus(ticket?.status) || shouldHideStaleOpenTicket(ticket)
     );
 
     const auditLogs = safeArray(auditLogsRes.data);
@@ -900,7 +945,10 @@ export async function GET() {
 
     if (debugEnabled()) {
       console.log("[dashboard/live] raw tickets found =", rawTickets.length);
-      console.log("[dashboard/live] canonical tickets found =", canonicalTickets.length);
+      console.log(
+        "[dashboard/live] canonical tickets found =",
+        canonicalTickets.length
+      );
       console.log("[dashboard/live] active tickets found =", activeTickets.length);
       console.log("[dashboard/live] closed tickets found =", closedTickets.length);
       console.log("[dashboard/live] auditLogs found =", auditLogs.length);
