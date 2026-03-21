@@ -6,6 +6,45 @@ import MobileBottomNav from "@/components/MobileBottomNav";
 
 const USER_TABS = ["home", "tickets", "help"];
 
+const FALLBACK_CATEGORIES = [
+  {
+    id: "fallback-verification",
+    name: "Verification",
+    slug: "verification",
+    description: "Help with pending verification, missing verified role, or verification review.",
+    intake_type: "verification",
+    button_label: "Open Verification Ticket",
+    is_default: true,
+  },
+  {
+    id: "fallback-appeal",
+    name: "Appeal",
+    slug: "appeal",
+    description: "Appeal a moderation action or request review of a previous decision.",
+    intake_type: "appeal",
+    button_label: "Open Appeal Ticket",
+    is_default: false,
+  },
+  {
+    id: "fallback-report",
+    name: "Report / Incident",
+    slug: "report",
+    description: "Report a member, suspicious activity, scam, abuse, or other incident.",
+    intake_type: "report",
+    button_label: "Open Report Ticket",
+    is_default: false,
+  },
+  {
+    id: "fallback-question",
+    name: "Question",
+    slug: "question",
+    description: "General support questions, access issues, or guidance on what to do next.",
+    intake_type: "question",
+    button_label: "Open Question Ticket",
+    is_default: false,
+  },
+];
+
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -63,6 +102,15 @@ function getRoleSummary(member) {
   return names.filter(Boolean).slice(0, 10);
 }
 
+function normalizeStatus(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getVisibleCategories(categories) {
+  const rows = safeArray(categories).filter((item) => item && item.name);
+  return rows.length ? rows : FALLBACK_CATEGORIES;
+}
+
 function getActionPlan({ member, openTicket, verificationFlags, vcVerifySession }) {
   const hasFlags = safeArray(verificationFlags).some((f) => Boolean(f?.flagged));
   const vcStatus = String(vcVerifySession?.status || "").toUpperCase();
@@ -70,16 +118,17 @@ function getActionPlan({ member, openTicket, verificationFlags, vcVerifySession 
   if (openTicket) {
     return {
       title: "Continue in your open ticket",
-      body: "You already have an active ticket. Keep using that same ticket so your case stays in one place and staff can help faster.",
+      body: "You already have an active ticket. Keep using that same ticket so your issue stays in one place and staff can help faster.",
       tone: "ok",
-      primaryLabel: "Go to Tickets Tab",
+      primaryLabel: "Go To My Tickets",
       primaryTargetTab: "tickets",
-      secondaryLabel: "View Help Categories",
+      secondaryLabel: "See Support Categories",
       secondaryTargetTab: "help",
+      suggestedCategorySlug: null,
       bullets: [
         "Avoid opening duplicate tickets for the same issue.",
         "Reply in your current ticket if you have updates.",
-        "Staff progress will usually show there first.",
+        "Your ticket tab shows your current and past cases.",
       ],
     };
   }
@@ -87,15 +136,16 @@ function getActionPlan({ member, openTicket, verificationFlags, vcVerifySession 
   if (vcVerifySession && vcStatus === "PENDING") {
     return {
       title: "Finish your VC verify flow",
-      body: "You have a pending VC verify session. Follow the Discord instructions tied to that flow to complete access.",
+      body: "You already have a pending VC verify session. Finish that process first before starting anything new.",
       tone: "warn",
       primaryLabel: "View Account Status",
       primaryTargetTab: "home",
-      secondaryLabel: "View Help Categories",
+      secondaryLabel: "See Support Categories",
       secondaryTargetTab: "help",
+      suggestedCategorySlug: "verification",
       bullets: [
         "Complete the active VC verification steps first.",
-        "If something is stuck, open a support ticket in Discord.",
+        "If the flow is stuck, open a verification support ticket.",
         "Do not start multiple verification flows at once.",
       ],
     };
@@ -103,17 +153,18 @@ function getActionPlan({ member, openTicket, verificationFlags, vcVerifySession 
 
   if (member?.has_unverified) {
     return {
-      title: "Open a verification support ticket",
-      body: "Your account still appears unverified. Open the verification support flow in Discord so staff can review and update your access.",
+      title: "Open a verification ticket",
+      body: "Your account still appears unverified. The right next move is a verification ticket so staff can review and update your access.",
       tone: "warn",
-      primaryLabel: "View Help Categories",
+      primaryLabel: "Open Verification Options",
       primaryTargetTab: "help",
       secondaryLabel: "View My Tickets",
       secondaryTargetTab: "tickets",
+      suggestedCategorySlug: "verification",
       bullets: [
-        "Use the verification-related support category.",
-        "Include clear details about what access you are missing.",
-        "If you already opened one, wait for staff in that ticket.",
+        "Use the verification-related category.",
+        "Explain what access or role you expected.",
+        "If you already opened one, wait in that ticket instead of duplicating it.",
       ],
     };
   }
@@ -121,15 +172,16 @@ function getActionPlan({ member, openTicket, verificationFlags, vcVerifySession 
   if (hasFlags) {
     return {
       title: "Request manual review",
-      body: "Your account has recent verification flags or conflicting state. Open a support ticket so staff can manually review and correct it.",
+      body: "Your account has recent verification flags or conflicting state. Open a support ticket so staff can manually review it.",
       tone: "danger",
-      primaryLabel: "View Help Categories",
+      primaryLabel: "Open Review Options",
       primaryTargetTab: "help",
       secondaryLabel: "View Account Status",
       secondaryTargetTab: "home",
+      suggestedCategorySlug: "verification",
       bullets: [
-        "Choose the category closest to your issue.",
-        "Mention any missing roles or blocked access.",
+        "Mention any missing role or blocked access.",
+        "Choose the category closest to the issue.",
         "Keep all updates inside one ticket once opened.",
       ],
     };
@@ -138,15 +190,16 @@ function getActionPlan({ member, openTicket, verificationFlags, vcVerifySession 
   if (member?.has_verified_role) {
     return {
       title: "You are verified",
-      body: "Your verified role is present. If something still looks wrong, open a support ticket under the category that best matches your issue.",
+      body: "Your verified role is present. If something still looks wrong, use a support ticket under the category that best matches your issue.",
       tone: "ok",
-      primaryLabel: "View Help Categories",
+      primaryLabel: "See Support Categories",
       primaryTargetTab: "help",
       secondaryLabel: "View My Tickets",
       secondaryTargetTab: "tickets",
+      suggestedCategorySlug: null,
       bullets: [
         "Use support only if something is missing or broken.",
-        "Pick the category that best matches your issue.",
+        "Pick the category closest to your issue.",
         "Your past tickets remain visible in the Tickets tab.",
       ],
     };
@@ -156,10 +209,11 @@ function getActionPlan({ member, openTicket, verificationFlags, vcVerifySession 
     title: "Open support if needed",
     body: "If your access looks wrong or you need help, open a support ticket in Discord and choose the category that best matches your issue.",
     tone: "warn",
-    primaryLabel: "View Help Categories",
+    primaryLabel: "See Support Categories",
     primaryTargetTab: "help",
     secondaryLabel: "View My Tickets",
     secondaryTargetTab: "tickets",
+    suggestedCategorySlug: null,
     bullets: [
       "Choose the closest help category.",
       "Explain what role or access you expected.",
@@ -235,7 +289,13 @@ function SummaryTiles({ member, openTicket, verificationFlags }) {
   );
 }
 
-function ActionCenter({ plan, onGoPrimary, onGoSecondary }) {
+function ActionCenter({
+  plan,
+  onGoPrimary,
+  onGoSecondary,
+  canRequestVerification,
+  onRequestVerification,
+}) {
   return (
     <div className={`status-panel ${plan.tone}`}>
       <div className="status-title">{plan.title}</div>
@@ -280,6 +340,17 @@ function ActionCenter({ plan, onGoPrimary, onGoSecondary }) {
             {plan.secondaryLabel}
           </button>
         ) : null}
+
+        {canRequestVerification ? (
+          <button
+            type="button"
+            className="button ghost"
+            style={{ width: "auto", minWidth: 170 }}
+            onClick={onRequestVerification}
+          >
+            Request Verification Ticket
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -292,6 +363,7 @@ function HomeTab({
   verificationFlags,
   vcVerifySession,
   onGoToTab,
+  onRequestVerification,
 }) {
   const verification = getVerificationState(member, verificationFlags);
   const roles = getRoleSummary(member);
@@ -301,6 +373,11 @@ function HomeTab({
     verificationFlags,
     vcVerifySession,
   });
+
+  const canRequestVerification =
+    !openTicket &&
+    (member?.has_unverified ||
+      safeArray(verificationFlags).some((f) => Boolean(f?.flagged)));
 
   return (
     <div className="user-dashboard-grid">
@@ -370,6 +447,8 @@ function HomeTab({
       <Section title="Action Center" subtitle="Only the next step you actually need">
         <ActionCenter
           plan={actionPlan}
+          canRequestVerification={canRequestVerification}
+          onRequestVerification={onRequestVerification}
           onGoPrimary={() => onGoToTab(actionPlan.primaryTargetTab)}
           onGoSecondary={() =>
             actionPlan.secondaryTargetTab
@@ -452,117 +531,195 @@ function HomeTab({
   );
 }
 
-function TicketsTab({ recentTickets }) {
-  const rows = safeArray(recentTickets);
-
-  return (
-    <Section
-      title="My Tickets"
-      subtitle={`${rows.length} ticket${rows.length === 1 ? "" : "s"} found for your account`}
-    >
-      {!rows.length ? (
-        <div className="empty-state">No tickets found for your account yet.</div>
-      ) : (
-        <div className="space">
-          {rows.map((ticket) => (
-            <div key={ticket.id} className="ticket-row-card">
-              <div
-                className="row"
-                style={{
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  gap: 12,
-                  flexWrap: "wrap",
-                }}
-              >
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div className="profile-name" style={{ fontSize: 16 }}>
-                    {safeText(ticket?.title, "Ticket")}
-                  </div>
-                  <div className="muted" style={{ marginTop: 6, lineHeight: 1.5 }}>
-                    {safeText(ticket?.matched_category_name || ticket?.category)} •{" "}
-                    {safeText(ticket?.channel_name || ticket?.channel_id)}
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <StatusBadge label={safeText(ticket?.status)} />
-                  <StatusBadge label={safeText(ticket?.priority)} />
-                </div>
-              </div>
-
-              <div className="info-grid" style={{ marginTop: 12 }}>
-                <div className="mini-card">
-                  <div className="ticket-info-label">Updated</div>
-                  <div>{timeAgo(ticket?.updated_at || ticket?.created_at)}</div>
-                </div>
-
-                <div className="mini-card">
-                  <div className="ticket-info-label">Created</div>
-                  <div>{formatTime(ticket?.created_at)}</div>
-                </div>
-
-                <div className="mini-card">
-                  <div className="ticket-info-label">Claimed By</div>
-                  <div>{safeText(ticket?.claimed_by)}</div>
-                </div>
-
-                <div className="mini-card">
-                  <div className="ticket-info-label">Closed Reason</div>
-                  <div>{safeText(ticket?.closed_reason)}</div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </Section>
+function TicketsTab({ recentTickets, showDeletedHistory, onToggleDeletedHistory }) {
+  const activeTickets = safeArray(recentTickets).filter((ticket) =>
+    ["open", "claimed"].includes(normalizeStatus(ticket?.status))
   );
-}
 
-function HelpTab({ categories, openTicket, onGoToTab }) {
-  const rows = safeArray(categories);
+  const closedTickets = safeArray(recentTickets).filter((ticket) =>
+    normalizeStatus(ticket?.status) === "closed"
+  );
+
+  const deletedTickets = safeArray(recentTickets).filter((ticket) =>
+    normalizeStatus(ticket?.status) === "deleted"
+  );
+
+  function renderTicket(ticket) {
+    return (
+      <div key={ticket.id} className="ticket-row-card">
+        <div
+          className="row"
+          style={{
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="profile-name" style={{ fontSize: 16 }}>
+              {safeText(ticket?.title, "Ticket")}
+            </div>
+            <div className="muted" style={{ marginTop: 6, lineHeight: 1.5 }}>
+              {safeText(ticket?.matched_category_name || ticket?.category)} •{" "}
+              {safeText(ticket?.channel_name || ticket?.channel_id)}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <StatusBadge label={safeText(ticket?.status)} />
+            <StatusBadge label={safeText(ticket?.priority)} />
+          </div>
+        </div>
+
+        <div className="info-grid" style={{ marginTop: 12 }}>
+          <div className="mini-card">
+            <div className="ticket-info-label">Updated</div>
+            <div>{timeAgo(ticket?.updated_at || ticket?.created_at)}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Created</div>
+            <div>{formatTime(ticket?.created_at)}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Claimed By</div>
+            <div>{safeText(ticket?.claimed_by)}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Closed Reason</div>
+            <div>{safeText(ticket?.closed_reason)}</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="user-dashboard-grid">
-      <Section title="Support Categories" subtitle="What kind of help you can request">
-        {!rows.length ? (
-          <div className="empty-state">
-            No support categories are currently configured.
-          </div>
+      <Section
+        title="Active Tickets"
+        subtitle={`${activeTickets.length} active ticket${activeTickets.length === 1 ? "" : "s"}`}
+      >
+        {!activeTickets.length ? (
+          <div className="empty-state">You do not currently have an active ticket.</div>
         ) : (
-          <div className="space">
-            {rows.map((category) => (
-              <div key={category.id} className="ticket-row-card">
-                <div
-                  className="row"
-                  style={{
-                    justifyContent: "space-between",
-                    alignItems: "flex-start",
-                    gap: 12,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="profile-name" style={{ fontSize: 16 }}>
-                      {safeText(category?.name)}
-                    </div>
-                    <div className="muted" style={{ marginTop: 6, lineHeight: 1.5 }}>
-                      {safeText(category?.description, "No description provided.")}
-                    </div>
-                  </div>
-
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <StatusBadge label={safeText(category?.intake_type, "general")} />
-                    {category?.is_default ? (
-                      <StatusBadge label="Default" tone="ok" />
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+          <div className="space">{activeTickets.map(renderTicket)}</div>
         )}
+      </Section>
+
+      <Section
+        title="Closed Ticket History"
+        subtitle={`${closedTickets.length} closed ticket${closedTickets.length === 1 ? "" : "s"}`}
+      >
+        {!closedTickets.length ? (
+          <div className="empty-state">No closed ticket history found.</div>
+        ) : (
+          <div className="space">{closedTickets.map(renderTicket)}</div>
+        )}
+      </Section>
+
+      <Section
+        title="Deleted / Archived Ticket History"
+        subtitle={`${deletedTickets.length} deleted ticket${deletedTickets.length === 1 ? "" : "s"}`}
+        actions={
+          <button
+            type="button"
+            className="button ghost"
+            style={{ width: "auto", minWidth: 150 }}
+            onClick={onToggleDeletedHistory}
+          >
+            {showDeletedHistory ? "Hide Deleted" : "Show Deleted"}
+          </button>
+        }
+      >
+        {!showDeletedHistory ? (
+          <div className="empty-state">
+            Deleted ticket rows are hidden by default so your history stays cleaner.
+          </div>
+        ) : !deletedTickets.length ? (
+          <div className="empty-state">No deleted ticket history found.</div>
+        ) : (
+          <div className="space">{deletedTickets.map(renderTicket)}</div>
+        )}
+      </Section>
+    </div>
+  );
+}
+
+function CategoryCard({ category, highlighted, onUseThisCategory }) {
+  return (
+    <div className={`ticket-row-card ${highlighted ? "emphasis" : ""}`}>
+      <div
+        className="row"
+        style={{
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="profile-name" style={{ fontSize: 16 }}>
+            {safeText(category?.name)}
+          </div>
+          <div className="muted" style={{ marginTop: 6, lineHeight: 1.5 }}>
+            {safeText(category?.description, "No description provided.")}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <StatusBadge label={safeText(category?.intake_type, "general")} />
+          {category?.is_default ? <StatusBadge label="Default" tone="ok" /> : null}
+          {highlighted ? <StatusBadge label="Recommended" tone="warn" /> : null}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
+        <button
+          type="button"
+          className="button ghost"
+          style={{ width: "auto", minWidth: 160 }}
+          onClick={() => onUseThisCategory(category)}
+        >
+          {safeText(category?.button_label, "Use This Category")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function HelpTab({
+  categories,
+  openTicket,
+  onGoToTab,
+  recommendedCategorySlug,
+  onUseCategory,
+}) {
+  const rows = getVisibleCategories(categories);
+
+  return (
+    <div className="user-dashboard-grid">
+      <Section title="Support Categories" subtitle="Pick the category that best matches your issue">
+        <div className="space">
+          {rows.map((category) => {
+            const highlighted =
+              recommendedCategorySlug &&
+              String(category?.slug || "").trim().toLowerCase() ===
+                String(recommendedCategorySlug || "").trim().toLowerCase();
+
+            return (
+              <CategoryCard
+                key={category.id}
+                category={category}
+                highlighted={highlighted}
+                onUseThisCategory={onUseCategory}
+              />
+            );
+          })}
+        </div>
       </Section>
 
       <Section title="Best Next Step" subtitle="What you should do right now">
@@ -573,7 +730,7 @@ function HelpTab({ categories, openTicket, onGoToTab }) {
           <div className="muted" style={{ lineHeight: 1.55 }}>
             {openTicket
               ? "You already have an active ticket. Continue there so staff can help you faster and keep everything in one place."
-              : "Go to the server support channel and use the ticket panel to open the category that best matches your issue."}
+              : "Use the category above that best matches your issue. Verification users should choose the verification category first."}
           </div>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
@@ -603,6 +760,8 @@ function HelpTab({ categories, openTicket, onGoToTab }) {
 
 export default function UserDashboardClient({ initialData }) {
   const [activeTab, setActiveTab] = useState("home");
+  const [showDeletedHistory, setShowDeletedHistory] = useState(false);
+  const [notice, setNotice] = useState("");
 
   const viewer = initialData?.viewer || {};
   const member = initialData?.member || null;
@@ -617,6 +776,17 @@ export default function UserDashboardClient({ initialData }) {
     [member, verificationFlags]
   );
 
+  const actionPlan = useMemo(
+    () =>
+      getActionPlan({
+        member,
+        openTicket,
+        verificationFlags,
+        vcVerifySession,
+      }),
+    [member, openTicket, verificationFlags, vcVerifySession]
+  );
+
   function goToTab(tab) {
     if (USER_TABS.includes(tab)) {
       setActiveTab(tab);
@@ -626,6 +796,38 @@ export default function UserDashboardClient({ initialData }) {
         });
       }
     }
+  }
+
+  function showTempNotice(text) {
+    setNotice(text);
+    if (typeof window !== "undefined") {
+      window.clearTimeout(window.__userDashNoticeTimer);
+      window.__userDashNoticeTimer = window.setTimeout(() => {
+        setNotice("");
+      }, 2600);
+    }
+  }
+
+  function handleUseCategory(category) {
+    const slug = String(category?.slug || "").trim().toLowerCase();
+
+    if (slug === "verification") {
+      showTempNotice(
+        "Verification category selected. The next backend step is wiring a real in-dashboard ticket create action."
+      );
+      return;
+    }
+
+    showTempNotice(
+      `${safeText(category?.name, "Category")} selected. The UI is ready; the next backend step is wiring real ticket creation from the dashboard.`
+    );
+  }
+
+  function handleRequestVerification() {
+    goToTab("help");
+    showTempNotice(
+      "Verification ticket request selected. The dashboard now points the user to the correct category, but true in-dashboard ticket creation still needs the backend route."
+    );
   }
 
   return (
@@ -657,6 +859,12 @@ export default function UserDashboardClient({ initialData }) {
           </div>
         </div>
 
+        {notice ? (
+          <div className="info-banner" style={{ marginBottom: 16 }}>
+            {notice}
+          </div>
+        ) : null}
+
         <div className="desktop-tab-bar">
           {USER_TABS.map((tab) => (
             <button
@@ -679,11 +887,18 @@ export default function UserDashboardClient({ initialData }) {
             verificationFlags={verificationFlags}
             vcVerifySession={vcVerifySession}
             onGoToTab={goToTab}
+            onRequestVerification={handleRequestVerification}
           />
         </section>
 
         <section className={activeTab === "tickets" ? "user-tab active" : "user-tab"}>
-          <TicketsTab recentTickets={recentTickets} />
+          <TicketsTab
+            recentTickets={recentTickets}
+            showDeletedHistory={showDeletedHistory}
+            onToggleDeletedHistory={() =>
+              setShowDeletedHistory((prev) => !prev)
+            }
+          />
         </section>
 
         <section className={activeTab === "help" ? "user-tab active" : "user-tab"}>
@@ -691,6 +906,8 @@ export default function UserDashboardClient({ initialData }) {
             categories={categories}
             openTicket={openTicket}
             onGoToTab={goToTab}
+            recommendedCategorySlug={actionPlan?.suggestedCategorySlug}
+            onUseCategory={handleUseCategory}
           />
         </section>
       </main>
