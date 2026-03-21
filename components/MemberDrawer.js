@@ -1,17 +1,17 @@
-"use client"
+"use client";
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react";
 
 function buildMention(id) {
-  return id ? `<@${id}>` : ""
+  return id ? `<@${id}>` : "";
 }
 
 function formatTime(value) {
-  if (!value) return "—"
+  if (!value) return "—";
   try {
-    return new Date(value).toLocaleString()
+    return new Date(value).toLocaleString();
   } catch {
-    return "—"
+    return "—";
   }
 }
 
@@ -24,64 +24,64 @@ function getDisplayName(member) {
     member?.user_id ||
     member?.id ||
     "Unknown Member"
-  )
+  );
 }
 
 function getSourceMember(primary, fallback) {
-  return primary || fallback || null
+  return primary || fallback || null;
 }
 
 function getMemberId(member) {
-  return String(member?.user_id || member?.id || "").trim()
+  return String(member?.user_id || member?.id || "").trim();
 }
 
 function getRoleNames(member) {
   if (Array.isArray(member?.role_names) && member.role_names.length) {
-    return member.role_names.map((value) => String(value || "").trim()).filter(Boolean)
+    return member.role_names.map((value) => String(value || "").trim()).filter(Boolean);
   }
 
   if (Array.isArray(member?.roles) && member.roles.length) {
     return member.roles
       .map((role) => {
-        if (typeof role === "string") return role
-        if (role && typeof role === "object") return String(role.name || role.id || "").trim()
-        return ""
+        if (typeof role === "string") return role;
+        if (role && typeof role === "object") return String(role.name || role.id || "").trim();
+        return "";
       })
-      .filter(Boolean)
+      .filter(Boolean);
   }
 
-  return []
+  return [];
 }
 
 function getRoleIds(member) {
   if (Array.isArray(member?.role_ids) && member.role_ids.length) {
-    return member.role_ids.map((value) => String(value || "").trim()).filter(Boolean)
+    return member.role_ids.map((value) => String(value || "").trim()).filter(Boolean);
   }
 
   if (Array.isArray(member?.roles) && member.roles.length) {
     return member.roles
       .map((role) => {
-        if (role && typeof role === "object") return String(role.id || "").trim()
-        return ""
+        if (role && typeof role === "object") return String(role.id || "").trim();
+        return "";
       })
-      .filter(Boolean)
+      .filter(Boolean);
   }
 
-  return []
+  return [];
 }
 
 function parseDiscordErrorDetails(message) {
-  const raw = String(message || "")
-  const statusMatch = raw.match(/Discord API\s+(\d+)/i)
-  const status = statusMatch ? Number(statusMatch[1]) : null
+  const raw = String(message || "");
+  const statusMatch = raw.match(/Discord API\s+(\d+)/i);
+  const status = statusMatch ? Number(statusMatch[1]) : null;
 
-  let retryAfter = null
-  const jsonStart = raw.indexOf("{")
+  let retryAfter = null;
+  const jsonStart = raw.indexOf("{");
   if (jsonStart >= 0) {
     try {
-      const payload = JSON.parse(raw.slice(jsonStart))
+      const payload = JSON.parse(raw.slice(jsonStart));
       if (payload && Number.isFinite(Number(payload.retry_after))) {
-        retryAfter = Number(payload.retry_after)
+        retryAfter = Number(payload.retry_after);
       }
     } catch {
       // ignore JSON parse failure
@@ -93,19 +93,19 @@ function parseDiscordErrorDetails(message) {
     isRateLimited: status === 429 || /rate limit/i.test(raw),
     isMissingMember: status === 404 || /unknown member/i.test(raw),
     retryAfter,
-  }
+  };
 }
 
 function toneForVerification(member) {
-  if (member?.has_verified_role) return "low"
-  if (member?.has_unverified) return "medium"
-  return "open"
+  if (member?.has_verified_role) return "low";
+  if (member?.has_unverified) return "medium";
+  return "open";
 }
 
 function labelForVerification(member) {
-  if (member?.has_verified_role) return "Verified"
-  if (member?.has_unverified) return "Unverified"
-  return "Unknown Verification"
+  if (member?.has_verified_role) return "Verified";
+  if (member?.has_unverified) return "Unverified";
+  return "Unknown Verification";
 }
 
 function normalizeGuildRoles(rows) {
@@ -118,154 +118,176 @@ function normalizeGuildRoles(rows) {
           member_count: Number(role?.member_count || 0),
         }))
         .filter((role) => role.id && role.name)
-    : []
+    : [];
 }
 
 export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
-  const [message, setMessage] = useState("")
-  const [error, setError] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [syncing, setSyncing] = useState(false)
-  const [loadingLive, setLoadingLive] = useState(false)
-  const [loadingRoles, setLoadingRoles] = useState(false)
-  const [liveMember, setLiveMember] = useState(null)
-  const [guildRoles, setGuildRoles] = useState([])
-  const [selectedRoleId, setSelectedRoleId] = useState("")
-  const [modReason, setModReason] = useState("Dashboard moderation action")
-  const [timeoutMinutes, setTimeoutMinutes] = useState("10")
-  const [rateLimitNotice, setRateLimitNotice] = useState("")
-  const [memberMissingOnDiscord, setMemberMissingOnDiscord] = useState(false)
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [loadingLive, setLoadingLive] = useState(false);
+  const [loadingRoles, setLoadingRoles] = useState(false);
+  const [liveMember, setLiveMember] = useState(null);
+  const [guildRoles, setGuildRoles] = useState([]);
+  const [selectedRoleId, setSelectedRoleId] = useState("");
+  const [modReason, setModReason] = useState("Dashboard moderation action");
+  const [timeoutMinutes, setTimeoutMinutes] = useState("10");
+  const [rateLimitNotice, setRateLimitNotice] = useState("");
+  const [memberMissingOnDiscord, setMemberMissingOnDiscord] = useState(false);
 
   useEffect(() => {
-    setLiveMember(member || null)
-    setMessage("")
-    setError("")
-    setSelectedRoleId("")
-    setRateLimitNotice("")
-    setMemberMissingOnDiscord(Boolean(member?.discord_unavailable))
-  }, [member])
+    setLiveMember(member || null);
+    setMessage("");
+    setError("");
+    setSelectedRoleId("");
+    setRateLimitNotice("");
+    setMemberMissingOnDiscord(Boolean(member?.discord_unavailable));
+  }, [member]);
 
-  const sourceMember = getSourceMember(liveMember, member)
-  const memberId = getMemberId(sourceMember)
-  const displayName = getDisplayName(sourceMember)
-  const avatarUrl = sourceMember?.avatar_url || sourceMember?.avatar || null
-  const inGuild = sourceMember?.in_guild !== false
-  const roleNames = useMemo(() => getRoleNames(sourceMember), [sourceMember])
-  const roleIds = useMemo(() => getRoleIds(sourceMember), [sourceMember])
+  useEffect(() => {
+    if (!member) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    const previousTouchAction = document.body.style.touchAction;
+
+    document.body.style.overflow = "hidden";
+    document.body.style.touchAction = "none";
+
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        onClose?.();
+      }
+    }
+
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.touchAction = previousTouchAction;
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [member, onClose]);
+
+  const sourceMember = getSourceMember(liveMember, member);
+  const memberId = getMemberId(sourceMember);
+  const displayName = getDisplayName(sourceMember);
+  const avatarUrl = sourceMember?.avatar_url || sourceMember?.avatar || null;
+  const inGuild = sourceMember?.in_guild !== false;
+  const roleNames = useMemo(() => getRoleNames(sourceMember), [sourceMember]);
+  const roleIds = useMemo(() => getRoleIds(sourceMember), [sourceMember]);
 
   const assignableRoles = useMemo(() => {
-    const assignedIdSet = new Set(roleIds)
-    const assignedNameSet = new Set(roleNames.map((name) => name.toLowerCase()))
+    const assignedIdSet = new Set(roleIds);
+    const assignedNameSet = new Set(roleNames.map((name) => name.toLowerCase()));
 
     return normalizeGuildRoles(guildRoles)
       .filter((role) => role.name !== "@everyone")
       .filter((role) => !assignedIdSet.has(role.id) && !assignedNameSet.has(role.name.toLowerCase()))
-      .sort((a, b) => b.position - a.position)
-  }, [guildRoles, roleIds, roleNames])
+      .sort((a, b) => b.position - a.position);
+  }, [guildRoles, roleIds, roleNames]);
 
   const selectedRole = useMemo(
     () => assignableRoles.find((role) => role.id === selectedRoleId) || null,
     [assignableRoles, selectedRoleId]
-  )
+  );
 
   async function copyText(value, successText) {
     try {
-      await navigator.clipboard.writeText(String(value || ""))
-      setMessage(successText)
-      setError("")
+      await navigator.clipboard.writeText(String(value || ""));
+      setMessage(successText);
+      setError("");
     } catch {
-      setError("Failed to copy.")
-      setMessage("")
+      setError("Failed to copy.");
+      setMessage("");
     }
   }
 
   async function loadGuildRoleCatalog({ silent = false } = {}) {
-    if (!member) return []
+    if (!member) return [];
 
-    if (!silent) setLoadingRoles(true)
+    if (!silent) setLoadingRoles(true);
 
     try {
-      const res = await fetch("/api/dashboard/live", { cache: "no-store" })
-      const json = await res.json().catch(() => ({}))
+      const res = await fetch("/api/dashboard/live", { cache: "no-store" });
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(json?.error || "Failed to load role catalog.")
+        throw new Error(json?.error || "Failed to load role catalog.");
       }
 
-      const nextRoles = normalizeGuildRoles(json?.roles)
-      setGuildRoles(nextRoles)
-      return nextRoles
+      const nextRoles = normalizeGuildRoles(json?.roles);
+      setGuildRoles(nextRoles);
+      return nextRoles;
     } catch (err) {
       if (!silent) {
-        setError((prev) => prev || err?.message || "Failed to load role catalog.")
+        setError((prev) => prev || err?.message || "Failed to load role catalog.");
       }
-      return []
+      return [];
     } finally {
-      if (!silent) setLoadingRoles(false)
+      if (!silent) setLoadingRoles(false);
     }
   }
 
   async function refreshMemberDetails({ silent = false } = {}) {
-    if (!memberId) return null
+    if (!memberId) return null;
 
+    setLoadingLive(true);
     if (!silent) {
-      setLoadingLive(true)
-      setError("")
-      setMessage("")
-    } else {
-      setLoadingLive(true)
+      setError("");
+      setMessage("");
     }
 
     try {
       const res = await fetch(`/api/discord/member-details?user_id=${encodeURIComponent(memberId)}`, {
         cache: "no-store",
-      })
-      const json = await res.json().catch(() => ({}))
+      });
+      const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error(json?.error || `Failed to load member details (${res.status}).`)
+        throw new Error(json?.error || `Failed to load member details (${res.status}).`);
       }
 
-      const nextMember = json?.member || null
+      const nextMember = json?.member || null;
       if (nextMember) {
-        setLiveMember(nextMember)
-        setMemberMissingOnDiscord(Boolean(nextMember?.discord_unavailable))
-        setRateLimitNotice("")
+        setLiveMember(nextMember);
+        setMemberMissingOnDiscord(Boolean(nextMember?.discord_unavailable));
+        setRateLimitNotice("");
         if (typeof onMemberUpdated === "function") {
-          onMemberUpdated(nextMember)
+          onMemberUpdated(nextMember);
         }
       }
-      return nextMember
+      return nextMember;
     } catch (err) {
-      const details = parseDiscordErrorDetails(err?.message)
+      const details = parseDiscordErrorDetails(err?.message);
 
       if (details.isMissingMember) {
-        setMemberMissingOnDiscord(true)
-        setRateLimitNotice("")
+        setMemberMissingOnDiscord(true);
+        setRateLimitNotice("");
       } else if (details.isRateLimited) {
-        setMemberMissingOnDiscord(false)
-        const waitText = details.retryAfter ? ` Retry after about ${details.retryAfter.toFixed(1)}s.` : ""
-        setRateLimitNotice(`Discord rate limited the live refresh. Showing the last good member data instead.${waitText}`)
+        setMemberMissingOnDiscord(false);
+        const waitText = details.retryAfter ? ` Retry after about ${details.retryAfter.toFixed(1)}s.` : "";
+        setRateLimitNotice(`Discord rate limited the live refresh. Showing the last good member data instead.${waitText}`);
       } else if (!silent) {
-        setMemberMissingOnDiscord(Boolean(sourceMember?.discord_unavailable))
+        setMemberMissingOnDiscord(Boolean(sourceMember?.discord_unavailable));
       }
 
       if (!details.isRateLimited || !silent) {
-        setError(err?.message || "Failed to load live member roles.")
+        setError(err?.message || "Failed to load live member roles.");
       }
-      return null
+      return null;
     } finally {
-      setLoadingLive(false)
+      setLoadingLive(false);
     }
   }
 
   async function syncMemberNow({ silent = false, successText = "Member sync completed." } = {}) {
-    if (!memberId) return null
+    if (!memberId) return null;
 
-    setSyncing(true)
+    setSyncing(true);
     if (!silent) {
-      setBusy(true)
-      setError("")
-      setMessage("")
+      setBusy(true);
+      setError("");
+      setMessage("");
     }
 
     try {
@@ -276,73 +298,73 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
           user_id: memberId,
           reason: modReason.trim() || "Dashboard member sync",
         }),
-      })
-      const json = await res.json().catch(() => ({}))
+      });
+      const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error(json?.error || "Member sync failed.")
+        throw new Error(json?.error || "Member sync failed.");
       }
 
-      const nextMember = json?.member || null
+      const nextMember = json?.member || null;
       if (nextMember) {
-        setLiveMember(nextMember)
-        setMemberMissingOnDiscord(Boolean(nextMember?.discord_unavailable))
-        setRateLimitNotice("")
+        setLiveMember(nextMember);
+        setMemberMissingOnDiscord(Boolean(nextMember?.discord_unavailable));
+        setRateLimitNotice("");
         if (typeof onMemberUpdated === "function") {
-          onMemberUpdated(nextMember)
+          onMemberUpdated(nextMember);
         }
       }
 
       if (!silent) {
-        setMessage(successText)
+        setMessage(successText);
       }
 
-      return nextMember
+      return nextMember;
     } catch (err) {
-      const details = parseDiscordErrorDetails(err?.message)
+      const details = parseDiscordErrorDetails(err?.message);
       if (details.isRateLimited) {
-        const waitText = details.retryAfter ? ` Retry after about ${details.retryAfter.toFixed(1)}s.` : ""
-        setRateLimitNotice(`Discord rate limited the sync refresh.${waitText}`)
+        const waitText = details.retryAfter ? ` Retry after about ${details.retryAfter.toFixed(1)}s.` : "";
+        setRateLimitNotice(`Discord rate limited the sync refresh.${waitText}`);
       } else if (!silent) {
-        setError(err?.message || "Member sync failed.")
+        setError(err?.message || "Member sync failed.");
       }
-      return null
+      return null;
     } finally {
-      setSyncing(false)
-      if (!silent) setBusy(false)
+      setSyncing(false);
+      if (!silent) setBusy(false);
     }
   }
 
   async function triggerFullRoleSync() {
-    setBusy(true)
-    setError("")
-    setMessage("")
+    setBusy(true);
+    setError("");
+    setMessage("");
 
     try {
       const res = await fetch("/api/discord/role-sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-      })
-      const json = await res.json().catch(() => ({}))
+      });
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(json?.error || "Role sync failed.")
+        throw new Error(json?.error || "Role sync failed.");
       }
 
-      await syncMemberNow({ silent: true })
-      setMessage("Full role sync started and this member was refreshed.")
+      await syncMemberNow({ silent: true });
+      setMessage("Full role sync started and this member was refreshed.");
     } catch (err) {
-      setError(err?.message || "Role sync failed.")
+      setError(err?.message || "Role sync failed.");
     } finally {
-      setBusy(false)
+      setBusy(false);
     }
   }
 
   async function runModAction(action, extra = {}) {
-    if (!memberId) return
+    if (!memberId) return;
 
-    setBusy(true)
-    setError("")
-    setMessage("")
+    setBusy(true);
+    setError("");
+    setMessage("");
 
     try {
       const payload = {
@@ -352,85 +374,85 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
         reason: modReason.trim() || "Dashboard moderation action",
         minutes: Number(timeoutMinutes || 10),
         ...extra,
-      }
+      };
 
       const res = await fetch("/api/discord/mod-action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      })
-      const json = await res.json().catch(() => ({}))
+      });
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(json?.error || `${action} failed`)
+        throw new Error(json?.error || `${action} failed`);
       }
 
       if (json?.member) {
-        setLiveMember(json.member)
-        setMemberMissingOnDiscord(Boolean(json.member?.discord_unavailable))
-        setRateLimitNotice(json?.refresh_warning || "")
+        setLiveMember(json.member);
+        setMemberMissingOnDiscord(Boolean(json.member?.discord_unavailable));
+        setRateLimitNotice(json?.refresh_warning || "");
         if (typeof onMemberUpdated === "function") {
-          onMemberUpdated(json.member)
+          onMemberUpdated(json.member);
         }
       } else if (["add_role", "remove_role", "timeout", "kick", "ban"].includes(action)) {
-        await syncMemberNow({ silent: true })
+        await syncMemberNow({ silent: true });
       }
 
       if (action === "timeout") {
-        setMessage(`Timed out ${displayName} for ${json.timeout_minutes || payload.minutes} minute(s).`)
+        setMessage(`Timed out ${displayName} for ${json.timeout_minutes || payload.minutes} minute(s).`);
       } else if (action === "warn") {
-        setMessage(`Warn recorded for ${displayName}.`)
+        setMessage(`Warn recorded for ${displayName}.`);
       } else if (action === "kick") {
-        setMessage(`${displayName} was kicked.`)
+        setMessage(`${displayName} was kicked.`);
       } else if (action === "ban") {
-        setMessage(`${displayName} was banned.`)
+        setMessage(`${displayName} was banned.`);
       } else if (action === "add_role") {
-        setSelectedRoleId("")
-        setMessage(`Added ${selectedRole?.name || "role"} to ${displayName}.`)
+        setSelectedRoleId("");
+        setMessage(`Added ${selectedRole?.name || "role"} to ${displayName}.`);
       } else if (action === "remove_role") {
-        setMessage(`Removed ${extra.role_name || "role"} from ${displayName}.`)
+        setMessage(`Removed ${extra.role_name || "role"} from ${displayName}.`);
       }
 
-      await loadGuildRoleCatalog({ silent: true })
+      await loadGuildRoleCatalog({ silent: true });
     } catch (err) {
-      const details = parseDiscordErrorDetails(err?.message)
+      const details = parseDiscordErrorDetails(err?.message);
       if (details.isRateLimited) {
-        const waitText = details.retryAfter ? ` Retry after about ${details.retryAfter.toFixed(1)}s.` : ""
-        setRateLimitNotice(`Discord rate limited this action refresh.${waitText}`)
+        const waitText = details.retryAfter ? ` Retry after about ${details.retryAfter.toFixed(1)}s.` : "";
+        setRateLimitNotice(`Discord rate limited this action refresh.${waitText}`);
       }
-      setError(err?.message || "Moderation action failed.")
+      setError(err?.message || "Moderation action failed.");
     } finally {
-      setBusy(false)
+      setBusy(false);
     }
   }
 
   useEffect(() => {
-    let cancelled = false
+    let cancelled = false;
 
     async function boot() {
-      if (!member) return
+      if (!member) return;
       await Promise.all([
         refreshMemberDetails({ silent: true }).catch(() => null),
         loadGuildRoleCatalog({ silent: true }).catch(() => []),
-      ])
+      ]);
       if (!cancelled) {
-        setLoadingRoles(false)
+        setLoadingRoles(false);
       }
     }
 
-    setLoadingRoles(true)
-    boot()
+    setLoadingRoles(true);
+    boot();
 
     return () => {
-      cancelled = true
-    }
-  }, [member?.user_id, member?.id])
+      cancelled = true;
+    };
+  }, [member?.user_id, member?.id]);
 
-  if (!member) return null
+  if (!member) return null;
 
   return (
-    <div className="drawer-backdrop" onClick={onClose}>
+    <div className="member-drawer-backdrop" onClick={onClose}>
       <div
-        className="drawer member-drawer"
+        className="member-drawer-panel"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -438,7 +460,7 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
       >
         <div className="member-drawer-handle" />
 
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 18, gap: 12, flexWrap: "wrap" }}>
           <div style={{ minWidth: 0 }}>
             <h2 style={{ margin: 0 }}>Member Smoke Sheet</h2>
             <div className="muted" style={{ marginTop: 6 }}>
@@ -545,7 +567,7 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
           <div className="roles" style={{ marginBottom: 14 }}>
             {roleNames.length ? (
               roleNames.map((roleName, index) => {
-                const roleId = roleIds[index] || ""
+                const roleId = roleIds[index] || "";
                 return (
                   <button
                     key={`${roleId || roleName}-${index}`}
@@ -558,7 +580,7 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
                   >
                     {roleName}{roleId ? " ×" : ""}
                   </button>
-                )
+                );
               })
             ) : (
               <span className="muted">No roles found.</span>
@@ -666,6 +688,109 @@ export default function MemberDrawer({ member, onClose, onMemberUpdated }) {
           </div>
         </div>
       </div>
+
+      <style jsx global>{`
+        .member-drawer-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 2000;
+          background: rgba(6, 10, 18, 0.66);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 16px;
+        }
+
+        .member-drawer-panel {
+          width: min(980px, 100%);
+          max-height: min(92vh, 100%);
+          overflow-y: auto;
+          border-radius: 24px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          background: linear-gradient(180deg, rgba(19, 32, 49, 0.98), rgba(17, 26, 41, 0.98));
+          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+          color: var(--text-strong, #f8fafc);
+          padding: 16px;
+          overscroll-behavior: contain;
+        }
+
+        .member-drawer-handle {
+          width: 42px;
+          height: 5px;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.18);
+          margin: 0 auto 14px;
+        }
+
+        .member-drawer-badges {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 10px;
+        }
+
+        .member-drawer-avatar {
+          width: 52px;
+          height: 52px;
+          overflow: hidden;
+          flex-shrink: 0;
+        }
+
+        .member-detail-grid {
+          display: grid;
+          grid-template-columns: repeat(1, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .member-detail-item {
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          background: rgba(255, 255, 255, 0.02);
+          border-radius: 14px;
+          padding: 12px;
+          min-width: 0;
+          overflow-wrap: anywhere;
+          display: grid;
+          gap: 6px;
+        }
+
+        .member-detail-item.full {
+          grid-column: 1 / -1;
+        }
+
+        .member-action-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        @media (min-width: 768px) {
+          .member-detail-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .member-action-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+        }
+
+        @media (max-width: 640px) {
+          .member-drawer-backdrop {
+            padding: 10px;
+            align-items: flex-end;
+          }
+
+          .member-drawer-panel {
+            max-height: 90vh;
+            border-radius: 22px 22px 18px 18px;
+          }
+
+          .member-action-grid {
+            grid-template-columns: repeat(1, minmax(0, 1fr));
+          }
+        }
+      `}</style>
     </div>
-  )
+  );
 }
