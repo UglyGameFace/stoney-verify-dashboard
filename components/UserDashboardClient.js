@@ -1382,30 +1382,75 @@ export default function UserDashboardClient({ initialData }) {
           padding: 14px;
         }
 
+        .ticket-card-shell {
+          overflow: hidden;
+          transition:
+            border-color 0.16s ease,
+            background 0.16s ease,
+            box-shadow 0.16s ease;
+        }
+
+        .ticket-card-shell:hover {
+          border-color: rgba(96, 165, 250, 0.18);
+          background: rgba(96, 165, 250, 0.04);
+        }
+
         .ticket-card-shell.expanded {
           border-color: rgba(96, 165, 250, 0.22);
           background: rgba(96, 165, 250, 0.05);
+          box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.08) inset;
         }
 
         .ticket-card-button {
           width: 100%;
+          display: block;
           text-align: left;
           cursor: pointer;
+          background: transparent;
+          border: 0;
+          padding: 0;
+          margin: 0;
+          color: inherit;
+          font: inherit;
+          line-height: inherit;
+          appearance: none;
+          -webkit-appearance: none;
+          border-radius: 0;
+          box-shadow: none;
+          outline: none;
+          text-decoration: none;
           transition:
             transform 0.16s ease,
-            border-color 0.16s ease,
-            background 0.16s ease,
-            box-shadow 0.16s ease;
+            opacity 0.16s ease;
+        }
+
+        .ticket-card-button,
+        .ticket-card-button * {
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        .ticket-card-button:hover {
+          opacity: 0.98;
         }
 
         .ticket-card-button:active {
           transform: scale(0.995);
         }
 
+        .ticket-card-button:focus-visible {
+          border-radius: 12px;
+          box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.32);
+        }
+
         .action-grid {
           display: flex;
           gap: 10px;
           flex-wrap: wrap;
+        }
+
+        .action-grid :global(a.button),
+        .action-grid :global(button.button) {
+          text-decoration: none;
         }
 
         .ticket-row-card.emphasis {
