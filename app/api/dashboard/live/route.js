@@ -150,9 +150,7 @@ function ticketFreshnessScore(ticket) {
 }
 
 function canonicalTicketKey(ticket) {
-  const channelId = normalizeString(
-    ticket?.channel_id || ticket?.discord_thread_id
-  );
+  const channelId = normalizeString(ticket?.channel_id || ticket?.discord_thread_id);
   if (channelId) return `channel:${channelId}`;
 
   const userId = normalizeString(ticket?.user_id || ticket?.owner_id);
@@ -315,15 +313,9 @@ function buildMemberIdentityMaps(guildMembers) {
       member?.display_name,
       member?.nickname,
       member?.username,
-      ...(Array.isArray(member?.previous_usernames)
-        ? member.previous_usernames
-        : []),
-      ...(Array.isArray(member?.previous_display_names)
-        ? member.previous_display_names
-        : []),
-      ...(Array.isArray(member?.previous_nicknames)
-        ? member.previous_nicknames
-        : []),
+      ...(Array.isArray(member?.previous_usernames) ? member.previous_usernames : []),
+      ...(Array.isArray(member?.previous_display_names) ? member.previous_display_names : []),
+      ...(Array.isArray(member?.previous_nicknames) ? member.previous_nicknames : []),
     ]
       .map((v) => normalizeString(v))
       .filter(Boolean);
@@ -373,11 +365,7 @@ function resolveStaffIdentity(value, memberMaps) {
   };
 }
 
-function deriveMetricsFromTickets(
-  tickets = [],
-  existingMetrics = [],
-  guildMembers = []
-) {
+function deriveMetricsFromTickets(tickets = [], existingMetrics = [], guildMembers = []) {
   const humanGuildMembers = safeArray(guildMembers).filter(
     (member) => !isBotLikeMember(member)
   );
@@ -456,9 +444,7 @@ function deriveMetricsFromTickets(
     if (!preferredMember && isLikelyBotName(row?.staff_name || row?.staff_id)) continue;
 
     byStaff.set(identityKey, {
-      staff_id:
-        preferredMember?.user_id ||
-        (looksLikeDiscordId(identityKey) ? identityKey : ""),
+      staff_id: preferredMember?.user_id || (looksLikeDiscordId(identityKey) ? identityKey : ""),
       staff_name: pickBestStaffDisplayName(
         [
           row?.staff_name,
@@ -534,8 +520,7 @@ function deriveMetricsFromTickets(
 
     if (!row) continue;
 
-    const updatedAt =
-      ticket?.updated_at || ticket?.closed_at || ticket?.created_at || null;
+    const updatedAt = ticket?.updated_at || ticket?.closed_at || ticket?.created_at || null;
 
     if (
       updatedAt &&
@@ -572,10 +557,7 @@ function deriveMetricsFromTickets(
         ticket?.closed_reason || ticket?.reason || ticket?.mod_suggestion || ""
       ).toLowerCase();
 
-      const denied =
-        /\b(deny|denied|reject|rejected|decline|declined|failed)\b/.test(
-          reasonText
-        );
+      const denied = /\b(deny|denied|reject|rejected|decline|declined|failed)\b/.test(reasonText);
 
       if (category.includes("verification")) {
         if (denied) {
@@ -591,12 +573,10 @@ function deriveMetricsFromTickets(
     .filter((row) => row.staff_id || row.staff_name)
     .filter((row) => !isLikelyBotName(row?.staff_name || row?.staff_id))
     .sort((a, b) => {
-      const handledDiff =
-        Number(b?.tickets_handled || 0) - Number(a?.tickets_handled || 0);
+      const handledDiff = Number(b?.tickets_handled || 0) - Number(a?.tickets_handled || 0);
       if (handledDiff !== 0) return handledDiff;
 
-      const approvalsDiff =
-        Number(b?.approvals || 0) - Number(a?.approvals || 0);
+      const approvalsDiff = Number(b?.approvals || 0) - Number(a?.approvals || 0);
       if (approvalsDiff !== 0) return approvalsDiff;
 
       return String(a?.staff_name || a?.staff_id || "").localeCompare(
@@ -621,10 +601,7 @@ function mergeJoinWithMember(joinRow, memberRow) {
     user_id: joinRow?.user_id || memberRow?.user_id || "",
     username: memberRow?.username || joinRow?.username || "",
     display_name:
-      memberRow?.display_name ||
-      joinRow?.display_name ||
-      joinRow?.username ||
-      "",
+      memberRow?.display_name || joinRow?.display_name || joinRow?.username || "",
     nickname: memberRow?.nickname || "",
     avatar_url: memberRow?.avatar_url || null,
     in_guild: memberRow?.in_guild !== false,
@@ -696,15 +673,9 @@ function mapGuildMember(row) {
     last_seen_at: row?.last_seen_at || null,
     left_at: row?.left_at || null,
     rejoined_at: row?.rejoined_at || null,
-    previous_usernames: Array.isArray(row?.previous_usernames)
-      ? row.previous_usernames
-      : [],
-    previous_display_names: Array.isArray(row?.previous_display_names)
-      ? row.previous_display_names
-      : [],
-    previous_nicknames: Array.isArray(row?.previous_nicknames)
-      ? row.previous_nicknames
-      : [],
+    previous_usernames: Array.isArray(row?.previous_usernames) ? row.previous_usernames : [],
+    previous_display_names: Array.isArray(row?.previous_display_names) ? row.previous_display_names : [],
+    previous_nicknames: Array.isArray(row?.previous_nicknames) ? row.previous_nicknames : [],
   };
 }
 
@@ -714,9 +685,7 @@ function computeRoleMemberCount(role, members) {
 
   return members.filter((member) => {
     const ids = safeArray(member?.role_ids).map((v) => normalizeString(v));
-    const names = safeArray(member?.role_names).map((v) =>
-      normalizeString(v).toLowerCase()
-    );
+    const names = safeArray(member?.role_names).map((v) => normalizeString(v).toLowerCase());
 
     return (
       (roleId && ids.includes(roleId)) ||
@@ -901,6 +870,114 @@ function mapRaid(row) {
   };
 }
 
+function buildIntelligence({ counts, memberCounts, fraud, guildMembers }) {
+  const openTickets = Number(counts?.openTickets || 0);
+  const warnsToday = Number(counts?.warnsToday || 0);
+  const raidAlerts = Number(counts?.raidAlerts || 0);
+  const fraudFlags = Number(counts?.fraudFlags || 0);
+  const pendingVerification = Number(memberCounts?.pendingVerification || 0);
+  const verified = Number(memberCounts?.verified || 0);
+  const active = Number(memberCounts?.active || 0);
+
+  let serverHealth = "Stable";
+  if (fraudFlags >= 4 || raidAlerts >= 2 || openTickets >= 14) {
+    serverHealth = "Elevated";
+  }
+  if (fraudFlags >= 8 || raidAlerts >= 4 || openTickets >= 24) {
+    serverHealth = "Critical";
+  }
+
+  let raidRisk = "Low";
+  let raidReason = "No recent raid alert threshold was crossed.";
+  if (raidAlerts >= 1) {
+    raidRisk = "Moderate";
+    raidReason = `${raidAlerts} recent raid alert(s) were recorded in the last 24 hours.`;
+  }
+  if (raidAlerts >= 3) {
+    raidRisk = "High";
+    raidReason = `${raidAlerts} raid alerts were recorded recently and need immediate review.`;
+  }
+
+  let fraudRisk = "Low";
+  let fraudReason = "No active fraud flags are currently driving the score.";
+  if (fraudFlags >= 1 || pendingVerification >= 12) {
+    fraudRisk = "Moderate";
+    fraudReason =
+      fraudFlags >= 1
+        ? `${fraudFlags} active fraud flag(s) exist and should be reviewed.`
+        : `Verification backlog is elevated at ${pendingVerification} pending, which raises fraud/manual review pressure.`;
+  }
+  if (fraudFlags >= 5) {
+    fraudRisk = "High";
+    fraudReason = `${fraudFlags} active fraud flag(s) are currently unresolved.`;
+  }
+
+  let ticketPressure = "Low";
+  let ticketReason = "Ticket load is within normal range.";
+  if (openTickets >= 6) {
+    ticketPressure = "Moderate";
+    ticketReason = `${openTickets} active tickets are open or claimed.`;
+  }
+  if (openTickets >= 14) {
+    ticketPressure = "High";
+    ticketReason = `${openTickets} active tickets are creating heavy staff load.`;
+  }
+
+  let verificationPressure = "Low";
+  let verificationReason = "Verification queue is under control.";
+  if (pendingVerification >= 8) {
+    verificationPressure = "Moderate";
+    verificationReason = `${pendingVerification} members are currently pending verification after strict filtering.`;
+  }
+  if (pendingVerification >= 16) {
+    verificationPressure = "High";
+    verificationReason = `${pendingVerification} members are pending verification and the queue likely needs direct staff cleanup.`;
+  }
+
+  const verifiedRate = active > 0 ? Math.round((verified / active) * 100) : 0;
+
+  const topFraudMembers = safeArray(fraud)
+    .slice(0, 5)
+    .map((row) => ({
+      user_id: row?.user_id || "",
+      display_name: row?.display_name || row?.username || row?.user_id || "Unknown User",
+      score: Number(row?.score || 0),
+      reasons: Array.isArray(row?.reasons) ? row.reasons : [],
+    }));
+
+  const topConflictMembers = safeArray(guildMembers)
+    .filter((member) => String(member?.role_state || "").includes("conflict"))
+    .slice(0, 5)
+    .map((member) => ({
+      user_id: member?.user_id || "",
+      display_name:
+        member?.display_name || member?.nickname || member?.username || member?.user_id || "Unknown User",
+      role_state: member?.role_state || "unknown",
+      role_state_reason: member?.role_state_reason || "",
+    }));
+
+  return {
+    serverHealth,
+    raidRisk,
+    fraudRisk,
+    ticketPressure,
+    verificationPressure,
+    verifiedRate,
+    reasons: {
+      serverHealth:
+        serverHealth === "Stable"
+          ? "No major threshold is currently tripping the health score."
+          : `Health is elevated by ticket load, fraud signals, or raid activity.`,
+      raidRiskReason: raidReason,
+      fraudRiskReason: fraudReason,
+      ticketPressureReason: ticketReason,
+      verificationPressureReason: verificationReason,
+    },
+    topFraudMembers,
+    topConflictMembers,
+  };
+}
+
 export async function GET() {
   try {
     await requireStaffSessionForRoute();
@@ -910,10 +987,7 @@ export async function GET() {
 
     if (debugEnabled()) {
       console.log("[dashboard/live] env.guildId =", guildId);
-      console.log(
-        "[dashboard/live] DISCORD_GUILD_ID =",
-        process.env.DISCORD_GUILD_ID || ""
-      );
+      console.log("[dashboard/live] DISCORD_GUILD_ID =", process.env.DISCORD_GUILD_ID || "");
       console.log("[dashboard/live] GUILD_ID =", process.env.GUILD_ID || "");
     }
 
@@ -1042,7 +1116,8 @@ export async function GET() {
         .from("guild_members")
         .select("*", { count: "exact", head: true })
         .eq("guild_id", guildId)
-        .eq("in_guild", true),
+        .eq("in_guild", true)
+        .eq("is_bot", false),
 
       supabase
         .from("guild_members")
@@ -1055,6 +1130,9 @@ export async function GET() {
         .select("*", { count: "exact", head: true })
         .eq("guild_id", guildId)
         .eq("in_guild", true)
+        .eq("is_bot", false)
+        .eq("has_staff_role", false)
+        .eq("has_verified_role", false)
         .eq("has_unverified", true),
 
       supabase
@@ -1062,6 +1140,7 @@ export async function GET() {
         .select("*", { count: "exact", head: true })
         .eq("guild_id", guildId)
         .eq("in_guild", true)
+        .eq("is_bot", false)
         .eq("has_verified_role", true),
 
       supabase
@@ -1069,6 +1148,7 @@ export async function GET() {
         .select("*", { count: "exact", head: true })
         .eq("guild_id", guildId)
         .eq("in_guild", true)
+        .eq("is_bot", false)
         .eq("has_staff_role", true),
 
       supabase
@@ -1143,12 +1223,8 @@ export async function GET() {
     const staffMessages = safeArray(staffMessagesRes.data);
     const categories = categoryRows;
     const memberJoins = memberJoinsRes.data || [];
-    const recentActiveMembers = safeArray(recentActiveMembersRes.data).map(
-      mapGuildMember
-    );
-    const recentFormerMembers = safeArray(recentFormerMembersRes.data).map(
-      mapGuildMember
-    );
+    const recentActiveMembers = safeArray(recentActiveMembersRes.data).map(mapGuildMember);
+    const recentFormerMembers = safeArray(recentFormerMembersRes.data).map(mapGuildMember);
     const guildMembers = safeArray(allGuildMembersRes.data).map(mapGuildMember);
 
     const activeTickets = canonicalTickets.filter((ticket) => {
@@ -1162,12 +1238,7 @@ export async function GET() {
         isClosedLikeStatus(ticket?.status) || shouldHideStaleOpenTicket(ticket)
     );
 
-    const events = buildTimeline(
-      auditLogs,
-      auditEvents,
-      staffMessages,
-      guildMembers
-    );
+    const events = buildTimeline(auditLogs, auditEvents, staffMessages, guildMembers);
 
     const roles = safeArray(rolesRes.data).map((role) => ({
       ...role,
@@ -1177,30 +1248,20 @@ export async function GET() {
       ),
     }));
 
-    const warns = safeArray(warnsRowsRes.data).map((row) =>
-      mapWarn(row, guildMembers)
-    );
-
+    const warns = safeArray(warnsRowsRes.data).map((row) => mapWarn(row, guildMembers));
     const raids = safeArray(raidsRowsRes.data).map(mapRaid);
-
-    const fraud = safeArray(fraudRowsRes.data).map((row) =>
-      mapFraud(row, guildMembers)
-    );
+    const fraud = safeArray(fraudRowsRes.data).map((row) => mapFraud(row, guildMembers));
 
     const joinUserIds = [
       ...new Set(
-        memberJoins
-          .map((row) => String(row?.user_id || "").trim())
-          .filter(Boolean)
+        memberJoins.map((row) => String(row?.user_id || "").trim()).filter(Boolean)
       ),
     ];
 
     let recentJoins = [];
 
     if (joinUserIds.length) {
-      const memberMap = new Map(
-        guildMembers.map((row) => [String(row.user_id), row])
-      );
+      const memberMap = new Map(guildMembers.map((row) => [String(row.user_id), row]));
 
       recentJoins = memberJoins
         .map((joinRow) =>
@@ -1231,12 +1292,33 @@ export async function GET() {
     const openTicketsCount = activeTickets.length;
     const closedTicketsCount = closedTickets.length;
 
+    const memberCounts = {
+      tracked: (activeMembersCountRes.count || 0) + (formerMembersCountRes.count || 0),
+      active: activeMembersCountRes.count || 0,
+      former: formerMembersCountRes.count || 0,
+      pendingVerification: pendingVerificationCountRes.count || 0,
+      verified: verifiedMembersCountRes.count || 0,
+      staff: staffMembersCountRes.count || 0,
+    };
+
+    const counts = {
+      openTickets: openTicketsCount,
+      closedTickets: closedTicketsCount,
+      warnsToday: warnsTodayRes.count || 0,
+      raidAlerts: raidAlertsRes.count || 0,
+      fraudFlags: fraudFlagsRes.count || 0,
+    };
+
+    const intelligence = buildIntelligence({
+      counts,
+      memberCounts,
+      fraud,
+      guildMembers,
+    });
+
     if (debugEnabled()) {
       console.log("[dashboard/live] raw tickets found =", rawTickets.length);
-      console.log(
-        "[dashboard/live] canonical tickets found =",
-        canonicalTickets.length
-      );
+      console.log("[dashboard/live] canonical tickets found =", canonicalTickets.length);
       console.log("[dashboard/live] active tickets found =", activeTickets.length);
       console.log("[dashboard/live] closed tickets found =", closedTickets.length);
       console.log("[dashboard/live] metrics found =", metrics.length);
@@ -1247,39 +1329,8 @@ export async function GET() {
       console.log("[dashboard/live] warns found =", warns.length);
       console.log("[dashboard/live] raids found =", raids.length);
       console.log("[dashboard/live] fraud found =", fraud.length);
-      console.log("[dashboard/live] memberJoins found =", memberJoins.length);
-      console.log("[dashboard/live] recentJoins hydrated =", recentJoins.length);
-      console.log(
-        "[dashboard/live] recentActiveMembers found =",
-        recentActiveMembers.length
-      );
-      console.log(
-        "[dashboard/live] recentFormerMembers found =",
-        recentFormerMembers.length
-      );
       console.log("[dashboard/live] guildMembers found =", guildMembers.length);
-      console.log("[dashboard/live] roles found =", roles.length);
-      console.log("[dashboard/live] categories found =", categories.length);
-      console.log(
-        "[dashboard/live] activeMembersCount =",
-        activeMembersCountRes.count || 0
-      );
-      console.log(
-        "[dashboard/live] formerMembersCount =",
-        formerMembersCountRes.count || 0
-      );
-      console.log(
-        "[dashboard/live] pendingVerificationCount =",
-        pendingVerificationCountRes.count || 0
-      );
-      console.log(
-        "[dashboard/live] verifiedMembersCount =",
-        verifiedMembersCountRes.count || 0
-      );
-      console.log(
-        "[dashboard/live] staffMembersCount =",
-        staffMembersCountRes.count || 0
-      );
+      console.log("[dashboard/live] pendingVerificationCount =", pendingVerificationCountRes.count || 0);
     }
 
     const payload = {
@@ -1300,23 +1351,9 @@ export async function GET() {
       guildMembers,
       members: guildMembers,
       memberRows,
-      memberCounts: {
-        tracked:
-          (activeMembersCountRes.count || 0) +
-          (formerMembersCountRes.count || 0),
-        active: activeMembersCountRes.count || 0,
-        former: formerMembersCountRes.count || 0,
-        pendingVerification: pendingVerificationCountRes.count || 0,
-        verified: verifiedMembersCountRes.count || 0,
-        staff: staffMembersCountRes.count || 0,
-      },
-      counts: {
-        openTickets: openTicketsCount,
-        closedTickets: closedTicketsCount,
-        warnsToday: warnsTodayRes.count || 0,
-        raidAlerts: raidAlertsRes.count || 0,
-        fraudFlags: fraudFlagsRes.count || 0,
-      },
+      memberCounts,
+      counts,
+      intelligence,
       debug: debugEnabled()
         ? {
             guildId,
@@ -1333,16 +1370,7 @@ export async function GET() {
             raidsCount: raids.length,
             fraudCount: fraud.length,
             staffMessagesCount: staffMessages.length,
-            memberCounts: {
-              tracked:
-                (activeMembersCountRes.count || 0) +
-                (formerMembersCountRes.count || 0),
-              active: activeMembersCountRes.count || 0,
-              former: formerMembersCountRes.count || 0,
-              pendingVerification: pendingVerificationCountRes.count || 0,
-              verified: verifiedMembersCountRes.count || 0,
-              staff: staffMembersCountRes.count || 0,
-            },
+            memberCounts,
             recentJoinsCount: recentJoins.length,
             memberJoinsCount: memberJoins.length,
           }
