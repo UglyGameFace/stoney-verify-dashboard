@@ -573,11 +573,19 @@ export default function DashboardClient({
 
   const {
     preferences,
+    profiles,
+    activeProfileId,
+    lastUsedProfileId,
     setThemeValue,
     setDensity,
     toggleSectionVisibility,
     moveSection,
     resetPreferences,
+    saveProfile,
+    saveActiveProfile,
+    loadProfile,
+    renameProfile,
+    deleteProfile,
   } = useDashboardPreferences();
 
   const currentStaffId = useMemo(
@@ -1401,6 +1409,7 @@ export default function DashboardClient({
           handlePreviewPurge={handlePreviewPurge}
           handlePurgeStale={handlePurgeStale}
           isMaintaining={isMaintaining}
+          density={density}
         />
 
         <section
@@ -1620,11 +1629,19 @@ export default function DashboardClient({
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         preferences={preferences}
+        profiles={profiles}
+        activeProfileId={activeProfileId}
+        lastUsedProfileId={lastUsedProfileId}
         setThemeValue={setThemeValue}
         setDensity={setDensity}
         toggleSectionVisibility={toggleSectionVisibility}
         moveSection={moveSection}
         resetPreferences={resetPreferences}
+        saveProfile={saveProfile}
+        saveActiveProfile={saveActiveProfile}
+        loadProfile={loadProfile}
+        renameProfile={renameProfile}
+        deleteProfile={deleteProfile}
       />
 
       <style jsx>{`
