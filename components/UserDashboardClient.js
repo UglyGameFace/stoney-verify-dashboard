@@ -47,7 +47,7 @@ function timeAgo(value) {
 }
 
 function getVerificationState(member, flags = []) {
-  if (!member) return { label: "Not synced yet", tone: "warn" };
+  if (!member) return { label: "Not Synced Yet", tone: "warn" };
   if (member?.has_staff_role) return { label: "Staff", tone: "ok" };
   if (member?.has_verified_role) return { label: "Verified", tone: "ok" };
   if (member?.has_unverified) return { label: "Pending Verification", tone: "warn" };
@@ -60,7 +60,57 @@ function getVerificationState(member, flags = []) {
 function getRoleSummary(member) {
   if (!member) return [];
   const names = Array.isArray(member?.role_names) ? member.role_names : [];
-  return names.filter(Boolean).slice(0, 8);
+  return names.filter(Boolean).slice(0, 10);
+}
+
+function getNextStep({ member, openTicket, verificationFlags, vcVerifySession }) {
+  const hasFlags = safeArray(verificationFlags).some((f) => Boolean(f?.flagged));
+
+  if (openTicket) {
+    return {
+      title: "Continue in your open ticket",
+      body: "You already have an active support ticket. Use that one so staff can help you faster without splitting your case.",
+      tone: "ok",
+    };
+  }
+
+  if (member?.has_verified_role) {
+    return {
+      title: "You look good",
+      body: "Your verified role is present. If something still looks wrong, open a support ticket under the category that matches your issue.",
+      tone: "ok",
+    };
+  }
+
+  if (vcVerifySession && String(vcVerifySession?.status || "").toUpperCase() === "PENDING") {
+    return {
+      title: "Finish your VC verify flow",
+      body: "You have a pending VC verify session. Follow the ticket or voice verification instructions to complete access.",
+      tone: "warn",
+    };
+  }
+
+  if (member?.has_unverified) {
+    return {
+      title: "Open a verification ticket",
+      body: "Your account still looks unverified. Open the verification support flow in Discord so staff can review and update your access.",
+      tone: "warn",
+    };
+  }
+
+  if (hasFlags) {
+    return {
+      title: "Request a review",
+      body: "Your account has recent verification flags or conflicting state. Open a support ticket so staff can manually review it.",
+      tone: "danger",
+    };
+  }
+
+  return {
+    title: "Open support if needed",
+    body: "If you are missing access or something looks wrong, open a support ticket in Discord and choose the category that matches your issue.",
+    tone: "warn",
+  };
 }
 
 function StatusBadge({ label, tone = "default" }) {
@@ -95,18 +145,51 @@ function Section({ title, subtitle, children, actions = null }) {
   );
 }
 
-function HomeTab({ viewer, member, openTicket, verificationFlags, vcVerifySession }) {
-  const verification = getVerificationState(member, verificationFlags);
+function SummaryTiles({ member, openTicket, verificationFlags }) {
   const roles = getRoleSummary(member);
   const flagCount = safeArray(verificationFlags).length;
 
   return (
+    <div className="summary-grid">
+      <div className="summary-tile">
+        <div className="ticket-info-label">Verification</div>
+        <div className="summary-value">
+          {member?.has_verified_role ? "Verified" : member?.has_unverified ? "Pending" : "Unknown"}
+        </div>
+      </div>
+
+      <div className="summary-tile">
+        <div className="ticket-info-label">Open Ticket</div>
+        <div className="summary-value">{openTicket ? "Yes" : "No"}</div>
+      </div>
+
+      <div className="summary-tile">
+        <div className="ticket-info-label">Tracked Roles</div>
+        <div className="summary-value">{roles.length}</div>
+      </div>
+
+      <div className="summary-tile">
+        <div className="ticket-info-label">Recent Flags</div>
+        <div className="summary-value">{flagCount}</div>
+      </div>
+    </div>
+  );
+}
+
+function HomeTab({ viewer, member, openTicket, verificationFlags, vcVerifySession }) {
+  const verification = getVerificationState(member, verificationFlags);
+  const roles = getRoleSummary(member);
+  const nextStep = getNextStep({ member, openTicket, verificationFlags, vcVerifySession });
+
+  return (
     <div className="user-dashboard-grid">
       <Section title="My Account" subtitle="Your server profile and current access state">
-        <div className="profile-card">
-          <div>
-            <div className="profile-name">{safeText(member?.display_name || viewer?.username, "Member")}</div>
-            <div className="muted" style={{ marginTop: 6 }}>
+        <div className="hero-card">
+          <div style={{ minWidth: 0 }}>
+            <div className="profile-name">
+              {safeText(member?.display_name || viewer?.username, "Member")}
+            </div>
+            <div className="muted" style={{ marginTop: 6, lineHeight: 1.5 }}>
               Discord ID: {safeText(viewer?.discord_id)}
             </div>
           </div>
@@ -118,6 +201,12 @@ function HomeTab({ viewer, member, openTicket, verificationFlags, vcVerifySessio
             ) : null}
           </div>
         </div>
+
+        <SummaryTiles
+          member={member}
+          openTicket={openTicket}
+          verificationFlags={verificationFlags}
+        />
 
         <div className="info-grid" style={{ marginTop: 14 }}>
           <div className="mini-card">
@@ -157,87 +246,75 @@ function HomeTab({ viewer, member, openTicket, verificationFlags, vcVerifySessio
         ) : null}
       </Section>
 
-      <Section title="Verification Status" subtitle="What your current status means">
-        <div className="space">
-          <div className={`status-panel ${verification.tone}`}>
-            <div className="status-title">{verification.label}</div>
-            <div className="muted" style={{ lineHeight: 1.5 }}>
-              {member?.has_verified_role
-                ? "Your verified role is present and your account looks healthy."
-                : member?.has_unverified
-                  ? "Your account is still pending verification. Use your open ticket or support flow if you need help."
-                  : flagCount
-                    ? "Your account has recent verification flags or needs additional review."
-                    : "Your account has not fully synced into the member tracker yet."}
+      <Section title="What To Do Next" subtitle="The best next step based on your current status">
+        <div className={`status-panel ${nextStep.tone}`}>
+          <div className="status-title">{nextStep.title}</div>
+          <div className="muted" style={{ lineHeight: 1.55 }}>
+            {nextStep.body}
+          </div>
+        </div>
+
+        {vcVerifySession ? (
+          <div className="mini-card" style={{ marginTop: 14 }}>
+            <div className="ticket-info-label">VC Verify Session</div>
+            <div style={{ marginTop: 8 }}>
+              Status: {safeText(vcVerifySession?.status)}
+            </div>
+            <div className="muted" style={{ marginTop: 6 }}>
+              Created: {formatTime(vcVerifySession?.created_at)}
             </div>
           </div>
-
-          {flagCount ? (
-            <div className="mini-card">
-              <div className="ticket-info-label">Recent Verification Flags</div>
-              <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
-                {verificationFlags.slice(0, 3).map((flag) => (
-                  <div key={flag.id} className="muted" style={{ lineHeight: 1.45 }}>
-                    Score {safeText(flag?.score, "0")} •{" "}
-                    {Array.isArray(flag?.reasons) && flag.reasons.length
-                      ? flag.reasons.join(" • ")
-                      : "No specific reasons saved"}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          {vcVerifySession ? (
-            <div className="mini-card">
-              <div className="ticket-info-label">VC Verify Session</div>
-              <div style={{ marginTop: 8 }}>
-                Status: {safeText(vcVerifySession?.status)}
-              </div>
-              <div className="muted" style={{ marginTop: 6 }}>
-                Created: {formatTime(vcVerifySession?.created_at)}
-              </div>
-            </div>
-          ) : null}
-        </div>
+        ) : null}
       </Section>
 
       <Section title="My Current Ticket" subtitle="Your most recent active support ticket">
         {openTicket ? (
           <div className="space">
-            <div className="profile-card">
-              <div>
-                <div className="profile-name">{safeText(openTicket?.title, "Open Ticket")}</div>
-                <div className="muted" style={{ marginTop: 6 }}>
-                  Updated {timeAgo(openTicket?.updated_at || openTicket?.created_at)}
+            <div className="ticket-row-card emphasis">
+              <div
+                className="row"
+                style={{
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  gap: 12,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="profile-name" style={{ fontSize: 18 }}>
+                    {safeText(openTicket?.title, "Open Ticket")}
+                  </div>
+                  <div className="muted" style={{ marginTop: 6 }}>
+                    Updated {timeAgo(openTicket?.updated_at || openTicket?.created_at)}
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <StatusBadge label={safeText(openTicket?.status)} tone="warn" />
+                  <StatusBadge label={safeText(openTicket?.priority)} />
                 </div>
               </div>
 
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <StatusBadge label={safeText(openTicket?.status)} tone="warn" />
-                <StatusBadge label={safeText(openTicket?.priority)} />
-              </div>
-            </div>
+              <div className="info-grid" style={{ marginTop: 12 }}>
+                <div className="mini-card">
+                  <div className="ticket-info-label">Category</div>
+                  <div>{safeText(openTicket?.matched_category_name || openTicket?.category)}</div>
+                </div>
 
-            <div className="info-grid">
-              <div className="mini-card">
-                <div className="ticket-info-label">Category</div>
-                <div>{safeText(openTicket?.matched_category_name || openTicket?.category)}</div>
-              </div>
+                <div className="mini-card">
+                  <div className="ticket-info-label">Channel</div>
+                  <div>{safeText(openTicket?.channel_name || openTicket?.channel_id)}</div>
+                </div>
 
-              <div className="mini-card">
-                <div className="ticket-info-label">Channel</div>
-                <div>{safeText(openTicket?.channel_name || openTicket?.channel_id)}</div>
-              </div>
+                <div className="mini-card">
+                  <div className="ticket-info-label">Claimed By</div>
+                  <div>{safeText(openTicket?.claimed_by)}</div>
+                </div>
 
-              <div className="mini-card">
-                <div className="ticket-info-label">Claimed By</div>
-                <div>{safeText(openTicket?.claimed_by)}</div>
-              </div>
-
-              <div className="mini-card">
-                <div className="ticket-info-label">Created</div>
-                <div>{formatTime(openTicket?.created_at)}</div>
+                <div className="mini-card">
+                  <div className="ticket-info-label">Created</div>
+                  <div>{formatTime(openTicket?.created_at)}</div>
+                </div>
               </div>
             </div>
           </div>
@@ -364,15 +441,15 @@ function HelpTab({ categories, openTicket }) {
         )}
       </Section>
 
-      <Section title="Next Step" subtitle="What to do from here">
+      <Section title="Best Next Step" subtitle="What you should do right now">
         <div className="status-panel ok">
           <div className="status-title">
             {openTicket ? "Use your current ticket" : "Open a support ticket in Discord"}
           </div>
-          <div className="muted" style={{ lineHeight: 1.5 }}>
+          <div className="muted" style={{ lineHeight: 1.55 }}>
             {openTicket
-              ? "You already have an active ticket. Continue there so staff can help you faster."
-              : "Go to the server support channel and use the ticket panel to open the category that fits your issue."}
+              ? "You already have an active ticket. Continue there so staff can help you faster and keep everything in one place."
+              : "Go to the server support channel and use the ticket panel to open the category that best matches your issue."}
           </div>
         </div>
       </Section>
@@ -481,7 +558,7 @@ export default function UserDashboardClient({ initialData }) {
           gap: 16px;
         }
 
-        .profile-card,
+        .hero-card,
         .ticket-row-card {
           border: 1px solid rgba(255, 255, 255, 0.08);
           background: rgba(255, 255, 255, 0.02);
@@ -489,11 +566,40 @@ export default function UserDashboardClient({ initialData }) {
           padding: 14px;
         }
 
+        .ticket-row-card.emphasis {
+          border-color: rgba(96, 165, 250, 0.22);
+          background: rgba(96, 165, 250, 0.06);
+        }
+
         .profile-name {
           font-size: 20px;
           font-weight: 800;
           color: var(--text-strong, #f8fafc);
           line-height: 1.1;
+          overflow-wrap: anywhere;
+        }
+
+        .summary-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+          margin-top: 14px;
+        }
+
+        .summary-tile {
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          background: rgba(255, 255, 255, 0.025);
+          border-radius: 14px;
+          padding: 12px;
+          min-width: 0;
+        }
+
+        .summary-value {
+          font-size: 20px;
+          font-weight: 800;
+          line-height: 1.05;
+          color: var(--text-strong, #f8fafc);
+          margin-top: 6px;
           overflow-wrap: anywhere;
         }
 
@@ -544,6 +650,10 @@ export default function UserDashboardClient({ initialData }) {
         @media (min-width: 768px) {
           .info-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .summary-grid {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
           }
         }
 
