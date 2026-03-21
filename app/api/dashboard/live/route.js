@@ -2,6 +2,7 @@ import { createServerSupabase } from "@/lib/supabase-server";
 import { env } from "@/lib/env";
 import { sortTickets, derivePriority } from "@/lib/priority";
 import { requireStaffSessionForRoute } from "@/lib/auth-server";
+import { enrichTicketWithMatchedCategory } from "@/lib/ticketCategoryMatching";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -986,6 +987,7 @@ export async function GET() {
         .from("ticket_categories")
         .select("*")
         .eq("guild_id", guildId)
+        .order("sort_order", { ascending: true, nullsFirst: false })
         .order("name", { ascending: true }),
 
       supabase
@@ -1129,13 +1131,17 @@ export async function GET() {
       );
     }
 
-    const rawTickets = safeArray(ticketsRes.data).map(mapTicket);
+    const categoryRows = safeArray(categoriesRes.data || []);
+    const mappedTickets = safeArray(ticketsRes.data).map(mapTicket);
+    const rawTickets = mappedTickets.map((ticket) =>
+      enrichTicketWithMatchedCategory(ticket, categoryRows)
+    );
     const canonicalTickets = canonicalizeTickets(rawTickets);
 
     const auditLogs = safeArray(auditLogsRes.data);
     const auditEvents = safeArray(auditEventsRes.data);
     const staffMessages = safeArray(staffMessagesRes.data);
-    const categories = categoriesRes.data || [];
+    const categories = categoryRows;
     const memberJoins = memberJoinsRes.data || [];
     const recentActiveMembers = safeArray(recentActiveMembersRes.data).map(
       mapGuildMember
