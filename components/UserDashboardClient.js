@@ -134,7 +134,7 @@ function getActionPlan({ member, openTicket, verificationFlags, vcVerifySession 
       bullets: [
         "Avoid opening duplicate tickets for the same issue.",
         "Reply in your current ticket if you have updates.",
-        "Your ticket tab shows your current and past cases.",
+        "Open the ticket card for quick actions and details.",
       ],
     };
   }
@@ -213,7 +213,7 @@ function getActionPlan({ member, openTicket, verificationFlags, vcVerifySession 
 
   return {
     title: "Open support if needed",
-    body: "If your access looks wrong or you need help, open a support ticket in Discord and choose the category that best matches your issue.",
+    body: "If your access looks wrong or you need help, open a support ticket and choose the category that best matches your issue.",
     tone: "warn",
     primaryLabel: "See Support Categories",
     primaryTargetTab: "help",
@@ -226,6 +226,34 @@ function getActionPlan({ member, openTicket, verificationFlags, vcVerifySession 
       "Keep your issue in one ticket thread.",
     ],
   };
+}
+
+function buildDiscordChannelUrl(ticket, initialData) {
+  const guildId =
+    initialData?.guildId ||
+    initialData?.viewer?.guild_id ||
+    initialData?.member?.guild_id ||
+    initialData?.guild_id ||
+    "";
+  const channelId = String(ticket?.channel_id || "").trim();
+
+  if (!guildId || !channelId) return "";
+  return `https://discord.com/channels/${guildId}/${channelId}`;
+}
+
+function buildTicketSummary(ticket) {
+  return [
+    `Title: ${safeText(ticket?.title)}`,
+    `Category: ${safeText(ticket?.matched_category_name || ticket?.category)}`,
+    `Status: ${safeText(ticket?.status)}`,
+    `Priority: ${safeText(ticket?.priority)}`,
+    `Channel: ${safeText(ticket?.channel_name)}`,
+    `Channel ID: ${safeText(ticket?.channel_id)}`,
+    `Created: ${safeText(ticket?.created_at)}`,
+    `Updated: ${safeText(ticket?.updated_at)}`,
+    `Claimed By: ${safeText(ticket?.claimed_by)}`,
+    `Closed Reason: ${safeText(ticket?.closed_reason)}`,
+  ].join("\n");
 }
 
 function StatusBadge({ label, tone = "default" }) {
@@ -362,6 +390,212 @@ function ActionCenter({
           </button>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function TicketActions({
+  ticket,
+  initialData,
+  onRefreshStatus,
+  onOpenCategories,
+  onRequestReopen,
+  onNotice,
+}) {
+  const discordUrl = buildDiscordChannelUrl(ticket, initialData);
+  const isClosed = normalizeStatus(ticket?.status) === "closed";
+  const isDeleted = normalizeStatus(ticket?.status) === "deleted";
+
+  async function copyText(text, successMessage) {
+    try {
+      await navigator.clipboard.writeText(text);
+      onNotice(successMessage, "success");
+    } catch {
+      onNotice("Copy failed on this device.", "error");
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+      <div className="action-grid">
+        {discordUrl ? (
+          <a
+            href={discordUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="button ghost"
+            style={{ width: "auto", minWidth: 150, textAlign: "center" }}
+          >
+            Open In Discord
+          </a>
+        ) : null}
+
+        <button
+          type="button"
+          className="button ghost"
+          style={{ width: "auto", minWidth: 150 }}
+          onClick={() =>
+            copyText(
+              safeText(ticket?.channel_id, ""),
+              "Channel ID copied."
+            )
+          }
+        >
+          Copy Channel ID
+        </button>
+
+        <button
+          type="button"
+          className="button ghost"
+          style={{ width: "auto", minWidth: 150 }}
+          onClick={() =>
+            copyText(buildTicketSummary(ticket), "Ticket summary copied.")
+          }
+        >
+          Copy Ticket Summary
+        </button>
+
+        <button
+          type="button"
+          className="button ghost"
+          style={{ width: "auto", minWidth: 150 }}
+          onClick={onRefreshStatus}
+        >
+          Refresh Status
+        </button>
+
+        <button
+          type="button"
+          className="button ghost"
+          style={{ width: "auto", minWidth: 150 }}
+          onClick={onOpenCategories}
+        >
+          Open Categories
+        </button>
+
+        {isClosed && !isDeleted ? (
+          <button
+            type="button"
+            className="button ghost"
+            style={{ width: "auto", minWidth: 170 }}
+            onClick={onRequestReopen}
+          >
+            Request Reopen Review
+          </button>
+        ) : null}
+      </div>
+
+      <div className="mini-card">
+        <div className="ticket-info-label">Ticket Details</div>
+        <div className="info-grid" style={{ marginTop: 10 }}>
+          <div className="mini-card">
+            <div className="ticket-info-label">Created</div>
+            <div>{formatTime(ticket?.created_at)}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Updated</div>
+            <div>{formatTime(ticket?.updated_at)}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Claimed By</div>
+            <div>{safeText(ticket?.claimed_by)}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Closed Reason</div>
+            <div>{safeText(ticket?.closed_reason)}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Channel ID</div>
+            <div>{safeText(ticket?.channel_id)}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Channel Name</div>
+            <div>{safeText(ticket?.channel_name)}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TicketCard({
+  ticket,
+  expanded,
+  onToggle,
+  initialData,
+  onRefreshStatus,
+  onOpenCategories,
+  onRequestReopen,
+  onNotice,
+}) {
+  return (
+    <div className={`ticket-row-card ticket-card-shell ${expanded ? "expanded" : ""}`}>
+      <button
+        type="button"
+        className="ticket-card-button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+      >
+        <div
+          className="row"
+          style={{
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 12,
+            flexWrap: "wrap",
+            width: "100%",
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1, textAlign: "left" }}>
+            <div className="profile-name" style={{ fontSize: 16 }}>
+              {safeText(ticket?.title, "Ticket")}
+            </div>
+            <div className="muted" style={{ marginTop: 6, lineHeight: 1.5 }}>
+              {safeText(ticket?.matched_category_name || ticket?.category)} •{" "}
+              {safeText(ticket?.channel_name || ticket?.channel_id)}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <StatusBadge label={safeText(ticket?.status)} />
+            <StatusBadge label={safeText(ticket?.priority)} />
+          </div>
+        </div>
+
+        <div
+          className="row"
+          style={{
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginTop: 12,
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div className="muted" style={{ textAlign: "left" }}>
+            Updated {timeAgo(ticket?.updated_at || ticket?.created_at)}
+          </div>
+          <div className="muted" style={{ fontWeight: 700 }}>
+            {expanded ? "Hide Actions" : "Open Actions"}
+          </div>
+        </div>
+      </button>
+
+      {expanded ? (
+        <TicketActions
+          ticket={ticket}
+          initialData={initialData}
+          onRefreshStatus={onRefreshStatus}
+          onOpenCategories={onOpenCategories}
+          onRequestReopen={onRequestReopen}
+          onNotice={onNotice}
+        />
+      ) : null}
     </div>
   );
 }
@@ -548,7 +782,14 @@ function TicketsTab({
   showDeletedHistory,
   onToggleDeletedHistory,
   isPolling,
+  initialData,
+  onRefreshAllTickets,
+  onOpenCategories,
+  onRequestReopen,
+  onNotice,
 }) {
+  const [expandedTicketId, setExpandedTicketId] = useState(null);
+
   const activeTickets = safeArray(recentTickets).filter((ticket) =>
     ["open", "claimed"].includes(normalizeStatus(ticket?.status))
   );
@@ -561,57 +802,8 @@ function TicketsTab({
     normalizeStatus(ticket?.status) === "deleted"
   );
 
-  function renderTicket(ticket) {
-    return (
-      <div key={ticket.id} className="ticket-row-card">
-        <div
-          className="row"
-          style={{
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-            gap: 12,
-            flexWrap: "wrap",
-          }}
-        >
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div className="profile-name" style={{ fontSize: 16 }}>
-              {safeText(ticket?.title, "Ticket")}
-            </div>
-            <div className="muted" style={{ marginTop: 6, lineHeight: 1.5 }}>
-              {safeText(ticket?.matched_category_name || ticket?.category)} •{" "}
-              {safeText(ticket?.channel_name || ticket?.channel_id)}
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <StatusBadge label={safeText(ticket?.status)} />
-            <StatusBadge label={safeText(ticket?.priority)} />
-          </div>
-        </div>
-
-        <div className="info-grid" style={{ marginTop: 12 }}>
-          <div className="mini-card">
-            <div className="ticket-info-label">Updated</div>
-            <div>{timeAgo(ticket?.updated_at || ticket?.created_at)}</div>
-          </div>
-
-          <div className="mini-card">
-            <div className="ticket-info-label">Created</div>
-            <div>{formatTime(ticket?.created_at)}</div>
-          </div>
-
-          <div className="mini-card">
-            <div className="ticket-info-label">Claimed By</div>
-            <div>{safeText(ticket?.claimed_by)}</div>
-          </div>
-
-          <div className="mini-card">
-            <div className="ticket-info-label">Closed Reason</div>
-            <div>{safeText(ticket?.closed_reason)}</div>
-          </div>
-        </div>
-      </div>
-    );
+  function toggleTicket(id) {
+    setExpandedTicketId((prev) => (prev === id ? null : id));
   }
 
   return (
@@ -624,7 +816,21 @@ function TicketsTab({
         {!activeTickets.length ? (
           <div className="empty-state">You do not currently have an active ticket.</div>
         ) : (
-          <div className="space">{activeTickets.map(renderTicket)}</div>
+          <div className="space">
+            {activeTickets.map((ticket) => (
+              <TicketCard
+                key={ticket.id}
+                ticket={ticket}
+                expanded={expandedTicketId === ticket.id}
+                onToggle={() => toggleTicket(ticket.id)}
+                initialData={initialData}
+                onRefreshStatus={onRefreshAllTickets}
+                onOpenCategories={onOpenCategories}
+                onRequestReopen={() => onRequestReopen(ticket)}
+                onNotice={onNotice}
+              />
+            ))}
+          </div>
         )}
       </Section>
 
@@ -635,7 +841,21 @@ function TicketsTab({
         {!closedTickets.length ? (
           <div className="empty-state">No closed ticket history found.</div>
         ) : (
-          <div className="space">{closedTickets.map(renderTicket)}</div>
+          <div className="space">
+            {closedTickets.map((ticket) => (
+              <TicketCard
+                key={ticket.id}
+                ticket={ticket}
+                expanded={expandedTicketId === ticket.id}
+                onToggle={() => toggleTicket(ticket.id)}
+                initialData={initialData}
+                onRefreshStatus={onRefreshAllTickets}
+                onOpenCategories={onOpenCategories}
+                onRequestReopen={() => onRequestReopen(ticket)}
+                onNotice={onNotice}
+              />
+            ))}
+          </div>
         )}
       </Section>
 
@@ -660,7 +880,21 @@ function TicketsTab({
         ) : !deletedTickets.length ? (
           <div className="empty-state">No deleted ticket history found.</div>
         ) : (
-          <div className="space">{deletedTickets.map(renderTicket)}</div>
+          <div className="space">
+            {deletedTickets.map((ticket) => (
+              <TicketCard
+                key={ticket.id}
+                ticket={ticket}
+                expanded={expandedTicketId === ticket.id}
+                onToggle={() => toggleTicket(ticket.id)}
+                initialData={initialData}
+                onRefreshStatus={onRefreshAllTickets}
+                onOpenCategories={onOpenCategories}
+                onRequestReopen={() => onRequestReopen(ticket)}
+                onNotice={onNotice}
+              />
+            ))}
+          </div>
         )}
       </Section>
     </div>
@@ -842,6 +1076,45 @@ export default function UserDashboardClient({ initialData }) {
     }
   }
 
+  async function refreshTicketsNow() {
+    setIsPolling(true);
+
+    try {
+      const res = await fetch(`/api/user/dashboard?_ts=${Date.now()}`, {
+        method: "GET",
+        cache: "no-store",
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+          Pragma: "no-cache",
+        },
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "Failed to refresh ticket status.");
+      }
+
+      const nextOpenTicket = data?.openTicket || null;
+      const nextRecentTickets = Array.isArray(data?.recentTickets)
+        ? data.recentTickets
+        : [];
+
+      setUserOpenTicket(nextOpenTicket);
+      setUserTickets(nextRecentTickets);
+      showTempNotice("Ticket status refreshed.", "success");
+      return Boolean(nextOpenTicket);
+    } catch (error) {
+      showTempNotice(
+        error instanceof Error ? error.message : "Failed to refresh ticket status.",
+        "error"
+      );
+      return false;
+    } finally {
+      setIsPolling(false);
+    }
+  }
+
   async function pollForCreatedTicket() {
     setIsPolling(true);
 
@@ -985,38 +1258,31 @@ export default function UserDashboardClient({ initialData }) {
     );
   }
 
+  function handleOpenCategories() {
+    goToTab("help");
+    showTempNotice("Choose a support category below.", "info");
+  }
+
+  function handleRequestReopen(ticket) {
+    const reopenCategory =
+      getVisibleCategories(categories).find(
+        (item) =>
+          String(item?.slug || "").trim().toLowerCase() === "appeal"
+      ) || FALLBACK_CATEGORIES[1] || FALLBACK_CATEGORIES[0];
+
+    queueTicketForCategory(
+      reopenCategory,
+      `Member requested review or reopen help for prior ticket: ${safeText(
+        ticket?.title
+      )} (${safeText(ticket?.channel_name || ticket?.channel_id, "no-channel")}).`
+    );
+  }
+
   return (
     <>
       <Topbar />
 
       <main style={{ paddingBottom: 96 }}>
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div
-            className="row"
-            style={{
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <div>
-              <h1 style={{ margin: 0 }}>My Dashboard</h1>
-              <div className="muted" style={{ marginTop: 6 }}>
-                Your account status, support progress, and ticket history
-              </div>
-            </div>
-
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <StatusBadge label={verification.label} tone={verification.tone} />
-              {userOpenTicket ? (
-                <StatusBadge label="Open Ticket" tone="warn" />
-              ) : null}
-              {isPolling ? <StatusBadge label="Bot Processing" tone="warn" /> : null}
-            </div>
-          </div>
-        </div>
-
         {notice ? (
           <div
             className={noticeTone === "error" ? "error-banner" : "info-banner"}
@@ -1061,6 +1327,11 @@ export default function UserDashboardClient({ initialData }) {
               setShowDeletedHistory((prev) => !prev)
             }
             isPolling={isPolling}
+            initialData={initialData}
+            onRefreshAllTickets={refreshTicketsNow}
+            onOpenCategories={handleOpenCategories}
+            onRequestReopen={handleRequestReopen}
+            onNotice={showTempNotice}
           />
         </section>
 
@@ -1109,6 +1380,32 @@ export default function UserDashboardClient({ initialData }) {
           background: rgba(255, 255, 255, 0.02);
           border-radius: 18px;
           padding: 14px;
+        }
+
+        .ticket-card-shell.expanded {
+          border-color: rgba(96, 165, 250, 0.22);
+          background: rgba(96, 165, 250, 0.05);
+        }
+
+        .ticket-card-button {
+          width: 100%;
+          text-align: left;
+          cursor: pointer;
+          transition:
+            transform 0.16s ease,
+            border-color 0.16s ease,
+            background 0.16s ease,
+            box-shadow 0.16s ease;
+        }
+
+        .ticket-card-button:active {
+          transform: scale(0.995);
+        }
+
+        .action-grid {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
         }
 
         .ticket-row-card.emphasis {
