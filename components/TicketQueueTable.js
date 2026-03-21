@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { timeAgo } from "@/lib/format";
 import TicketControls from "./dashboard/TicketControls";
 import CreateTicketButton from "./dashboard/CreateTicketButton";
@@ -63,10 +64,6 @@ function isGhost(ticket) {
 
 function hasMissingChannel(ticket) {
   return !getChannelId(ticket);
-}
-
-function getPriority(ticket) {
-  return String(ticket?.priority || "").trim().toLowerCase();
 }
 
 function getDisplayedCategoryName(ticket) {
@@ -244,6 +241,123 @@ function CategoryDisplay({ ticket, compact = false }) {
           {categorySlug}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function QuickModActions({ ticket, currentStaffId, onRefresh }) {
+  const [busy, setBusy] = useState("");
+  const [reason, setReason] = useState("");
+  const [timeoutMinutes, setTimeoutMinutes] = useState("10");
+
+  async function queueAction(action, payload = {}) {
+    setBusy(action);
+    try {
+      const res = await fetch("/api/dashboard/mod-action", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+        },
+        body: JSON.stringify({
+          action,
+          payload: {
+            ...payload,
+            staff_id: currentStaffId,
+            reason: String(reason || "").trim(),
+          },
+        }),
+      });
+
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || "Failed to queue mod action.");
+      }
+
+      await onRefresh?.();
+    } catch (err) {
+      alert(err?.message || "Failed to queue mod action.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const userId = String(ticket?.user_id || "").trim();
+  if (!userId || !currentStaffId) return null;
+
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        paddingTop: 12,
+        borderTop: "1px solid rgba(255,255,255,0.08)",
+        display: "grid",
+        gap: 10,
+      }}
+    >
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+          gap: 10,
+        }}
+      >
+        <input
+          className="input"
+          placeholder="Reason"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
+        <input
+          className="input"
+          placeholder="Timeout minutes"
+          value={timeoutMinutes}
+          onChange={(e) => setTimeoutMinutes(e.target.value)}
+        />
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <button
+          type="button"
+          className="button ghost"
+          disabled={Boolean(busy)}
+          onClick={() =>
+            queueAction("timeout_member", {
+              user_id: userId,
+              minutes: Number(timeoutMinutes || 10),
+            })
+          }
+        >
+          {busy === "timeout_member" ? "Working..." : "Timeout"}
+        </button>
+
+        <button
+          type="button"
+          className="button ghost"
+          disabled={Boolean(busy)}
+          onClick={() => queueAction("remove_timeout", { user_id: userId })}
+        >
+          {busy === "remove_timeout" ? "Working..." : "Remove Timeout"}
+        </button>
+
+        <button
+          type="button"
+          className="button ghost"
+          disabled={Boolean(busy)}
+          onClick={() => queueAction("mute_member", { user_id: userId })}
+        >
+          {busy === "mute_member" ? "Working..." : "Mute VC"}
+        </button>
+
+        <button
+          type="button"
+          className="button ghost"
+          disabled={Boolean(busy)}
+          onClick={() => queueAction("disconnect_member", { user_id: userId })}
+        >
+          {busy === "disconnect_member" ? "Working..." : "Disconnect VC"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -436,11 +550,7 @@ export default function TicketQueueTable({
                     {metaBlock("Ghost", ghost ? "yes" : "no")}
                     {metaBlock("Updated", timeAgo(ticket.updated_at || ticket.created_at))}
                     {metaBlock("Match Reason", getCategoryReason(ticket) || "—", true)}
-                    {metaBlock(
-                      "Suggestion",
-                      ticket.mod_suggestion || "—",
-                      true
-                    )}
+                    {metaBlock("Suggestion", ticket.mod_suggestion || "—", true)}
 
                     {!!ticket.closed_reason ? (
                       metaBlock("Closed Reason", ticket.closed_reason, true)
@@ -460,6 +570,12 @@ export default function TicketQueueTable({
                       Open Ticket View
                     </Link>
                   </div>
+
+                  <QuickModActions
+                    ticket={ticket}
+                    currentStaffId={currentStaffId}
+                    onRefresh={onRefresh}
+                  />
 
                   <TicketControls
                     ticket={ticket}
@@ -742,6 +858,12 @@ export default function TicketQueueTable({
                         </div>
                       </div>
                     ) : null}
+
+                    <QuickModActions
+                      ticket={ticket}
+                      currentStaffId={currentStaffId}
+                      onRefresh={onRefresh}
+                    />
 
                     <TicketControls
                       ticket={ticket}
