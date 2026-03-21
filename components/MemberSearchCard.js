@@ -94,7 +94,128 @@ function sortResults(rows) {
   });
 }
 
-export default function MemberSearchCard() {
+function QuickMemberActions({ member, currentStaffId, onRefresh }) {
+  const [busy, setBusy] = useState("");
+  const [reason, setReason] = useState("");
+  const [timeoutMinutes, setTimeoutMinutes] = useState("10");
+
+  const userId = String(member?.user_id || member?.id || "").trim();
+  if (!userId || !currentStaffId) return null;
+
+  async function queueAction(action, payload = {}) {
+    setBusy(action);
+    try {
+      const res = await fetch("/api/dashboard/mod-action", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+        },
+        body: JSON.stringify({
+          action,
+          payload: {
+            ...payload,
+            staff_id: currentStaffId,
+            reason: String(reason || "").trim(),
+          },
+        }),
+      });
+
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || "Failed to queue member action.");
+      }
+
+      await onRefresh?.();
+    } catch (err) {
+      alert(err?.message || "Failed to queue member action.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+          gap: 10,
+        }}
+      >
+        <input
+          className="input"
+          placeholder="Reason"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
+        <input
+          className="input"
+          placeholder="Timeout minutes"
+          value={timeoutMinutes}
+          onChange={(e) => setTimeoutMinutes(e.target.value)}
+        />
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button
+          type="button"
+          className="button ghost"
+          disabled={Boolean(busy)}
+          onClick={() =>
+            queueAction("timeout_member", {
+              user_id: userId,
+              minutes: Number(timeoutMinutes || 10),
+            })
+          }
+        >
+          {busy === "timeout_member" ? "Working..." : "Timeout"}
+        </button>
+
+        <button
+          type="button"
+          className="button ghost"
+          disabled={Boolean(busy)}
+          onClick={() => queueAction("remove_timeout", { user_id: userId })}
+        >
+          {busy === "remove_timeout" ? "Working..." : "Remove Timeout"}
+        </button>
+
+        <button
+          type="button"
+          className="button ghost"
+          disabled={Boolean(busy)}
+          onClick={() => queueAction("mute_member", { user_id: userId })}
+        >
+          {busy === "mute_member" ? "Working..." : "Mute VC"}
+        </button>
+
+        <button
+          type="button"
+          className="button ghost"
+          disabled={Boolean(busy)}
+          onClick={() => queueAction("disconnect_member", { user_id: userId })}
+        >
+          {busy === "disconnect_member" ? "Working..." : "Disconnect VC"}
+        </button>
+
+        <button
+          type="button"
+          className="button danger"
+          disabled={Boolean(busy)}
+          onClick={() => queueAction("strip_roles", { user_id: userId })}
+        >
+          {busy === "strip_roles" ? "Working..." : "Strip Roles"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function MemberSearchCard({
+  currentStaffId = null,
+  onRefresh = async () => {},
+}) {
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query, 250);
 
@@ -103,6 +224,33 @@ export default function MemberSearchCard() {
   const [error, setError] = useState("");
   const [selected, setSelected] = useState(null);
   const [expandedMemberId, setExpandedMemberId] = useState("");
+
+  async function reloadSearchPreservingQuery() {
+    const q = String(debouncedQuery || "").trim();
+    if (!q) {
+      await onRefresh?.();
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const res = await fetch(`/api/discord/member-search?q=${encodeURIComponent(q)}`, { cache: "no-store" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json?.error || "Member search failed.");
+      }
+
+      setResults(sortResults(Array.isArray(json?.results) ? json.results : []));
+      await onRefresh?.();
+    } catch (err) {
+      setError(err?.message || "Member search failed.");
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -286,7 +434,13 @@ export default function MemberSearchCard() {
                             <div className="member-detail-item"><span className="ticket-info-label">Role State</span><span>{member.role_state || "unknown"}</span></div>
                           </div>
 
-                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                          <QuickMemberActions
+                            member={member}
+                            currentStaffId={currentStaffId}
+                            onRefresh={reloadSearchPreservingQuery}
+                          />
+
+                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
                             <button type="button" className="button" style={{ width: "auto", minWidth: 130 }} onClick={() => setSelected(member)}>Open Profile</button>
                             <button type="button" className="button ghost" style={{ width: "auto", minWidth: 130 }} onClick={() => toggleExpanded(member)}>Collapse</button>
                           </div>
