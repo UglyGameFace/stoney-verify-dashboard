@@ -270,36 +270,20 @@ function buildModeratorIntelligence(data) {
   }
 
   let raidRisk = "Low";
-  if (raidAlerts >= 1) {
-    raidRisk = "Moderate";
-  }
-  if (raidAlerts >= 3) {
-    raidRisk = "High";
-  }
+  if (raidAlerts >= 1) raidRisk = "Moderate";
+  if (raidAlerts >= 3) raidRisk = "High";
 
   let fraudRisk = "Low";
-  if (fraudFlags >= 1 || pendingVerification >= 12) {
-    fraudRisk = "Moderate";
-  }
-  if (fraudFlags >= 5) {
-    fraudRisk = "High";
-  }
+  if (fraudFlags >= 1 || pendingVerification >= 12) fraudRisk = "Moderate";
+  if (fraudFlags >= 5) fraudRisk = "High";
 
   let ticketPressure = "Low";
-  if (openTickets >= 6 || claimedTickets >= 4) {
-    ticketPressure = "Moderate";
-  }
-  if (openTickets >= 14 || claimedTickets >= 8) {
-    ticketPressure = "High";
-  }
+  if (openTickets >= 6 || claimedTickets >= 4) ticketPressure = "Moderate";
+  if (openTickets >= 14 || claimedTickets >= 8) ticketPressure = "High";
 
   let verificationPressure = "Low";
-  if (pendingVerification >= 8) {
-    verificationPressure = "Moderate";
-  }
-  if (pendingVerification >= 16) {
-    verificationPressure = "High";
-  }
+  if (pendingVerification >= 8) verificationPressure = "Moderate";
+  if (pendingVerification >= 16) verificationPressure = "High";
 
   const verifiedRate =
     activeMembers > 0
@@ -307,30 +291,10 @@ function buildModeratorIntelligence(data) {
       : 0;
 
   const summaryItems = [
-    {
-      key: "health",
-      label: "Server Health",
-      value: serverHealth,
-      tone: serverHealth,
-    },
-    {
-      key: "raid",
-      label: "Raid Risk",
-      value: raidRisk,
-      tone: raidRisk,
-    },
-    {
-      key: "fraud",
-      label: "Fraud Risk",
-      value: fraudRisk,
-      tone: fraudRisk,
-    },
-    {
-      key: "tickets",
-      label: "Ticket Pressure",
-      value: ticketPressure,
-      tone: ticketPressure,
-    },
+    { key: "health", label: "Server Health", value: serverHealth, tone: serverHealth },
+    { key: "raid", label: "Raid Risk", value: raidRisk, tone: raidRisk },
+    { key: "fraud", label: "Fraud Risk", value: fraudRisk, tone: fraudRisk },
+    { key: "tickets", label: "Ticket Pressure", value: ticketPressure, tone: ticketPressure },
     {
       key: "verification",
       label: "Verification Queue",
@@ -367,9 +331,7 @@ function buildModeratorIntelligence(data) {
     claimedTickets,
     summaryItems,
     flaggedMembers: members
-      .filter((m) =>
-        String(m?.role_state || "").toLowerCase().includes("conflict")
-      )
+      .filter((m) => String(m?.role_state || "").toLowerCase().includes("conflict"))
       .slice(0, 8),
   };
 }
@@ -399,12 +361,7 @@ function DashboardSection({
         }}
       >
         <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              fontWeight: 800,
-              color: "var(--text-strong)",
-            }}
-          >
+          <div style={{ fontWeight: 800, color: "var(--text-strong)" }}>
             {title}
           </div>
 
@@ -1387,7 +1344,10 @@ export default function DashboardClient({
         expanded={true}
         onToggle={null}
       >
-        <MemberSearchCard />
+        <MemberSearchCard
+          currentStaffId={currentStaffId}
+          onRefresh={() => refresh({ force: true, reason: "member-search-action" })}
+        />
       </DashboardSection>
     ),
   };
@@ -1733,7 +1693,8 @@ export default function DashboardClient({
           className={`mobile-tab-panel ${activeTab === "members" ? "active" : ""}`}
         >
           <div className="dashboard-members-grid">
-            {membersLayout
+            {[...membersLayout]
+              .filter((key, index, arr) => arr.indexOf(key) === index)
               .filter((key) => sectionVisibility[key] !== false)
               .map((key) => (
                 <div key={`members-${key}`}>{membersSections[key] || null}</div>
