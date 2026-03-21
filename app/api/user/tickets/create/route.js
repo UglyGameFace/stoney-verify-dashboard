@@ -69,8 +69,8 @@ function normalizeSlug(value) {
     .replace(/^-+|-+$/g, "");
 }
 
-function normalizeTextBlock(value) {
-  return normalizeString(value).replace(/\s+/g, " ").slice(0, 2000);
+function normalizeTextBlock(value, maxLength = 2000) {
+  return normalizeString(value).replace(/\s+/g, " ").slice(0, maxLength);
 }
 
 function safeArray(value) {
@@ -99,28 +99,6 @@ function deriveViewerFromSession(session) {
   };
 }
 
-function buildTicketTitle(category, username) {
-  const categoryName = normalizeString(category?.name || "Support");
-  const userName = normalizeString(username || "Member");
-  return `${categoryName} - ${userName}`.slice(0, 120);
-}
-
-function buildInitialMessage(body, category, viewer) {
-  const requestedCategory = normalizeString(category?.name || category?.slug || "Support");
-  const details = normalizeTextBlock(body?.message || body?.details || body?.initial_message);
-
-  const lines = [
-    `Ticket requested by ${viewer.username} (${viewer.discordId}).`,
-    `Requested category: ${requestedCategory}.`,
-  ];
-
-  if (details) {
-    lines.push(`Member message: ${details}`);
-  }
-
-  return lines.join(" ");
-}
-
 async function getConfiguredCategories(supabase, guildId) {
   const { data, error } = await supabase
     .from("ticket_categories")
@@ -138,13 +116,17 @@ async function getConfiguredCategories(supabase, guildId) {
 }
 
 function pickCategory(categories, body) {
-  const requestedSlug = normalizeSlug(body?.category_slug || body?.slug || body?.category);
+  const requestedSlug = normalizeSlug(
+    body?.category_slug || body?.slug || body?.category
+  );
   const requestedIntakeType = normalizeSlug(body?.intake_type);
 
-  let category =
+  const category =
     categories.find((item) => normalizeSlug(item?.slug) === requestedSlug) ||
-    categories.find((item) => normalizeSlug(item?.intake_type) === requestedIntakeType) ||
-    categories.find((item) => item?.is_default) ||
+    categories.find(
+      (item) => normalizeSlug(item?.intake_type) === requestedIntakeType
+    ) ||
+    categories.find((item) => Boolean(item?.is_default)) ||
     categories[0] ||
     null;
 
@@ -178,6 +160,77 @@ async function findExistingOpenTicket(supabase, guildId, userId) {
   return data || null;
 }
 
+async function findExistingPendingCommand(supabase, guildId, userId) {
+  const { data, error } = await supabase
+    .from("bot_commands")
+    .select("*")
+    .eq("guild_id", guildId)
+    .eq("action", "create_ticket")
+    .in("status", ["pending", "processing"])
+    .order("created_at", { ascending: false })
+    .limit(25);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const rows = safeArray(data);
+  return (
+    rows.find((row) => {
+      const payload = row?.payload || {};
+      return normalizeString(payload?.user_id || payload?.owner_id) === userId;
+    }) || null
+  );
+}
+
+function buildInitialMessage(body, category, viewer) {
+  const requestedCategory = normalizeString(
+    category?.name || category?.slug || "Support"
+  );
+  const details = normalizeTextBlock(
+    body?.message || body?.details || body?.initial_message
+  );
+
+  const parts = [
+    `Ticket requested by ${viewer.username} (${viewer.discordId}).`,
+    `Requested category: ${requestedCategory}.`,
+  ];
+
+  if (details) {
+    parts.push(`Member message: ${details}`);
+  }
+
+  return parts.join(" ");
+}
+
+function buildCommandPayload({ guildId, viewer, category, initialMessage }) {
+  const categoryName = normalizeString(category?.name || "Support");
+  const categorySlug = normalizeString(category?.slug || "general");
+  const intakeType = normalizeString(category?.intake_type || "general");
+
+  return {
+    guild_id: guildId,
+    user_id: viewer.discordId,
+    owner_id: viewer.discordId,
+    requester_id: viewer.discordId,
+    username: viewer.username,
+    owner_username: viewer.username,
+    owner_display_name: viewer.username,
+    category: categorySlug,
+    category_name: categoryName,
+    category_slug: categorySlug,
+    intake_type: intakeType,
+    title: `${categoryName} - ${viewer.username}`.slice(0, 120),
+    initial_message: initialMessage,
+    source: "dashboard",
+    create_from: "user_dashboard",
+    matched_category_name: categoryName,
+    matched_category_slug: categorySlug,
+    matched_intake_type: intakeType,
+    category_id: category?.id || null,
+  };
+}
+
 export async function POST(request) {
   try {
     const session = await getSession();
@@ -190,6 +243,7 @@ export async function POST(request) {
     }
 
     const viewer = deriveViewerFromSession(session);
+
     if (!viewer.discordId) {
       return NextResponse.json(
         { ok: false, error: "Unauthorized" },
@@ -235,67 +289,74 @@ export async function POST(request) {
       );
     }
 
+    const existingPendingCommand = await findExistingPendingCommand(
+      supabase,
+      guildId,
+      viewer.discordId
+    );
+
+    if (existingPendingCommand) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "A ticket request is already being processed.",
+          existing_command: {
+            id: existingPendingCommand.id,
+            status: existingPendingCommand.status,
+            created_at: existingPendingCommand.created_at,
+          },
+        },
+        { status: 409 }
+      );
+    }
+
     const categories = await getConfiguredCategories(supabase, guildId);
     const category = pickCategory(categories, body);
-
-    const title = buildTicketTitle(category, viewer.username);
     const initialMessage = buildInitialMessage(body, category, viewer);
+    const payload = buildCommandPayload({
+      guildId,
+      viewer,
+      category,
+      initialMessage,
+    });
 
-    const payload = {
-      guild_id: guildId,
-      user_id: viewer.discordId,
-      username: viewer.username,
-      title,
-      category: normalizeString(category?.slug || category?.name || "general"),
-      status: "open",
-      priority: normalizeString(body?.priority || "medium").toLowerCase() || "medium",
-      initial_message: initialMessage,
-      source: "dashboard",
-      category_id: category?.id || null,
-      matched_category_id: category?.id || null,
-      matched_category_name: normalizeString(category?.name),
-      matched_category_slug: normalizeString(category?.slug),
-      matched_intake_type: normalizeString(category?.intake_type || "general"),
-      matched_category_reason: "user-dashboard-create",
-      matched_category_score: 100,
-      category_override: true,
-      category_set_by: viewer.discordId,
-      category_set_at: new Date().toISOString(),
-    };
-
-    const { data: insertedTicket, error: insertError } = await supabase
-      .from("tickets")
-      .insert(payload)
+    const { data: commandRow, error: commandError } = await supabase
+      .from("bot_commands")
+      .insert({
+        guild_id: guildId,
+        action: "create_ticket",
+        payload,
+        status: "pending",
+        requested_by: viewer.discordId,
+      })
       .select("*")
       .single();
 
-    if (insertError) {
+    if (commandError) {
       return NextResponse.json(
-        { ok: false, error: insertError.message },
+        { ok: false, error: commandError.message },
         { status: 500 }
       );
     }
 
     return NextResponse.json({
       ok: true,
-      ticket: {
-        id: insertedTicket.id,
-        title: insertedTicket.title,
-        status: insertedTicket.status,
-        category: insertedTicket.category,
-        matched_category_name: insertedTicket.matched_category_name,
-        matched_category_slug: insertedTicket.matched_category_slug,
-        matched_intake_type: insertedTicket.matched_intake_type,
-        priority: insertedTicket.priority,
-        created_at: insertedTicket.created_at,
-        updated_at: insertedTicket.updated_at,
-        channel_id: insertedTicket.channel_id,
-        channel_name: insertedTicket.channel_name,
+      queued: true,
+      command: {
+        id: commandRow.id,
+        status: commandRow.status,
+        created_at: commandRow.created_at,
+      },
+      requested_category: {
+        id: category?.id || null,
+        name: normalizeString(category?.name),
+        slug: normalizeString(category?.slug),
+        intake_type: normalizeString(category?.intake_type || "general"),
       },
     });
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Failed to create ticket.";
+      error instanceof Error ? error.message : "Failed to queue ticket creation.";
 
     return NextResponse.json(
       { ok: false, error: message },
