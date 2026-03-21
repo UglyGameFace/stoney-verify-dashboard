@@ -1,12 +1,25 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   assignTicketAction,
   closeTicketAction,
   deleteTicketAction,
   reopenTicketAction,
 } from "@/lib/dashboardActions";
+
+type TicketCategory = {
+  id?: string;
+  name?: string | null;
+  slug?: string | null;
+  color?: string | null;
+  description?: string | null;
+  intake_type?: string | null;
+  match_keywords?: string[] | null;
+  button_label?: string | null;
+  sort_order?: number | null;
+  is_default?: boolean | null;
+};
 
 type TicketLike = {
   id?: string;
@@ -16,6 +29,10 @@ type TicketLike = {
   title?: string | null;
   username?: string | null;
   category?: string | null;
+  category_id?: string | null;
+  category_override?: boolean | null;
+  category_set_by?: string | null;
+  category_set_at?: string | null;
   status?: string | null;
   assigned_to?: string | null;
   claimed_by?: string | null;
@@ -29,6 +46,12 @@ type TicketLike = {
   transcript_channel_id?: string | null;
   source?: string | null;
   is_ghost?: boolean | null;
+  matched_category_id?: string | null;
+  matched_category_name?: string | null;
+  matched_category_slug?: string | null;
+  matched_intake_type?: string | null;
+  matched_category_reason?: string | null;
+  matched_category_score?: number | null;
 };
 
 type TicketControlsProps = {
@@ -43,7 +66,8 @@ type ActionState =
   | "assigning"
   | "closing"
   | "reopening"
-  | "deleting";
+  | "deleting"
+  | "saving-category";
 
 function getChannelId(ticket: TicketLike): string {
   return String(ticket.channel_id || ticket.discord_thread_id || "").trim();
@@ -63,6 +87,10 @@ function isOpen(status?: string | null): boolean {
 
 function normalizeBoolean(value: unknown): boolean {
   return value === true;
+}
+
+function normalizeString(value: unknown): string {
+  return String(value ?? "").trim();
 }
 
 function safeText(value: unknown, fallback = "—"): string {
@@ -116,6 +144,41 @@ function miniValueClass(): string {
   return "ticket-controls-mini-value";
 }
 
+function sortCategories(categories: TicketCategory[]): TicketCategory[] {
+  return [...categories].sort((a, b) => {
+    const sortA = Number(a?.sort_order ?? 9999);
+    const sortB = Number(b?.sort_order ?? 9999);
+
+    if (sortA !== sortB) return sortA - sortB;
+
+    if (Boolean(b?.is_default) !== Boolean(a?.is_default)) {
+      return b?.is_default ? 1 : -1;
+    }
+
+    return String(a?.name || "").localeCompare(String(b?.name || ""));
+  });
+}
+
+function getCurrentCategoryId(ticket: TicketLike): string {
+  return (
+    normalizeString(ticket.category_id) ||
+    normalizeString(ticket.matched_category_id) ||
+    ""
+  );
+}
+
+function getCurrentCategoryName(ticket: TicketLike): string {
+  return (
+    normalizeString(ticket.matched_category_name) ||
+    normalizeString(ticket.category) ||
+    "Uncategorized"
+  );
+}
+
+function getCurrentCategoryReason(ticket: TicketLike): string {
+  return normalizeString(ticket.matched_category_reason) || "No match reason";
+}
+
 export default function TicketControls({
   ticket,
   currentStaffId,
@@ -146,12 +209,76 @@ export default function TicketControls({
   const [closeReason, setCloseReason] = useState("Resolved");
 
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
+  const [showCategoryPanel, setShowCategoryPanel] = useState(false);
+
+  const [categories, setCategories] = useState<TicketCategory[]>([]);
+  const [loadingCategories, setLoadingCategories] = useState(false);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>(
+    getCurrentCategoryId(ticket)
+  );
+
+  useEffect(() => {
+    setSelectedCategoryId(getCurrentCategoryId(ticket));
+  }, [ticket?.id, ticket?.category_id, ticket?.matched_category_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCategories() {
+      setLoadingCategories(true);
+
+      try {
+        const res = await fetch("/api/ticket-categories", {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            "Cache-Control": "no-store, max-age=0",
+          },
+        });
+
+        const json = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(json?.error || "Failed to load categories.");
+        }
+
+        if (!cancelled) {
+          setCategories(sortCategories((json?.categories || []) as TicketCategory[]));
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error ? err.message : "Failed to load categories."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingCategories(false);
+        }
+      }
+    }
+
+    loadCategories();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const busy = actionState !== "idle";
   const assignDisabled = busy || !channelId || !currentStaffId || deleted;
   const closeDisabled = busy || !channelId || deleted || closed;
   const reopenDisabled = busy || !channelId || deleted || open;
   const deleteDisabled = busy || !channelId || deleted;
+  const saveCategoryDisabled =
+    busy || !ticket?.id || !selectedCategoryId || loadingCategories;
+
+  const selectedCategory = useMemo(
+    () =>
+      categories.find(
+        (category) => String(category?.id || "") === String(selectedCategoryId)
+      ) || null,
+    [categories, selectedCategoryId]
+  );
 
   async function afterChange(ok: boolean) {
     if (!ok) return;
@@ -293,6 +420,54 @@ export default function TicketControls({
     }
   }
 
+  async function handleSaveCategory() {
+    if (!ticket?.id) {
+      setError("Missing ticket ID.");
+      return;
+    }
+
+    if (!selectedCategory) {
+      setError("Choose a category first.");
+      return;
+    }
+
+    setError("");
+    setMessage("");
+    setActionState("saving-category");
+
+    try {
+      const res = await fetch(`/api/tickets/${ticket.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store, max-age=0",
+        },
+        body: JSON.stringify({
+          action: "update-category",
+          category_id: selectedCategory.id,
+          category: selectedCategory.slug || selectedCategory.name,
+          category_override: true,
+          category_set_by: currentStaffId ?? "",
+        }),
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(json?.error || "Failed to update ticket category.");
+      }
+
+      setMessage("Ticket category updated.");
+      await afterChange(true);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to update ticket category."
+      );
+    } finally {
+      setActionState("idle");
+    }
+  }
+
   return (
     <div className={`ticket-controls ${className}`}>
       <div className="ticket-controls-bar">
@@ -346,12 +521,162 @@ export default function TicketControls({
           type="button"
           className={buttonClass("secondary", false)}
           onClick={() => {
+            setError("");
+            setMessage("");
+            setShowCategoryPanel((v) => !v);
+          }}
+        >
+          {showCategoryPanel ? "Hide Category" : "Category"}
+        </button>
+
+        <button
+          type="button"
+          className={buttonClass("secondary", false)}
+          onClick={() => {
             setShowTranscriptPanel((v) => !v);
           }}
         >
           {showTranscriptPanel ? "Hide Transcript" : "Transcript"}
         </button>
       </div>
+
+      {showCategoryPanel && (
+        <div className={panelClass()}>
+          <div
+            className="row"
+            style={{
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              gap: 12,
+              marginBottom: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div className="ticket-controls-title">Category Override</div>
+              <div className="ticket-controls-copy">
+                Staff can recategorize this ticket if the auto-match guessed wrong.
+              </div>
+            </div>
+
+            {ticket?.category_override ? (
+              <span className="badge claimed">Manual Override</span>
+            ) : (
+              <span className="badge">Auto Match</span>
+            )}
+          </div>
+
+          <div className="ticket-controls-info-grid" style={{ marginBottom: 12 }}>
+            <div className={detailCardClass()}>
+              <div className={miniLabelClass()}>Current Category</div>
+              <div className={miniValueClass()}>
+                {getCurrentCategoryName(ticket)}
+              </div>
+            </div>
+
+            <div className={detailCardClass()}>
+              <div className={miniLabelClass()}>Current Reason</div>
+              <div className={miniValueClass()}>
+                {getCurrentCategoryReason(ticket)}
+              </div>
+            </div>
+
+            <div className={detailCardClass()}>
+              <div className={miniLabelClass()}>Matched Intake Type</div>
+              <div className={miniValueClass()}>
+                {safeText(ticket?.matched_intake_type)}
+              </div>
+            </div>
+
+            <div className={detailCardClass()}>
+              <div className={miniLabelClass()}>Override Set At</div>
+              <div className={miniValueClass()}>
+                {formatDateTime(ticket?.category_set_at)}
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gap: 10,
+              gridTemplateColumns: "minmax(0, 1fr) auto",
+              alignItems: "center",
+            }}
+          >
+            <select
+              className={inputClass()}
+              value={selectedCategoryId}
+              disabled={loadingCategories || busy}
+              onChange={(e) => setSelectedCategoryId(e.target.value)}
+            >
+              <option value="">
+                {loadingCategories ? "Loading categories..." : "Choose category"}
+              </option>
+
+              {categories.map((category) => (
+                <option key={String(category.id)} value={String(category.id)}>
+                  {safeText(category.name, "Unnamed")}
+                  {normalizeString(category.intake_type)
+                    ? ` • ${normalizeString(category.intake_type)}`
+                    : ""}
+                  {category.is_default ? " • default" : ""}
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              className={buttonClass("primary", saveCategoryDisabled)}
+              disabled={saveCategoryDisabled}
+              onClick={handleSaveCategory}
+            >
+              {actionState === "saving-category"
+                ? "Saving..."
+                : "Save Category"}
+            </button>
+          </div>
+
+          {selectedCategory ? (
+            <div
+              style={{
+                marginTop: 12,
+                display: "grid",
+                gap: 10,
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              }}
+            >
+              <div className={detailCardClass()}>
+                <div className={miniLabelClass()}>Selected Name</div>
+                <div className={miniValueClass()}>
+                  {safeText(selectedCategory.name)}
+                </div>
+              </div>
+
+              <div className={detailCardClass()}>
+                <div className={miniLabelClass()}>Selected Slug</div>
+                <div className={miniValueClass()}>
+                  {safeText(selectedCategory.slug)}
+                </div>
+              </div>
+
+              <div className={detailCardClass()}>
+                <div className={miniLabelClass()}>Selected Intake Type</div>
+                <div className={miniValueClass()}>
+                  {safeText(selectedCategory.intake_type)}
+                </div>
+              </div>
+
+              <div className={detailCardClass()}>
+                <div className={miniLabelClass()}>Description</div>
+                <div className={miniValueClass()}>
+                  {safeText(selectedCategory.description)}
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )}
 
       {showClosePanel && !deleted && (
         <div className={panelClass()}>
