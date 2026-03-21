@@ -1,4 +1,4 @@
-# Stoney Verify Dashboard V3.8
+# Stoney Verify Dashboard V4.0
 
 A production-oriented dashboard and Discord bot system for managing verification, tickets, moderation workflows, member visibility, and role sync for the Stoney Verify server.
 
