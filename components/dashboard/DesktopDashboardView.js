@@ -1,24 +1,194 @@
 "use client";
 
+function DesktopKpiStrip({
+  counts = {},
+  intelligence = {},
+  jumpToTickets,
+  jumpToPanel,
+}) {
+  const items = [
+    {
+      key: "openTickets",
+      label: "Open Tickets",
+      value: Number(counts?.openTickets || 0),
+      action: () => jumpToTickets?.({ status: "open" }),
+    },
+    {
+      key: "warnsToday",
+      label: "Warns Today",
+      value: Number(counts?.warnsToday || 0),
+      action: () => jumpToPanel?.("warns"),
+    },
+    {
+      key: "raidAlerts",
+      label: "Raid Alerts",
+      value: Number(counts?.raidAlerts || 0),
+      action: () => jumpToPanel?.("raids"),
+    },
+    {
+      key: "fraudFlags",
+      label: "Fraud Flags",
+      value: Number(counts?.fraudFlags || 0),
+      action: () => jumpToPanel?.("fraud"),
+    },
+    {
+      key: "pendingVerification",
+      label: "Pending Verification",
+      value: Number(intelligence?.pendingVerification || 0),
+      action: () => jumpToPanel?.("fraud"),
+    },
+    {
+      key: "verifiedMembers",
+      label: "Verified Members",
+      value: Number(intelligence?.verifiedMembers || 0),
+      action: null,
+    },
+  ];
+
+  return (
+    <>
+      <div className="desktop-kpi-strip">
+        {items.map((item) => {
+          const card = (
+            <>
+              <span className="desktop-kpi-label">{item.label}</span>
+              <span className="desktop-kpi-value">{item.value}</span>
+            </>
+          );
+
+          if (item.action) {
+            return (
+              <button
+                key={item.key}
+                type="button"
+                className="desktop-kpi-card clickable"
+                onClick={item.action}
+              >
+                {card}
+              </button>
+            );
+          }
+
+          return (
+            <div key={item.key} className="desktop-kpi-card">
+              {card}
+            </div>
+          );
+        })}
+      </div>
+
+      <style jsx>{`
+        .desktop-kpi-strip {
+          display: grid;
+          grid-template-columns: repeat(6, minmax(0, 1fr));
+          gap: 12px;
+          margin-bottom: 18px;
+        }
+
+        .desktop-kpi-card {
+          border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.08));
+          background: var(--panel-bg-soft, rgba(255, 255, 255, 0.02));
+          border-radius: 18px;
+          padding: 14px;
+          text-align: left;
+          color: var(--text-strong, #f8fafc);
+          display: grid;
+          gap: 8px;
+          min-height: 88px;
+        }
+
+        .desktop-kpi-card.clickable {
+          cursor: pointer;
+        }
+
+        .desktop-kpi-label {
+          font-size: 12px;
+          color: var(--text-muted, rgba(255, 255, 255, 0.72));
+          line-height: 1.25;
+        }
+
+        .desktop-kpi-value {
+          font-size: 30px;
+          font-weight: 900;
+          line-height: 1;
+          overflow-wrap: anywhere;
+        }
+
+        @media (max-width: 1499px) {
+          .desktop-kpi-strip {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+        }
+
+        @media (max-width: 1199px) {
+          .desktop-kpi-strip {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+        }
+      `}</style>
+    </>
+  );
+}
+
+function DesktopPageShell({ title, subtitle, actions, children }) {
+  return (
+    <div className="desktop-page-shell card">
+      <div className="desktop-page-head">
+        <div className="desktop-page-copy">
+          <h2 style={{ margin: 0 }}>{title}</h2>
+          {subtitle ? (
+            <div className="muted" style={{ marginTop: 6 }}>
+              {subtitle}
+            </div>
+          ) : null}
+        </div>
+
+        {actions ? <div className="desktop-page-actions">{actions}</div> : null}
+      </div>
+
+      <div className="desktop-page-body">{children}</div>
+
+      <style jsx>{`
+        .desktop-page-shell {
+          padding: 18px;
+        }
+
+        .desktop-page-head {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 14px;
+          flex-wrap: wrap;
+          margin-bottom: 14px;
+        }
+
+        .desktop-page-copy {
+          min-width: 0;
+        }
+
+        .desktop-page-actions {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+        }
+
+        .desktop-page-body {
+          min-width: 0;
+        }
+      `}</style>
+    </div>
+  );
+}
+
 export default function DesktopDashboardView({
   activeTab,
   counts,
-  safeEvents,
-  safeWarns,
-  safeRaids,
-  safeFraud,
   safeCategories,
-  safeRecentJoins,
-  safeMembers,
-  safeMetrics,
-  safeRoles,
   intelligence,
-  expandedPanels,
-  togglePanel,
   jumpToTickets,
   jumpToPanel,
   refresh,
-  currentStaffId,
   homeLayout,
   membersLayout,
   sectionVisibility,
@@ -37,20 +207,33 @@ export default function DesktopDashboardView({
   handlePreviewPurge,
   handlePurgeStale,
   isMaintaining,
+  density = "comfortable",
 }) {
-  if (typeof window !== "undefined" && window.innerWidth < 1024) {
-    return null;
-  }
+  const gap =
+    density === "compact" ? "14px" : density === "spacious" ? "24px" : "18px";
+
+  const pagePadding =
+    density === "compact" ? "14px" : density === "spacious" ? "22px" : "18px";
 
   return (
     <div className="desktop-dashboard-shell">
       {activeTab === "home" ? (
         <section className="desktop-tab-section">
+          <DesktopKpiStrip
+            counts={counts}
+            intelligence={intelligence}
+            jumpToTickets={jumpToTickets}
+            jumpToPanel={jumpToPanel}
+          />
+
           <div className="desktop-home-grid">
             {homeLayout
               .filter((key) => sectionVisibility[key] !== false)
-              .map((key) => (
-                <div key={`desktop-home-${key}`} className="desktop-grid-item">
+              .map((key, index) => (
+                <div
+                  key={`desktop-home-${key}`}
+                  className={`desktop-grid-item desktop-home-item desktop-home-item-${index + 1}`}
+                >
                   {homeSections[key] || null}
                 </div>
               ))}
@@ -60,31 +243,11 @@ export default function DesktopDashboardView({
 
       {activeTab === "tickets" ? (
         <section className="desktop-tab-section">
-          <div className="card">
-            <div
-              className="row"
-              style={{
-                justifyContent: "space-between",
-                alignItems: "flex-start",
-                gap: 12,
-                flexWrap: "wrap",
-                marginBottom: 14,
-              }}
-            >
-              <div>
-                <h2 style={{ margin: 0 }}>Ticket Queue</h2>
-                <div className="muted" style={{ marginTop: 6 }}>
-                  Live moderation queue with repair, transcript, and filtering controls
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  gap: 10,
-                  flexWrap: "wrap",
-                }}
-              >
+          <DesktopPageShell
+            title="Ticket Queue"
+            subtitle="Live moderation queue with repair, transcript, and filtering controls"
+            actions={
+              <>
                 <button
                   type="button"
                   className="button ghost"
@@ -102,7 +265,9 @@ export default function DesktopDashboardView({
                   type="button"
                   className="button ghost"
                   style={{ width: "auto", minWidth: 120 }}
-                  onClick={() => refresh({ force: true, reason: "manual-ticket-refresh" })}
+                  onClick={() =>
+                    refresh({ force: true, reason: "manual-ticket-refresh" })
+                  }
                 >
                   Refresh Queue
                 </button>
@@ -142,29 +307,16 @@ export default function DesktopDashboardView({
                 >
                   {isMaintaining ? "Working..." : "Purge Stale"}
                 </button>
-              </div>
+              </>
+            }
+          >
+            <div className="muted desktop-ticket-note">
+              Reconcile repairs stale ticket rows that no longer reflect Discord
+              truth. Purge removes dead closed or deleted rows that no longer have
+              a usable live channel.
             </div>
 
-            <div
-              className="muted"
-              style={{
-                marginBottom: 14,
-                fontSize: 12,
-                lineHeight: 1.5,
-              }}
-            >
-              Reconcile repairs stale ticket rows that no longer reflect Discord truth.
-              Purge removes dead closed or deleted rows that no longer have a usable live channel.
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(4, minmax(180px, 1fr))",
-                gap: 10,
-                marginBottom: 14,
-              }}
-            >
+            <div className="desktop-ticket-filter-grid">
               <input
                 className="input"
                 placeholder="Search tickets"
@@ -211,7 +363,7 @@ export default function DesktopDashboardView({
             </div>
 
             <div>{filteredTickets}</div>
-          </div>
+          </DesktopPageShell>
         </section>
       ) : null}
 
@@ -220,8 +372,11 @@ export default function DesktopDashboardView({
           <div className="desktop-members-grid">
             {membersLayout
               .filter((key) => sectionVisibility[key] !== false)
-              .map((key) => (
-                <div key={`desktop-members-${key}`} className="desktop-grid-item">
+              .map((key, index) => (
+                <div
+                  key={`desktop-members-${key}`}
+                  className={`desktop-grid-item desktop-members-item desktop-members-item-${index + 1}`}
+                >
                   {membersSections[key] || null}
                 </div>
               ))}
@@ -232,7 +387,12 @@ export default function DesktopDashboardView({
       {activeTab === "categories" ? (
         <section className="desktop-tab-section">
           {sectionVisibility.categories !== false ? (
-            <div className="card">{safeCategories}</div>
+            <DesktopPageShell
+              title="Categories"
+              subtitle="Channel grouping, structure control, and organization tools"
+            >
+              {safeCategories}
+            </DesktopPageShell>
           ) : (
             <div className="empty-state">
               Categories is hidden in your personalization settings.
@@ -255,48 +415,88 @@ export default function DesktopDashboardView({
             margin-top: 16px;
           }
 
+          .desktop-ticket-note {
+            margin-bottom: 14px;
+            font-size: 12px;
+            line-height: 1.5;
+          }
+
+          .desktop-ticket-filter-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(180px, 1fr));
+            gap: 10px;
+            margin-bottom: 14px;
+          }
+
           .desktop-home-grid {
             display: grid;
             grid-template-columns: repeat(12, minmax(0, 1fr));
-            gap: 18px;
+            gap: ${gap};
             align-items: start;
           }
 
-          .desktop-home-grid > .desktop-grid-item:nth-child(1) {
+          .desktop-home-item-1 {
             grid-column: span 12;
           }
 
-          .desktop-home-grid > .desktop-grid-item:nth-child(2) {
-            grid-column: span 12;
+          .desktop-home-item-2,
+          .desktop-home-item-3 {
+            grid-column: span 6;
           }
 
-          .desktop-home-grid > .desktop-grid-item:nth-child(3) {
-            grid-column: span 12;
-          }
-
-          .desktop-home-grid > .desktop-grid-item:nth-child(4),
-          .desktop-home-grid > .desktop-grid-item:nth-child(5),
-          .desktop-home-grid > .desktop-grid-item:nth-child(6),
-          .desktop-home-grid > .desktop-grid-item:nth-child(7) {
+          .desktop-home-item-4,
+          .desktop-home-item-5,
+          .desktop-home-item-6,
+          .desktop-home-item-7 {
             grid-column: span 6;
           }
 
           .desktop-members-grid {
             display: grid;
             grid-template-columns: repeat(12, minmax(0, 1fr));
-            gap: 18px;
+            gap: ${gap};
             align-items: start;
           }
 
-          .desktop-members-grid > .desktop-grid-item:nth-child(1),
-          .desktop-members-grid > .desktop-grid-item:nth-child(2) {
+          .desktop-members-item-1,
+          .desktop-members-item-2 {
             grid-column: span 6;
           }
 
-          .desktop-members-grid > .desktop-grid-item:nth-child(3),
-          .desktop-members-grid > .desktop-grid-item:nth-child(4),
-          .desktop-members-grid > .desktop-grid-item:nth-child(5) {
-            grid-column: span 4;
+          .desktop-members-item-3 {
+            grid-column: span 12;
+          }
+
+          .desktop-members-item-4,
+          .desktop-members-item-5 {
+            grid-column: span 6;
+          }
+
+          :global(.desktop-page-shell.card) {
+            padding: ${pagePadding};
+          }
+        }
+
+        @media (min-width: 1024px) and (max-width: 1399px) {
+          .desktop-ticket-filter-grid {
+            grid-template-columns: repeat(2, minmax(220px, 1fr));
+          }
+
+          .desktop-home-item-2,
+          .desktop-home-item-3,
+          .desktop-home-item-4,
+          .desktop-home-item-5,
+          .desktop-home-item-6,
+          .desktop-home-item-7 {
+            grid-column: span 12;
+          }
+
+          .desktop-members-item-1,
+          .desktop-members-item-2,
+          .desktop-members-item-3,
+          .desktop-members-item-4,
+          .desktop-members-item-5 {
+            grid-column: span 12;
           }
         }
       `}</style>
