@@ -14,6 +14,7 @@ import {
   reconcileTicketsAction,
   purgeStaleTicketsAction,
 } from "@/lib/dashboardActions";
+import { useDashboardPreferences } from "@/lib/useDashboardPreferences";
 
 import Topbar from "@/components/Topbar";
 import StatCard from "@/components/StatCard";
@@ -27,6 +28,7 @@ import CategoryManager from "@/components/CategoryManager";
 import MobileBottomNav from "@/components/MobileBottomNav";
 import RecentJoinsCard from "@/components/RecentJoinsCard";
 import MemberSnapshot from "@/components/dashboard/MemberSnapshot";
+import DashboardSettingsPanel from "@/components/dashboard/DashboardSettingsPanel";
 
 const MOBILE_TABS = ["home", "tickets", "members", "categories"];
 const STALE_VISIBLE_REFRESH_MS = 20_000;
@@ -128,9 +130,9 @@ function getTicketStatusCount(tickets, status) {
 function getSeverityColor(level) {
   const value = String(level || "").toLowerCase();
 
-  if (value.includes("critical") || value.includes("high")) return "#f87171";
-  if (value.includes("moderate") || value.includes("medium")) return "#fbbf24";
-  return "#4ade80";
+  if (value.includes("critical") || value.includes("high")) return "var(--tone-danger, #f87171)";
+  if (value.includes("moderate") || value.includes("medium")) return "var(--tone-warn, #fbbf24)";
+  return "var(--tone-success, #4ade80)";
 }
 
 function getPanelToneClass(level) {
@@ -537,6 +539,7 @@ export default function DashboardClient({
   const [maintenanceMessage, setMaintenanceMessage] = useState("");
   const [maintenanceError, setMaintenanceError] = useState("");
   const [isMaintaining, setIsMaintaining] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -564,6 +567,15 @@ export default function DashboardClient({
   const warnsSectionRef = useRef(null);
   const raidsSectionRef = useRef(null);
   const fraudSectionRef = useRef(null);
+
+  const {
+    preferences,
+    setThemeValue,
+    setDensity,
+    toggleSectionVisibility,
+    moveSection,
+    resetPreferences,
+  } = useDashboardPreferences();
 
   const currentStaffId = useMemo(
     () => getStaffUserId(initialData, staffName),
@@ -945,6 +957,297 @@ export default function DashboardClient({
 
   const lastRefreshLabel = timeAgo(lastRefreshAtRef.current);
 
+  const sectionVisibility = preferences?.sectionVisibility || {};
+  const homeLayout = preferences?.layout?.home || [];
+  const membersLayout = preferences?.layout?.members || [];
+  const density = preferences?.density || "comfortable";
+
+  const homeSections = {
+    intelligence: (
+      <IntelligencePanel
+        intelligence={intelligence}
+        expanded={expandedPanels.intelligence}
+        onToggle={() => togglePanel("intelligence")}
+        onJumpToTickets={() => jumpToTickets({ status: "open" })}
+        onJumpToWarns={() => jumpToPanel("warns")}
+        onJumpToRaids={() => jumpToPanel("raids")}
+        onJumpToFraud={() => jumpToPanel("fraud")}
+      />
+    ),
+    stats: (
+      <div className="metrics-grid">
+        <ClickableStatCard
+          title="Open Tickets"
+          value={counts.openTickets}
+          subtitle="Tap to open queue"
+          onClick={() => jumpToTickets({ status: "open" })}
+        />
+
+        <ClickableStatCard
+          title="Warns Today"
+          value={counts.warnsToday}
+          subtitle="Tap to review warnings"
+          onClick={() => jumpToPanel("warns")}
+        />
+
+        <ClickableStatCard
+          title="Raid Alerts"
+          value={counts.raidAlerts}
+          subtitle="Tap to review raids"
+          onClick={() => jumpToPanel("raids")}
+        />
+
+        <ClickableStatCard
+          title="Fraud Flags"
+          value={counts.fraudFlags}
+          subtitle="Tap to review fraud"
+          onClick={() => jumpToPanel("fraud")}
+        />
+      </div>
+    ),
+    quickActions: (
+      <QuickActions
+        onRefresh={() => refresh({ force: true, reason: "quick-actions" })}
+        currentStaffId={currentStaffId}
+      />
+    ),
+    activity: (
+      <DashboardSection
+        title="Activity Feed"
+        subtitle={`${safeEvents.length} recent audit events loaded`}
+        expanded={expandedPanels.activity}
+        onToggle={() => togglePanel("activity")}
+      >
+        <AuditTimeline events={safeEvents} />
+      </DashboardSection>
+    ),
+    warns: (
+      <div ref={warnsSectionRef}>
+        <DashboardSection
+          title="Warn Intelligence"
+          subtitle={`${safeWarns.length} warning record${safeWarns.length === 1 ? "" : "s"} in the last 24 hours`}
+          expanded={expandedPanels.warns}
+          onToggle={() => togglePanel("warns")}
+          actions={
+            <button
+              type="button"
+              className="button ghost"
+              style={{ width: "auto", minWidth: 120 }}
+              onClick={() => jumpToTickets({ status: "open" })}
+            >
+              Open Tickets
+            </button>
+          }
+        >
+          <SimpleFeedPanel
+            rows={homeSummary.recentWarns}
+            emptyMessage="No warnings were recorded in the last 24 hours."
+            renderRow={(warn, index) => (
+              <div
+                key={warn?.id || `warn-${index}`}
+                className="card"
+                style={{ padding: 14 }}
+              >
+                <div style={{ fontWeight: 800 }}>
+                  {safeText(warn?.display_name || warn?.username, "Unknown user")}
+                </div>
+                <div
+                  className="muted"
+                  style={{ marginTop: 6, fontSize: 13 }}
+                >
+                  {safeText(warn?.reason, "No reason provided")}
+                </div>
+                <div
+                  className="muted"
+                  style={{ marginTop: 8, fontSize: 12 }}
+                >
+                  {formatTime(warn?.created_at)}
+                </div>
+              </div>
+            )}
+          />
+        </DashboardSection>
+      </div>
+    ),
+    raids: (
+      <div ref={raidsSectionRef}>
+        <DashboardSection
+          title="Raid Intelligence"
+          subtitle={`${safeRaids.length} raid alert${safeRaids.length === 1 ? "" : "s"} in the last 24 hours`}
+          expanded={expandedPanels.raids}
+          onToggle={() => togglePanel("raids")}
+        >
+          <SimpleFeedPanel
+            rows={homeSummary.recentRaids}
+            emptyMessage="No raid alerts were recorded in the last 24 hours."
+            renderRow={(raid, index) => (
+              <div
+                key={raid?.id || `raid-${index}`}
+                className="card"
+                style={{ padding: 14 }}
+              >
+                <div style={{ fontWeight: 800 }}>
+                  {safeText(raid?.summary, "Raid event")}
+                </div>
+                <div
+                  className="muted"
+                  style={{ marginTop: 6, fontSize: 13 }}
+                >
+                  Join count: {safeText(raid?.join_count, "—")} • Window:{" "}
+                  {safeText(raid?.window_seconds, "—")}s • Severity:{" "}
+                  {safeText(raid?.severity, "unknown")}
+                </div>
+                <div
+                  className="muted"
+                  style={{ marginTop: 8, fontSize: 12 }}
+                >
+                  {formatTime(raid?.created_at)}
+                </div>
+              </div>
+            )}
+          />
+        </DashboardSection>
+      </div>
+    ),
+    fraud: (
+      <div ref={fraudSectionRef}>
+        <DashboardSection
+          title="Fraud Intelligence"
+          subtitle={`${safeFraud.length} flagged record${safeFraud.length === 1 ? "" : "s"} in the current dataset`}
+          expanded={expandedPanels.fraud}
+          onToggle={() => togglePanel("fraud")}
+        >
+          {homeSummary.recentFraud.length ? (
+            <SimpleFeedPanel
+              rows={homeSummary.recentFraud}
+              emptyMessage="No fraud items."
+              renderRow={(fraud, index) => (
+                <div
+                  key={fraud?.id || `fraud-${index}`}
+                  className="card"
+                  style={{ padding: 14 }}
+                >
+                  <div style={{ fontWeight: 800 }}>
+                    {safeText(fraud?.display_name || fraud?.username, "Suspicious member")}
+                  </div>
+                  <div
+                    className="muted"
+                    style={{ marginTop: 6, fontSize: 13 }}
+                  >
+                    Score: {safeText(fraud?.score, "0")} • Flagged:{" "}
+                    {String(Boolean(fraud?.flagged))}
+                  </div>
+
+                  {Array.isArray(fraud?.reasons) && fraud.reasons.length ? (
+                    <div
+                      className="muted"
+                      style={{ marginTop: 8, fontSize: 12 }}
+                    >
+                      {fraud.reasons.join(" • ")}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            />
+          ) : (
+            <div className="space">
+              {intelligence.flaggedMembers.length ? (
+                intelligence.flaggedMembers.map((member) => (
+                  <div
+                    key={member.user_id}
+                    className="card"
+                    style={{ padding: 14 }}
+                  >
+                    <div style={{ fontWeight: 800 }}>
+                      {getMemberDisplay(member)}
+                    </div>
+                    <div
+                      className="muted"
+                      style={{ marginTop: 6, fontSize: 13 }}
+                    >
+                      Role state: {safeText(member?.role_state)}
+                    </div>
+                    <div
+                      className="muted"
+                      style={{ marginTop: 6, fontSize: 12 }}
+                    >
+                      {safeText(
+                        member?.role_state_reason,
+                        "Role conflict detected"
+                      )}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="empty-state">
+                  No fraud flags or role conflicts are present in the current dataset.
+                </div>
+              )}
+            </div>
+          )}
+        </DashboardSection>
+      </div>
+    ),
+  };
+
+  const membersSections = {
+    freshEntrants: (
+      <DashboardSection
+        title="Fresh Entrants"
+        subtitle={`${safeRecentJoins.length} recent join record${safeRecentJoins.length === 1 ? "" : "s"} loaded`}
+        expanded={expandedPanels.joins}
+        onToggle={() => togglePanel("joins")}
+      >
+        <RecentJoinsCard joins={safeRecentJoins} />
+      </DashboardSection>
+    ),
+    memberSnapshot: (
+      <DashboardSection
+        title="Member Snapshot"
+        subtitle={`${safeMembers.length} member record${safeMembers.length === 1 ? "" : "s"} loaded`}
+        expanded={expandedPanels.members}
+        onToggle={() => togglePanel("members")}
+      >
+        <MemberSnapshot members={safeMembers} />
+      </DashboardSection>
+    ),
+    staffMetrics: (
+      <DashboardSection
+        title="Staff Metrics"
+        subtitle={`${safeMetrics.length} staff record${safeMetrics.length === 1 ? "" : "s"} loaded`}
+        expanded={expandedPanels.staff}
+        onToggle={() => togglePanel("staff")}
+      >
+        <StaffMetricsCard metrics={safeMetrics} />
+      </DashboardSection>
+    ),
+    roleHierarchy: (
+      <DashboardSection
+        title="Role Hierarchy"
+        subtitle={`${safeRoles.length} role record${safeRoles.length === 1 ? "" : "s"} loaded`}
+        expanded={expandedPanels.roles}
+        onToggle={() => togglePanel("roles")}
+      >
+        <RoleHierarchyCard
+          roles={safeRoles}
+          members={safeMembers}
+          staffUserId={currentStaffId}
+          refreshDashboardData={() => refresh({ force: true, reason: "role-hierarchy" })}
+        />
+      </DashboardSection>
+    ),
+    memberSearch: (
+      <DashboardSection
+        title="Member Search"
+        subtitle="Search the tracked guild member dataset"
+        expanded={true}
+        onToggle={null}
+      >
+        <MemberSearchCard />
+      </DashboardSection>
+    ),
+  };
+
   return (
     <>
       <Topbar />
@@ -972,6 +1275,15 @@ export default function DashboardClient({
             </div>
 
             <div className="dashboard-refresh-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="button ghost"
+                style={{ width: "auto", minWidth: 120 }}
+                onClick={() => setSettingsOpen(true)}
+              >
+                Personalize UI
+              </button>
+
               <button
                 type="button"
                 className="button ghost"
@@ -1028,223 +1340,11 @@ export default function DashboardClient({
           className={`mobile-tab-panel ${activeTab === "home" ? "active" : ""}`}
         >
           <div className="dashboard-home-grid">
-            <IntelligencePanel
-              intelligence={intelligence}
-              expanded={expandedPanels.intelligence}
-              onToggle={() => togglePanel("intelligence")}
-              onJumpToTickets={() => jumpToTickets({ status: "open" })}
-              onJumpToWarns={() => jumpToPanel("warns")}
-              onJumpToRaids={() => jumpToPanel("raids")}
-              onJumpToFraud={() => jumpToPanel("fraud")}
-            />
-
-            <div className="metrics-grid">
-              <ClickableStatCard
-                title="Open Tickets"
-                value={counts.openTickets}
-                subtitle="Tap to open queue"
-                onClick={() => jumpToTickets({ status: "open" })}
-              />
-
-              <ClickableStatCard
-                title="Warns Today"
-                value={counts.warnsToday}
-                subtitle="Tap to review warnings"
-                onClick={() => jumpToPanel("warns")}
-              />
-
-              <ClickableStatCard
-                title="Raid Alerts"
-                value={counts.raidAlerts}
-                subtitle="Tap to review raids"
-                onClick={() => jumpToPanel("raids")}
-              />
-
-              <ClickableStatCard
-                title="Fraud Flags"
-                value={counts.fraudFlags}
-                subtitle="Tap to review fraud"
-                onClick={() => jumpToPanel("fraud")}
-              />
-            </div>
-
-            <QuickActions
-              onRefresh={() => refresh({ force: true, reason: "quick-actions" })}
-              currentStaffId={currentStaffId}
-            />
-
-            <DashboardSection
-              title="Activity Feed"
-              subtitle={`${safeEvents.length} recent audit events loaded`}
-              expanded={expandedPanels.activity}
-              onToggle={() => togglePanel("activity")}
-            >
-              <AuditTimeline events={safeEvents} />
-            </DashboardSection>
-
-            <div ref={warnsSectionRef}>
-              <DashboardSection
-                title="Warn Intelligence"
-                subtitle={`${safeWarns.length} warning record${safeWarns.length === 1 ? "" : "s"} in the last 24 hours`}
-                expanded={expandedPanels.warns}
-                onToggle={() => togglePanel("warns")}
-                actions={
-                  <button
-                    type="button"
-                    className="button ghost"
-                    style={{ width: "auto", minWidth: 120 }}
-                    onClick={() => jumpToTickets({ status: "open" })}
-                  >
-                    Open Tickets
-                  </button>
-                }
-              >
-                <SimpleFeedPanel
-                  rows={homeSummary.recentWarns}
-                  emptyMessage="No warnings were recorded in the last 24 hours."
-                  renderRow={(warn, index) => (
-                    <div
-                      key={warn?.id || `warn-${index}`}
-                      className="card"
-                      style={{ padding: 14 }}
-                    >
-                      <div style={{ fontWeight: 800 }}>
-                        {safeText(warn?.display_name || warn?.username, "Unknown user")}
-                      </div>
-                      <div
-                        className="muted"
-                        style={{ marginTop: 6, fontSize: 13 }}
-                      >
-                        {safeText(warn?.reason, "No reason provided")}
-                      </div>
-                      <div
-                        className="muted"
-                        style={{ marginTop: 8, fontSize: 12 }}
-                      >
-                        {formatTime(warn?.created_at)}
-                      </div>
-                    </div>
-                  )}
-                />
-              </DashboardSection>
-            </div>
-
-            <div ref={raidsSectionRef}>
-              <DashboardSection
-                title="Raid Intelligence"
-                subtitle={`${safeRaids.length} raid alert${safeRaids.length === 1 ? "" : "s"} in the last 24 hours`}
-                expanded={expandedPanels.raids}
-                onToggle={() => togglePanel("raids")}
-              >
-                <SimpleFeedPanel
-                  rows={homeSummary.recentRaids}
-                  emptyMessage="No raid alerts were recorded in the last 24 hours."
-                  renderRow={(raid, index) => (
-                    <div
-                      key={raid?.id || `raid-${index}`}
-                      className="card"
-                      style={{ padding: 14 }}
-                    >
-                      <div style={{ fontWeight: 800 }}>
-                        {safeText(raid?.summary, "Raid event")}
-                      </div>
-                      <div
-                        className="muted"
-                        style={{ marginTop: 6, fontSize: 13 }}
-                      >
-                        Join count: {safeText(raid?.join_count, "—")} • Window:{" "}
-                        {safeText(raid?.window_seconds, "—")}s • Severity:{" "}
-                        {safeText(raid?.severity, "unknown")}
-                      </div>
-                      <div
-                        className="muted"
-                        style={{ marginTop: 8, fontSize: 12 }}
-                      >
-                        {formatTime(raid?.created_at)}
-                      </div>
-                    </div>
-                  )}
-                />
-              </DashboardSection>
-            </div>
-
-            <div ref={fraudSectionRef}>
-              <DashboardSection
-                title="Fraud Intelligence"
-                subtitle={`${safeFraud.length} flagged record${safeFraud.length === 1 ? "" : "s"} in the current dataset`}
-                expanded={expandedPanels.fraud}
-                onToggle={() => togglePanel("fraud")}
-              >
-                {homeSummary.recentFraud.length ? (
-                  <SimpleFeedPanel
-                    rows={homeSummary.recentFraud}
-                    emptyMessage="No fraud items."
-                    renderRow={(fraud, index) => (
-                      <div
-                        key={fraud?.id || `fraud-${index}`}
-                        className="card"
-                        style={{ padding: 14 }}
-                      >
-                        <div style={{ fontWeight: 800 }}>
-                          {safeText(fraud?.display_name || fraud?.username, "Suspicious member")}
-                        </div>
-                        <div
-                          className="muted"
-                          style={{ marginTop: 6, fontSize: 13 }}
-                        >
-                          Score: {safeText(fraud?.score, "0")} • Flagged:{" "}
-                          {String(Boolean(fraud?.flagged))}
-                        </div>
-
-                        {Array.isArray(fraud?.reasons) && fraud.reasons.length ? (
-                          <div
-                            className="muted"
-                            style={{ marginTop: 8, fontSize: 12 }}
-                          >
-                            {fraud.reasons.join(" • ")}
-                          </div>
-                        ) : null}
-                      </div>
-                    )}
-                  />
-                ) : (
-                  <div className="space">
-                    {intelligence.flaggedMembers.length ? (
-                      intelligence.flaggedMembers.map((member) => (
-                        <div
-                          key={member.user_id}
-                          className="card"
-                          style={{ padding: 14 }}
-                        >
-                          <div style={{ fontWeight: 800 }}>
-                            {getMemberDisplay(member)}
-                          </div>
-                          <div
-                            className="muted"
-                            style={{ marginTop: 6, fontSize: 13 }}
-                          >
-                            Role state: {safeText(member?.role_state)}
-                          </div>
-                          <div
-                            className="muted"
-                            style={{ marginTop: 6, fontSize: 12 }}
-                          >
-                            {safeText(
-                              member?.role_state_reason,
-                              "Role conflict detected"
-                            )}
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="empty-state">
-                        No fraud flags or role conflicts are present in the current dataset.
-                      </div>
-                    )}
-                  </div>
-                )}
-              </DashboardSection>
-            </div>
+            {homeLayout
+              .filter((key) => sectionVisibility[key] !== false)
+              .map((key) => (
+                <div key={`home-${key}`}>{homeSections[key] || null}</div>
+              ))}
           </div>
         </section>
 
@@ -1413,67 +1513,29 @@ export default function DashboardClient({
           className={`mobile-tab-panel ${activeTab === "members" ? "active" : ""}`}
         >
           <div className="dashboard-members-grid">
-            <DashboardSection
-              title="Fresh Entrants"
-              subtitle={`${safeRecentJoins.length} recent join record${safeRecentJoins.length === 1 ? "" : "s"} loaded`}
-              expanded={expandedPanels.joins}
-              onToggle={() => togglePanel("joins")}
-            >
-              <RecentJoinsCard joins={safeRecentJoins} />
-            </DashboardSection>
-
-            <DashboardSection
-              title="Member Snapshot"
-              subtitle={`${safeMembers.length} member record${safeMembers.length === 1 ? "" : "s"} loaded`}
-              expanded={expandedPanels.members}
-              onToggle={() => togglePanel("members")}
-            >
-              <MemberSnapshot members={safeMembers} />
-            </DashboardSection>
-
-            <DashboardSection
-              title="Staff Metrics"
-              subtitle={`${safeMetrics.length} staff record${safeMetrics.length === 1 ? "" : "s"} loaded`}
-              expanded={expandedPanels.staff}
-              onToggle={() => togglePanel("staff")}
-            >
-              <StaffMetricsCard metrics={safeMetrics} />
-            </DashboardSection>
-
-            <DashboardSection
-              title="Role Hierarchy"
-              subtitle={`${safeRoles.length} role record${safeRoles.length === 1 ? "" : "s"} loaded`}
-              expanded={expandedPanels.roles}
-              onToggle={() => togglePanel("roles")}
-            >
-              <RoleHierarchyCard
-                roles={safeRoles}
-                members={safeMembers}
-                staffUserId={currentStaffId}
-                refreshDashboardData={() => refresh({ force: true, reason: "role-hierarchy" })}
-              />
-            </DashboardSection>
-
-            <DashboardSection
-              title="Member Search"
-              subtitle="Search the tracked guild member dataset"
-              expanded={true}
-              onToggle={null}
-            >
-              <MemberSearchCard />
-            </DashboardSection>
+            {membersLayout
+              .filter((key) => sectionVisibility[key] !== false)
+              .map((key) => (
+                <div key={`members-${key}`}>{membersSections[key] || null}</div>
+              ))}
           </div>
         </section>
 
         <section
           className={`mobile-tab-panel ${activeTab === "categories" ? "active" : ""}`}
         >
-          <div className="card">
-            <CategoryManager
-              categories={safeCategories}
-              onRefresh={() => refresh({ force: true, reason: "categories" })}
-            />
-          </div>
+          {sectionVisibility.categories !== false ? (
+            <div className="card">
+              <CategoryManager
+                categories={safeCategories}
+                onRefresh={() => refresh({ force: true, reason: "categories" })}
+              />
+            </div>
+          ) : (
+            <div className="empty-state">
+              Categories is hidden in your personalization settings.
+            </div>
+          )}
         </section>
       </div>
 
@@ -1481,6 +1543,17 @@ export default function DashboardClient({
         activeTab={activeTab}
         onChange={setActiveTab}
         tabs={MOBILE_TABS}
+      />
+
+      <DashboardSettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        preferences={preferences}
+        setThemeValue={setThemeValue}
+        setDensity={setDensity}
+        toggleSectionVisibility={toggleSectionVisibility}
+        moveSection={moveSection}
+        resetPreferences={resetPreferences}
       />
 
       <style jsx>{`
@@ -1491,7 +1564,7 @@ export default function DashboardClient({
         .dashboard-home-grid,
         .dashboard-members-grid {
           display: grid;
-          gap: 16px;
+          gap: ${density === "compact" ? "12px" : density === "spacious" ? "22px" : "16px"};
         }
 
         .dashboard-members-grid {
@@ -1501,41 +1574,41 @@ export default function DashboardClient({
         .metrics-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 12px;
+          gap: ${density === "compact" ? "10px" : density === "spacious" ? "16px" : "12px"};
         }
 
         .intelligence-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 12px;
+          gap: ${density === "compact" ? "10px" : density === "spacious" ? "16px" : "12px"};
           margin-bottom: 14px;
           align-items: stretch;
         }
 
         .intel-tile {
           border-radius: 18px;
-          padding: 14px;
+          padding: ${density === "compact" ? "12px" : density === "spacious" ? "18px" : "14px"};
           display: grid;
           gap: 8px;
-          border: 1px solid rgba(255,255,255,0.08);
-          background: rgba(255,255,255,0.02);
+          border: 1px solid var(--panel-border, rgba(255,255,255,0.08));
+          background: var(--panel-bg-soft, rgba(255,255,255,0.02));
           min-width: 0;
           overflow: hidden;
         }
 
         .intel-tile.ok {
-          border-color: rgba(74, 222, 128, 0.2);
-          background: rgba(74, 222, 128, 0.08);
+          border-color: color-mix(in srgb, var(--tone-success, #4ade80) 22%, transparent);
+          background: color-mix(in srgb, var(--tone-success, #4ade80) 10%, transparent);
         }
 
         .intel-tile.warn {
-          border-color: rgba(251, 191, 36, 0.2);
-          background: rgba(251, 191, 36, 0.08);
+          border-color: color-mix(in srgb, var(--tone-warn, #fbbf24) 22%, transparent);
+          background: color-mix(in srgb, var(--tone-warn, #fbbf24) 10%, transparent);
         }
 
         .intel-tile.danger {
-          border-color: rgba(248, 113, 113, 0.2);
-          background: rgba(248, 113, 113, 0.08);
+          border-color: color-mix(in srgb, var(--tone-danger, #f87171) 22%, transparent);
+          background: color-mix(in srgb, var(--tone-danger, #f87171) 10%, transparent);
         }
 
         .intel-value {
@@ -1548,11 +1621,11 @@ export default function DashboardClient({
         .detail-grid-3 {
           display: grid;
           grid-template-columns: 1fr;
-          gap: 12px;
+          gap: ${density === "compact" ? "10px" : density === "spacious" ? "16px" : "12px"};
         }
 
         .compact-detail-card {
-          padding: 14px;
+          padding: ${density === "compact" ? "12px" : density === "spacious" ? "18px" : "14px"};
         }
 
         .detail-card-title {
@@ -1587,7 +1660,7 @@ export default function DashboardClient({
 
           .dashboard-home-grid,
           .dashboard-members-grid {
-            gap: 18px;
+            gap: ${density === "compact" ? "14px" : density === "spacious" ? "24px" : "18px"};
           }
 
           .dashboard-members-grid {
