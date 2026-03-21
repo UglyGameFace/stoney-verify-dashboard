@@ -232,10 +232,56 @@ function cleanDisplayName(value) {
   return text;
 }
 
+function isTruthyFlag(value) {
+  if (typeof value === "boolean") return value;
+  const text = normalizeString(value).toLowerCase();
+  return text === "true" || text === "1" || text === "yes";
+}
+
+function isLikelyBotName(value) {
+  const text = normalizeString(value).toLowerCase();
+  if (!text) return false;
+
+  const needles = [
+    "bot",
+    "ticket tool",
+    "tickettool",
+    "disboard",
+    "probot",
+    "jockie music",
+    "top.gg",
+    "pokemon idle",
+    "verify helper",
+    "stoney verify",
+    "stoney-verify-helper",
+    "manager bot",
+    "idle grow op",
+  ];
+
+  return needles.some((needle) => text.includes(needle));
+}
+
+function isBotLikeMember(member) {
+  if (!member) return false;
+
+  if (
+    isTruthyFlag(member?.is_bot) ||
+    isTruthyFlag(member?.bot) ||
+    isTruthyFlag(member?.isBot) ||
+    isTruthyFlag(member?.user_is_bot) ||
+    isTruthyFlag(member?.member_is_bot)
+  ) {
+    return true;
+  }
+
+  return isLikelyBotName(member?.display_name) || isLikelyBotName(member?.username);
+}
+
 function pickBestStaffDisplayName(candidates, fallback = "Unknown Staff") {
   const cleaned = safeArray(candidates)
     .map(cleanDisplayName)
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((name) => !isLikelyBotName(name));
 
   if (!cleaned.length) return fallback;
 
@@ -331,8 +377,19 @@ function deriveMetricsFromTickets(
   existingMetrics = [],
   guildMembers = []
 ) {
-  const memberMaps = buildMemberIdentityMaps(guildMembers);
+  const humanGuildMembers = safeArray(guildMembers).filter(
+    (member) => !isBotLikeMember(member)
+  );
+
+  const memberMaps = buildMemberIdentityMaps(humanGuildMembers);
   const byStaff = new Map();
+
+  function isHumanIdentity(identity) {
+    if (!identity?.key) return false;
+    if (identity.member) return !isBotLikeMember(identity.member);
+    if (isLikelyBotName(identity.rawName)) return false;
+    return true;
+  }
 
   function ensureRow(identityKey, seed = {}) {
     const key = normalizeStaffKey(identityKey);
@@ -340,11 +397,27 @@ function deriveMetricsFromTickets(
 
     if (!byStaff.has(key)) {
       const member = seed.member || null;
+
+      if (member && isBotLikeMember(member)) {
+        return null;
+      }
+
+      const fallbackName =
+        member?.display_name ||
+        member?.nickname ||
+        member?.username ||
+        seed?.staff_name ||
+        seed?.rawName ||
+        "Unknown Staff";
+
+      if (isLikelyBotName(fallbackName)) {
+        return null;
+      }
+
       byStaff.set(key, {
-        staff_id:
-          looksLikeDiscordId(key)
-            ? key
-            : normalizeStaffKey(seed?.staff_id || ""),
+        staff_id: looksLikeDiscordId(key)
+          ? key
+          : normalizeStaffKey(seed?.staff_id || ""),
         staff_name: pickBestStaffDisplayName(
           [
             seed?.staff_name,
@@ -353,18 +426,14 @@ function deriveMetricsFromTickets(
             member?.nickname,
             member?.username,
           ],
-          member?.display_name ||
-            member?.nickname ||
-            member?.username ||
-            seed?.staff_name ||
-            seed?.rawName ||
-            "Unknown Staff"
+          fallbackName
         ),
         tickets_handled: 0,
         approvals: 0,
         denials: 0,
         avg_response_minutes: 0,
         last_active: null,
+        is_bot: false,
       });
     }
 
@@ -375,17 +444,20 @@ function deriveMetricsFromTickets(
     const idIdentity = resolveStaffIdentity(row?.staff_id, memberMaps);
     const nameIdentity = resolveStaffIdentity(row?.staff_name, memberMaps);
 
+    const preferredMember = idIdentity.member || nameIdentity.member || null;
     const identityKey =
       idIdentity.key ||
       nameIdentity.key ||
       normalizeStaffKey(row?.staff_id || row?.staff_name);
 
     if (!identityKey) continue;
-
-    const preferredMember = idIdentity.member || nameIdentity.member || null;
+    if (preferredMember && isBotLikeMember(preferredMember)) continue;
+    if (!preferredMember && isLikelyBotName(row?.staff_name || row?.staff_id)) continue;
 
     byStaff.set(identityKey, {
-      staff_id: preferredMember?.user_id || (looksLikeDiscordId(identityKey) ? identityKey : ""),
+      staff_id:
+        preferredMember?.user_id ||
+        (looksLikeDiscordId(identityKey) ? identityKey : ""),
       staff_name: pickBestStaffDisplayName(
         [
           row?.staff_name,
@@ -405,6 +477,7 @@ function deriveMetricsFromTickets(
       denials: Number(row?.denials || 0),
       avg_response_minutes: Number(row?.avg_response_minutes || 0),
       last_active: row?.last_active || null,
+      is_bot: false,
     });
   }
 
@@ -431,9 +504,12 @@ function deriveMetricsFromTickets(
     }
 
     if (!identity.key) continue;
+    if (!isHumanIdentity(identity)) continue;
 
     const row = ensureRow(identity.key, {
-      staff_id: identity.member?.user_id || (looksLikeDiscordId(identity.key) ? identity.key : ""),
+      staff_id:
+        identity.member?.user_id ||
+        (looksLikeDiscordId(identity.key) ? identity.key : ""),
       staff_name: pickBestStaffDisplayName(
         [
           ticket?.closed_by_name,
@@ -512,6 +588,7 @@ function deriveMetricsFromTickets(
 
   return [...byStaff.values()]
     .filter((row) => row.staff_id || row.staff_name)
+    .filter((row) => !isLikelyBotName(row?.staff_name || row?.staff_id))
     .sort((a, b) => {
       const handledDiff =
         Number(b?.tickets_handled || 0) - Number(a?.tickets_handled || 0);
@@ -595,6 +672,12 @@ function mapGuildMember(row) {
     display_name: row?.display_name || "",
     nickname: row?.nickname || "",
     avatar_url: row?.avatar_url || null,
+    is_bot:
+      Boolean(row?.is_bot) ||
+      Boolean(row?.bot) ||
+      Boolean(row?.isBot) ||
+      Boolean(row?.user_is_bot) ||
+      Boolean(row?.member_is_bot),
     role_ids: Array.isArray(row?.role_ids) ? row.role_ids : [],
     role_names: Array.isArray(row?.role_names) ? row.role_names : [],
     roles: Array.isArray(row?.roles) ? row.roles : [],
