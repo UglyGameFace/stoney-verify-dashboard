@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Topbar from "@/components/Topbar";
 import MobileBottomNav from "@/components/MobileBottomNav";
 
@@ -356,7 +356,7 @@ function ActionCenter({
             onClick={onRequestVerification}
             disabled={isCreating}
           >
-            {isCreating ? "Creating..." : "Request Verification Ticket"}
+            {isCreating ? "Submitting..." : "Request Verification Ticket"}
           </button>
         ) : null}
       </div>
@@ -541,7 +541,12 @@ function HomeTab({
   );
 }
 
-function TicketsTab({ recentTickets, showDeletedHistory, onToggleDeletedHistory }) {
+function TicketsTab({
+  recentTickets,
+  showDeletedHistory,
+  onToggleDeletedHistory,
+  isPolling,
+}) {
   const activeTickets = safeArray(recentTickets).filter((ticket) =>
     ["open", "claimed"].includes(normalizeStatus(ticket?.status))
   );
@@ -612,6 +617,11 @@ function TicketsTab({ recentTickets, showDeletedHistory, onToggleDeletedHistory 
       <Section
         title="Active Tickets"
         subtitle={`${activeTickets.length} active ticket${activeTickets.length === 1 ? "" : "s"}`}
+        actions={
+          isPolling ? (
+            <span className="badge warn">Waiting for bot…</span>
+          ) : null
+        }
       >
         {!activeTickets.length ? (
           <div className="empty-state">You do not currently have an active ticket.</div>
@@ -696,7 +706,7 @@ function CategoryCard({ category, highlighted, onUseThisCategory, isCreating }) 
           disabled={isCreating}
         >
           {isCreating
-            ? "Creating..."
+            ? "Submitting..."
             : safeText(category?.button_label, "Use This Category")}
         </button>
       </div>
@@ -740,12 +750,12 @@ function HelpTab({
       <Section title="Best Next Step" subtitle="What you should do right now">
         <div className="status-panel ok">
           <div className="status-title">
-            {openTicket ? "Use your current ticket" : "Open a support ticket"}
+            {openTicket ? "Use your current ticket" : "Submit a support request"}
           </div>
           <div className="muted" style={{ lineHeight: 1.55 }}>
             {openTicket
               ? "You already have an active ticket. Continue there so staff can help you faster and keep everything in one place."
-              : "Use one of the categories above to create a ticket directly from the dashboard."}
+              : "Use one of the categories above to queue a support request. Your Discord ticket should appear shortly after the bot processes it."}
           </div>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
@@ -781,6 +791,7 @@ export default function UserDashboardClient({ initialData }) {
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState("info");
   const [isCreating, setIsCreating] = useState(false);
+  const [isPolling, setIsPolling] = useState(false);
   const [userTickets, setUserTickets] = useState(safeArray(initialData?.recentTickets));
   const [userOpenTicket, setUserOpenTicket] = useState(initialData?.openTicket || null);
 
@@ -825,12 +836,86 @@ export default function UserDashboardClient({ initialData }) {
       window.__userDashNoticeTimer = window.setTimeout(() => {
         setNotice("");
         setNoticeTone("info");
-      }, 3200);
+      }, 3600);
     }
   }
 
-  async function createTicketForCategory(category, extraMessage = "") {
+  async function refreshUserDashboardFromPage() {
+    const res = await fetch(`/?_ts=${Date.now()}`, {
+      method: "GET",
+      cache: "no-store",
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+        Pragma: "no-cache",
+      },
+    });
+
+    const html = await res.text();
+    const match = html.match(/"recentTickets":(\[[\s\S]*?\]),"categories":/);
+
+    if (!match) return false;
+
+    return false;
+  }
+
+  async function pollForCreatedTicket() {
+    setIsPolling(true);
+
+    let found = false;
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 1800 : 2500));
+
+      try {
+        const res = await fetch(`/?_ts=${Date.now()}`, {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            "Cache-Control": "no-store, max-age=0",
+            Pragma: "no-cache",
+          },
+        });
+
+        if (!res.ok) {
+          continue;
+        }
+
+        const html = await res.text();
+        const ticketMatch = html.match(/"openTicket":(null|\{[\s\S]*?\}),"recentTickets":/);
+        const recentMatch = html.match(/"recentTickets":(\[[\s\S]*?\]),"categories":/);
+
+        if (!ticketMatch || !recentMatch) {
+          continue;
+        }
+
+        let openTicket = null;
+        let recentTickets = [];
+
+        try {
+          openTicket = JSON.parse(ticketMatch[1]);
+          recentTickets = JSON.parse(recentMatch[1]);
+        } catch {
+          continue;
+        }
+
+        if (openTicket || (Array.isArray(recentTickets) && recentTickets.length > 0)) {
+          setUserOpenTicket(openTicket || null);
+          setUserTickets(Array.isArray(recentTickets) ? recentTickets : []);
+          found = true;
+          break;
+        }
+      } catch {
+        // ignore and keep polling
+      }
+    }
+
+    setIsPolling(false);
+    return found;
+  }
+
+  async function queueTicketForCategory(category, extraMessage = "") {
     if (isCreating) return;
+
     setIsCreating(true);
 
     try {
@@ -866,27 +951,29 @@ export default function UserDashboardClient({ initialData }) {
           return;
         }
 
-        throw new Error(data?.error || "Failed to create ticket.");
-      }
+        if (res.status === 409 && data?.existing_command) {
+          goToTab("tickets");
+          showTempNotice(
+            "A ticket request is already being processed. Your Discord ticket should appear shortly.",
+            "warn"
+          );
+          void pollForCreatedTicket();
+          return;
+        }
 
-      const createdTicket = data?.ticket || null;
-
-      if (createdTicket) {
-        setUserOpenTicket(createdTicket);
-        setUserTickets((prev) => {
-          const existingRows = safeArray(prev).filter((row) => row?.id !== createdTicket.id);
-          return [createdTicket, ...existingRows];
-        });
+        throw new Error(data?.error || "Failed to submit ticket request.");
       }
 
       goToTab("tickets");
       showTempNotice(
-        `${safeText(category?.name, "Support")} ticket created successfully.`,
+        `${safeText(category?.name, "Support")} request queued. Your Discord ticket should appear shortly.`,
         "success"
       );
+
+      void pollForCreatedTicket();
     } catch (error) {
       showTempNotice(
-        error instanceof Error ? error.message : "Failed to create ticket.",
+        error instanceof Error ? error.message : "Failed to submit ticket request.",
         "error"
       );
     } finally {
@@ -895,7 +982,7 @@ export default function UserDashboardClient({ initialData }) {
   }
 
   function handleUseCategory(category) {
-    createTicketForCategory(category);
+    queueTicketForCategory(category);
   }
 
   function handleRequestVerification() {
@@ -904,7 +991,7 @@ export default function UserDashboardClient({ initialData }) {
         (item) => String(item?.slug || "").trim().toLowerCase() === "verification"
       ) || FALLBACK_CATEGORIES[0];
 
-    createTicketForCategory(
+    queueTicketForCategory(
       category,
       "Member requested verification help from the dashboard."
     );
@@ -935,6 +1022,7 @@ export default function UserDashboardClient({ initialData }) {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <StatusBadge label={verification.label} tone={verification.tone} />
               {userOpenTicket ? <StatusBadge label="Open Ticket" tone="warn" /> : null}
+              {isPolling ? <StatusBadge label="Bot Processing" tone="warn" /> : null}
             </div>
           </div>
         </div>
@@ -944,9 +1032,7 @@ export default function UserDashboardClient({ initialData }) {
             className={
               noticeTone === "error"
                 ? "error-banner"
-                : noticeTone === "success"
-                  ? "info-banner"
-                  : "info-banner"
+                : "info-banner"
             }
             style={{ marginBottom: 16 }}
           >
@@ -988,6 +1074,7 @@ export default function UserDashboardClient({ initialData }) {
             onToggleDeletedHistory={() =>
               setShowDeletedHistory((prev) => !prev)
             }
+            isPolling={isPolling}
           />
         </section>
 
