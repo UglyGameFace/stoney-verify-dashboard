@@ -875,6 +875,9 @@ export default function DashboardClient({
           t.user_id,
           t.title,
           t.category,
+          t.matched_category_name,
+          t.matched_category_slug,
+          t.matched_intake_type,
           t.claimed_by,
           t.channel_id,
           t.discord_thread_id,
@@ -972,6 +975,19 @@ export default function DashboardClient({
   const homeLayout = preferences?.layout?.home || [];
   const membersLayout = preferences?.layout?.members || [];
   const density = preferences?.density || "comfortable";
+
+  const handleFindTicketsByCategory = useCallback((category) => {
+    setActiveTab("tickets");
+    setSearch(category?.name || category?.slug || "");
+    setStatusFilter("all");
+    setPriorityFilter("all");
+
+    if (typeof window !== "undefined") {
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    }
+  }, []);
 
   const homeSections = {
     intelligence: (
@@ -1264,7 +1280,9 @@ export default function DashboardClient({
   const desktopCategorySection = (
     <CategoryManager
       categories={safeCategories}
+      tickets={filteredTickets}
       onRefresh={() => refresh({ force: true, reason: "categories" })}
+      onFindTicketsByCategory={handleFindTicketsByCategory}
     />
   );
 
@@ -1536,7 +1554,7 @@ export default function DashboardClient({
             >
               <input
                 className="input"
-                placeholder="Search tickets"
+                placeholder="Search tickets, categories, intake types..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -1605,12 +1623,12 @@ export default function DashboardClient({
           className={`mobile-tab-panel ${activeTab === "categories" ? "active" : ""}`}
         >
           {sectionVisibility.categories !== false ? (
-            <div className="card">
-              <CategoryManager
-                categories={safeCategories}
-                onRefresh={() => refresh({ force: true, reason: "categories" })}
-              />
-            </div>
+            <CategoryManager
+              categories={safeCategories}
+              tickets={filteredTickets}
+              onRefresh={() => refresh({ force: true, reason: "categories" })}
+              onFindTicketsByCategory={handleFindTicketsByCategory}
+            />
           ) : (
             <div className="empty-state">
               Categories is hidden in your personalization settings.
