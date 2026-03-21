@@ -29,6 +29,7 @@ import MobileBottomNav from "@/components/MobileBottomNav";
 import RecentJoinsCard from "@/components/RecentJoinsCard";
 import MemberSnapshot from "@/components/dashboard/MemberSnapshot";
 import DashboardSettingsPanel from "@/components/dashboard/DashboardSettingsPanel";
+import DesktopDashboardView from "@/components/dashboard/DesktopDashboardView";
 
 const MOBILE_TABS = ["home", "tickets", "members", "categories"];
 const STALE_VISIBLE_REFRESH_MS = 20_000;
@@ -130,8 +131,12 @@ function getTicketStatusCount(tickets, status) {
 function getSeverityColor(level) {
   const value = String(level || "").toLowerCase();
 
-  if (value.includes("critical") || value.includes("high")) return "var(--tone-danger, #f87171)";
-  if (value.includes("moderate") || value.includes("medium")) return "var(--tone-warn, #fbbf24)";
+  if (value.includes("critical") || value.includes("high")) {
+    return "var(--tone-danger, #f87171)";
+  }
+  if (value.includes("moderate") || value.includes("medium")) {
+    return "var(--tone-warn, #fbbf24)";
+  }
   return "var(--tone-success, #4ade80)";
 }
 
@@ -327,9 +332,7 @@ function DashboardSection({
         </div>
       </div>
 
-      {isOpen ? (
-        <div style={{ marginTop: 14 }}>{children}</div>
-      ) : null}
+      {isOpen ? <div style={{ marginTop: 14 }}>{children}</div> : null}
     </div>
   );
 }
@@ -1232,7 +1235,9 @@ export default function DashboardClient({
           roles={safeRoles}
           members={safeMembers}
           staffUserId={currentStaffId}
-          refreshDashboardData={() => refresh({ force: true, reason: "role-hierarchy" })}
+          refreshDashboardData={() =>
+            refresh({ force: true, reason: "role-hierarchy" })
+          }
         />
       </DashboardSection>
     ),
@@ -1248,6 +1253,13 @@ export default function DashboardClient({
     ),
   };
 
+  const desktopCategorySection = (
+    <CategoryManager
+      categories={safeCategories}
+      onRefresh={() => refresh({ force: true, reason: "categories" })}
+    />
+  );
+
   return (
     <>
       <Topbar />
@@ -1260,7 +1272,10 @@ export default function DashboardClient({
           />
         </div>
 
-        <div className="card dashboard-refresh-card" style={{ marginBottom: 16, padding: 12 }}>
+        <div
+          className="card dashboard-refresh-card"
+          style={{ marginBottom: 16, padding: 12 }}
+        >
           <div
             style={{
               display: "flex",
@@ -1274,7 +1289,10 @@ export default function DashboardClient({
               Last successful refresh: {lastRefreshLabel}
             </div>
 
-            <div className="dashboard-refresh-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div
+              className="dashboard-refresh-actions"
+              style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+            >
               <button
                 type="button"
                 className="button ghost"
@@ -1288,7 +1306,9 @@ export default function DashboardClient({
                 type="button"
                 className="button ghost"
                 style={{ width: "auto", minWidth: 120 }}
-                onClick={() => refresh({ force: true, reason: "manual-header-refresh" })}
+                onClick={() =>
+                  refresh({ force: true, reason: "manual-header-refresh" })
+                }
               >
                 Refresh Now
               </button>
@@ -1335,6 +1355,53 @@ export default function DashboardClient({
             Refreshing dashboard…
           </div>
         ) : null}
+
+        <DesktopDashboardView
+          activeTab={activeTab}
+          counts={counts}
+          safeEvents={safeEvents}
+          safeWarns={safeWarns}
+          safeRaids={safeRaids}
+          safeFraud={safeFraud}
+          safeCategories={desktopCategorySection}
+          safeRecentJoins={safeRecentJoins}
+          safeMembers={safeMembers}
+          safeMetrics={safeMetrics}
+          safeRoles={safeRoles}
+          intelligence={intelligence}
+          expandedPanels={expandedPanels}
+          togglePanel={togglePanel}
+          jumpToTickets={jumpToTickets}
+          jumpToPanel={jumpToPanel}
+          refresh={refresh}
+          currentStaffId={currentStaffId}
+          homeLayout={homeLayout}
+          membersLayout={membersLayout}
+          sectionVisibility={sectionVisibility}
+          homeSections={homeSections}
+          membersSections={membersSections}
+          filteredTickets={
+            <TicketQueueTable
+              tickets={filteredTickets}
+              currentStaffId={currentStaffId}
+              onRefresh={() =>
+                refresh({ force: true, reason: "ticket-controls" })
+              }
+            />
+          }
+          search={search}
+          setSearch={setSearch}
+          statusFilter={statusFilter}
+          setStatusFilter={setStatusFilter}
+          priorityFilter={priorityFilter}
+          setPriorityFilter={setPriorityFilter}
+          sortBy={sortBy}
+          setSortBy={setSortBy}
+          handleReconcileTickets={handleReconcileTickets}
+          handlePreviewPurge={handlePreviewPurge}
+          handlePurgeStale={handlePurgeStale}
+          isMaintaining={isMaintaining}
+        />
 
         <section
           className={`mobile-tab-panel ${activeTab === "home" ? "active" : ""}`}
@@ -1393,7 +1460,9 @@ export default function DashboardClient({
                   type="button"
                   className="button ghost"
                   style={{ width: "auto", minWidth: 120 }}
-                  onClick={() => refresh({ force: true, reason: "manual-ticket-refresh" })}
+                  onClick={() =>
+                    refresh({ force: true, reason: "manual-ticket-refresh" })
+                  }
                 >
                   Refresh Queue
                 </button>
@@ -1504,7 +1573,9 @@ export default function DashboardClient({
             <TicketQueueTable
               tickets={filteredTickets}
               currentStaffId={currentStaffId}
-              onRefresh={() => refresh({ force: true, reason: "ticket-controls" })}
+              onRefresh={() =>
+                refresh({ force: true, reason: "ticket-controls" })
+              }
             />
           </div>
         </section>
@@ -1564,7 +1635,11 @@ export default function DashboardClient({
         .dashboard-home-grid,
         .dashboard-members-grid {
           display: grid;
-          gap: ${density === "compact" ? "12px" : density === "spacious" ? "22px" : "16px"};
+          gap: ${density === "compact"
+            ? "12px"
+            : density === "spacious"
+              ? "22px"
+              : "16px"};
         }
 
         .dashboard-members-grid {
@@ -1574,20 +1649,32 @@ export default function DashboardClient({
         .metrics-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: ${density === "compact" ? "10px" : density === "spacious" ? "16px" : "12px"};
+          gap: ${density === "compact"
+            ? "10px"
+            : density === "spacious"
+              ? "16px"
+              : "12px"};
         }
 
         .intelligence-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: ${density === "compact" ? "10px" : density === "spacious" ? "16px" : "12px"};
+          gap: ${density === "compact"
+            ? "10px"
+            : density === "spacious"
+              ? "16px"
+              : "12px"};
           margin-bottom: 14px;
           align-items: stretch;
         }
 
         .intel-tile {
           border-radius: 18px;
-          padding: ${density === "compact" ? "12px" : density === "spacious" ? "18px" : "14px"};
+          padding: ${density === "compact"
+            ? "12px"
+            : density === "spacious"
+              ? "18px"
+              : "14px"};
           display: grid;
           gap: 8px;
           border: 1px solid var(--panel-border, rgba(255,255,255,0.08));
@@ -1597,18 +1684,42 @@ export default function DashboardClient({
         }
 
         .intel-tile.ok {
-          border-color: color-mix(in srgb, var(--tone-success, #4ade80) 22%, transparent);
-          background: color-mix(in srgb, var(--tone-success, #4ade80) 10%, transparent);
+          border-color: color-mix(
+            in srgb,
+            var(--tone-success, #4ade80) 22%,
+            transparent
+          );
+          background: color-mix(
+            in srgb,
+            var(--tone-success, #4ade80) 10%,
+            transparent
+          );
         }
 
         .intel-tile.warn {
-          border-color: color-mix(in srgb, var(--tone-warn, #fbbf24) 22%, transparent);
-          background: color-mix(in srgb, var(--tone-warn, #fbbf24) 10%, transparent);
+          border-color: color-mix(
+            in srgb,
+            var(--tone-warn, #fbbf24) 22%,
+            transparent
+          );
+          background: color-mix(
+            in srgb,
+            var(--tone-warn, #fbbf24) 10%,
+            transparent
+          );
         }
 
         .intel-tile.danger {
-          border-color: color-mix(in srgb, var(--tone-danger, #f87171) 22%, transparent);
-          background: color-mix(in srgb, var(--tone-danger, #f87171) 10%, transparent);
+          border-color: color-mix(
+            in srgb,
+            var(--tone-danger, #f87171) 22%,
+            transparent
+          );
+          background: color-mix(
+            in srgb,
+            var(--tone-danger, #f87171) 10%,
+            transparent
+          );
         }
 
         .intel-value {
@@ -1621,11 +1732,19 @@ export default function DashboardClient({
         .detail-grid-3 {
           display: grid;
           grid-template-columns: 1fr;
-          gap: ${density === "compact" ? "10px" : density === "spacious" ? "16px" : "12px"};
+          gap: ${density === "compact"
+            ? "10px"
+            : density === "spacious"
+              ? "16px"
+              : "12px"};
         }
 
         .compact-detail-card {
-          padding: ${density === "compact" ? "12px" : density === "spacious" ? "18px" : "14px"};
+          padding: ${density === "compact"
+            ? "12px"
+            : density === "spacious"
+              ? "18px"
+              : "14px"};
         }
 
         .detail-card-title {
@@ -1660,7 +1779,11 @@ export default function DashboardClient({
 
           .dashboard-home-grid,
           .dashboard-members-grid {
-            gap: ${density === "compact" ? "14px" : density === "spacious" ? "24px" : "18px"};
+            gap: ${density === "compact"
+              ? "14px"
+              : density === "spacious"
+                ? "24px"
+                : "18px"};
           }
 
           .dashboard-members-grid {
@@ -1671,6 +1794,10 @@ export default function DashboardClient({
           .dashboard-members-grid :global(.compact-panel:nth-child(4)),
           .dashboard-members-grid :global(.compact-panel:nth-child(5)) {
             grid-column: span 1;
+          }
+
+          .mobile-tab-panel {
+            display: none !important;
           }
         }
 
