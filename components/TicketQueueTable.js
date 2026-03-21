@@ -18,6 +18,13 @@ function badgeClass(value) {
   if (v === "high") return "badge danger";
   if (v === "urgent") return "badge danger";
 
+  if (v === "verification") return "badge claimed";
+  if (v === "appeal") return "badge medium";
+  if (v === "report") return "badge danger";
+  if (v === "partnership") return "badge low";
+  if (v === "question") return "badge";
+  if (v === "custom") return "badge";
+
   return "badge";
 }
 
@@ -62,6 +69,42 @@ function getPriority(ticket) {
   return String(ticket?.priority || "").trim().toLowerCase();
 }
 
+function getDisplayedCategoryName(ticket) {
+  return (
+    String(ticket?.matched_category_name || "").trim() ||
+    String(ticket?.category || "").trim() ||
+    "Uncategorized"
+  );
+}
+
+function getDisplayedCategorySlug(ticket) {
+  return (
+    String(ticket?.matched_category_slug || "").trim() ||
+    String(ticket?.category || "").trim() ||
+    ""
+  );
+}
+
+function getDisplayedIntakeType(ticket) {
+  return String(ticket?.matched_intake_type || "").trim() || "";
+}
+
+function getCategoryReason(ticket) {
+  return String(ticket?.matched_category_reason || "").trim() || "";
+}
+
+function getCategoryScore(ticket) {
+  const score = Number(ticket?.matched_category_score || 0);
+  return Number.isFinite(score) ? score : 0;
+}
+
+function hasMatchedCategory(ticket) {
+  return Boolean(
+    String(ticket?.matched_category_name || "").trim() ||
+      String(ticket?.matched_category_slug || "").trim()
+  );
+}
+
 function countByStatus(tickets, status) {
   return tickets.filter(
     (ticket) => String(ticket?.status || "").toLowerCase() === status
@@ -74,6 +117,18 @@ function countByPriority(tickets, priority) {
   ).length;
 }
 
+function countMatchedCategories(tickets) {
+  return tickets.filter((ticket) => hasMatchedCategory(ticket)).length;
+}
+
+function countVerificationLike(tickets) {
+  return tickets.filter((ticket) => {
+    const intake = getDisplayedIntakeType(ticket).toLowerCase();
+    const category = getDisplayedCategoryName(ticket).toLowerCase();
+    return intake === "verification" || category.includes("verification");
+  }).length;
+}
+
 function getSummaryStats(tickets) {
   return {
     total: tickets.length,
@@ -83,6 +138,8 @@ function getSummaryStats(tickets) {
     high: countByPriority(tickets, "high"),
     missingChannel: tickets.filter((ticket) => hasMissingChannel(ticket)).length,
     ghosts: tickets.filter((ticket) => isGhost(ticket)).length,
+    matched: countMatchedCategories(tickets),
+    verificationLike: countVerificationLike(tickets),
   };
 }
 
@@ -111,6 +168,82 @@ function desktopMiniField(label, value) {
         {label}
       </div>
       <div style={{ overflowWrap: "anywhere" }}>{value}</div>
+    </div>
+  );
+}
+
+function CategoryDisplay({ ticket, compact = false }) {
+  const categoryName = getDisplayedCategoryName(ticket);
+  const categorySlug = getDisplayedCategorySlug(ticket);
+  const intakeType = getDisplayedIntakeType(ticket);
+  const reason = getCategoryReason(ticket);
+  const score = getCategoryScore(ticket);
+  const matched = hasMatchedCategory(ticket);
+
+  if (compact) {
+    return (
+      <div style={{ display: "grid", gap: 6 }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <span className={matched ? "badge claimed" : "badge"}>
+            {categoryName}
+          </span>
+          {intakeType ? (
+            <span className={badgeClass(intakeType)}>{intakeType}</span>
+          ) : null}
+        </div>
+
+        {reason ? (
+          <div className="muted" style={{ fontSize: 12, lineHeight: 1.35 }}>
+            {reason} {score > 0 ? `• score ${score}` : ""}
+          </div>
+        ) : null}
+
+        {categorySlug && categorySlug !== categoryName ? (
+          <div className="muted" style={{ fontSize: 12, lineHeight: 1.35 }}>
+            {categorySlug}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 6 }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
+        <span className={matched ? "badge claimed" : "badge"}>
+          {categoryName}
+        </span>
+        {intakeType ? (
+          <span className={badgeClass(intakeType)}>{intakeType}</span>
+        ) : null}
+      </div>
+
+      {reason ? (
+        <div className="muted" style={{ fontSize: 12, lineHeight: 1.35 }}>
+          Match: {reason}
+          {score > 0 ? ` • score ${score}` : ""}
+        </div>
+      ) : null}
+
+      {categorySlug && categorySlug !== categoryName ? (
+        <div className="muted" style={{ fontSize: 12, lineHeight: 1.35 }}>
+          {categorySlug}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -177,7 +310,17 @@ export default function TicketQueueTable({
         {summaryChip("Claimed", stats.claimed, "claimed")}
         {summaryChip("Urgent", stats.urgent, "danger")}
         {summaryChip("High", stats.high, "warn")}
-        {summaryChip("Missing Channel", stats.missingChannel, stats.missingChannel ? "danger" : "default")}
+        {summaryChip("Matched", stats.matched, stats.matched ? "claimed" : "default")}
+        {summaryChip(
+          "Verification",
+          stats.verificationLike,
+          stats.verificationLike ? "open" : "default"
+        )}
+        {summaryChip(
+          "Missing Channel",
+          stats.missingChannel,
+          stats.missingChannel ? "danger" : "default"
+        )}
         {summaryChip("Ghost", stats.ghosts, stats.ghosts ? "warn" : "default")}
       </div>
 
@@ -278,8 +421,13 @@ export default function TicketQueueTable({
                     </div>
                   </div>
 
+                  <div style={{ marginBottom: 12 }}>
+                    <CategoryDisplay ticket={ticket} compact />
+                  </div>
+
                   <div className="ticket-mobile-meta">
-                    {metaBlock("Category", safeText(ticket.category))}
+                    {metaBlock("Category", getDisplayedCategoryName(ticket))}
+                    {metaBlock("Intake Type", getDisplayedIntakeType(ticket) || "—")}
                     {metaBlock("Claimed By", safeText(ticket.claimed_by))}
                     {metaBlock("Priority", safeText(ticket.priority))}
                     {metaBlock("Status", safeText(ticket.status))}
@@ -287,7 +435,12 @@ export default function TicketQueueTable({
                     {metaBlock("User ID", safeText(ticket.user_id), true)}
                     {metaBlock("Ghost", ghost ? "yes" : "no")}
                     {metaBlock("Updated", timeAgo(ticket.updated_at || ticket.created_at))}
-                    {metaBlock("Suggestion", ticket.mod_suggestion || "—", true)}
+                    {metaBlock("Match Reason", getCategoryReason(ticket) || "—", true)}
+                    {metaBlock(
+                      "Suggestion",
+                      ticket.mod_suggestion || "—",
+                      true
+                    )}
 
                     {!!ticket.closed_reason ? (
                       metaBlock("Closed Reason", ticket.closed_reason, true)
@@ -324,7 +477,7 @@ export default function TicketQueueTable({
                 <thead>
                   <tr>
                     <th>User</th>
-                    <th>Category</th>
+                    <th>Category Intelligence</th>
                     <th>Status</th>
                     <th>Priority</th>
                     <th>Claimed By</th>
@@ -392,8 +545,8 @@ export default function TicketQueueTable({
                           </div>
                         </td>
 
-                        <td style={{ whiteSpace: "normal" }}>
-                          {safeText(ticket.category)}
+                        <td style={{ whiteSpace: "normal", minWidth: 220 }}>
+                          <CategoryDisplay ticket={ticket} />
                         </td>
 
                         <td>
@@ -531,6 +684,10 @@ export default function TicketQueueTable({
                       </div>
                     </div>
 
+                    <div style={{ marginBottom: 14 }}>
+                      <CategoryDisplay ticket={ticket} />
+                    </div>
+
                     <div
                       style={{
                         display: "grid",
@@ -539,7 +696,11 @@ export default function TicketQueueTable({
                         marginBottom: 14,
                       }}
                     >
-                      {desktopMiniField("Category", safeText(ticket.category))}
+                      {desktopMiniField("Category", getDisplayedCategoryName(ticket))}
+                      {desktopMiniField(
+                        "Intake Type",
+                        getDisplayedIntakeType(ticket) || "—"
+                      )}
                       {desktopMiniField("Claimed By", safeText(ticket.claimed_by))}
                       {desktopMiniField("Channel ID", channelId || "Missing")}
                       {desktopMiniField("User ID", safeText(ticket.user_id))}
@@ -548,6 +709,10 @@ export default function TicketQueueTable({
                         timeAgo(ticket.updated_at || ticket.created_at)
                       )}
                       {desktopMiniField("Ghost", ghost ? "yes" : "no")}
+                      {desktopMiniField(
+                        "Match Reason",
+                        getCategoryReason(ticket) || "—"
+                      )}
                     </div>
 
                     {!!ticket.mod_suggestion ? (
@@ -649,7 +814,7 @@ export default function TicketQueueTable({
 
         @media (min-width: 1200px) {
           .queue-summary-grid {
-            grid-template-columns: repeat(7, minmax(0, 1fr));
+            grid-template-columns: repeat(9, minmax(0, 1fr));
           }
         }
       `}</style>
