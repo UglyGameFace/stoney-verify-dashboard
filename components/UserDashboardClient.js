@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Topbar from "@/components/Topbar";
 import MobileBottomNav from "@/components/MobileBottomNav";
 
@@ -93,7 +93,9 @@ function getVerificationState(member, flags = []) {
   if (!member) return { label: "Not Synced Yet", tone: "warn" };
   if (member?.has_staff_role) return { label: "Staff", tone: "ok" };
   if (member?.has_verified_role) return { label: "Verified", tone: "ok" };
-  if (member?.has_unverified) return { label: "Pending Verification", tone: "warn" };
+  if (member?.has_unverified) {
+    return { label: "Pending Verification", tone: "warn" };
+  }
   if (safeArray(flags).some((f) => Boolean(f?.flagged))) {
     return { label: "Needs Review", tone: "danger" };
   }
@@ -617,11 +619,7 @@ function TicketsTab({
       <Section
         title="Active Tickets"
         subtitle={`${activeTickets.length} active ticket${activeTickets.length === 1 ? "" : "s"}`}
-        actions={
-          isPolling ? (
-            <span className="badge warn">Waiting for bot…</span>
-          ) : null
-        }
+        actions={isPolling ? <span className="badge warn">Waiting for bot…</span> : null}
       >
         {!activeTickets.length ? (
           <div className="empty-state">You do not currently have an active ticket.</div>
@@ -792,8 +790,12 @@ export default function UserDashboardClient({ initialData }) {
   const [noticeTone, setNoticeTone] = useState("info");
   const [isCreating, setIsCreating] = useState(false);
   const [isPolling, setIsPolling] = useState(false);
-  const [userTickets, setUserTickets] = useState(safeArray(initialData?.recentTickets));
-  const [userOpenTicket, setUserOpenTicket] = useState(initialData?.openTicket || null);
+  const [userTickets, setUserTickets] = useState(
+    safeArray(initialData?.recentTickets)
+  );
+  const [userOpenTicket, setUserOpenTicket] = useState(
+    initialData?.openTicket || null
+  );
 
   const viewer = initialData?.viewer || {};
   const member = initialData?.member || null;
@@ -840,34 +842,18 @@ export default function UserDashboardClient({ initialData }) {
     }
   }
 
-  async function refreshUserDashboardFromPage() {
-    const res = await fetch(`/?_ts=${Date.now()}`, {
-      method: "GET",
-      cache: "no-store",
-      headers: {
-        "Cache-Control": "no-store, max-age=0",
-        Pragma: "no-cache",
-      },
-    });
-
-    const html = await res.text();
-    const match = html.match(/"recentTickets":(\[[\s\S]*?\]),"categories":/);
-
-    if (!match) return false;
-
-    return false;
-  }
-
   async function pollForCreatedTicket() {
     setIsPolling(true);
 
     let found = false;
 
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 1800 : 2500));
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, attempt === 0 ? 1500 : 2200)
+      );
 
       try {
-        const res = await fetch(`/?_ts=${Date.now()}`, {
+        const res = await fetch(`/api/user/dashboard?_ts=${Date.now()}`, {
           method: "GET",
           cache: "no-store",
           headers: {
@@ -876,36 +862,26 @@ export default function UserDashboardClient({ initialData }) {
           },
         });
 
-        if (!res.ok) {
+        const data = await res.json().catch(() => null);
+
+        if (!res.ok || !data?.ok) {
           continue;
         }
 
-        const html = await res.text();
-        const ticketMatch = html.match(/"openTicket":(null|\{[\s\S]*?\}),"recentTickets":/);
-        const recentMatch = html.match(/"recentTickets":(\[[\s\S]*?\]),"categories":/);
+        const nextOpenTicket = data?.openTicket || null;
+        const nextRecentTickets = Array.isArray(data?.recentTickets)
+          ? data.recentTickets
+          : [];
 
-        if (!ticketMatch || !recentMatch) {
-          continue;
-        }
+        setUserOpenTicket(nextOpenTicket);
+        setUserTickets(nextRecentTickets);
 
-        let openTicket = null;
-        let recentTickets = [];
-
-        try {
-          openTicket = JSON.parse(ticketMatch[1]);
-          recentTickets = JSON.parse(recentMatch[1]);
-        } catch {
-          continue;
-        }
-
-        if (openTicket || (Array.isArray(recentTickets) && recentTickets.length > 0)) {
-          setUserOpenTicket(openTicket || null);
-          setUserTickets(Array.isArray(recentTickets) ? recentTickets : []);
+        if (nextOpenTicket) {
           found = true;
           break;
         }
       } catch {
-        // ignore and keep polling
+        // keep polling
       }
     }
 
@@ -940,7 +916,9 @@ export default function UserDashboardClient({ initialData }) {
           const existing = data.existing_ticket;
           setUserOpenTicket(existing);
           setUserTickets((prev) => {
-            const existingRows = safeArray(prev).filter((row) => row?.id !== existing.id);
+            const existingRows = safeArray(prev).filter(
+              (row) => row?.id !== existing.id
+            );
             return [existing, ...existingRows];
           });
           goToTab("tickets");
@@ -970,10 +948,19 @@ export default function UserDashboardClient({ initialData }) {
         "success"
       );
 
-      void pollForCreatedTicket();
+      const found = await pollForCreatedTicket();
+
+      if (!found) {
+        showTempNotice(
+          "Your request was queued successfully, but the ticket has not appeared in the dashboard yet. The bot may still be processing it.",
+          "warn"
+        );
+      }
     } catch (error) {
       showTempNotice(
-        error instanceof Error ? error.message : "Failed to submit ticket request.",
+        error instanceof Error
+          ? error.message
+          : "Failed to submit ticket request.",
         "error"
       );
     } finally {
@@ -988,7 +975,8 @@ export default function UserDashboardClient({ initialData }) {
   function handleRequestVerification() {
     const category =
       getVisibleCategories(categories).find(
-        (item) => String(item?.slug || "").trim().toLowerCase() === "verification"
+        (item) =>
+          String(item?.slug || "").trim().toLowerCase() === "verification"
       ) || FALLBACK_CATEGORIES[0];
 
     queueTicketForCategory(
@@ -1021,7 +1009,9 @@ export default function UserDashboardClient({ initialData }) {
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <StatusBadge label={verification.label} tone={verification.tone} />
-              {userOpenTicket ? <StatusBadge label="Open Ticket" tone="warn" /> : null}
+              {userOpenTicket ? (
+                <StatusBadge label="Open Ticket" tone="warn" />
+              ) : null}
               {isPolling ? <StatusBadge label="Bot Processing" tone="warn" /> : null}
             </div>
           </div>
@@ -1029,11 +1019,7 @@ export default function UserDashboardClient({ initialData }) {
 
         {notice ? (
           <div
-            className={
-              noticeTone === "error"
-                ? "error-banner"
-                : "info-banner"
-            }
+            className={noticeTone === "error" ? "error-banner" : "info-banner"}
             style={{ marginBottom: 16 }}
           >
             {notice}
@@ -1090,7 +1076,11 @@ export default function UserDashboardClient({ initialData }) {
         </section>
       </main>
 
-      <MobileBottomNav activeTab={activeTab} onChange={setActiveTab} tabs={USER_TABS} />
+      <MobileBottomNav
+        activeTab={activeTab}
+        onChange={setActiveTab}
+        tabs={USER_TABS}
+      />
 
       <style jsx>{`
         .desktop-tab-bar {
