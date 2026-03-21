@@ -30,7 +30,9 @@ function getMemberAvatar(member) {
 }
 
 function getRoleCount(member) {
-  const roles = safeArray(member?.role_names || member?.roles || member?.role_ids);
+  const roles = safeArray(
+    member?.role_names || member?.roles || member?.role_ids
+  );
   return roles.length;
 }
 
@@ -47,10 +49,14 @@ function formatCompactDateTime(value) {
   if (!value) return "Unknown";
   try {
     const date = new Date(value);
-    return date.toLocaleDateString() + " " + date.toLocaleTimeString([], {
-      hour: "numeric",
-      minute: "2-digit",
-    });
+    return (
+      date.toLocaleDateString() +
+      " " +
+      date.toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    );
   } catch {
     return "Unknown";
   }
@@ -149,6 +155,7 @@ function MemberCard({ member, onSelect }) {
         borderRadius: 18,
         padding: 12,
         color: "var(--text-strong, #f8fafc)",
+        cursor: "pointer",
       }}
     >
       <div
@@ -270,6 +277,273 @@ function MemberCard({ member, onSelect }) {
   );
 }
 
+function MemberDrawer({ member, onClose }) {
+  if (!member) return null;
+
+  const name = getMemberName(member);
+  const avatar = getMemberAvatar(member);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 120,
+        background: "rgba(0,0,0,0.58)",
+        backdropFilter: "blur(10px)",
+        display: "flex",
+        alignItems: "flex-end",
+        justifyContent: "center",
+        padding: "16px 12px calc(16px + env(safe-area-inset-bottom, 0px))",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: 760,
+          maxHeight: "88vh",
+          overflowY: "auto",
+          borderRadius: 24,
+          border: "1px solid rgba(255,255,255,0.10)",
+          background:
+            "linear-gradient(180deg, rgba(19,32,49,0.98), rgba(17,26,41,0.98))",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
+          color: "var(--text-strong, #f8fafc)",
+          padding: 16,
+        }}
+      >
+        <div
+          style={{
+            width: 42,
+            height: 5,
+            borderRadius: 999,
+            background: "rgba(255,255,255,0.18)",
+            margin: "0 auto 14px",
+          }}
+        />
+
+        <div
+          className="row"
+          style={{
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 12,
+            marginBottom: 14,
+          }}
+        >
+          <div
+            className="row"
+            style={{
+              alignItems: "center",
+              gap: 12,
+              minWidth: 0,
+              flex: 1,
+            }}
+          >
+            <div
+              className="avatar"
+              style={{ width: 52, height: 52, fontSize: 16 }}
+            >
+              {avatar ? (
+                <img
+                  src={avatar}
+                  alt={name}
+                  width="52"
+                  height="52"
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                  }}
+                />
+              ) : (
+                initialsFromName(name)
+              )}
+            </div>
+
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  fontWeight: 900,
+                  fontSize: 20,
+                  lineHeight: 1.15,
+                  overflowWrap: "anywhere",
+                }}
+              >
+                {name}
+              </div>
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 13,
+                  color: "var(--text-muted, rgba(255,255,255,0.72))",
+                  overflowWrap: "anywhere",
+                }}
+              >
+                {safeText(member?.user_id, "No member ID")}
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="button ghost"
+            style={{ width: "auto", minWidth: 100 }}
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+            marginBottom: 14,
+          }}
+        >
+          <span className={`badge ${getStateTone(member)}`}>
+            {getMemberState(member)}
+          </span>
+          <span className={`badge ${member?.in_guild === false ? "closed" : "low"}`}>
+            {member?.in_guild === false ? "Former" : "In Server"}
+          </span>
+          <span className={`badge ${member?.has_verified_role ? "low" : "medium"}`}>
+            {member?.has_verified_role ? "Verified" : "Not Verified"}
+          </span>
+          <span className={`badge ${member?.has_staff_role ? "claimed" : "open"}`}>
+            {member?.has_staff_role ? "Staff" : "Member"}
+          </span>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+            gap: 10,
+            marginBottom: 12,
+          }}
+        >
+          <div className="member-detail-item">
+            <span className="ticket-info-label">Display Name</span>
+            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+              {safeText(member?.display_name, "Unknown")}
+            </span>
+          </div>
+
+          <div className="member-detail-item">
+            <span className="ticket-info-label">Username</span>
+            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+              {safeText(member?.username, "Unknown")}
+            </span>
+          </div>
+
+          <div className="member-detail-item">
+            <span className="ticket-info-label">Nickname</span>
+            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+              {safeText(member?.nickname, "None")}
+            </span>
+          </div>
+
+          <div className="member-detail-item">
+            <span className="ticket-info-label">Top Role</span>
+            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+              {safeText(member?.top_role || member?.highest_role_name, "None")}
+            </span>
+          </div>
+
+          <div className="member-detail-item">
+            <span className="ticket-info-label">Role Count</span>
+            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+              {getRoleCount(member)}
+            </span>
+          </div>
+
+          <div className="member-detail-item">
+            <span className="ticket-info-label">Role State</span>
+            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+              {safeText(member?.role_state, "unknown")}
+            </span>
+          </div>
+
+          <div className="member-detail-item">
+            <span className="ticket-info-label">Joined</span>
+            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+              {formatDateTime(member?.joined_at)}
+            </span>
+          </div>
+
+          <div className="member-detail-item">
+            <span className="ticket-info-label">Updated</span>
+            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+              {formatDateTime(
+                member?.updated_at || member?.last_seen_at || member?.synced_at
+              )}
+            </span>
+          </div>
+
+          <div className="member-detail-item">
+            <span className="ticket-info-label">Last Seen</span>
+            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+              {formatDateTime(member?.last_seen_at)}
+            </span>
+          </div>
+        </div>
+
+        {member?.role_state_reason ? (
+          <div className="member-detail-item" style={{ marginBottom: 12 }}>
+            <span className="ticket-info-label">Reason</span>
+            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+              {member.role_state_reason}
+            </span>
+          </div>
+        ) : null}
+
+        <div className="member-detail-item" style={{ marginBottom: 12 }}>
+          <span className="ticket-info-label">Current Roles</span>
+          <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+            {safeArray(member?.role_names).length
+              ? safeArray(member.role_names).join(", ")
+              : "No roles tracked"}
+          </span>
+        </div>
+
+        {safeArray(member?.previous_usernames).length ? (
+          <div className="member-detail-item" style={{ marginBottom: 12 }}>
+            <span className="ticket-info-label">Previous Usernames</span>
+            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+              {safeArray(member.previous_usernames).join(", ")}
+            </span>
+          </div>
+        ) : null}
+
+        {safeArray(member?.previous_display_names).length ? (
+          <div className="member-detail-item" style={{ marginBottom: 12 }}>
+            <span className="ticket-info-label">Previous Display Names</span>
+            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+              {safeArray(member.previous_display_names).join(", ")}
+            </span>
+          </div>
+        ) : null}
+
+        {safeArray(member?.previous_nicknames).length ? (
+          <div className="member-detail-item">
+            <span className="ticket-info-label">Previous Nicknames</span>
+            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+              {safeArray(member.previous_nicknames).join(", ")}
+            </span>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default function MemberSnapshot({ members = [] }) {
   const safeMembers = safeArray(members);
   const [query, setQuery] = useState("");
@@ -286,14 +560,7 @@ export default function MemberSnapshot({ members = [] }) {
     const verified = safeMembers.filter((m) => !!m?.has_verified_role).length;
     const pending = safeMembers.filter((m) => !!m?.has_unverified).length;
 
-    return {
-      total,
-      active,
-      former,
-      staff,
-      verified,
-      pending,
-    };
+    return { total, active, former, staff, verified, pending };
   }, [safeMembers]);
 
   const filteredMembers = useMemo(() => {
@@ -334,27 +601,22 @@ export default function MemberSnapshot({ members = [] }) {
           <span className="ticket-info-label">Total</span>
           <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.total}</span>
         </div>
-
         <div className="member-detail-item">
           <span className="ticket-info-label">Active</span>
           <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.active}</span>
         </div>
-
         <div className="member-detail-item">
           <span className="ticket-info-label">Former</span>
           <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.former}</span>
         </div>
-
         <div className="member-detail-item">
           <span className="ticket-info-label">Staff</span>
           <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.staff}</span>
         </div>
-
         <div className="member-detail-item">
           <span className="ticket-info-label">Verified</span>
           <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.verified}</span>
         </div>
-
         <div className="member-detail-item">
           <span className="ticket-info-label">Pending</span>
           <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.pending}</span>
@@ -421,12 +683,7 @@ export default function MemberSnapshot({ members = [] }) {
                   flexWrap: "wrap",
                 }}
               >
-                <div
-                  style={{
-                    fontWeight: 800,
-                    color: "var(--text-strong, #f8fafc)",
-                  }}
-                >
+                <div style={{ fontWeight: 800, color: "var(--text-strong, #f8fafc)" }}>
                   Active Members
                 </div>
                 <div
@@ -464,12 +721,7 @@ export default function MemberSnapshot({ members = [] }) {
                 }}
               >
                 <div>
-                  <div
-                    style={{
-                      fontWeight: 800,
-                      color: "var(--text-strong, #f8fafc)",
-                    }}
-                  >
+                  <div style={{ fontWeight: 800, color: "var(--text-strong, #f8fafc)" }}>
                     Former Members
                   </div>
                   <div
@@ -507,147 +759,7 @@ export default function MemberSnapshot({ members = [] }) {
         </>
       )}
 
-      {selected ? (
-        <div
-          style={{
-            marginTop: 16,
-            border: "1px solid rgba(255,255,255,0.08)",
-            background: "rgba(255,255,255,0.02)",
-            borderRadius: 20,
-            padding: 16,
-            color: "var(--text-strong, #f8fafc)",
-          }}
-        >
-          <div
-            className="row"
-            style={{
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 12,
-              marginBottom: 12,
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontWeight: 800,
-                  fontSize: 18,
-                  color: "var(--text-strong, #f8fafc)",
-                }}
-              >
-                {getMemberName(selected)}
-              </div>
-              <div
-                style={{
-                  marginTop: 4,
-                  fontSize: 13,
-                  color: "var(--text-muted, rgba(255,255,255,0.72))",
-                }}
-              >
-                {safeText(selected?.user_id, "No member ID")}
-              </div>
-            </div>
-
-            <button
-              type="button"
-              className="button ghost"
-              style={{ width: "auto", minWidth: 110 }}
-              onClick={() => setSelected(null)}
-            >
-              Close
-            </button>
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-              gap: 10,
-              marginBottom: 12,
-            }}
-          >
-            <div className="member-detail-item">
-              <span className="ticket-info-label">Display Name</span>
-              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-                {safeText(selected?.display_name, "Unknown")}
-              </span>
-            </div>
-
-            <div className="member-detail-item">
-              <span className="ticket-info-label">Username</span>
-              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-                {safeText(selected?.username, "Unknown")}
-              </span>
-            </div>
-
-            <div className="member-detail-item">
-              <span className="ticket-info-label">Nickname</span>
-              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-                {safeText(selected?.nickname, "None")}
-              </span>
-            </div>
-
-            <div className="member-detail-item">
-              <span className="ticket-info-label">State</span>
-              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-                {safeText(selected?.role_state, "unknown")}
-              </span>
-            </div>
-
-            <div className="member-detail-item">
-              <span className="ticket-info-label">In Guild</span>
-              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-                {selected?.in_guild === false ? "No" : "Yes"}
-              </span>
-            </div>
-
-            <div className="member-detail-item">
-              <span className="ticket-info-label">Last Seen</span>
-              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-                {formatDateTime(
-                  selected?.last_seen_at || selected?.updated_at || selected?.synced_at
-                )}
-              </span>
-            </div>
-          </div>
-
-          <div className="member-detail-item" style={{ marginBottom: 12 }}>
-            <span className="ticket-info-label">Current Roles</span>
-            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-              {safeArray(selected?.role_names).length
-                ? safeArray(selected.role_names).join(", ")
-                : "No roles tracked"}
-            </span>
-          </div>
-
-          {safeArray(selected?.previous_usernames).length ? (
-            <div className="member-detail-item" style={{ marginBottom: 12 }}>
-              <span className="ticket-info-label">Previous Usernames</span>
-              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-                {safeArray(selected.previous_usernames).join(", ")}
-              </span>
-            </div>
-          ) : null}
-
-          {safeArray(selected?.previous_display_names).length ? (
-            <div className="member-detail-item" style={{ marginBottom: 12 }}>
-              <span className="ticket-info-label">Previous Display Names</span>
-              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-                {safeArray(selected.previous_display_names).join(", ")}
-              </span>
-            </div>
-          ) : null}
-
-          {safeArray(selected?.previous_nicknames).length ? (
-            <div className="member-detail-item">
-              <span className="ticket-info-label">Previous Nicknames</span>
-              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-                {safeArray(selected.previous_nicknames).join(", ")}
-              </span>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+      <MemberDrawer member={selected} onClose={() => setSelected(null)} />
     </>
   );
 }
