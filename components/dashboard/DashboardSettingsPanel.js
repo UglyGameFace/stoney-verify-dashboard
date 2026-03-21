@@ -295,7 +295,10 @@ export default function DashboardSettingsPanel({
   const theme = preferences?.theme || {};
 
   const sortedProfiles = useMemo(
-    () => safeArray(profiles).slice().sort((a, b) => Number(a.slot || 0) - Number(b.slot || 0)),
+    () =>
+      safeArray(profiles)
+        .slice()
+        .sort((a, b) => Number(a.slot || 0) - Number(b.slot || 0)),
     [profiles]
   );
 
@@ -303,10 +306,12 @@ export default function DashboardSettingsPanel({
 
   function flashMessage(text) {
     setMessage(text);
-    window.clearTimeout(window.__dashboardSettingsMsgTimer);
-    window.__dashboardSettingsMsgTimer = window.setTimeout(() => {
-      setMessage("");
-    }, 2200);
+    if (typeof window !== "undefined") {
+      window.clearTimeout(window.__dashboardSettingsMsgTimer);
+      window.__dashboardSettingsMsgTimer = window.setTimeout(() => {
+        setMessage("");
+      }, 2200);
+    }
   }
 
   function handleRename(profileId, nextName) {
@@ -398,7 +403,8 @@ export default function DashboardSettingsPanel({
                 fontSize: 13,
               }}
             >
-              Customize colors, density, visibility, layout, and save up to 5 UI profiles.
+              Customize colors, density, visibility, layout, and save up to 5 UI
+              profiles.
             </div>
           </div>
 
@@ -433,10 +439,7 @@ export default function DashboardSettingsPanel({
         </div>
 
         {message ? (
-          <div
-            className="info-banner"
-            style={{ marginBottom: 14 }}
-          >
+          <div className="info-banner" style={{ marginBottom: 14 }}>
             {message}
           </div>
         ) : null}
@@ -514,7 +517,7 @@ export default function DashboardSettingsPanel({
               <span className="ticket-info-label">Muted Text</span>
               <input
                 type="color"
-                value="#b8c0cc"
+                value={theme.textMuted || "#b8c0cc"}
                 onChange={(e) => setThemeValue("textMuted", e.target.value)}
                 style={{ marginTop: 10, width: "100%", height: 42 }}
               />
@@ -554,7 +557,8 @@ export default function DashboardSettingsPanel({
                 lineHeight: 1.5,
               }}
             >
-              Compact keeps the same information but expects more expandable sections and tighter spacing.
+              Compact keeps the same information but expects more expandable
+              sections and tighter spacing.
             </div>
           </div>
 
