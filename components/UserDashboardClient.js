@@ -11,7 +11,8 @@ const FALLBACK_CATEGORIES = [
     id: "fallback-verification",
     name: "Verification",
     slug: "verification",
-    description: "Help with pending verification, missing verified role, or verification review.",
+    description:
+      "Help with pending verification, missing verified role, or verification review.",
     intake_type: "verification",
     button_label: "Open Verification Ticket",
     is_default: true,
@@ -20,7 +21,8 @@ const FALLBACK_CATEGORIES = [
     id: "fallback-appeal",
     name: "Appeal",
     slug: "appeal",
-    description: "Appeal a moderation action or request review of a previous decision.",
+    description:
+      "Appeal a moderation action or request review of a previous decision.",
     intake_type: "appeal",
     button_label: "Open Appeal Ticket",
     is_default: false,
@@ -29,7 +31,8 @@ const FALLBACK_CATEGORIES = [
     id: "fallback-report",
     name: "Report / Incident",
     slug: "report",
-    description: "Report a member, suspicious activity, scam, abuse, or other incident.",
+    description:
+      "Report a member, suspicious activity, scam, abuse, or other incident.",
     intake_type: "report",
     button_label: "Open Report Ticket",
     is_default: false,
@@ -38,7 +41,8 @@ const FALLBACK_CATEGORIES = [
     id: "fallback-question",
     name: "Question",
     slug: "question",
-    description: "General support questions, access issues, or guidance on what to do next.",
+    description:
+      "General support questions, access issues, or guidance on what to do next.",
     intake_type: "question",
     button_label: "Open Question Ticket",
     is_default: false,
@@ -295,6 +299,7 @@ function ActionCenter({
   onGoSecondary,
   canRequestVerification,
   onRequestVerification,
+  isCreating,
 }) {
   return (
     <div className={`status-panel ${plan.tone}`}>
@@ -326,6 +331,7 @@ function ActionCenter({
           className="button"
           style={{ width: "auto", minWidth: 150 }}
           onClick={onGoPrimary}
+          disabled={isCreating}
         >
           {plan.primaryLabel}
         </button>
@@ -336,6 +342,7 @@ function ActionCenter({
             className="button ghost"
             style={{ width: "auto", minWidth: 150 }}
             onClick={onGoSecondary}
+            disabled={isCreating}
           >
             {plan.secondaryLabel}
           </button>
@@ -345,10 +352,11 @@ function ActionCenter({
           <button
             type="button"
             className="button ghost"
-            style={{ width: "auto", minWidth: 170 }}
+            style={{ width: "auto", minWidth: 190 }}
             onClick={onRequestVerification}
+            disabled={isCreating}
           >
-            Request Verification Ticket
+            {isCreating ? "Creating..." : "Request Verification Ticket"}
           </button>
         ) : null}
       </div>
@@ -364,6 +372,7 @@ function HomeTab({
   vcVerifySession,
   onGoToTab,
   onRequestVerification,
+  isCreating,
 }) {
   const verification = getVerificationState(member, verificationFlags);
   const roles = getRoleSummary(member);
@@ -455,6 +464,7 @@ function HomeTab({
               ? onGoToTab(actionPlan.secondaryTargetTab)
               : null
           }
+          isCreating={isCreating}
         />
 
         {vcVerifySession ? (
@@ -649,7 +659,7 @@ function TicketsTab({ recentTickets, showDeletedHistory, onToggleDeletedHistory 
   );
 }
 
-function CategoryCard({ category, highlighted, onUseThisCategory }) {
+function CategoryCard({ category, highlighted, onUseThisCategory, isCreating }) {
   return (
     <div className={`ticket-row-card ${highlighted ? "emphasis" : ""}`}>
       <div
@@ -681,10 +691,13 @@ function CategoryCard({ category, highlighted, onUseThisCategory }) {
         <button
           type="button"
           className="button ghost"
-          style={{ width: "auto", minWidth: 160 }}
+          style={{ width: "auto", minWidth: 180 }}
           onClick={() => onUseThisCategory(category)}
+          disabled={isCreating}
         >
-          {safeText(category?.button_label, "Use This Category")}
+          {isCreating
+            ? "Creating..."
+            : safeText(category?.button_label, "Use This Category")}
         </button>
       </div>
     </div>
@@ -697,6 +710,7 @@ function HelpTab({
   onGoToTab,
   recommendedCategorySlug,
   onUseCategory,
+  isCreating,
 }) {
   const rows = getVisibleCategories(categories);
 
@@ -716,6 +730,7 @@ function HelpTab({
                 category={category}
                 highlighted={highlighted}
                 onUseThisCategory={onUseCategory}
+                isCreating={isCreating}
               />
             );
           })}
@@ -725,12 +740,12 @@ function HelpTab({
       <Section title="Best Next Step" subtitle="What you should do right now">
         <div className="status-panel ok">
           <div className="status-title">
-            {openTicket ? "Use your current ticket" : "Open a support ticket in Discord"}
+            {openTicket ? "Use your current ticket" : "Open a support ticket"}
           </div>
           <div className="muted" style={{ lineHeight: 1.55 }}>
             {openTicket
               ? "You already have an active ticket. Continue there so staff can help you faster and keep everything in one place."
-              : "Use the category above that best matches your issue. Verification users should choose the verification category first."}
+              : "Use one of the categories above to create a ticket directly from the dashboard."}
           </div>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
@@ -739,6 +754,7 @@ function HelpTab({
               className="button ghost"
               style={{ width: "auto", minWidth: 150 }}
               onClick={() => onGoToTab("tickets")}
+              disabled={isCreating}
             >
               View My Tickets
             </button>
@@ -748,6 +764,7 @@ function HelpTab({
               className="button ghost"
               style={{ width: "auto", minWidth: 150 }}
               onClick={() => onGoToTab("home")}
+              disabled={isCreating}
             >
               View Account Status
             </button>
@@ -762,11 +779,13 @@ export default function UserDashboardClient({ initialData }) {
   const [activeTab, setActiveTab] = useState("home");
   const [showDeletedHistory, setShowDeletedHistory] = useState(false);
   const [notice, setNotice] = useState("");
+  const [noticeTone, setNoticeTone] = useState("info");
+  const [isCreating, setIsCreating] = useState(false);
+  const [userTickets, setUserTickets] = useState(safeArray(initialData?.recentTickets));
+  const [userOpenTicket, setUserOpenTicket] = useState(initialData?.openTicket || null);
 
   const viewer = initialData?.viewer || {};
   const member = initialData?.member || null;
-  const openTicket = initialData?.openTicket || null;
-  const recentTickets = safeArray(initialData?.recentTickets);
   const categories = safeArray(initialData?.categories);
   const verificationFlags = safeArray(initialData?.verificationFlags);
   const vcVerifySession = initialData?.vcVerifySession || null;
@@ -780,11 +799,11 @@ export default function UserDashboardClient({ initialData }) {
     () =>
       getActionPlan({
         member,
-        openTicket,
+        openTicket: userOpenTicket,
         verificationFlags,
         vcVerifySession,
       }),
-    [member, openTicket, verificationFlags, vcVerifySession]
+    [member, userOpenTicket, verificationFlags, vcVerifySession]
   );
 
   function goToTab(tab) {
@@ -798,35 +817,96 @@ export default function UserDashboardClient({ initialData }) {
     }
   }
 
-  function showTempNotice(text) {
+  function showTempNotice(text, tone = "info") {
     setNotice(text);
+    setNoticeTone(tone);
     if (typeof window !== "undefined") {
       window.clearTimeout(window.__userDashNoticeTimer);
       window.__userDashNoticeTimer = window.setTimeout(() => {
         setNotice("");
-      }, 2600);
+        setNoticeTone("info");
+      }, 3200);
+    }
+  }
+
+  async function createTicketForCategory(category, extraMessage = "") {
+    if (isCreating) return;
+    setIsCreating(true);
+
+    try {
+      const res = await fetch("/api/user/tickets/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+        },
+        body: JSON.stringify({
+          category_slug: category?.slug || category?.intake_type || "general",
+          intake_type: category?.intake_type || "general",
+          message: extraMessage || "",
+          priority: "medium",
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        if (res.status === 409 && data?.existing_ticket) {
+          const existing = data.existing_ticket;
+          setUserOpenTicket(existing);
+          setUserTickets((prev) => {
+            const existingRows = safeArray(prev).filter((row) => row?.id !== existing.id);
+            return [existing, ...existingRows];
+          });
+          goToTab("tickets");
+          showTempNotice(
+            "You already have an open ticket, so I took you to it instead.",
+            "warn"
+          );
+          return;
+        }
+
+        throw new Error(data?.error || "Failed to create ticket.");
+      }
+
+      const createdTicket = data?.ticket || null;
+
+      if (createdTicket) {
+        setUserOpenTicket(createdTicket);
+        setUserTickets((prev) => {
+          const existingRows = safeArray(prev).filter((row) => row?.id !== createdTicket.id);
+          return [createdTicket, ...existingRows];
+        });
+      }
+
+      goToTab("tickets");
+      showTempNotice(
+        `${safeText(category?.name, "Support")} ticket created successfully.`,
+        "success"
+      );
+    } catch (error) {
+      showTempNotice(
+        error instanceof Error ? error.message : "Failed to create ticket.",
+        "error"
+      );
+    } finally {
+      setIsCreating(false);
     }
   }
 
   function handleUseCategory(category) {
-    const slug = String(category?.slug || "").trim().toLowerCase();
-
-    if (slug === "verification") {
-      showTempNotice(
-        "Verification category selected. The next backend step is wiring a real in-dashboard ticket create action."
-      );
-      return;
-    }
-
-    showTempNotice(
-      `${safeText(category?.name, "Category")} selected. The UI is ready; the next backend step is wiring real ticket creation from the dashboard.`
-    );
+    createTicketForCategory(category);
   }
 
   function handleRequestVerification() {
-    goToTab("help");
-    showTempNotice(
-      "Verification ticket request selected. The dashboard now points the user to the correct category, but true in-dashboard ticket creation still needs the backend route."
+    const category =
+      getVisibleCategories(categories).find(
+        (item) => String(item?.slug || "").trim().toLowerCase() === "verification"
+      ) || FALLBACK_CATEGORIES[0];
+
+    createTicketForCategory(
+      category,
+      "Member requested verification help from the dashboard."
     );
   }
 
@@ -854,13 +934,22 @@ export default function UserDashboardClient({ initialData }) {
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <StatusBadge label={verification.label} tone={verification.tone} />
-              {openTicket ? <StatusBadge label="Open Ticket" tone="warn" /> : null}
+              {userOpenTicket ? <StatusBadge label="Open Ticket" tone="warn" /> : null}
             </div>
           </div>
         </div>
 
         {notice ? (
-          <div className="info-banner" style={{ marginBottom: 16 }}>
+          <div
+            className={
+              noticeTone === "error"
+                ? "error-banner"
+                : noticeTone === "success"
+                  ? "info-banner"
+                  : "info-banner"
+            }
+            style={{ marginBottom: 16 }}
+          >
             {notice}
           </div>
         ) : null}
@@ -883,17 +972,18 @@ export default function UserDashboardClient({ initialData }) {
           <HomeTab
             viewer={viewer}
             member={member}
-            openTicket={openTicket}
+            openTicket={userOpenTicket}
             verificationFlags={verificationFlags}
             vcVerifySession={vcVerifySession}
             onGoToTab={goToTab}
             onRequestVerification={handleRequestVerification}
+            isCreating={isCreating}
           />
         </section>
 
         <section className={activeTab === "tickets" ? "user-tab active" : "user-tab"}>
           <TicketsTab
-            recentTickets={recentTickets}
+            recentTickets={userTickets}
             showDeletedHistory={showDeletedHistory}
             onToggleDeletedHistory={() =>
               setShowDeletedHistory((prev) => !prev)
@@ -904,10 +994,11 @@ export default function UserDashboardClient({ initialData }) {
         <section className={activeTab === "help" ? "user-tab active" : "user-tab"}>
           <HelpTab
             categories={categories}
-            openTicket={openTicket}
+            openTicket={userOpenTicket}
             onGoToTab={goToTab}
             recommendedCategorySlug={actionPlan?.suggestedCategorySlug}
             onUseCategory={handleUseCategory}
+            isCreating={isCreating}
           />
         </section>
       </main>
