@@ -160,6 +160,84 @@ function deriveMetricsFromTickets(tickets = [], existingMetrics = []) {
   });
 }
 
+function sanitizeUserTicket(ticket) {
+  return {
+    id: ticket?.id || null,
+    title: ticket?.title || "Ticket",
+    category: ticket?.category || null,
+    matched_category_name: ticket?.matched_category_name || null,
+    matched_category_slug: ticket?.matched_category_slug || null,
+    matched_intake_type: ticket?.matched_intake_type || null,
+    status: ticket?.status || "open",
+    priority: ticket?.priority || "medium",
+    claimed_by: ticket?.claimed_by || null,
+    closed_reason: ticket?.closed_reason || null,
+    created_at: ticket?.created_at || null,
+    updated_at: ticket?.updated_at || null,
+    closed_at: ticket?.closed_at || null,
+    channel_id: ticket?.channel_id || ticket?.discord_thread_id || null,
+    channel_name: ticket?.channel_name || null,
+  };
+}
+
+function sanitizeUserCategory(category) {
+  return {
+    id: category?.id || null,
+    name: category?.name || "Category",
+    slug: category?.slug || null,
+    description: category?.description || null,
+    intake_type: category?.intake_type || "general",
+    button_label: category?.button_label || null,
+    is_default: Boolean(category?.is_default),
+  };
+}
+
+function sanitizeUserMember(member) {
+  if (!member) return null;
+
+  return {
+    user_id: member?.user_id || null,
+    username: member?.username || null,
+    display_name: member?.display_name || null,
+    nickname: member?.nickname || null,
+    avatar_url: member?.avatar_url || null,
+    in_guild: member?.in_guild !== false,
+    has_unverified: Boolean(member?.has_unverified),
+    has_verified_role: Boolean(member?.has_verified_role),
+    has_staff_role: Boolean(member?.has_staff_role),
+    has_secondary_verified_role: Boolean(member?.has_secondary_verified_role),
+    role_state: member?.role_state || "unknown",
+    role_state_reason: member?.role_state_reason || null,
+    joined_at: member?.joined_at || null,
+    role_names: Array.isArray(member?.role_names) ? member.role_names : [],
+  };
+}
+
+function sanitizeVerificationFlag(flag) {
+  return {
+    id: flag?.id || null,
+    score: Number(flag?.score || 0),
+    flagged: Boolean(flag?.flagged),
+    reasons: Array.isArray(flag?.reasons) ? flag.reasons : [],
+    created_at: flag?.created_at || null,
+  };
+}
+
+function sanitizeVcVerifySession(session) {
+  if (!session) return null;
+
+  return {
+    token: null,
+    status: session?.status || "PENDING",
+    created_at: session?.created_at || null,
+    accepted_at: session?.accepted_at || null,
+    started_at: session?.started_at || null,
+    completed_at: session?.completed_at || null,
+    canceled_at: session?.canceled_at || null,
+    access_minutes: Number(session?.access_minutes || 0),
+  };
+}
+
 async function getStaffDashboardData() {
   const supabase = createServerSupabase();
   const guildId = env.guildId || "";
@@ -534,14 +612,17 @@ async function getUserDashboardData(session) {
       .maybeSingle(),
   ]);
 
-  const member = memberRes.data || null;
+  const member = sanitizeUserMember(memberRes.data || null);
+
   const allTickets = (ticketsRes.data || []).map((ticket) => ({
     ...ticket,
     priority: ticket.priority || derivePriority(ticket),
     channel_id: ticket.channel_id || ticket.discord_thread_id || null,
   }));
 
-  const visibleTickets = allTickets.filter((ticket) => !shouldHideStaleTicket(ticket));
+  const visibleTickets = allTickets
+    .filter((ticket) => !shouldHideStaleTicket(ticket))
+    .map(sanitizeUserTicket);
 
   const openTicket =
     visibleTickets.find((ticket) =>
@@ -557,9 +638,9 @@ async function getUserDashboardData(session) {
     member,
     openTicket,
     recentTickets: sortTickets(visibleTickets, "updated_desc"),
-    categories: categoriesRes.data || [],
-    verificationFlags: flagsRes.data || [],
-    vcVerifySession: vcRes.data || null,
+    categories: (categoriesRes.data || []).map(sanitizeUserCategory),
+    verificationFlags: (flagsRes.data || []).map(sanitizeVerificationFlag),
+    vcVerifySession: sanitizeVcVerifySession(vcRes.data || null),
   };
 }
 
