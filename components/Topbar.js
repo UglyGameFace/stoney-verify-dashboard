@@ -9,7 +9,7 @@ function getHeaderContent(session) {
       eyebrow: "Stoney Balonney control room",
       title: "Stoney Verify Dashboard",
       description:
-        "Green-room command for tickets, joins, verification flow, role sync, fraud checks, and staff actions.",
+        "Manage tickets, joins, verification flow, role sync, fraud checks, and staff operations.",
       badge: "Staff Console",
       tone: "staff",
     };
@@ -19,23 +19,10 @@ function getHeaderContent(session) {
     eyebrow: "Member support portal",
     title: "My Dashboard",
     description:
-      "Track your verification status, support progress, and ticket history without staff-only controls.",
+      "Track your verification status, support progress, and ticket history in one place.",
     badge: "Member View",
     tone: "member",
   };
-}
-
-function getDisplayName(session) {
-  return (
-    session?.user?.username ||
-    session?.discordUser?.username ||
-    session?.user?.name ||
-    "User"
-  );
-}
-
-function getAvatar(session) {
-  return session?.user?.avatar || session?.discordUser?.avatar || "";
 }
 
 export default function Topbar() {
@@ -78,13 +65,10 @@ export default function Topbar() {
   }, []);
 
   const content = useMemo(() => getHeaderContent(session), [session]);
-  const displayName = getDisplayName(session);
-  const avatar = getAvatar(session);
-  const initial = String(displayName || "?").slice(0, 1).toUpperCase();
 
   return (
     <div
-      className={`card stoner-topbar topbar-shell ${content.tone}`}
+      className={`card topbar-shell ${content.tone}`}
       style={{ marginBottom: 18 }}
     >
       <div className="topbar-glow topbar-glow-a" />
@@ -117,44 +101,8 @@ export default function Topbar() {
           </h1>
 
           <div className="muted topbar-description">
-            {loading
-              ? "Loading your session and dashboard view..."
-              : content.description}
+            {loading ? "Loading your dashboard..." : content.description}
           </div>
-
-          {!loading && session ? (
-            <div className="topbar-presence">
-              <div className="topbar-presence-user">
-                {avatar ? (
-                  <div className="topbar-avatar">
-                    <img
-                      src={avatar}
-                      alt={`${displayName} avatar`}
-                      width="44"
-                      height="44"
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                        display: "block",
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <div className="topbar-avatar fallback">{initial}</div>
-                )}
-
-                <div className="topbar-presence-copy">
-                  <div className="topbar-presence-name">{displayName}</div>
-                  <div className="muted topbar-presence-subline">
-                    {session?.isStaff
-                      ? "Staff tools and moderation controls available"
-                      : "Personal support, verification, and ticket tracking"}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
         </div>
 
         <div className="topbar-auth-wrap">
@@ -278,65 +226,6 @@ export default function Topbar() {
           font-size: 15px;
         }
 
-        .topbar-presence {
-          margin-top: 18px;
-          display: flex;
-          flex-wrap: wrap;
-          gap: 12px;
-        }
-
-        .topbar-presence-user {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          min-width: 0;
-          padding: 10px 12px;
-          border-radius: 18px;
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(255, 255, 255, 0.035);
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-        }
-
-        .topbar-avatar {
-          width: 44px;
-          height: 44px;
-          min-width: 44px;
-          border-radius: 999px;
-          overflow: hidden;
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          background: rgba(255, 255, 255, 0.06);
-        }
-
-        .topbar-avatar.fallback {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: 900;
-          color: #08111f;
-          background: linear-gradient(135deg, #7cf29e, #7db7ff);
-        }
-
-        .topbar-presence-copy {
-          min-width: 0;
-        }
-
-        .topbar-presence-name {
-          font-size: 15px;
-          font-weight: 800;
-          color: var(--text-strong, #f8fafc);
-          line-height: 1.15;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          max-width: 320px;
-        }
-
-        .topbar-presence-subline {
-          margin-top: 3px;
-          font-size: 13px;
-          line-height: 1.35;
-        }
-
         @media (max-width: 767px) {
           .topbar-shell {
             padding: 18px;
@@ -353,10 +242,6 @@ export default function Topbar() {
 
           .topbar-description {
             font-size: 14px;
-          }
-
-          .topbar-presence-name {
-            max-width: 180px;
           }
         }
       `}</style>
