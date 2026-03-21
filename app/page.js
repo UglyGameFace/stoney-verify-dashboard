@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import DashboardClient from "@/components/DashboardClient";
+import UserDashboardClient from "@/components/UserDashboardClient";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { sortTickets, derivePriority } from "@/lib/priority";
 import {
@@ -48,8 +49,6 @@ function shouldHideStaleTicket(ticket) {
   const newestMs = Math.max(closedAtMs, updatedAtMs, createdAtMs);
   const ageMs = Date.now() - newestMs;
 
-  // Hide dead DB-only closed/deleted rows with no live Discord channel
-  // after a short grace period so recently changed rows can still settle.
   return ageMs > 5 * 60 * 1000;
 }
 
@@ -75,7 +74,6 @@ function deriveMetricsFromTickets(tickets = [], existingMetrics = []) {
     return byStaff.get(safeKey);
   }
 
-  // Seed from existing metrics first
   for (const row of Array.isArray(existingMetrics) ? existingMetrics : []) {
     const key = normalizeStaffKey(row?.staff_id || row?.staff_name);
     if (!key) continue;
@@ -125,11 +123,9 @@ function deriveMetricsFromTickets(tickets = [], existingMetrics = []) {
       row.last_active = updatedAt;
     }
 
-    // Count any closed/deleted ticket with a staff actor as handled.
     if (status === "closed" || status === "deleted") {
       row.tickets_handled += 1;
 
-      // Treat verification issue closes as approvals unless clearly denied/rejected.
       const reasonText = String(
         ticket?.closed_reason || ticket?.reason || ticket?.mod_suggestion || ""
       ).toLowerCase();
@@ -164,7 +160,7 @@ function deriveMetricsFromTickets(tickets = [], existingMetrics = []) {
   });
 }
 
-async function getDashboardData() {
+async function getStaffDashboardData() {
   const supabase = createServerSupabase();
   const guildId = env.guildId || "";
 
@@ -385,8 +381,8 @@ async function getDashboardData() {
               .filter(Boolean)
               .join(" • ") || "Dashboard/bot audit log entry"
           : row?.token
-          ? `Token: ${row.token}`
-          : "Dashboard/bot audit log entry",
+            ? `Token: ${row.token}`
+            : "Dashboard/bot audit log entry",
       event_type: "audit_log",
       related_id: row?.staff_id || null,
       created_at: row?.created_at || null,
@@ -413,12 +409,8 @@ async function getDashboardData() {
     )
     .slice(0, 40);
 
-  const roles = (rolesRes.data || []).map((role) => ({
-    ...role,
-  }));
-
+  const roles = (rolesRes.data || []).map((role) => ({ ...role }));
   const metrics = deriveMetricsFromTickets(rawTickets, metricsRes.data || []);
-
   const categories = categoriesRes.data || [];
   const recentJoins = memberJoinsRes.data || [];
   const recentActiveMembers = recentActiveMembersRes.data || [];
@@ -462,10 +454,119 @@ async function getDashboardData() {
   };
 }
 
+async function getUserDashboardData(session) {
+  const supabase = createServerSupabase();
+  const guildId = env.guildId || "";
+
+  const discordId = String(
+    session?.user?.discord_id ||
+      session?.user?.id ||
+      session?.discordUser?.id ||
+      ""
+  ).trim();
+
+  const username =
+    session?.user?.username ||
+    session?.discordUser?.username ||
+    session?.user?.global_name ||
+    session?.user?.name ||
+    "Member";
+
+  if (!discordId) {
+    return {
+      viewer: {
+        discord_id: null,
+        username,
+        isStaff: false,
+      },
+      member: null,
+      openTicket: null,
+      recentTickets: [],
+      categories: [],
+      verificationFlags: [],
+      vcVerifySession: null,
+    };
+  }
+
+  const [
+    memberRes,
+    ticketsRes,
+    categoriesRes,
+    flagsRes,
+    vcRes,
+  ] = await Promise.all([
+    supabase
+      .from("guild_members")
+      .select("*")
+      .eq("guild_id", guildId)
+      .eq("user_id", discordId)
+      .maybeSingle(),
+
+    supabase
+      .from("tickets")
+      .select("*")
+      .eq("guild_id", guildId)
+      .eq("user_id", discordId)
+      .order("updated_at", { ascending: false })
+      .limit(25),
+
+    supabase
+      .from("ticket_categories")
+      .select("*")
+      .eq("guild_id", guildId)
+      .order("sort_order", { ascending: true, nullsFirst: false })
+      .order("name", { ascending: true }),
+
+    supabase
+      .from("verification_flags")
+      .select("*")
+      .eq("guild_id", guildId)
+      .eq("user_id", discordId)
+      .order("created_at", { ascending: false })
+      .limit(5),
+
+    supabase
+      .from("vc_verify_sessions")
+      .select("*")
+      .eq("owner_id", Number(discordId))
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  const member = memberRes.data || null;
+  const allTickets = (ticketsRes.data || []).map((ticket) => ({
+    ...ticket,
+    priority: ticket.priority || derivePriority(ticket),
+    channel_id: ticket.channel_id || ticket.discord_thread_id || null,
+  }));
+
+  const visibleTickets = allTickets.filter((ticket) => !shouldHideStaleTicket(ticket));
+
+  const openTicket =
+    visibleTickets.find((ticket) =>
+      ["open", "claimed"].includes(String(ticket?.status || "").toLowerCase())
+    ) || null;
+
+  return {
+    viewer: {
+      discord_id: discordId,
+      username,
+      isStaff: false,
+    },
+    member,
+    openTicket,
+    recentTickets: sortTickets(visibleTickets, "updated_desc"),
+    categories: categoriesRes.data || [],
+    verificationFlags: flagsRes.data || [],
+    vcVerifySession: vcRes.data || null,
+  };
+}
+
 export default async function HomePage() {
   const session = await getSession();
 
-  if (!session?.isStaff) {
+  if (!session) {
     if (hasDiscordOAuthConfig()) {
       redirect(getDiscordLoginUrl());
     }
@@ -493,7 +594,7 @@ export default async function HomePage() {
         >
           <h1 style={{ marginTop: 0 }}>Login Required</h1>
           <p style={{ color: "rgba(255,255,255,0.72)", lineHeight: 1.5 }}>
-            Discord staff login is required to use this dashboard.
+            Discord login is required to use this dashboard.
           </p>
           <p style={{ color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>
             OAuth configuration is currently missing or incomplete.
@@ -503,17 +604,27 @@ export default async function HomePage() {
     );
   }
 
-  const data = await getDashboardData();
+  if (session?.isStaff) {
+    const data = await getStaffDashboardData();
+
+    return (
+      <div className="shell">
+        <Sidebar />
+        <main className="content">
+          <DashboardClient
+            initialData={data}
+            staffName={session?.user?.username || env.defaultStaffName}
+          />
+        </main>
+      </div>
+    );
+  }
+
+  const userData = await getUserDashboardData(session);
 
   return (
-    <div className="shell">
-      <Sidebar />
-      <main className="content">
-        <DashboardClient
-          initialData={data}
-          staffName={session?.user?.username || env.defaultStaffName}
-        />
-      </main>
-    </div>
+    <main className="content" style={{ minHeight: "100vh" }}>
+      <UserDashboardClient initialData={userData} />
+    </main>
   );
 }
