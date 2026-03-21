@@ -35,6 +35,108 @@ const MOBILE_TABS = ["home", "tickets", "members", "categories"];
 const STALE_VISIBLE_REFRESH_MS = 20_000;
 const BACKUP_REFRESH_INTERVAL_MS = 45_000;
 
+const LEGACY_CATEGORY_ALIASES = {
+  verification: [
+    "verification_issue",
+    "verification issue",
+    "verify_issue",
+    "verify issue",
+    "verification",
+    "verify",
+  ],
+  appeal: ["appeal", "appeals", "ban appeal", "timeout appeal"],
+  report: [
+    "report",
+    "report_issue",
+    "report issue",
+    "incident",
+    "report incident",
+    "report / incident",
+  ],
+  partnership: ["partnership", "partner", "collab", "collaboration"],
+  question: ["question", "questions"],
+  general: ["general", "general support", "support", "help"],
+  custom: [],
+};
+
+function normalizeText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getLegacyAliasesForCategory(category) {
+  const keys = [
+    normalizeText(category?.slug),
+    normalizeText(category?.intake_type),
+    normalizeText(category?.name),
+  ];
+
+  const out = new Set();
+
+  for (const key of keys) {
+    const aliases = LEGACY_CATEGORY_ALIASES[key] || [];
+    for (const alias of aliases) {
+      out.add(normalizeText(alias));
+    }
+  }
+
+  return [...out];
+}
+
+function ticketMatchesSelectedCategory(ticket, selectedCategory) {
+  if (!selectedCategory) return true;
+
+  const selectedId = String(selectedCategory?.id || "").trim();
+  const selectedSlug = normalizeText(selectedCategory?.slug);
+  const selectedName = normalizeText(selectedCategory?.name);
+  const selectedIntake = normalizeText(selectedCategory?.intake_type);
+  const selectedKeywords = Array.isArray(selectedCategory?.match_keywords)
+    ? selectedCategory.match_keywords.map((k) => normalizeText(k))
+    : [];
+  const legacyAliases = getLegacyAliasesForCategory(selectedCategory);
+
+  const ticketCategoryId = String(ticket?.category_id || "").trim();
+  const ticketMatchedCategoryId = String(ticket?.matched_category_id || "").trim();
+
+  if (
+    selectedId &&
+    (ticketCategoryId === selectedId || ticketMatchedCategoryId === selectedId)
+  ) {
+    return true;
+  }
+
+  const ticketValues = [
+    ticket?.category,
+    ticket?.raw_category,
+    ticket?.matched_category_name,
+    ticket?.matched_category_slug,
+    ticket?.matched_intake_type,
+    ticket?.title,
+    ticket?.initial_message,
+    ticket?.mod_suggestion,
+    ticket?.closed_reason,
+    ticket?.channel_name,
+  ]
+    .filter(Boolean)
+    .map((v) => normalizeText(v));
+
+  const needles = [
+    selectedSlug,
+    selectedName,
+    selectedIntake,
+    ...selectedKeywords,
+    ...legacyAliases,
+  ].filter(Boolean);
+
+  return needles.some((needle) =>
+    ticketValues.some((value) => value === needle || value.includes(needle))
+  );
+}
+
 function formatTime(value) {
   if (!value) return "—";
   try {
@@ -98,10 +200,7 @@ function getStaffUserId(initialData, staffName) {
 
     return (
       metricName &&
-      metricName ===
-        String(staffName || "")
-          .trim()
-          .toLowerCase()
+      metricName === String(staffName || "").trim().toLowerCase()
     );
   });
 
@@ -242,7 +341,12 @@ function buildModeratorIntelligence(data) {
       key: "verified-rate",
       label: "Verified Rate",
       value: `${verifiedRate}%`,
-      tone: verifiedRate >= 80 ? "Low" : verifiedRate >= 60 ? "Moderate" : "High",
+      tone:
+        verifiedRate >= 80
+          ? "Low"
+          : verifiedRate >= 60
+            ? "Moderate"
+            : "High",
     },
   ];
 
@@ -305,10 +409,7 @@ function DashboardSection({
           </div>
 
           {subtitle ? (
-            <div
-              className="muted"
-              style={{ marginTop: 4, fontSize: 13 }}
-            >
+            <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
               {subtitle}
             </div>
           ) : null}
@@ -325,9 +426,7 @@ function DashboardSection({
         >
           {actions}
           {onToggle ? (
-            <span className="badge">
-              {isOpen ? "Hide" : "Show"}
-            </span>
+            <span className="badge">{isOpen ? "Hide" : "Show"}</span>
           ) : null}
         </div>
       </div>
@@ -548,6 +647,7 @@ export default function DashboardClient({
   const [statusFilter, setStatusFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [sortBy, setSortBy] = useState("priority_desc");
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState("home");
   const [expandedPanels, setExpandedPanels] = useState({
@@ -866,6 +966,12 @@ export default function DashboardClient({
   const filteredTickets = useMemo(() => {
     let rows = [...safeTickets];
 
+    if (selectedCategoryFilter) {
+      rows = rows.filter((ticket) =>
+        ticketMatchesSelectedCategory(ticket, selectedCategoryFilter)
+      );
+    }
+
     if (search.trim()) {
       const q = search.toLowerCase();
 
@@ -875,6 +981,7 @@ export default function DashboardClient({
           t.user_id,
           t.title,
           t.category,
+          t.raw_category,
           t.matched_category_name,
           t.matched_category_slug,
           t.matched_intake_type,
@@ -890,21 +997,20 @@ export default function DashboardClient({
 
     if (statusFilter !== "all") {
       rows = rows.filter(
-        (t) =>
-          String(t.status || "").toLowerCase() === statusFilter
+        (t) => String(t.status || "").toLowerCase() === statusFilter
       );
     }
 
     if (priorityFilter !== "all") {
       rows = rows.filter(
-        (t) =>
-          String(t.priority || "").toLowerCase() === priorityFilter
+        (t) => String(t.priority || "").toLowerCase() === priorityFilter
       );
     }
 
     return sortTickets(rows, sortBy);
   }, [
     safeTickets,
+    selectedCategoryFilter,
     search,
     statusFilter,
     priorityFilter,
@@ -925,6 +1031,7 @@ export default function DashboardClient({
       setActiveTab("tickets");
       setStatusFilter(status);
       setPriorityFilter(priority);
+      setSelectedCategoryFilter(null);
       if (typeof query === "string") {
         setSearch(query);
       }
@@ -978,7 +1085,8 @@ export default function DashboardClient({
 
   const handleFindTicketsByCategory = useCallback((category) => {
     setActiveTab("tickets");
-    setSearch(category?.name || category?.slug || "");
+    setSelectedCategoryFilter(category || null);
+    setSearch("");
     setStatusFilter("all");
     setPriorityFilter("all");
 
@@ -987,6 +1095,13 @@ export default function DashboardClient({
         window.scrollTo({ top: 0, behavior: "smooth" });
       });
     }
+  }, []);
+
+  const clearTicketFilters = useCallback(() => {
+    setSearch("");
+    setStatusFilter("all");
+    setPriorityFilter("all");
+    setSelectedCategoryFilter(null);
   }, []);
 
   const homeSections = {
@@ -1280,7 +1395,7 @@ export default function DashboardClient({
   const desktopCategorySection = (
     <CategoryManager
       categories={safeCategories}
-      tickets={filteredTickets}
+      tickets={safeTickets}
       onRefresh={() => refresh({ force: true, reason: "categories" })}
       onFindTicketsByCategory={handleFindTicketsByCategory}
     />
@@ -1474,11 +1589,7 @@ export default function DashboardClient({
                   type="button"
                   className="button ghost"
                   style={{ width: "auto", minWidth: 120 }}
-                  onClick={() => {
-                    setSearch("");
-                    setStatusFilter("all");
-                    setPriorityFilter("all");
-                  }}
+                  onClick={clearTicketFilters}
                 >
                   Clear Filters
                 </button>
@@ -1531,6 +1642,17 @@ export default function DashboardClient({
                 </button>
               </div>
             </div>
+
+            {selectedCategoryFilter ? (
+              <div className="info-banner" style={{ marginBottom: 14 }}>
+                Filtering tickets by category:{" "}
+                <strong>
+                  {selectedCategoryFilter?.name ||
+                    selectedCategoryFilter?.slug ||
+                    "Selected Category"}
+                </strong>
+              </div>
+            ) : null}
 
             <div
               className="muted"
@@ -1625,7 +1747,7 @@ export default function DashboardClient({
           {sectionVisibility.categories !== false ? (
             <CategoryManager
               categories={safeCategories}
-              tickets={filteredTickets}
+              tickets={safeTickets}
               onRefresh={() => refresh({ force: true, reason: "categories" })}
               onFindTicketsByCategory={handleFindTicketsByCategory}
             />
