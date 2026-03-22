@@ -6,6 +6,7 @@ import { getBrowserSupabase } from "@/lib/supabase-browser"
 import TicketMessageList from "@/components/TicketMessageList"
 import TicketReplyBox from "@/components/TicketReplyBox"
 import TicketControls from "@/components/dashboard/TicketControls"
+import TicketVerificationActions from "@/components/TicketVerificationActions"
 
 function safeText(value, fallback = "—") {
   const text = String(value ?? "").trim()
@@ -146,8 +147,8 @@ export default function TicketDetailClient({ initialData, ticketId }) {
   const messages = data?.messages || []
   const notes = data?.notes || []
 
-  const status = ticket.status || "open"
-  const priority = ticket.priority || "medium"
+  const status = String(ticket.status || "open").toLowerCase()
+  const priority = String(ticket.priority || "medium").toLowerCase()
   const currentStaffId = useMemo(() => getCurrentStaffId(data), [data])
 
   return (
@@ -373,6 +374,12 @@ export default function TicketDetailClient({ initialData, ticketId }) {
           </div>
 
           <TicketControls
+            ticket={ticket}
+            currentStaffId={currentStaffId || null}
+            onChanged={refresh}
+          />
+
+          <TicketVerificationActions
             ticket={ticket}
             currentStaffId={currentStaffId || null}
             onChanged={refresh}
