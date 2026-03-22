@@ -158,6 +158,10 @@ function MemberCard({ member, onSelect }) {
         padding: 12,
         color: "var(--text-strong, #f8fafc)",
         cursor: "pointer",
+        appearance: "none",
+        WebkitAppearance: "none",
+        boxShadow: "none",
+        outline: "none",
       }}
     >
       <div
@@ -316,7 +320,7 @@ function MemberDrawerInner({ member, onClose }) {
         backdropFilter: "blur(10px)",
         WebkitBackdropFilter: "blur(10px)",
         display: "flex",
-        alignItems: "flex-end",
+        alignItems: "center",
         justifyContent: "center",
         padding: "16px 12px calc(16px + env(safe-area-inset-bottom, 0px))",
       }}
