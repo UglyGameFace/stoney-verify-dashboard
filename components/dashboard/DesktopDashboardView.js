@@ -11,7 +11,7 @@ function DesktopKpiStrip({
       key: "openTickets",
       label: "Open Tickets",
       value: Number(counts?.openTickets || 0),
-      action: () => jumpToTickets?.({ status: "open" }),
+      action: () => jumpToTickets?.({ status: "active" }),
     },
     {
       key: "warnsToday",
@@ -254,7 +254,7 @@ export default function DesktopDashboardView({
                   style={{ width: "auto", minWidth: 120 }}
                   onClick={() => {
                     setSearch("");
-                    setStatusFilter("all");
+                    setStatusFilter("active");
                     setPriorityFilter("all");
                   }}
                 >
@@ -329,9 +329,10 @@ export default function DesktopDashboardView({
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
+                <option value="active">Active (Open + Claimed)</option>
                 <option value="all">All statuses</option>
-                <option value="open">Open</option>
-                <option value="claimed">Claimed</option>
+                <option value="open_only">Open Only</option>
+                <option value="claimed">Claimed Only</option>
                 <option value="closed">Closed</option>
                 <option value="deleted">Deleted</option>
               </select>
