@@ -89,17 +89,19 @@ function timeAgo(value) {
   }
 }
 
+function normalizeStatus(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 function getVerificationState(member, flags = []) {
   if (!member) return { label: "Not Synced Yet", tone: "warn" };
-  if (member?.has_staff_role) return { label: "Staff", tone: "ok" };
-  if (member?.has_verified_role) return { label: "Verified", tone: "ok" };
-  if (member?.has_unverified) {
-    return { label: "Pending Verification", tone: "warn" };
-  }
+  if (member?.has_staff_role) return { label: "Staff", tone: "low" };
+  if (member?.has_verified_role) return { label: "Verified", tone: "low" };
+  if (member?.has_unverified) return { label: "Pending Verification", tone: "medium" };
   if (safeArray(flags).some((f) => Boolean(f?.flagged))) {
     return { label: "Needs Review", tone: "danger" };
   }
-  return { label: safeText(member?.role_state, "Unknown"), tone: "warn" };
+  return { label: safeText(member?.role_state, "Unknown"), tone: "medium" };
 }
 
 function getRoleSummary(member) {
@@ -108,124 +110,9 @@ function getRoleSummary(member) {
   return names.filter(Boolean).slice(0, 10);
 }
 
-function normalizeStatus(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
 function getVisibleCategories(categories) {
   const rows = safeArray(categories).filter((item) => item && item.name);
   return rows.length ? rows : FALLBACK_CATEGORIES;
-}
-
-function getActionPlan({ member, openTicket, verificationFlags, vcVerifySession }) {
-  const hasFlags = safeArray(verificationFlags).some((f) => Boolean(f?.flagged));
-  const vcStatus = String(vcVerifySession?.status || "").toUpperCase();
-
-  if (openTicket) {
-    return {
-      title: "Continue in your open ticket",
-      body: "You already have an active ticket. Keep using that same ticket so your issue stays in one place and staff can help faster.",
-      tone: "ok",
-      primaryLabel: "Go To My Tickets",
-      primaryTargetTab: "tickets",
-      secondaryLabel: "See Support Categories",
-      secondaryTargetTab: "help",
-      suggestedCategorySlug: null,
-      bullets: [
-        "Avoid opening duplicate tickets for the same issue.",
-        "Reply in your current ticket if you have updates.",
-        "Open the ticket card for quick actions and details.",
-      ],
-    };
-  }
-
-  if (vcVerifySession && vcStatus === "PENDING") {
-    return {
-      title: "Finish your VC verify flow",
-      body: "You already have a pending VC verify session. Finish that process first before starting anything new.",
-      tone: "warn",
-      primaryLabel: "View Account Status",
-      primaryTargetTab: "home",
-      secondaryLabel: "See Support Categories",
-      secondaryTargetTab: "help",
-      suggestedCategorySlug: "verification",
-      bullets: [
-        "Complete the active VC verification steps first.",
-        "If the flow is stuck, open a verification support ticket.",
-        "Do not start multiple verification flows at once.",
-      ],
-    };
-  }
-
-  if (member?.has_unverified) {
-    return {
-      title: "Open a verification ticket",
-      body: "Your account still appears unverified. The right next move is a verification ticket so staff can review and update your access.",
-      tone: "warn",
-      primaryLabel: "Open Verification Options",
-      primaryTargetTab: "help",
-      secondaryLabel: "View My Tickets",
-      secondaryTargetTab: "tickets",
-      suggestedCategorySlug: "verification",
-      bullets: [
-        "Use the verification-related category.",
-        "Explain what access or role you expected.",
-        "If you already opened one, wait in that ticket instead of duplicating it.",
-      ],
-    };
-  }
-
-  if (hasFlags) {
-    return {
-      title: "Request manual review",
-      body: "Your account has recent verification flags or conflicting state. Open a support ticket so staff can manually review it.",
-      tone: "danger",
-      primaryLabel: "Open Review Options",
-      primaryTargetTab: "help",
-      secondaryLabel: "View Account Status",
-      secondaryTargetTab: "home",
-      suggestedCategorySlug: "verification",
-      bullets: [
-        "Mention any missing role or blocked access.",
-        "Choose the category closest to the issue.",
-        "Keep all updates inside one ticket once opened.",
-      ],
-    };
-  }
-
-  if (member?.has_verified_role) {
-    return {
-      title: "You are verified",
-      body: "Your verified role is present. If something still looks wrong, use a support ticket under the category that best matches your issue.",
-      tone: "ok",
-      primaryLabel: "See Support Categories",
-      primaryTargetTab: "help",
-      secondaryLabel: "View My Tickets",
-      secondaryTargetTab: "tickets",
-      suggestedCategorySlug: null,
-      bullets: [
-        "Use support only if something is missing or broken.",
-        "Pick the category closest to your issue.",
-        "Your past tickets remain visible in the Tickets tab.",
-      ],
-    };
-  }
-
-  return {
-    title: "Open support if needed",
-    body: "If your access looks wrong or you need help, open a support ticket and choose the category that best matches your issue.",
-    tone: "warn",
-    primaryLabel: "See Support Categories",
-    primaryTargetTab: "help",
-    secondaryLabel: "View My Tickets",
-    secondaryTargetTab: "tickets",
-    suggestedCategorySlug: null,
-    bullets: [
-      "Choose the closest help category.",
-      "Explain what role or access you expected.",
-      "Keep your issue in one ticket thread.",
-    ],
-  };
 }
 
 function buildDiscordChannelUrl(ticket, initialData) {
@@ -256,13 +143,124 @@ function buildTicketSummary(ticket) {
   ].join("\n");
 }
 
+function getActionPlan({ member, openTicket, verificationFlags, vcVerifySession }) {
+  const hasFlags = safeArray(verificationFlags).some((f) => Boolean(f?.flagged));
+  const vcStatus = String(vcVerifySession?.status || "").toUpperCase();
+
+  if (openTicket) {
+    return {
+      title: "Stay in your current ticket",
+      body: "You already have an active ticket. Keep everything inside that same thread so staff can move faster and your issue stays clean.",
+      tone: "low",
+      primaryLabel: "Go To My Tickets",
+      primaryTargetTab: "tickets",
+      secondaryLabel: "Open Support Categories",
+      secondaryTargetTab: "help",
+      suggestedCategorySlug: null,
+      bullets: [
+        "Avoid duplicate tickets for the same issue.",
+        "Reply in your active ticket if you have updates.",
+        "Use the ticket action menu for fast copy and Discord access.",
+      ],
+    };
+  }
+
+  if (vcVerifySession && vcStatus === "PENDING") {
+    return {
+      title: "Finish your VC verify flow",
+      body: "You already have a pending VC verification session. Complete that flow first before starting anything new.",
+      tone: "medium",
+      primaryLabel: "View Account Status",
+      primaryTargetTab: "home",
+      secondaryLabel: "Open Support Categories",
+      secondaryTargetTab: "help",
+      suggestedCategorySlug: "verification",
+      bullets: [
+        "Complete the active VC verify steps first.",
+        "If the flow is stuck, open a verification support ticket.",
+        "Do not start multiple verification flows at once.",
+      ],
+    };
+  }
+
+  if (member?.has_unverified) {
+    return {
+      title: "Open a verification ticket",
+      body: "Your account still appears unverified. The fastest next move is a verification ticket so staff can review and update your access.",
+      tone: "medium",
+      primaryLabel: "Open Verification Options",
+      primaryTargetTab: "help",
+      secondaryLabel: "View My Tickets",
+      secondaryTargetTab: "tickets",
+      suggestedCategorySlug: "verification",
+      bullets: [
+        "Use the verification-related category.",
+        "Explain what role or access you expected.",
+        "Once opened, keep all updates in that same ticket.",
+      ],
+    };
+  }
+
+  if (hasFlags) {
+    return {
+      title: "Request manual review",
+      body: "Your account has recent verification flags or conflicting state. Open a support ticket so staff can manually review it.",
+      tone: "danger",
+      primaryLabel: "Open Review Options",
+      primaryTargetTab: "help",
+      secondaryLabel: "View Account Status",
+      secondaryTargetTab: "home",
+      suggestedCategorySlug: "verification",
+      bullets: [
+        "Mention any missing role or blocked access.",
+        "Choose the category closest to the issue.",
+        "Keep your updates inside one ticket after it opens.",
+      ],
+    };
+  }
+
+  if (member?.has_verified_role) {
+    return {
+      title: "You are verified",
+      body: "Your verified role is present. If something still feels wrong, use a support ticket under the category that best matches the issue.",
+      tone: "low",
+      primaryLabel: "See Support Categories",
+      primaryTargetTab: "help",
+      secondaryLabel: "View My Tickets",
+      secondaryTargetTab: "tickets",
+      suggestedCategorySlug: null,
+      bullets: [
+        "Only open support if something is missing or broken.",
+        "Pick the closest category to your issue.",
+        "Your past tickets stay visible in the Tickets tab.",
+      ],
+    };
+  }
+
+  return {
+    title: "Open support if needed",
+    body: "If your access looks wrong or you need help, open a support ticket and choose the category that best matches your issue.",
+    tone: "medium",
+    primaryLabel: "See Support Categories",
+    primaryTargetTab: "help",
+    secondaryLabel: "View My Tickets",
+    secondaryTargetTab: "tickets",
+    suggestedCategorySlug: null,
+    bullets: [
+      "Choose the closest help category.",
+      "Explain what role or access you expected.",
+      "Keep your issue in one ticket thread.",
+    ],
+  };
+}
+
 function StatusBadge({ label, tone = "default" }) {
   return <span className={`badge ${tone}`}>{label}</span>;
 }
 
-function Section({ title, subtitle, children, actions = null }) {
+function Section({ title, subtitle, children, actions = null, tone = "default" }) {
   return (
-    <div className="card">
+    <div className={`card member-section tone-${tone}`}>
       <div
         className="row"
         style={{
@@ -274,6 +272,12 @@ function Section({ title, subtitle, children, actions = null }) {
         }}
       >
         <div>
+          <div className="section-chip-row">
+            <span className="section-chip">Member Portal</span>
+            {tone !== "default" ? (
+              <span className={`section-chip tone-${tone}`}>{tone}</span>
+            ) : null}
+          </div>
           <h2 style={{ margin: 0 }}>{title}</h2>
           {subtitle ? (
             <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
@@ -294,7 +298,7 @@ function SummaryTiles({ member, openTicket, verificationFlags }) {
 
   return (
     <div className="summary-grid">
-      <div className="summary-tile">
+      <div className="summary-tile neon-green">
         <div className="ticket-info-label">Verification</div>
         <div className="summary-value">
           {member?.has_verified_role
@@ -305,17 +309,17 @@ function SummaryTiles({ member, openTicket, verificationFlags }) {
         </div>
       </div>
 
-      <div className="summary-tile">
+      <div className="summary-tile neon-blue">
         <div className="ticket-info-label">Open Ticket</div>
         <div className="summary-value">{openTicket ? "Yes" : "No"}</div>
       </div>
 
-      <div className="summary-tile">
+      <div className="summary-tile neon-purple">
         <div className="ticket-info-label">Tracked Roles</div>
         <div className="summary-value">{roles.length}</div>
       </div>
 
-      <div className="summary-tile">
+      <div className="summary-tile neon-amber">
         <div className="ticket-info-label">Recent Flags</div>
         <div className="summary-value">{flagCount}</div>
       </div>
@@ -334,14 +338,14 @@ function ActionCenter({
   return (
     <div className={`status-panel ${plan.tone}`}>
       <div className="status-title">{plan.title}</div>
-      <div className="muted" style={{ lineHeight: 1.55 }}>
+      <div className="muted" style={{ lineHeight: 1.6 }}>
         {plan.body}
       </div>
 
       {safeArray(plan.bullets).length ? (
-        <div style={{ marginTop: 12, display: "grid", gap: 6 }}>
+        <div style={{ marginTop: 12, display: "grid", gap: 7 }}>
           {plan.bullets.map((bullet) => (
-            <div key={bullet} className="muted" style={{ lineHeight: 1.45 }}>
+            <div key={bullet} className="muted" style={{ lineHeight: 1.5 }}>
               • {bullet}
             </div>
           ))}
@@ -358,8 +362,8 @@ function ActionCenter({
       >
         <button
           type="button"
-          className="button"
-          style={{ width: "auto", minWidth: 150 }}
+          className="button primary"
+          style={{ width: "auto", minWidth: 170 }}
           onClick={onGoPrimary}
           disabled={isCreating}
         >
@@ -370,7 +374,7 @@ function ActionCenter({
           <button
             type="button"
             className="button ghost"
-            style={{ width: "auto", minWidth: 150 }}
+            style={{ width: "auto", minWidth: 170 }}
             onClick={onGoSecondary}
             disabled={isCreating}
           >
@@ -382,7 +386,7 @@ function ActionCenter({
           <button
             type="button"
             className="button ghost"
-            style={{ width: "auto", minWidth: 190 }}
+            style={{ width: "auto", minWidth: 210 }}
             onClick={onRequestVerification}
             disabled={isCreating}
           >
@@ -434,12 +438,7 @@ function TicketActions({
           type="button"
           className="button ghost"
           style={{ width: "auto", minWidth: 150 }}
-          onClick={() =>
-            copyText(
-              safeText(ticket?.channel_id, ""),
-              "Channel ID copied."
-            )
-          }
+          onClick={() => copyText(safeText(ticket?.channel_id, ""), "Channel ID copied.")}
         >
           Copy Channel ID
         </button>
@@ -447,7 +446,7 @@ function TicketActions({
         <button
           type="button"
           className="button ghost"
-          style={{ width: "auto", minWidth: 150 }}
+          style={{ width: "auto", minWidth: 160 }}
           onClick={() =>
             copyText(buildTicketSummary(ticket), "Ticket summary copied.")
           }
@@ -487,6 +486,7 @@ function TicketActions({
 
       <div className="mini-card">
         <div className="ticket-info-label">Ticket Details</div>
+
         <div className="info-grid" style={{ marginTop: 10 }}>
           <div className="mini-card">
             <div className="ticket-info-label">Created</div>
@@ -552,7 +552,7 @@ function TicketCard({
           }}
         >
           <div style={{ minWidth: 0, flex: 1, textAlign: "left" }}>
-            <div className="profile-name" style={{ fontSize: 16 }}>
+            <div className="profile-name" style={{ fontSize: 17 }}>
               {safeText(ticket?.title, "Ticket")}
             </div>
             <div className="muted" style={{ marginTop: 6, lineHeight: 1.5 }}>
@@ -580,7 +580,7 @@ function TicketCard({
           <div className="muted" style={{ textAlign: "left" }}>
             Updated {timeAgo(ticket?.updated_at || ticket?.created_at)}
           </div>
-          <div className="muted" style={{ fontWeight: 700 }}>
+          <div className="muted" style={{ fontWeight: 800 }}>
             {expanded ? "Hide Actions" : "Open Actions"}
           </div>
         </div>
@@ -626,13 +626,18 @@ function HomeTab({
 
   return (
     <div className="user-dashboard-grid">
-      <Section title="My Account" subtitle="Your server profile and current access state">
-        <div className="hero-card">
+      <Section
+        title="My Smoke Sheet"
+        subtitle="Your server identity, access state, and verification position"
+        tone="account"
+      >
+        <div className="member-hero-card">
           <div style={{ minWidth: 0 }}>
-            <div className="profile-name">
+            <div className="member-kicker">Member support portal</div>
+            <div className="profile-name hero-name">
               {safeText(member?.display_name || viewer?.username, "Member")}
             </div>
-            <div className="muted" style={{ marginTop: 6, lineHeight: 1.5 }}>
+            <div className="muted" style={{ marginTop: 8, lineHeight: 1.55 }}>
               Discord ID: {safeText(viewer?.discord_id)}
             </div>
           </div>
@@ -689,7 +694,11 @@ function HomeTab({
         ) : null}
       </Section>
 
-      <Section title="Action Center" subtitle="Only the next step you actually need">
+      <Section
+        title="Action Center"
+        subtitle="Only the next move you really need"
+        tone="actions"
+      >
         <ActionCenter
           plan={actionPlan}
           canRequestVerification={canRequestVerification}
@@ -716,7 +725,11 @@ function HomeTab({
         ) : null}
       </Section>
 
-      <Section title="My Current Ticket" subtitle="Your most recent active support ticket">
+      <Section
+        title="My Current Ticket"
+        subtitle="Your most recent active support thread"
+        tone="ticket"
+      >
         {openTicket ? (
           <div className="space">
             <div className="ticket-row-card emphasis">
@@ -739,7 +752,7 @@ function HomeTab({
                 </div>
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <StatusBadge label={safeText(openTicket?.status)} tone="warn" />
+                  <StatusBadge label={safeText(openTicket?.status)} tone="medium" />
                   <StatusBadge label={safeText(openTicket?.priority)} />
                 </div>
               </div>
@@ -794,12 +807,12 @@ function TicketsTab({
     ["open", "claimed"].includes(normalizeStatus(ticket?.status))
   );
 
-  const closedTickets = safeArray(recentTickets).filter((ticket) =>
-    normalizeStatus(ticket?.status) === "closed"
+  const closedTickets = safeArray(recentTickets).filter(
+    (ticket) => normalizeStatus(ticket?.status) === "closed"
   );
 
-  const deletedTickets = safeArray(recentTickets).filter((ticket) =>
-    normalizeStatus(ticket?.status) === "deleted"
+  const deletedTickets = safeArray(recentTickets).filter(
+    (ticket) => normalizeStatus(ticket?.status) === "deleted"
   );
 
   function toggleTicket(id) {
@@ -811,7 +824,8 @@ function TicketsTab({
       <Section
         title="Active Tickets"
         subtitle={`${activeTickets.length} active ticket${activeTickets.length === 1 ? "" : "s"}`}
-        actions={isPolling ? <span className="badge warn">Waiting for bot…</span> : null}
+        tone="ticket"
+        actions={isPolling ? <span className="badge medium">Waiting for bot…</span> : null}
       >
         {!activeTickets.length ? (
           <div className="empty-state">You do not currently have an active ticket.</div>
@@ -837,6 +851,7 @@ function TicketsTab({
       <Section
         title="Closed Ticket History"
         subtitle={`${closedTickets.length} closed ticket${closedTickets.length === 1 ? "" : "s"}`}
+        tone="history"
       >
         {!closedTickets.length ? (
           <div className="empty-state">No closed ticket history found.</div>
@@ -860,8 +875,9 @@ function TicketsTab({
       </Section>
 
       <Section
-        title="Deleted / Archived Ticket History"
+        title="Deleted / Archived History"
         subtitle={`${deletedTickets.length} deleted ticket${deletedTickets.length === 1 ? "" : "s"}`}
+        tone="history"
         actions={
           <button
             type="button"
@@ -903,7 +919,7 @@ function TicketsTab({
 
 function CategoryCard({ category, highlighted, onUseThisCategory, isCreating }) {
   return (
-    <div className={`ticket-row-card ${highlighted ? "emphasis" : ""}`}>
+    <div className={`ticket-row-card category-card ${highlighted ? "emphasis" : ""}`}>
       <div
         className="row"
         style={{
@@ -917,23 +933,23 @@ function CategoryCard({ category, highlighted, onUseThisCategory, isCreating }) 
           <div className="profile-name" style={{ fontSize: 16 }}>
             {safeText(category?.name)}
           </div>
-          <div className="muted" style={{ marginTop: 6, lineHeight: 1.5 }}>
+          <div className="muted" style={{ marginTop: 6, lineHeight: 1.55 }}>
             {safeText(category?.description, "No description provided.")}
           </div>
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <StatusBadge label={safeText(category?.intake_type, "general")} />
-          {category?.is_default ? <StatusBadge label="Default" tone="ok" /> : null}
-          {highlighted ? <StatusBadge label="Recommended" tone="warn" /> : null}
+          {category?.is_default ? <StatusBadge label="Default" tone="low" /> : null}
+          {highlighted ? <StatusBadge label="Recommended" tone="medium" /> : null}
         </div>
       </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
         <button
           type="button"
-          className="button ghost"
-          style={{ width: "auto", minWidth: 180 }}
+          className="button primary"
+          style={{ width: "auto", minWidth: 190 }}
           onClick={() => onUseThisCategory(category)}
           disabled={isCreating}
         >
@@ -958,7 +974,11 @@ function HelpTab({
 
   return (
     <div className="user-dashboard-grid">
-      <Section title="Support Categories" subtitle="Pick the category that best matches your issue">
+      <Section
+        title="Support Categories"
+        subtitle="Pick the category that best matches your issue"
+        tone="categories"
+      >
         <div className="space">
           {rows.map((category) => {
             const highlighted =
@@ -979,12 +999,16 @@ function HelpTab({
         </div>
       </Section>
 
-      <Section title="Best Next Step" subtitle="What you should do right now">
-        <div className="status-panel ok">
+      <Section
+        title="Best Next Step"
+        subtitle="What you should do right now"
+        tone="actions"
+      >
+        <div className="status-panel low">
           <div className="status-title">
             {openTicket ? "Use your current ticket" : "Submit a support request"}
           </div>
-          <div className="muted" style={{ lineHeight: 1.55 }}>
+          <div className="muted" style={{ lineHeight: 1.6 }}>
             {openTicket
               ? "You already have an active ticket. Continue there so staff can help you faster and keep everything in one place."
               : "Use one of the categories above to queue a support request. Your Discord ticket should appear shortly after the bot processes it."}
@@ -1004,7 +1028,7 @@ function HelpTab({
             <button
               type="button"
               className="button ghost"
-              style={{ width: "auto", minWidth: 150 }}
+              style={{ width: "auto", minWidth: 160 }}
               onClick={() => onGoToTab("home")}
               disabled={isCreating}
             >
@@ -1024,23 +1048,14 @@ export default function UserDashboardClient({ initialData }) {
   const [noticeTone, setNoticeTone] = useState("info");
   const [isCreating, setIsCreating] = useState(false);
   const [isPolling, setIsPolling] = useState(false);
-  const [userTickets, setUserTickets] = useState(
-    safeArray(initialData?.recentTickets)
-  );
-  const [userOpenTicket, setUserOpenTicket] = useState(
-    initialData?.openTicket || null
-  );
+  const [userTickets, setUserTickets] = useState(safeArray(initialData?.recentTickets));
+  const [userOpenTicket, setUserOpenTicket] = useState(initialData?.openTicket || null);
 
   const viewer = initialData?.viewer || {};
   const member = initialData?.member || null;
   const categories = safeArray(initialData?.categories);
   const verificationFlags = safeArray(initialData?.verificationFlags);
   const vcVerifySession = initialData?.vcVerifySession || null;
-
-  const verification = useMemo(
-    () => getVerificationState(member, verificationFlags),
-    [member, verificationFlags]
-  );
 
   const actionPlan = useMemo(
     () =>
@@ -1067,6 +1082,7 @@ export default function UserDashboardClient({ initialData }) {
   function showTempNotice(text, tone = "info") {
     setNotice(text);
     setNoticeTone(tone);
+
     if (typeof window !== "undefined") {
       window.clearTimeout(window.__userDashNoticeTimer);
       window.__userDashNoticeTimer = window.setTimeout(() => {
@@ -1137,9 +1153,7 @@ export default function UserDashboardClient({ initialData }) {
 
         const data = await res.json().catch(() => null);
 
-        if (!res.ok || !data?.ok) {
-          continue;
-        }
+        if (!res.ok || !data?.ok) continue;
 
         const nextOpenTicket = data?.openTicket || null;
         const nextRecentTickets = Array.isArray(data?.recentTickets)
@@ -1189,9 +1203,7 @@ export default function UserDashboardClient({ initialData }) {
           const existing = data.existing_ticket;
           setUserOpenTicket(existing);
           setUserTickets((prev) => {
-            const existingRows = safeArray(prev).filter(
-              (row) => row?.id !== existing.id
-            );
+            const existingRows = safeArray(prev).filter((row) => row?.id !== existing.id);
             return [existing, ...existingRows];
           });
           goToTab("tickets");
@@ -1231,9 +1243,7 @@ export default function UserDashboardClient({ initialData }) {
       }
     } catch (error) {
       showTempNotice(
-        error instanceof Error
-          ? error.message
-          : "Failed to submit ticket request.",
+        error instanceof Error ? error.message : "Failed to submit ticket request.",
         "error"
       );
     } finally {
@@ -1266,8 +1276,7 @@ export default function UserDashboardClient({ initialData }) {
   function handleRequestReopen(ticket) {
     const reopenCategory =
       getVisibleCategories(categories).find(
-        (item) =>
-          String(item?.slug || "").trim().toLowerCase() === "appeal"
+        (item) => String(item?.slug || "").trim().toLowerCase() === "appeal"
       ) || FALLBACK_CATEGORIES[1] || FALLBACK_CATEGORIES[0];
 
     queueTicketForCategory(
@@ -1285,20 +1294,25 @@ export default function UserDashboardClient({ initialData }) {
       <main style={{ paddingBottom: 96 }}>
         {notice ? (
           <div
-            className={noticeTone === "error" ? "error-banner" : "info-banner"}
+            className={
+              noticeTone === "error"
+                ? "error-banner"
+                : noticeTone === "warn"
+                  ? "warning-banner"
+                  : "info-banner"
+            }
             style={{ marginBottom: 16 }}
           >
             {notice}
           </div>
         ) : null}
 
-        <div className="desktop-tab-bar">
+        <div className="desktop-tab-bar desktop-command-bar">
           {USER_TABS.map((tab) => (
             <button
               key={tab}
               type="button"
-              className={activeTab === tab ? "button" : "button ghost"}
-              style={{ width: "auto", minWidth: 110 }}
+              className={`desktop-command-pill ${activeTab === tab ? "active" : ""}`}
               onClick={() => setActiveTab(tab)}
             >
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -1323,9 +1337,7 @@ export default function UserDashboardClient({ initialData }) {
           <TicketsTab
             recentTickets={userTickets}
             showDeletedHistory={showDeletedHistory}
-            onToggleDeletedHistory={() =>
-              setShowDeletedHistory((prev) => !prev)
-            }
+            onToggleDeletedHistory={() => setShowDeletedHistory((prev) => !prev)}
             isPolling={isPolling}
             initialData={initialData}
             onRefreshAllTickets={refreshTicketsNow}
@@ -1374,25 +1386,97 @@ export default function UserDashboardClient({ initialData }) {
           gap: 16px;
         }
 
-        .hero-card,
+        .member-section {
+          border-radius: 26px;
+        }
+
+        .member-section.tone-account {
+          box-shadow: var(--shadow-strong), var(--glow-green);
+        }
+
+        .member-section.tone-actions {
+          box-shadow: var(--shadow-strong), var(--glow-blue);
+        }
+
+        .member-section.tone-ticket,
+        .member-section.tone-history {
+          box-shadow: var(--shadow), var(--glow-purple);
+        }
+
+        .member-section.tone-categories {
+          box-shadow: var(--shadow-strong), var(--glow-green);
+        }
+
+        .section-chip-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-bottom: 10px;
+        }
+
+        .section-chip {
+          display: inline-flex;
+          align-items: center;
+          min-height: 28px;
+          padding: 6px 10px;
+          border-radius: 999px;
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          color: var(--text);
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.03);
+        }
+
+        .section-chip.tone-account {
+          background: rgba(93,255,141,0.12);
+          border-color: rgba(93,255,141,0.18);
+        }
+
+        .section-chip.tone-actions {
+          background: rgba(99,213,255,0.12);
+          border-color: rgba(99,213,255,0.18);
+        }
+
+        .member-kicker {
+          font-size: 12px;
+          font-weight: 800;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          color: var(--muted);
+          margin-bottom: 8px;
+        }
+
+        .member-hero-card,
         .ticket-row-card {
           border: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(255, 255, 255, 0.02);
-          border-radius: 18px;
+          background:
+            radial-gradient(circle at top right, rgba(93,255,141,0.06), transparent 36%),
+            rgba(255,255,255,0.025);
+          border-radius: 22px;
           padding: 14px;
         }
 
-        .ticket-row-card.emphasis {
-          border-color: rgba(96, 165, 250, 0.22);
-          background: rgba(96, 165, 250, 0.06);
+        .ticket-row-card.emphasis,
+        .category-card.emphasis {
+          border-color: rgba(99, 213, 255, 0.2);
+          background:
+            radial-gradient(circle at top right, rgba(99,213,255,0.10), transparent 36%),
+            rgba(99,213,255,0.06);
         }
 
         .profile-name {
           font-size: 20px;
-          font-weight: 800;
+          font-weight: 900;
           color: var(--text-strong, #f8fafc);
-          line-height: 1.1;
+          line-height: 1.05;
           overflow-wrap: anywhere;
+          letter-spacing: -0.03em;
+        }
+
+        .hero-name {
+          font-size: clamp(24px, 4vw, 34px);
         }
 
         .summary-grid {
@@ -1403,20 +1487,37 @@ export default function UserDashboardClient({ initialData }) {
         }
 
         .summary-tile {
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(255, 255, 255, 0.025);
-          border-radius: 14px;
-          padding: 12px;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 18px;
+          padding: 13px;
           min-width: 0;
+          background: rgba(255,255,255,0.03);
+        }
+
+        .summary-tile.neon-green {
+          box-shadow: inset 0 0 0 1px rgba(93,255,141,0.06), 0 0 16px rgba(93,255,141,0.06);
+        }
+
+        .summary-tile.neon-blue {
+          box-shadow: inset 0 0 0 1px rgba(99,213,255,0.06), 0 0 16px rgba(99,213,255,0.05);
+        }
+
+        .summary-tile.neon-purple {
+          box-shadow: inset 0 0 0 1px rgba(178,109,255,0.06), 0 0 16px rgba(178,109,255,0.05);
+        }
+
+        .summary-tile.neon-amber {
+          box-shadow: inset 0 0 0 1px rgba(255,211,107,0.06), 0 0 16px rgba(255,211,107,0.05);
         }
 
         .summary-value {
-          font-size: 20px;
-          font-weight: 800;
-          line-height: 1.05;
+          font-size: 22px;
+          font-weight: 900;
+          line-height: 1.02;
           color: var(--text-strong, #f8fafc);
           margin-top: 6px;
           overflow-wrap: anywhere;
+          letter-spacing: -0.03em;
         }
 
         .info-grid {
@@ -1428,39 +1529,43 @@ export default function UserDashboardClient({ initialData }) {
         .mini-card {
           border: 1px solid rgba(255, 255, 255, 0.08);
           background: rgba(255, 255, 255, 0.02);
-          border-radius: 14px;
+          border-radius: 16px;
           padding: 12px;
           min-width: 0;
           overflow-wrap: anywhere;
         }
 
         .status-panel {
-          border-radius: 18px;
-          padding: 14px;
+          border-radius: 22px;
+          padding: 16px;
           border: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(255, 255, 255, 0.02);
+          background: rgba(255, 255, 255, 0.025);
         }
 
-        .status-panel.ok {
-          border-color: rgba(74, 222, 128, 0.22);
-          background: rgba(74, 222, 128, 0.08);
+        .status-panel.low {
+          border-color: rgba(93,255,141,0.18);
+          background: rgba(93,255,141,0.08);
+          box-shadow: 0 0 18px rgba(93,255,141,0.08);
         }
 
-        .status-panel.warn {
-          border-color: rgba(251, 191, 36, 0.22);
-          background: rgba(251, 191, 36, 0.08);
+        .status-panel.medium {
+          border-color: rgba(255,211,107,0.18);
+          background: rgba(255,211,107,0.08);
+          box-shadow: 0 0 18px rgba(255,211,107,0.06);
         }
 
         .status-panel.danger {
-          border-color: rgba(248, 113, 113, 0.22);
-          background: rgba(248, 113, 113, 0.08);
+          border-color: rgba(255,111,142,0.20);
+          background: rgba(255,111,142,0.08);
+          box-shadow: 0 0 18px rgba(255,111,142,0.06);
         }
 
         .status-title {
-          font-size: 18px;
-          font-weight: 800;
+          font-size: 20px;
+          font-weight: 900;
           margin-bottom: 8px;
           color: var(--text-strong, #f8fafc);
+          letter-spacing: -0.03em;
         }
 
         @media (min-width: 768px) {
@@ -1499,14 +1604,14 @@ export default function UserDashboardClient({ initialData }) {
         }
 
         .ticket-card-shell:hover {
-          border-color: rgba(96, 165, 250, 0.18);
-          background: rgba(96, 165, 250, 0.04);
+          border-color: rgba(99, 213, 255, 0.18);
+          background: rgba(99, 213, 255, 0.04);
         }
 
         .ticket-card-shell.expanded {
-          border-color: rgba(96, 165, 250, 0.22);
-          background: rgba(96, 165, 250, 0.05);
-          box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.08) inset;
+          border-color: rgba(99, 213, 255, 0.22);
+          background: rgba(99, 213, 255, 0.06);
+          box-shadow: 0 0 0 1px rgba(99, 213, 255, 0.08) inset;
         }
 
         .ticket-card-button {
