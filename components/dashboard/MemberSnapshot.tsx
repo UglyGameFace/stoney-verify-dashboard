@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
@@ -147,6 +148,7 @@ function MemberCard({ member, onSelect }) {
     <button
       type="button"
       onClick={() => onSelect(member)}
+      className="member-card-button"
       style={{
         textAlign: "left",
         width: "100%",
@@ -277,11 +279,29 @@ function MemberCard({ member, onSelect }) {
   );
 }
 
-function MemberDrawer({ member, onClose }) {
-  if (!member) return null;
-
+function MemberDrawerInner({ member, onClose }) {
   const name = getMemberName(member);
   const avatar = getMemberAvatar(member);
+
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    const prevTouchAction = document.body.style.touchAction;
+
+    document.body.style.overflow = "hidden";
+    document.body.style.touchAction = "none";
+
+    function onKeyDown(event) {
+      if (event.key === "Escape") onClose?.();
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.body.style.touchAction = prevTouchAction;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose]);
 
   return (
     <div
@@ -291,9 +311,10 @@ function MemberDrawer({ member, onClose }) {
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 120,
+        zIndex: 2000,
         background: "rgba(0,0,0,0.58)",
         backdropFilter: "blur(10px)",
+        WebkitBackdropFilter: "blur(10px)",
         display: "flex",
         alignItems: "flex-end",
         justifyContent: "center",
@@ -541,6 +562,22 @@ function MemberDrawer({ member, onClose }) {
         ) : null}
       </div>
     </div>
+  );
+}
+
+function MemberDrawer({ member, onClose }) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
+
+  if (!member || !mounted || typeof document === "undefined") return null;
+
+  return createPortal(
+    <MemberDrawerInner member={member} onClose={onClose} />,
+    document.body
   );
 }
 
