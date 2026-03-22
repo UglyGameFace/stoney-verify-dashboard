@@ -474,6 +474,30 @@ function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
 
       {expanded ? (
         <>
+          <div
+            className="row"
+            style={{
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 10,
+              marginTop: 12,
+              marginBottom: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <div className="muted" style={{ fontSize: 12 }}>
+              Full ticket page gives you full conversation, reply flow, and notes.
+            </div>
+
+            <Link
+              className="button ghost"
+              href={`/tickets/${ticket.id}`}
+              style={{ width: "auto", minWidth: 150 }}
+            >
+              Open Full Ticket
+            </Link>
+          </div>
+
           <div className="ticket-mobile-meta">
             {metaBlock("Category", getDisplayedCategoryName(ticket))}
             {metaBlock("Intake Type", getDisplayedIntakeType(ticket) || "—")}
@@ -490,12 +514,6 @@ function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
             {!!ticket.closed_reason
               ? metaBlock("Closed Reason", ticket.closed_reason, true)
               : null}
-          </div>
-
-          <div className="ticket-mobile-actions">
-            <Link className="button ghost" href={`/tickets/${ticket.id}`}>
-              Open Ticket View
-            </Link>
           </div>
 
           <QuickModActions
@@ -871,7 +889,7 @@ export default function TicketQueueTable({
                         }}
                       >
                         <Link className="button ghost" href={`/tickets/${ticket.id}`}>
-                          Open Ticket View
+                          Full Ticket
                         </Link>
                       </div>
                     </div>
