@@ -1076,12 +1076,17 @@ export default function TicketControls({
         }
 
         .ticket-action-accordion-head {
-          appearance: none;
-          -webkit-appearance: none;
+          appearance: none !important;
+          -webkit-appearance: none !important;
+          -moz-appearance: none !important;
           width: 100%;
-          border: 0;
-          background: transparent;
-          color: inherit;
+          border: 0 !important;
+          outline: none !important;
+          box-shadow: none !important;
+          background:
+            radial-gradient(circle at top right, rgba(99,213,255,0.04), transparent 36%),
+            rgba(255,255,255,0.015) !important;
+          color: var(--text-strong, #f8fafc) !important;
           text-align: left;
           padding: 14px;
           display: flex;
@@ -1089,11 +1094,19 @@ export default function TicketControls({
           align-items: center;
           gap: 12px;
           cursor: pointer;
+          border-radius: 0 !important;
+          font: inherit !important;
+        }
+
+        .ticket-action-accordion-head:hover {
+          background:
+            radial-gradient(circle at top right, rgba(99,213,255,0.08), transparent 36%),
+            rgba(255,255,255,0.03) !important;
         }
 
         .ticket-action-accordion-title {
           font-weight: 900;
-          color: var(--text-strong, #f8fafc);
+          color: var(--text-strong, #f8fafc) !important;
           line-height: 1.08;
           letter-spacing: -0.02em;
         }
@@ -1102,6 +1115,7 @@ export default function TicketControls({
           margin-top: 6px;
           font-size: 13px;
           line-height: 1.45;
+          color: var(--text-muted, rgba(255,255,255,0.72)) !important;
         }
 
         .ticket-action-accordion-side {
@@ -1115,6 +1129,7 @@ export default function TicketControls({
           font-size: 22px;
           line-height: 1;
           transition: transform 0.16s ease;
+          color: var(--text-strong, #f8fafc) !important;
         }
 
         .ticket-action-chevron.open {
@@ -1125,6 +1140,7 @@ export default function TicketControls({
           padding: 0 14px 14px;
           display: grid;
           gap: 12px;
+          background: transparent;
         }
 
         .ticket-controls-select-row {
