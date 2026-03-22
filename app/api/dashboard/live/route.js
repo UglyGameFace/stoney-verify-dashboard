@@ -11,6 +11,33 @@ function debugEnabled() {
   return String(process.env.DASHBOARD_DEBUG || "").toLowerCase() === "true";
 }
 
+async function discordApi(path) {
+  const token = process.env.DISCORD_TOKEN || env.discordToken || "";
+
+  if (!token) {
+    throw new Error("Missing DISCORD_TOKEN");
+  }
+
+  const res = await fetch(`https://discord.com/api/v10${path}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bot ${token}`,
+      "Content-Type": "application/json",
+    },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    const err = new Error(`Discord API ${res.status}: ${text}`);
+    err.status = res.status;
+    throw err;
+  }
+
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
 function toJoinedTimestamp(value) {
   const ts = new Date(value || 0).getTime();
   return Number.isFinite(ts) ? ts : 0;
@@ -622,6 +649,8 @@ function mergeJoinWithMember(joinRow, memberRow) {
     last_seen_at: memberRow?.last_seen_at || null,
     left_at: memberRow?.left_at || null,
     rejoined_at: memberRow?.rejoined_at || null,
+    voice_channel_id: memberRow?.voice_channel_id || null,
+    voice_state: memberRow?.voice_state || null,
   };
 }
 
@@ -676,6 +705,8 @@ function mapGuildMember(row) {
     previous_usernames: Array.isArray(row?.previous_usernames) ? row.previous_usernames : [],
     previous_display_names: Array.isArray(row?.previous_display_names) ? row.previous_display_names : [],
     previous_nicknames: Array.isArray(row?.previous_nicknames) ? row.previous_nicknames : [],
+    voice_channel_id: row?.voice_channel_id || null,
+    voice_state: row?.voice_state || null,
   };
 }
 
@@ -870,6 +901,32 @@ function mapRaid(row) {
   };
 }
 
+function mapVoiceChannels(channels) {
+  const allowedTypes = new Set([2, 13]);
+  const rows = safeArray(channels)
+    .filter((channel) => allowedTypes.has(Number(channel?.type)))
+    .map((channel) => ({
+      id: String(channel?.id || "").trim(),
+      name: String(channel?.name || "").trim() || "Unnamed Voice",
+      type: Number(channel?.type || 0),
+      parent_id: channel?.parent_id || null,
+      position: Number(channel?.position || 0),
+      bitrate: Number(channel?.bitrate || 0),
+      user_limit: Number(channel?.user_limit || 0),
+    }))
+    .filter((channel) => channel.id);
+
+  rows.sort((a, b) => {
+    const parentA = String(a.parent_id || "");
+    const parentB = String(b.parent_id || "");
+    if (parentA !== parentB) return parentA.localeCompare(parentB);
+    if (a.position !== b.position) return a.position - b.position;
+    return a.name.localeCompare(b.name);
+  });
+
+  return rows;
+}
+
 function buildIntelligence({ counts, memberCounts, fraud, guildMembers }) {
   const openTickets = Number(counts?.openTickets || 0);
   const warnsToday = Number(counts?.warnsToday || 0);
@@ -1016,6 +1073,7 @@ export async function GET() {
       warnsRowsRes,
       raidsRowsRes,
       fraudRowsRes,
+      discordChannelsResult,
     ] = await Promise.all([
       supabase
         .from("tickets")
@@ -1174,6 +1232,10 @@ export async function GET() {
         .eq("flagged", true)
         .order("created_at", { ascending: false })
         .limit(25),
+
+      discordApi(`/guilds/${guildId}/channels`).catch((error) => ({
+        __discord_error: error?.message || "Failed to load Discord channels.",
+      })),
     ]);
 
     const firstError =
@@ -1251,6 +1313,10 @@ export async function GET() {
     const warns = safeArray(warnsRowsRes.data).map((row) => mapWarn(row, guildMembers));
     const raids = safeArray(raidsRowsRes.data).map(mapRaid);
     const fraud = safeArray(fraudRowsRes.data).map((row) => mapFraud(row, guildMembers));
+
+    const voiceChannels = discordChannelsResult?.__discord_error
+      ? []
+      : mapVoiceChannels(discordChannelsResult || []);
 
     const joinUserIds = [
       ...new Set(
@@ -1331,6 +1397,10 @@ export async function GET() {
       console.log("[dashboard/live] fraud found =", fraud.length);
       console.log("[dashboard/live] guildMembers found =", guildMembers.length);
       console.log("[dashboard/live] pendingVerificationCount =", pendingVerificationCountRes.count || 0);
+      console.log("[dashboard/live] voiceChannels found =", voiceChannels.length);
+      if (discordChannelsResult?.__discord_error) {
+        console.warn("[dashboard/live] voice channel fetch warning =", discordChannelsResult.__discord_error);
+      }
     }
 
     const payload = {
@@ -1354,6 +1424,7 @@ export async function GET() {
       memberCounts,
       counts,
       intelligence,
+      voiceChannels,
       debug: debugEnabled()
         ? {
             guildId,
@@ -1370,6 +1441,8 @@ export async function GET() {
             raidsCount: raids.length,
             fraudCount: fraud.length,
             staffMessagesCount: staffMessages.length,
+            voiceChannelsCount: voiceChannels.length,
+            voiceChannelsError: discordChannelsResult?.__discord_error || null,
             memberCounts,
             recentJoinsCount: recentJoins.length,
             memberJoinsCount: memberJoins.length,
