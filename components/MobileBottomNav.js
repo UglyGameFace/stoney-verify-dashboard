@@ -6,7 +6,7 @@ const labels = {
   home: "Home",
   tickets: "Tickets",
   members: "Members",
-  categories: "Categories",
+  categories: "Cats",
 };
 
 const icons = {
@@ -91,7 +91,6 @@ export default function MobileBottomNav({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mobile-command-handle" />
-
             <div className="mobile-command-title">{title}</div>
 
             <div className="mobile-command-grid">
@@ -106,7 +105,9 @@ export default function MobileBottomNav({
                     onClick={() => handleTab(tab)}
                   >
                     <span className="mobile-command-icon">{icons[tab] || "•"}</span>
-                    <span className="mobile-command-label">{labels[tab] || tab}</span>
+                    <span className="mobile-command-label">
+                      {tab === "categories" ? "Categories" : labels[tab] || tab}
+                    </span>
                   </button>
                 );
               })}
@@ -158,7 +159,7 @@ export default function MobileBottomNav({
           color: var(--text-muted, rgba(255, 255, 255, 0.72));
           border-radius: 18px;
           min-height: 58px;
-          padding: 8px 6px;
+          padding: 8px 4px;
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -202,11 +203,14 @@ export default function MobileBottomNav({
 
         .mobile-nav-label {
           display: block;
-          font-size: 12px;
+          font-size: 11px;
           font-weight: 800;
           line-height: 1.05;
           letter-spacing: 0.01em;
-          overflow-wrap: anywhere;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 100%;
         }
 
         .mobile-command-overlay {
