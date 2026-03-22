@@ -278,8 +278,8 @@ function buildModeratorIntelligence(data) {
     fraudFlags >= 8 || raidAlerts >= 4 || openTickets >= 24
       ? "Critical"
       : fraudFlags >= 4 || raidAlerts >= 2 || openTickets >= 14
-      ? "Elevated"
-      : "Stable"
+        ? "Elevated"
+        : "Stable"
   );
 
   const raidRisk = data?.intelligence?.raidRisk || (
@@ -302,8 +302,8 @@ function buildModeratorIntelligence(data) {
     Number.isFinite(Number(data?.intelligence?.verifiedRate))
       ? Number(data.intelligence.verifiedRate)
       : activeMembers > 0
-      ? Math.round((verifiedMembers / activeMembers) * 100)
-      : 0;
+        ? Math.round((verifiedMembers / activeMembers) * 100)
+        : 0;
 
   const summaryItems = [
     { key: "health", label: "Server Health", value: serverHealth, tone: serverHealth },
@@ -1091,6 +1091,64 @@ export default function DashboardClient({
     setSelectedCategoryFilter(null);
   }, []);
 
+  const openSettingsFromMobile = useCallback(() => {
+    setSettingsOpen(true);
+  }, []);
+
+  const mobileExtraActions = useMemo(
+    () => [
+      {
+        key: "settings",
+        label: "Personalize UI",
+        icon: "🎨",
+        onClick: openSettingsFromMobile,
+      },
+      {
+        key: "refresh",
+        label: "Refresh Now",
+        icon: "⚡",
+        onClick: () =>
+          refresh({ force: true, reason: "mobile-command-refresh" }),
+      },
+      {
+        key: "reconcile-preview",
+        label: isMaintaining ? "Working..." : "Preview Reconcile",
+        icon: "🧪",
+        onClick: () =>
+          handleReconcileTickets({
+            includeOpenWithMissingChannel: true,
+            includeTranscriptBackfill: true,
+            dryRun: true,
+          }),
+      },
+      {
+        key: "warns",
+        label: "Open Warns",
+        icon: "⚠️",
+        onClick: () => jumpToPanel("warns"),
+      },
+      {
+        key: "raids",
+        label: "Open Raids",
+        icon: "🚨",
+        onClick: () => jumpToPanel("raids"),
+      },
+      {
+        key: "fraud",
+        label: "Open Fraud",
+        icon: "🕵️",
+        onClick: () => jumpToPanel("fraud"),
+      },
+    ],
+    [
+      openSettingsFromMobile,
+      refresh,
+      handleReconcileTickets,
+      jumpToPanel,
+      isMaintaining,
+    ]
+  );
+
   const homeSections = {
     intelligence: (
       <IntelligencePanel
@@ -1755,6 +1813,8 @@ export default function DashboardClient({
         activeTab={activeTab}
         onChange={setActiveTab}
         tabs={MOBILE_TABS}
+        title="Staff Command Menu"
+        extraActions={mobileExtraActions}
       />
 
       <DashboardSettingsPanel
