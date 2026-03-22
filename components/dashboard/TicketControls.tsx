@@ -69,20 +69,10 @@ type ActionState =
   | "deleting"
   | "saving-category";
 
+type PanelName = "overview" | "category" | "transcript" | "close" | "delete";
+
 function getChannelId(ticket: TicketLike): string {
   return String(ticket.channel_id || ticket.discord_thread_id || "").trim();
-}
-
-function isClosed(status?: string | null): boolean {
-  return String(status || "").toLowerCase() === "closed";
-}
-
-function isDeleted(status?: string | null): boolean {
-  return String(status || "").toLowerCase() === "deleted";
-}
-
-function isOpen(status?: string | null): boolean {
-  return String(status || "").toLowerCase() === "open";
 }
 
 function normalizeBoolean(value: unknown): boolean {
@@ -100,63 +90,34 @@ function safeText(value: unknown, fallback = "—"): string {
 
 function formatDateTime(value?: string | null): string {
   if (!value) return "—";
-
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
-
   return date.toLocaleString();
 }
 
-function buttonClass(
-  kind: "primary" | "danger" | "secondary" | "success",
-  disabled = false
-): string {
-  const base = "button";
-  const tone =
-    kind === "primary"
-      ? " primary"
-      : kind === "danger"
-      ? " danger"
-      : kind === "success"
-      ? " primary"
-      : " ghost";
-
-  return `${base}${tone}${disabled ? " is-disabled" : ""}`;
+function isClosed(status?: string | null): boolean {
+  return String(status || "").toLowerCase() === "closed";
 }
 
-function panelClass(): string {
-  return "ticket-controls-panel";
+function isDeleted(status?: string | null): boolean {
+  return String(status || "").toLowerCase() === "deleted";
 }
 
-function inputClass(): string {
-  return "input";
+function isOpen(status?: string | null): boolean {
+  return String(status || "").toLowerCase() === "open";
 }
 
-function detailCardClass(): string {
-  return "member-detail-item";
+function isClaimed(status?: string | null): boolean {
+  return String(status || "").toLowerCase() === "claimed";
 }
 
-function miniLabelClass(): string {
-  return "ticket-info-label";
-}
-
-function miniValueClass(): string {
-  return "ticket-controls-mini-value";
-}
-
-function sortCategories(categories: TicketCategory[]): TicketCategory[] {
-  return [...categories].sort((a, b) => {
-    const sortA = Number(a?.sort_order ?? 9999);
-    const sortB = Number(b?.sort_order ?? 9999);
-
-    if (sortA !== sortB) return sortA - sortB;
-
-    if (Boolean(b?.is_default) !== Boolean(a?.is_default)) {
-      return b?.is_default ? 1 : -1;
-    }
-
-    return String(a?.name || "").localeCompare(String(b?.name || ""));
-  });
+function getStatusTone(status?: string | null): string {
+  const value = String(status || "").toLowerCase();
+  if (value === "open") return "open";
+  if (value === "claimed") return "claimed";
+  if (value === "closed") return "medium";
+  if (value === "deleted") return "danger";
+  return "";
 }
 
 function getCurrentCategoryId(ticket: TicketLike): string {
@@ -179,6 +140,64 @@ function getCurrentCategoryReason(ticket: TicketLike): string {
   return normalizeString(ticket.matched_category_reason) || "No match reason";
 }
 
+function sortCategories(categories: TicketCategory[]): TicketCategory[] {
+  return [...categories].sort((a, b) => {
+    const sortA = Number(a?.sort_order ?? 9999);
+    const sortB = Number(b?.sort_order ?? 9999);
+
+    if (sortA !== sortB) return sortA - sortB;
+    if (Boolean(b?.is_default) !== Boolean(a?.is_default)) {
+      return b?.is_default ? 1 : -1;
+    }
+
+    return String(a?.name || "").localeCompare(String(b?.name || ""));
+  });
+}
+
+function ActionAccordion({
+  title,
+  subtitle,
+  badge,
+  open,
+  onToggle,
+  children,
+  danger = false,
+}: {
+  title: string;
+  subtitle?: string;
+  badge?: React.ReactNode;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+  danger?: boolean;
+}) {
+  return (
+    <div className={`ticket-action-accordion ${open ? "open" : ""} ${danger ? "danger" : ""}`}>
+      <button
+        type="button"
+        className="ticket-action-accordion-head"
+        onClick={onToggle}
+      >
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="ticket-action-accordion-title">{title}</div>
+          {subtitle ? (
+            <div className="muted ticket-action-accordion-copy">{subtitle}</div>
+          ) : null}
+        </div>
+
+        <div className="ticket-action-accordion-side">
+          {badge}
+          <span className={`ticket-action-chevron ${open ? "open" : ""}`}>⌄</span>
+        </div>
+      </button>
+
+      {open ? (
+        <div className="ticket-action-accordion-body">{children}</div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function TicketControls({
   ticket,
   currentStaffId,
@@ -190,32 +209,35 @@ export default function TicketControls({
   const closed = isClosed(ticket.status);
   const deleted = isDeleted(ticket.status);
   const open = isOpen(ticket.status);
+  const claimed = isClaimed(ticket.status);
 
-  const transcriptUrl = safeText(ticket.transcript_url, "");
-  const transcriptMessageId = safeText(ticket.transcript_message_id, "");
-  const transcriptChannelId = safeText(ticket.transcript_channel_id, "");
+  const transcriptUrl = normalizeString(ticket.transcript_url);
+  const transcriptMessageId = normalizeString(ticket.transcript_message_id);
+  const transcriptChannelId = normalizeString(ticket.transcript_channel_id);
   const hasTranscript =
     !!transcriptUrl || !!transcriptMessageId || !!transcriptChannelId;
 
   const [actionState, setActionState] = useState<ActionState>("idle");
-  const [error, setError] = useState<string>("");
-  const [message, setMessage] = useState<string>("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
-  const [showDeletePanel, setShowDeletePanel] = useState(false);
   const [deleteReason, setDeleteReason] = useState("Deleted from dashboard");
   const [forceTranscript, setForceTranscript] = useState(false);
-
-  const [showClosePanel, setShowClosePanel] = useState(false);
   const [closeReason, setCloseReason] = useState("Resolved");
-
-  const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
-  const [showCategoryPanel, setShowCategoryPanel] = useState(false);
 
   const [categories, setCategories] = useState<TicketCategory[]>([]);
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>(
     getCurrentCategoryId(ticket)
   );
+
+  const [openPanels, setOpenPanels] = useState<Record<PanelName, boolean>>({
+    overview: true,
+    category: false,
+    transcript: false,
+    close: false,
+    delete: false,
+  });
 
   useEffect(() => {
     setSelectedCategoryId(getCurrentCategoryId(ticket));
@@ -237,6 +259,7 @@ export default function TicketControls({
         });
 
         const json = await res.json().catch(() => null);
+
         if (!res.ok) {
           throw new Error(json?.error || "Failed to load categories.");
         }
@@ -280,10 +303,27 @@ export default function TicketControls({
     [categories, selectedCategoryId]
   );
 
+  function togglePanel(name: PanelName) {
+    setOpenPanels((prev) => ({
+      ...prev,
+      [name]: !prev[name],
+    }));
+  }
+
   async function afterChange(ok: boolean) {
     if (!ok) return;
     if (onChanged) {
       await onChanged();
+    }
+  }
+
+  async function copyText(value: string, successMessage: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setError("");
+      setMessage(successMessage);
+    } catch {
+      setError("Could not copy to clipboard on this device.");
     }
   }
 
@@ -340,7 +380,7 @@ export default function TicketControls({
       }
 
       setMessage("Ticket closed.");
-      setShowClosePanel(false);
+      setOpenPanels((prev) => ({ ...prev, close: false, transcript: true }));
       await afterChange(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to close ticket.");
@@ -411,7 +451,7 @@ export default function TicketControls({
           : "Ticket deleted after transcript posted."
       );
 
-      setShowDeletePanel(false);
+      setOpenPanels((prev) => ({ ...prev, delete: false }));
       await afterChange(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete ticket.");
@@ -470,488 +510,476 @@ export default function TicketControls({
 
   return (
     <div className={`ticket-controls ${className}`}>
-      <div className="ticket-controls-bar">
-        <button
-          type="button"
-          className={buttonClass("primary", assignDisabled)}
-          disabled={assignDisabled}
-          onClick={handleAssign}
-        >
-          {actionState === "assigning" ? "Assigning..." : "Assign / Claim"}
-        </button>
-
-        <button
-          type="button"
-          className={buttonClass("secondary", closeDisabled)}
-          disabled={closeDisabled}
-          onClick={() => {
-            setError("");
-            setMessage("");
-            setShowClosePanel((v) => !v);
-            if (showDeletePanel) setShowDeletePanel(false);
-          }}
-        >
-          {closed ? "Already Closed" : "Close"}
-        </button>
-
-        <button
-          type="button"
-          className={buttonClass("success", reopenDisabled)}
-          disabled={reopenDisabled}
-          onClick={handleReopen}
-        >
-          {actionState === "reopening" ? "Reopening..." : "Reopen"}
-        </button>
-
-        <button
-          type="button"
-          className={buttonClass("danger", deleteDisabled)}
-          disabled={deleteDisabled}
-          onClick={() => {
-            setError("");
-            setMessage("");
-            setShowDeletePanel((v) => !v);
-            if (showClosePanel) setShowClosePanel(false);
-          }}
-        >
-          Delete
-        </button>
-
-        <button
-          type="button"
-          className={buttonClass("secondary", false)}
-          onClick={() => {
-            setError("");
-            setMessage("");
-            setShowCategoryPanel((v) => !v);
-          }}
-        >
-          {showCategoryPanel ? "Hide Category" : "Category"}
-        </button>
-
-        <button
-          type="button"
-          className={buttonClass("secondary", false)}
-          onClick={() => {
-            setShowTranscriptPanel((v) => !v);
-          }}
-        >
-          {showTranscriptPanel ? "Hide Transcript" : "Transcript"}
-        </button>
-      </div>
-
-      {showCategoryPanel && (
-        <div className={panelClass()}>
-          <div
-            className="row"
-            style={{
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-              gap: 12,
-              marginBottom: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <div style={{ minWidth: 0 }}>
-              <div className="ticket-controls-title">Category Override</div>
-              <div className="ticket-controls-copy">
-                Staff can recategorize this ticket if the auto-match guessed wrong.
-              </div>
+      <div className="ticket-controls-header-card">
+        <div className="ticket-controls-header-top">
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="ticket-controls-header-title">Ticket Actions</div>
+            <div className="muted ticket-controls-header-copy">
+              Cleaner mobile-first control sheet for status, category, transcript, and deletion workflow.
             </div>
+          </div>
 
-            {ticket?.category_override ? (
-              <span className="badge claimed">Manual Override</span>
+          <div className="ticket-controls-status-row">
+            <span className={`badge ${getStatusTone(ticket.status)}`}>
+              {safeText(ticket.status, "unknown")}
+            </span>
+            {ghost ? <span className="badge">Ghost</span> : null}
+            {hasTranscript ? (
+              <span className="badge claimed">Transcript</span>
             ) : (
-              <span className="badge">Auto Match</span>
+              <span className="badge">No Transcript</span>
             )}
           </div>
+        </div>
 
-          <div className="ticket-controls-info-grid" style={{ marginBottom: 12 }}>
-            <div className={detailCardClass()}>
-              <div className={miniLabelClass()}>Current Category</div>
-              <div className={miniValueClass()}>
-                {getCurrentCategoryName(ticket)}
-              </div>
-            </div>
+        <div className="ticket-primary-actions">
+          <button
+            type="button"
+            className="button primary"
+            disabled={assignDisabled}
+            onClick={handleAssign}
+          >
+            {actionState === "assigning" ? "Assigning..." : claimed ? "Re-Assign" : "Assign / Claim"}
+          </button>
 
-            <div className={detailCardClass()}>
-              <div className={miniLabelClass()}>Current Reason</div>
-              <div className={miniValueClass()}>
-                {getCurrentCategoryReason(ticket)}
-              </div>
-            </div>
+          <button
+            type="button"
+            className="button ghost"
+            disabled={closeDisabled}
+            onClick={() => togglePanel("close")}
+          >
+            {closed ? "Already Closed" : "Close"}
+          </button>
 
-            <div className={detailCardClass()}>
-              <div className={miniLabelClass()}>Matched Intake Type</div>
-              <div className={miniValueClass()}>
-                {safeText(ticket?.matched_intake_type)}
-              </div>
-            </div>
+          <button
+            type="button"
+            className="button ghost"
+            disabled={reopenDisabled}
+            onClick={handleReopen}
+          >
+            {actionState === "reopening" ? "Reopening..." : "Reopen"}
+          </button>
 
-            <div className={detailCardClass()}>
-              <div className={miniLabelClass()}>Override Set At</div>
-              <div className={miniValueClass()}>
-                {formatDateTime(ticket?.category_set_at)}
-              </div>
+          <button
+            type="button"
+            className="button danger"
+            disabled={deleteDisabled}
+            onClick={() => togglePanel("delete")}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+
+      <ActionAccordion
+        title="Overview"
+        subtitle="Current ticket state, channel identity, and quick copy actions."
+        badge={<span className="badge open">Info</span>}
+        open={openPanels.overview}
+        onToggle={() => togglePanel("overview")}
+      >
+        <div className="ticket-controls-info-grid">
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Ticket</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(ticket.title || ticket.channel_name, "Untitled")}
             </div>
           </div>
 
-          <div
-            style={{
-              display: "grid",
-              gap: 10,
-              gridTemplateColumns: "minmax(0, 1fr) auto",
-              alignItems: "center",
-            }}
-          >
-            <select
-              className={inputClass()}
-              value={selectedCategoryId}
-              disabled={loadingCategories || busy}
-              onChange={(e) => setSelectedCategoryId(e.target.value)}
-            >
-              <option value="">
-                {loadingCategories ? "Loading categories..." : "Choose category"}
-              </option>
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Category</div>
+            <div className="ticket-controls-mini-value">
+              {getCurrentCategoryName(ticket)}
+            </div>
+          </div>
 
-              {categories.map((category) => (
-                <option key={String(category.id)} value={String(category.id)}>
-                  {safeText(category.name, "Unnamed")}
-                  {normalizeString(category.intake_type)
-                    ? ` • ${normalizeString(category.intake_type)}`
-                    : ""}
-                  {category.is_default ? " • default" : ""}
-                </option>
-              ))}
-            </select>
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Channel ID</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(channelId, "Missing")}
+            </div>
+          </div>
 
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Claimed By</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(ticket.claimed_by)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Current Reason</div>
+            <div className="ticket-controls-mini-value">
+              {getCurrentCategoryReason(ticket)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Source</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(ticket.source)}
+            </div>
+          </div>
+        </div>
+
+        <div className="ticket-controls-actions">
+          {channelId ? (
             <button
               type="button"
-              className={buttonClass("primary", saveCategoryDisabled)}
-              disabled={saveCategoryDisabled}
-              onClick={handleSaveCategory}
+              className="button ghost"
+              onClick={() => copyText(channelId, "Channel ID copied.")}
             >
-              {actionState === "saving-category"
-                ? "Saving..."
-                : "Save Category"}
+              Copy Channel ID
             </button>
-          </div>
+          ) : null}
 
-          {selectedCategory ? (
-            <div
-              style={{
-                marginTop: 12,
-                display: "grid",
-                gap: 10,
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-              }}
+          {!!ticket.title ? (
+            <button
+              type="button"
+              className="button ghost"
+              onClick={() => copyText(String(ticket.title), "Ticket title copied.")}
             >
-              <div className={detailCardClass()}>
-                <div className={miniLabelClass()}>Selected Name</div>
-                <div className={miniValueClass()}>
-                  {safeText(selectedCategory.name)}
-                </div>
-              </div>
+              Copy Title
+            </button>
+          ) : null}
 
-              <div className={detailCardClass()}>
-                <div className={miniLabelClass()}>Selected Slug</div>
-                <div className={miniValueClass()}>
-                  {safeText(selectedCategory.slug)}
-                </div>
-              </div>
-
-              <div className={detailCardClass()}>
-                <div className={miniLabelClass()}>Selected Intake Type</div>
-                <div className={miniValueClass()}>
-                  {safeText(selectedCategory.intake_type)}
-                </div>
-              </div>
-
-              <div className={detailCardClass()}>
-                <div className={miniLabelClass()}>Description</div>
-                <div className={miniValueClass()}>
-                  {safeText(selectedCategory.description)}
-                </div>
-              </div>
-            </div>
+          {!!ticket.claimed_by ? (
+            <button
+              type="button"
+              className="button ghost"
+              onClick={() =>
+                copyText(String(ticket.claimed_by), "Claimed-by value copied.")
+              }
+            >
+              Copy Claimed By
+            </button>
           ) : null}
         </div>
-      )}
+      </ActionAccordion>
 
-      {showClosePanel && !deleted && (
-        <div className={panelClass()}>
-          <div className="ticket-controls-title">Close Ticket</div>
-          <div className="ticket-controls-copy">
-            This keeps the ticket record and channel, but marks the ticket as
-            closed.
-          </div>
-          <input
-            className={inputClass()}
-            value={closeReason}
-            onChange={(e) => setCloseReason(e.target.value)}
-            placeholder="Reason for closing"
-          />
-          <div className="ticket-controls-actions">
-            <button
-              type="button"
-              className={buttonClass("secondary", busy)}
-              disabled={busy}
-              onClick={() => setShowClosePanel(false)}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className={buttonClass("primary", busy)}
-              disabled={busy}
-              onClick={handleClose}
-            >
-              {actionState === "closing" ? "Closing..." : "Confirm Close"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {showDeletePanel && !deleted && (
-        <div className={panelClass()}>
-          <div className="ticket-controls-title">
-            {ghost ? "Delete Ghost Ticket" : "Delete Ticket"}
-          </div>
-
-          <div className="ticket-controls-copy">
-            {ghost
-              ? "Ghost tickets do not require transcript posting, but staff can choose to include one."
-              : "Normal tickets must post a transcript before the channel is deleted, just like the Discord workflow."}
-          </div>
-
-          <input
-            className={inputClass()}
-            value={deleteReason}
-            onChange={(e) => setDeleteReason(e.target.value)}
-            placeholder="Reason for deletion"
-          />
-
-          {ghost && (
-            <label className="ticket-controls-check">
-              <input
-                type="checkbox"
-                checked={forceTranscript}
-                onChange={(e) => setForceTranscript(e.target.checked)}
-              />
-              <span>Post transcript before deleting this ghost ticket</span>
-            </label>
-          )}
-
-          {!ghost && (
-            <div className="info-banner">
-              Transcript posting is automatically required for normal tickets.
+      <ActionAccordion
+        title="Category Override"
+        subtitle="Fix a wrong auto-match and assign the category staff actually want."
+        badge={
+          ticket?.category_override ? (
+            <span className="badge claimed">Manual Override</span>
+          ) : (
+            <span className="badge">Auto Match</span>
+          )
+        }
+        open={openPanels.category}
+        onToggle={() => togglePanel("category")}
+      >
+        <div className="ticket-controls-info-grid" style={{ marginBottom: 12 }}>
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Current Category</div>
+            <div className="ticket-controls-mini-value">
+              {getCurrentCategoryName(ticket)}
             </div>
-          )}
+          </div>
 
-          <div className="ticket-controls-actions">
-            <button
-              type="button"
-              className={buttonClass("secondary", busy)}
-              disabled={busy}
-              onClick={() => setShowDeletePanel(false)}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className={buttonClass("danger", busy)}
-              disabled={busy}
-              onClick={handleDelete}
-            >
-              {actionState === "deleting" ? "Deleting..." : "Confirm Delete"}
-            </button>
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Current Reason</div>
+            <div className="ticket-controls-mini-value">
+              {getCurrentCategoryReason(ticket)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Matched Intake Type</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(ticket?.matched_intake_type)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Override Set At</div>
+            <div className="ticket-controls-mini-value">
+              {formatDateTime(ticket?.category_set_at)}
+            </div>
           </div>
         </div>
-      )}
 
-      {showTranscriptPanel && (
-        <div className={panelClass()}>
-          <div
-            className="row"
-            style={{
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-              gap: 12,
-              marginBottom: 12,
-              flexWrap: "wrap",
-            }}
+        <div className="ticket-controls-select-row">
+          <select
+            className="input"
+            value={selectedCategoryId}
+            disabled={loadingCategories || busy}
+            onChange={(e) => setSelectedCategoryId(e.target.value)}
           >
-            <div style={{ minWidth: 0 }}>
-              <div className="ticket-controls-title">
-                Transcript & Ticket History
-              </div>
-              <div className="ticket-controls-copy">
-                Mirrors your Discord-side workflow: transcript details,
-                closure, and deletion history.
+            <option value="">
+              {loadingCategories ? "Loading categories..." : "Choose category"}
+            </option>
+
+            {categories.map((category) => (
+              <option key={String(category.id)} value={String(category.id)}>
+                {safeText(category.name, "Unnamed")}
+                {normalizeString(category.intake_type)
+                  ? ` • ${normalizeString(category.intake_type)}`
+                  : ""}
+                {category.is_default ? " • default" : ""}
+              </option>
+            ))}
+          </select>
+
+          <button
+            type="button"
+            className="button primary"
+            disabled={saveCategoryDisabled}
+            onClick={handleSaveCategory}
+          >
+            {actionState === "saving-category" ? "Saving..." : "Save Category"}
+          </button>
+        </div>
+
+        {selectedCategory ? (
+          <div className="ticket-controls-info-grid" style={{ marginTop: 12 }}>
+            <div className="member-detail-item">
+              <div className="ticket-info-label">Selected Name</div>
+              <div className="ticket-controls-mini-value">
+                {safeText(selectedCategory.name)}
               </div>
             </div>
 
-            <div className="roles" style={{ justifyContent: "flex-end" }}>
-              {hasTranscript ? (
-                <span className="badge claimed">Transcript Available</span>
-              ) : (
-                <span className="badge">No Transcript Yet</span>
-              )}
+            <div className="member-detail-item">
+              <div className="ticket-info-label">Selected Slug</div>
+              <div className="ticket-controls-mini-value">
+                {safeText(selectedCategory.slug)}
+              </div>
+            </div>
 
-              {deleted ? (
-                <span className="badge danger">Deleted</span>
-              ) : closed ? (
-                <span className="badge medium">Closed</span>
-              ) : (
-                <span className="badge open">Open</span>
-              )}
+            <div className="member-detail-item">
+              <div className="ticket-info-label">Selected Intake Type</div>
+              <div className="ticket-controls-mini-value">
+                {safeText(selectedCategory.intake_type)}
+              </div>
+            </div>
+
+            <div className="member-detail-item">
+              <div className="ticket-info-label">Description</div>
+              <div className="ticket-controls-mini-value">
+                {safeText(selectedCategory.description)}
+              </div>
             </div>
           </div>
+        ) : null}
+      </ActionAccordion>
 
-          <div className="ticket-controls-info-grid">
-            <div className={detailCardClass()}>
-              <div className={miniLabelClass()}>Ticket</div>
-              <div className={miniValueClass()}>
-                {safeText(ticket.title || ticket.channel_name, "Untitled")}
-              </div>
-            </div>
-
-            <div className={detailCardClass()}>
-              <div className={miniLabelClass()}>Category</div>
-              <div className={miniValueClass()}>{safeText(ticket.category)}</div>
-            </div>
-
-            <div className={detailCardClass()}>
-              <div className={miniLabelClass()}>Channel ID</div>
-              <div className={miniValueClass()}>{safeText(channelId)}</div>
-            </div>
-
-            <div className={detailCardClass()}>
-              <div className={miniLabelClass()}>Transcript URL</div>
-              <div className={miniValueClass()}>
-                {transcriptUrl ? (
-                  <a
-                    href={transcriptUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="ticket-inline-link"
-                  >
-                    Open Transcript
-                  </a>
-                ) : (
-                  "—"
-                )}
-              </div>
-            </div>
-
-            <div className={detailCardClass()}>
-              <div className={miniLabelClass()}>Transcript Message ID</div>
-              <div className={miniValueClass()}>
-                {transcriptMessageId || "—"}
-              </div>
-            </div>
-
-            <div className={detailCardClass()}>
-              <div className={miniLabelClass()}>Transcript Channel ID</div>
-              <div className={miniValueClass()}>
-                {transcriptChannelId || "—"}
-              </div>
-            </div>
-
-            <div className={detailCardClass()}>
-              <div className={miniLabelClass()}>Closed By</div>
-              <div className={miniValueClass()}>{safeText(ticket.closed_by)}</div>
-            </div>
-
-            <div className={detailCardClass()}>
-              <div className={miniLabelClass()}>Closed At</div>
-              <div className={miniValueClass()}>
-                {formatDateTime(ticket.closed_at)}
-              </div>
-            </div>
-
-            <div className={detailCardClass()}>
-              <div className={miniLabelClass()}>Closed Reason</div>
-              <div className={miniValueClass()}>
-                {safeText(ticket.closed_reason)}
-              </div>
-            </div>
-
-            <div className={detailCardClass()}>
-              <div className={miniLabelClass()}>Deleted By</div>
-              <div className={miniValueClass()}>{safeText(ticket.deleted_by)}</div>
-            </div>
-
-            <div className={detailCardClass()}>
-              <div className={miniLabelClass()}>Deleted At</div>
-              <div className={miniValueClass()}>
-                {formatDateTime(ticket.deleted_at)}
-              </div>
-            </div>
-
-            <div className={detailCardClass()}>
-              <div className={miniLabelClass()}>Source</div>
-              <div className={miniValueClass()}>{safeText(ticket.source)}</div>
-            </div>
-          </div>
-
-          {hasTranscript ? (
-            <div className="ticket-controls-actions">
+      <ActionAccordion
+        title="Transcript & History"
+        subtitle="Closure, deletion, transcript links, and archival proof."
+        badge={
+          hasTranscript ? (
+            <span className="badge claimed">Available</span>
+          ) : (
+            <span className="badge">Pending</span>
+          )
+        }
+        open={openPanels.transcript}
+        onToggle={() => togglePanel("transcript")}
+      >
+        <div className="ticket-controls-info-grid">
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Transcript URL</div>
+            <div className="ticket-controls-mini-value">
               {transcriptUrl ? (
                 <a
                   href={transcriptUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className={buttonClass("primary", false)}
+                  className="ticket-inline-link"
                 >
                   Open Transcript
                 </a>
-              ) : null}
-
-              {transcriptMessageId ? (
-                <button
-                  type="button"
-                  className={buttonClass("secondary", false)}
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(transcriptMessageId);
-                      setMessage("Transcript message ID copied.");
-                      setError("");
-                    } catch {
-                      setError("Could not copy transcript message ID.");
-                    }
-                  }}
-                >
-                  Copy Message ID
-                </button>
-              ) : null}
-
-              {transcriptChannelId ? (
-                <button
-                  type="button"
-                  className={buttonClass("secondary", false)}
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(transcriptChannelId);
-                      setMessage("Transcript channel ID copied.");
-                      setError("");
-                    } catch {
-                      setError("Could not copy transcript channel ID.");
-                    }
-                  }}
-                >
-                  Copy Channel ID
-                </button>
-              ) : null}
+              ) : (
+                "—"
+              )}
             </div>
-          ) : (
-            <div className="empty-state" style={{ padding: 12 }}>
-              Transcript data will appear here after the ticket is closed or
-              deleted through the bot workflow.
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Transcript Message ID</div>
+            <div className="ticket-controls-mini-value">
+              {transcriptMessageId || "—"}
             </div>
-          )}
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Transcript Channel ID</div>
+            <div className="ticket-controls-mini-value">
+              {transcriptChannelId || "—"}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Closed By</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(ticket.closed_by)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Closed At</div>
+            <div className="ticket-controls-mini-value">
+              {formatDateTime(ticket.closed_at)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Closed Reason</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(ticket.closed_reason)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Deleted By</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(ticket.deleted_by)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Deleted At</div>
+            <div className="ticket-controls-mini-value">
+              {formatDateTime(ticket.deleted_at)}
+            </div>
+          </div>
         </div>
-      )}
+
+        {hasTranscript ? (
+          <div className="ticket-controls-actions">
+            {transcriptUrl ? (
+              <a
+                href={transcriptUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="button primary"
+              >
+                Open Transcript
+              </a>
+            ) : null}
+
+            {transcriptMessageId ? (
+              <button
+                type="button"
+                className="button ghost"
+                onClick={() =>
+                  copyText(transcriptMessageId, "Transcript message ID copied.")
+                }
+              >
+                Copy Message ID
+              </button>
+            ) : null}
+
+            {transcriptChannelId ? (
+              <button
+                type="button"
+                className="button ghost"
+                onClick={() =>
+                  copyText(transcriptChannelId, "Transcript channel ID copied.")
+                }
+              >
+                Copy Channel ID
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <div className="empty-state" style={{ padding: 12 }}>
+            Transcript data will appear here after the ticket is closed or deleted through the bot workflow.
+          </div>
+        )}
+      </ActionAccordion>
+
+      <ActionAccordion
+        title="Close Ticket"
+        subtitle="Marks the ticket as resolved while preserving the ticket record and channel."
+        badge={<span className="badge medium">Resolve</span>}
+        open={openPanels.close}
+        onToggle={() => togglePanel("close")}
+      >
+        <input
+          className="input"
+          value={closeReason}
+          onChange={(e) => setCloseReason(e.target.value)}
+          placeholder="Reason for closing"
+        />
+
+        <div className="ticket-controls-actions">
+          <button
+            type="button"
+            className="button ghost"
+            disabled={busy}
+            onClick={() => togglePanel("close")}
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            className="button primary"
+            disabled={busy || closeDisabled}
+            onClick={handleClose}
+          >
+            {actionState === "closing" ? "Closing..." : "Confirm Close"}
+          </button>
+        </div>
+      </ActionAccordion>
+
+      <ActionAccordion
+        title={ghost ? "Delete Ghost Ticket" : "Delete Ticket"}
+        subtitle={
+          ghost
+            ? "Ghost tickets can skip transcript posting unless staff explicitly want one."
+            : "Normal tickets should delete only after transcript workflow is complete."
+        }
+        badge={<span className="badge danger">Danger</span>}
+        open={openPanels.delete}
+        onToggle={() => togglePanel("delete")}
+        danger
+      >
+        <input
+          className="input"
+          value={deleteReason}
+          onChange={(e) => setDeleteReason(e.target.value)}
+          placeholder="Reason for deletion"
+        />
+
+        {ghost ? (
+          <label className="ticket-controls-check">
+            <input
+              type="checkbox"
+              checked={forceTranscript}
+              onChange={(e) => setForceTranscript(e.target.checked)}
+            />
+            <span>Post transcript before deleting this ghost ticket</span>
+          </label>
+        ) : (
+          <div className="info-banner">
+            Transcript posting is automatically required for normal tickets.
+          </div>
+        )}
+
+        <div className="ticket-controls-actions">
+          <button
+            type="button"
+            className="button ghost"
+            disabled={busy}
+            onClick={() => togglePanel("delete")}
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            className="button danger"
+            disabled={busy || deleteDisabled}
+            onClick={handleDelete}
+          >
+            {actionState === "deleting" ? "Deleting..." : "Confirm Delete"}
+          </button>
+        </div>
+      </ActionAccordion>
 
       {!!message && <div className="info-banner">{message}</div>}
       {!!error && <div className="error-banner">{error}</div>}
@@ -974,6 +1002,226 @@ export default function TicketControls({
           {ghost ? "yes" : "no"}
         </div>
       </div>
+
+      <style jsx>{`
+        .ticket-controls {
+          display: grid;
+          gap: 12px;
+        }
+
+        .ticket-controls-header-card {
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 20px;
+          padding: 14px;
+          background:
+            radial-gradient(circle at top right, rgba(93,255,141,0.06), transparent 36%),
+            rgba(255,255,255,0.025);
+        }
+
+        .ticket-controls-header-top {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 12px;
+          flex-wrap: wrap;
+          margin-bottom: 12px;
+        }
+
+        .ticket-controls-header-title {
+          font-weight: 900;
+          font-size: 18px;
+          line-height: 1.05;
+          color: var(--text-strong, #f8fafc);
+          letter-spacing: -0.02em;
+        }
+
+        .ticket-controls-header-copy {
+          margin-top: 6px;
+          font-size: 13px;
+          line-height: 1.5;
+          max-width: 720px;
+        }
+
+        .ticket-controls-status-row {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          align-items: center;
+        }
+
+        .ticket-primary-actions {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .ticket-action-accordion {
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 20px;
+          overflow: hidden;
+          background:
+            radial-gradient(circle at top right, rgba(99,213,255,0.04), transparent 34%),
+            rgba(255,255,255,0.02);
+        }
+
+        .ticket-action-accordion.danger {
+          border-color: rgba(248,113,113,0.18);
+          background:
+            radial-gradient(circle at top right, rgba(248,113,113,0.06), transparent 34%),
+            rgba(255,255,255,0.02);
+        }
+
+        .ticket-action-accordion.open {
+          box-shadow: 0 0 18px rgba(99,213,255,0.06);
+        }
+
+        .ticket-action-accordion-head {
+          appearance: none;
+          -webkit-appearance: none;
+          width: 100%;
+          border: 0;
+          background: transparent;
+          color: inherit;
+          text-align: left;
+          padding: 14px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          cursor: pointer;
+        }
+
+        .ticket-action-accordion-title {
+          font-weight: 900;
+          color: var(--text-strong, #f8fafc);
+          line-height: 1.08;
+          letter-spacing: -0.02em;
+        }
+
+        .ticket-action-accordion-copy {
+          margin-top: 6px;
+          font-size: 13px;
+          line-height: 1.45;
+        }
+
+        .ticket-action-accordion-side {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-shrink: 0;
+        }
+
+        .ticket-action-chevron {
+          font-size: 22px;
+          line-height: 1;
+          transition: transform 0.16s ease;
+        }
+
+        .ticket-action-chevron.open {
+          transform: rotate(180deg);
+        }
+
+        .ticket-action-accordion-body {
+          padding: 0 14px 14px;
+          display: grid;
+          gap: 12px;
+        }
+
+        .ticket-controls-select-row {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 10px;
+          align-items: center;
+        }
+
+        .ticket-controls-info-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+        }
+
+        .ticket-controls-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+        }
+
+        .ticket-controls-check {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          color: var(--text);
+          font-size: 13px;
+          line-height: 1.4;
+        }
+
+        .ticket-controls-mini-value {
+          margin-top: 2px;
+          color: var(--text-strong, #f8fafc);
+          font-size: 14px;
+          overflow-wrap: anywhere;
+          line-height: 1.45;
+        }
+
+        .ticket-inline-link {
+          color: #c8f1ff;
+          text-decoration: underline;
+          text-underline-offset: 2px;
+        }
+
+        .ticket-controls-footnote {
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 16px;
+          padding: 12px 14px;
+          background: rgba(255,255,255,0.02);
+          color: var(--muted);
+          font-size: 12px;
+          line-height: 1.55;
+          display: grid;
+          gap: 4px;
+        }
+
+        .ticket-controls-footnote-label {
+          font-weight: 700;
+          color: var(--text-strong, #f8fafc);
+        }
+
+        @media (max-width: 860px) {
+          .ticket-primary-actions {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .ticket-controls-info-grid,
+          .ticket-controls-select-row {
+            grid-template-columns: 1fr;
+          }
+
+          .ticket-controls-actions {
+            display: grid;
+            grid-template-columns: 1fr;
+          }
+
+          .ticket-controls-actions :global(.button),
+          .ticket-controls-actions a {
+            width: 100%;
+            min-width: 0;
+            text-align: center;
+          }
+        }
+
+        @media (max-width: 520px) {
+          .ticket-primary-actions {
+            grid-template-columns: 1fr;
+          }
+
+          .ticket-controls-header-card,
+          .ticket-action-accordion-head,
+          .ticket-action-accordion-body {
+            padding-left: 12px;
+            padding-right: 12px;
+          }
+        }
+      `}</style>
     </div>
   );
 }
