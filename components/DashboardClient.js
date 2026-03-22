@@ -227,6 +227,19 @@ function getTicketStatusCount(tickets, status) {
   ).length;
 }
 
+function statusMatchesFilter(ticket, filterValue) {
+  const status = String(ticket?.status || "").toLowerCase();
+
+  if (filterValue === "all") return true;
+  if (filterValue === "active") return status === "open" || status === "claimed";
+  if (filterValue === "open_only") return status === "open";
+  if (filterValue === "claimed") return status === "claimed";
+  if (filterValue === "closed") return status === "closed";
+  if (filterValue === "deleted") return status === "deleted";
+
+  return status === filterValue;
+}
+
 function getSeverityColor(level) {
   const value = String(level || "").toLowerCase();
 
@@ -261,32 +274,34 @@ function buildModeratorIntelligence(data) {
   const fraudFlags = Number(counts?.fraudFlags || 0);
   const claimedTickets = getTicketStatusCount(tickets, "claimed");
 
-  let serverHealth = "Stable";
-  if (fraudFlags >= 4 || raidAlerts >= 2 || openTickets >= 14) {
-    serverHealth = "Elevated";
-  }
-  if (fraudFlags >= 8 || raidAlerts >= 4 || openTickets >= 24) {
-    serverHealth = "Critical";
-  }
+  const serverHealth = data?.intelligence?.serverHealth || (
+    fraudFlags >= 8 || raidAlerts >= 4 || openTickets >= 24
+      ? "Critical"
+      : fraudFlags >= 4 || raidAlerts >= 2 || openTickets >= 14
+      ? "Elevated"
+      : "Stable"
+  );
 
-  let raidRisk = "Low";
-  if (raidAlerts >= 1) raidRisk = "Moderate";
-  if (raidAlerts >= 3) raidRisk = "High";
+  const raidRisk = data?.intelligence?.raidRisk || (
+    raidAlerts >= 3 ? "High" : raidAlerts >= 1 ? "Moderate" : "Low"
+  );
 
-  let fraudRisk = "Low";
-  if (fraudFlags >= 1 || pendingVerification >= 12) fraudRisk = "Moderate";
-  if (fraudFlags >= 5) fraudRisk = "High";
+  const fraudRisk = data?.intelligence?.fraudRisk || (
+    fraudFlags >= 5 ? "High" : fraudFlags >= 1 || pendingVerification >= 12 ? "Moderate" : "Low"
+  );
 
-  let ticketPressure = "Low";
-  if (openTickets >= 6 || claimedTickets >= 4) ticketPressure = "Moderate";
-  if (openTickets >= 14 || claimedTickets >= 8) ticketPressure = "High";
+  const ticketPressure = data?.intelligence?.ticketPressure || (
+    openTickets >= 14 || claimedTickets >= 8 ? "High" : openTickets >= 6 || claimedTickets >= 4 ? "Moderate" : "Low"
+  );
 
-  let verificationPressure = "Low";
-  if (pendingVerification >= 8) verificationPressure = "Moderate";
-  if (pendingVerification >= 16) verificationPressure = "High";
+  const verificationPressure = data?.intelligence?.verificationPressure || (
+    pendingVerification >= 16 ? "High" : pendingVerification >= 8 ? "Moderate" : "Low"
+  );
 
   const verifiedRate =
-    activeMembers > 0
+    Number.isFinite(Number(data?.intelligence?.verifiedRate))
+      ? Number(data.intelligence.verifiedRate)
+      : activeMembers > 0
       ? Math.round((verifiedMembers / activeMembers) * 100)
       : 0;
 
@@ -330,6 +345,23 @@ function buildModeratorIntelligence(data) {
     activeMembers,
     claimedTickets,
     summaryItems,
+    reasons: {
+      serverHealth:
+        data?.intelligence?.reasons?.serverHealth ||
+        "No major threshold is currently tripping the health score.",
+      raidRiskReason:
+        data?.intelligence?.reasons?.raidRiskReason ||
+        "No recent raid alert threshold was crossed.",
+      fraudRiskReason:
+        data?.intelligence?.reasons?.fraudRiskReason ||
+        "No active fraud flags are currently driving the score.",
+      ticketPressureReason:
+        data?.intelligence?.reasons?.ticketPressureReason ||
+        "Ticket load is within normal range.",
+      verificationPressureReason:
+        data?.intelligence?.reasons?.verificationPressureReason ||
+        "Verification queue is under control.",
+    },
     flaggedMembers: members
       .filter((m) => String(m?.role_state || "").toLowerCase().includes("conflict"))
       .slice(0, 8),
@@ -519,12 +551,12 @@ function IntelligencePanel({
         </div>
 
         <div className="card compact-detail-card">
-          <div className="detail-card-title">Verification Pressure</div>
+          <div className="detail-card-title">Why The Current Scores</div>
           <div className="muted detail-list">
-            <div>Pending Verification: {intelligence.pendingVerification}</div>
-            <div>Verified Members: {intelligence.verifiedMembers}</div>
-            <div>Former Members Tracked: {intelligence.formerMembers}</div>
-            <div>Active Members: {intelligence.activeMembers}</div>
+            <div><strong>Fraud:</strong> {safeText(intelligence.reasons.fraudRiskReason)}</div>
+            <div><strong>Tickets:</strong> {safeText(intelligence.reasons.ticketPressureReason)}</div>
+            <div><strong>Verification:</strong> {safeText(intelligence.reasons.verificationPressureReason)}</div>
+            <div><strong>Raid:</strong> {safeText(intelligence.reasons.raidRiskReason)}</div>
           </div>
         </div>
 
@@ -601,7 +633,7 @@ export default function DashboardClient({
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("active");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [sortBy, setSortBy] = useState("priority_desc");
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState(null);
@@ -953,9 +985,7 @@ export default function DashboardClient({
     }
 
     if (statusFilter !== "all") {
-      rows = rows.filter(
-        (t) => String(t.status || "").toLowerCase() === statusFilter
-      );
+      rows = rows.filter((t) => statusMatchesFilter(t, statusFilter));
     }
 
     if (priorityFilter !== "all") {
@@ -984,7 +1014,7 @@ export default function DashboardClient({
   }, [safeEvents, safeWarns, safeRaids, safeFraud]);
 
   const jumpToTickets = useCallback(
-    ({ status = "all", priority = "all", query = "" } = {}) => {
+    ({ status = "active", priority = "all", query = "" } = {}) => {
       setActiveTab("tickets");
       setStatusFilter(status);
       setPriorityFilter(priority);
@@ -1044,7 +1074,7 @@ export default function DashboardClient({
     setActiveTab("tickets");
     setSelectedCategoryFilter(category || null);
     setSearch("");
-    setStatusFilter("all");
+    setStatusFilter("active");
     setPriorityFilter("all");
 
     if (typeof window !== "undefined") {
@@ -1056,7 +1086,7 @@ export default function DashboardClient({
 
   const clearTicketFilters = useCallback(() => {
     setSearch("");
-    setStatusFilter("all");
+    setStatusFilter("active");
     setPriorityFilter("all");
     setSelectedCategoryFilter(null);
   }, []);
@@ -1067,7 +1097,7 @@ export default function DashboardClient({
         intelligence={intelligence}
         expanded={expandedPanels.intelligence}
         onToggle={() => togglePanel("intelligence")}
-        onJumpToTickets={() => jumpToTickets({ status: "open" })}
+        onJumpToTickets={() => jumpToTickets({ status: "active" })}
         onJumpToWarns={() => jumpToPanel("warns")}
         onJumpToRaids={() => jumpToPanel("raids")}
         onJumpToFraud={() => jumpToPanel("fraud")}
@@ -1079,7 +1109,7 @@ export default function DashboardClient({
           title="Open Tickets"
           value={counts.openTickets}
           subtitle="Tap to open queue"
-          onClick={() => jumpToTickets({ status: "open" })}
+          onClick={() => jumpToTickets({ status: "active" })}
         />
 
         <ClickableStatCard
@@ -1132,7 +1162,7 @@ export default function DashboardClient({
               type="button"
               className="button ghost"
               style={{ width: "auto", minWidth: 120 }}
-              onClick={() => jumpToTickets({ status: "open" })}
+              onClick={() => jumpToTickets({ status: "active" })}
             >
               Open Tickets
             </button>
@@ -1646,9 +1676,10 @@ export default function DashboardClient({
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
+                <option value="active">Active (Open + Claimed)</option>
                 <option value="all">All statuses</option>
-                <option value="open">Open</option>
-                <option value="claimed">Claimed</option>
+                <option value="open_only">Open Only</option>
+                <option value="claimed">Claimed Only</option>
                 <option value="closed">Closed</option>
                 <option value="deleted">Deleted</option>
               </select>
