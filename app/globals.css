@@ -587,7 +587,7 @@ tbody tr:hover {
   height: 12px;
   border-radius: 999px;
   background: linear-gradient(135deg, var(--accent), var(--blue));
-  box-shadow: 0 0 16px rgba(93, 255, 141, 0.22);
+  box-shadow: 0 0 16px rgba(93,255,141,0.22);
 }
 
 .quick-actions {
@@ -743,19 +743,6 @@ tbody tr:hover {
 .ticket-controls {
   display: grid;
   gap: 12px;
-}
-
-.ticket-controls-bar,
-.ticket-controls-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.ticket-controls-bar .button,
-.ticket-controls-actions .button {
-  width: auto;
-  min-width: 120px;
 }
 
 .ticket-controls-panel {
@@ -1038,6 +1025,168 @@ tbody tr:hover {
   background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
 }
 
+/* FINAL MOBILE UI HARD OVERRIDES */
+
+button,
+[role="button"] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus,
+button:focus-visible,
+[role="button"]:focus,
+[role="button"]:focus-visible {
+  outline: none;
+}
+
+.ticket-action-accordion-head,
+.mobile-nav-link,
+.mobile-command-item,
+.settings-pill,
+.density-preview,
+.settings-accordion-head,
+.quick-action-copy,
+.ticket-mobile-toggle,
+.member-search-toggle,
+.recent-join-toggle,
+.member-card-button {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  border-image: none !important;
+  box-shadow: none;
+  background-clip: padding-box;
+  font: inherit !important;
+  color: var(--text-strong) !important;
+}
+
+.ticket-action-accordion,
+.drawer-accordion {
+  background:
+    radial-gradient(circle at top right, rgba(99, 213, 255, 0.04), transparent 34%),
+    rgba(255, 255, 255, 0.02) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.ticket-action-accordion-head,
+.drawer-accordion-head {
+  width: 100%;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background:
+    radial-gradient(circle at top right, rgba(99, 213, 255, 0.05), transparent 36%),
+    rgba(255, 255, 255, 0.015) !important;
+  color: var(--text-strong) !important;
+}
+
+.ticket-action-accordion-head:hover,
+.drawer-accordion-head:hover {
+  background:
+    radial-gradient(circle at top right, rgba(99, 213, 255, 0.08), transparent 36%),
+    rgba(255, 255, 255, 0.03) !important;
+}
+
+.ticket-action-accordion-title,
+.drawer-accordion-title {
+  color: var(--text-strong) !important;
+}
+
+.ticket-action-accordion-copy,
+.drawer-accordion-copy {
+  color: var(--muted) !important;
+}
+
+.ticket-action-chevron,
+.drawer-chevron {
+  color: var(--text-strong) !important;
+}
+
+.ticket-action-accordion .badge,
+.drawer-accordion .badge,
+.ticket-mobile-card .badge,
+.member-search-result .badge,
+.recent-join-card .badge,
+.settings-sheet .badge {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+  color: inherit;
+}
+
+.mobile-bottom-nav {
+  position: fixed;
+  left: 8px !important;
+  right: 8px !important;
+  bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+  z-index: 80 !important;
+  display: grid !important;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  padding: 8px !important;
+  border-radius: 24px !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  background:
+    linear-gradient(180deg, rgba(10, 14, 22, 0.95), rgba(5, 10, 16, 0.96)) !important;
+  backdrop-filter: blur(18px) !important;
+  -webkit-backdrop-filter: blur(18px) !important;
+  box-shadow: 0 -10px 30px rgba(0,0,0,0.28) !important;
+}
+
+.mobile-nav-link {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  border: 1px solid rgba(255,255,255,0.06) !important;
+  background: rgba(255,255,255,0.03) !important;
+  color: var(--muted) !important;
+  border-radius: 18px !important;
+  min-height: 58px !important;
+  padding: 8px 4px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 5px !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.mobile-nav-link.active {
+  color: var(--text-strong) !important;
+  background:
+    linear-gradient(180deg, rgba(59, 130, 246, 0.18), rgba(69, 212, 131, 0.12)) !important;
+  border-color: rgba(59, 130, 246, 0.3) !important;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.18) !important;
+}
+
+.mobile-nav-menu {
+  background:
+    radial-gradient(circle at top, rgba(178, 109, 255, 0.18), transparent 70%),
+    rgba(255,255,255,0.04) !important;
+}
+
+.mobile-nav-label {
+  display: block !important;
+  max-width: 100% !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  line-height: 1.05 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.mobile-command-item {
+  background: rgba(255,255,255,0.03) !important;
+  color: var(--text-strong) !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  border-radius: 18px !important;
+}
+
+.mobile-bottom-nav .sidebar-link {
+  all: unset;
+}
+
 @media (max-width: 1180px) {
   .hero,
   .grid-2,
@@ -1132,48 +1281,6 @@ tbody tr:hover {
     margin-bottom: 14px;
   }
 
-  .mobile-bottom-nav {
-    position: fixed;
-    left: 8px;
-    right: 8px;
-    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
-    display: grid;
-    grid-template-columns: repeat(4,1fr);
-    gap: 8px;
-    padding: 8px;
-    border-radius: 24px;
-    border: 1px solid rgba(255,255,255,0.08);
-    background:
-      linear-gradient(180deg, rgba(11,22,34,0.95), rgba(5,10,16,0.95));
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    z-index: 50;
-    box-shadow: 0 18px 40px rgba(0,0,0,0.42);
-  }
-
-  .mobile-bottom-nav .sidebar-link {
-    border: 1px solid transparent;
-    background: rgba(255,255,255,0.025);
-    color: var(--muted);
-    font-weight: 800;
-    padding: 10px 8px;
-    min-height: var(--tap);
-    font-size: 12px;
-    text-align: center;
-  }
-
-  .mobile-bottom-nav .sidebar-link.active {
-    background: linear-gradient(135deg, rgba(93,255,141,0.20), rgba(99,213,255,0.18));
-    border-color: rgba(93,255,141,0.24);
-    color: white;
-    box-shadow: 0 0 16px rgba(93,255,141,0.16);
-  }
-
-  .mobile-bottom-nav button {
-    appearance: none;
-    -webkit-appearance: none;
-  }
-
   .recent-join-card,
   .member-search-result {
     padding: 12px;
@@ -1200,6 +1307,28 @@ tbody tr:hover {
     width: 100%;
     min-width: 0;
     min-height: var(--tap-lg);
+  }
+
+  .mobile-bottom-nav {
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  }
+
+  .ticket-action-accordion-head,
+  .drawer-accordion-head {
+    background:
+      radial-gradient(circle at top right, rgba(99, 213, 255, 0.05), transparent 36%),
+      rgba(255, 255, 255, 0.015) !important;
+    color: var(--text-strong) !important;
+  }
+
+  .ticket-action-accordion-title,
+  .drawer-accordion-title {
+    color: var(--text-strong) !important;
+  }
+
+  .ticket-action-accordion-copy,
+  .drawer-accordion-copy {
+    color: var(--muted) !important;
   }
 }
 
@@ -1242,8 +1371,8 @@ tbody tr:hover {
   }
 
   .mobile-bottom-nav {
-    left: 6px;
-    right: 6px;
-    bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+    left: 6px !important;
+    right: 6px !important;
+    bottom: calc(6px + env(safe-area-inset-bottom, 0px)) !important;
   }
 }
