@@ -43,6 +43,238 @@ function getSuccessMessage(name, result) {
   return `${name} completed successfully.`;
 }
 
+function ActionCard({
+  action,
+  isExpanded,
+  isRunning,
+  hasStaffId,
+  onToggle,
+  onRun,
+  currentStaffId,
+}) {
+  return (
+    <div className={`quick-action-card ${isExpanded ? "expanded" : ""}`}>
+      <div className="quick-action-main">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="quick-action-copy"
+        >
+          <div className="quick-action-chip-row">
+            <span className="badge">{action.compactLabel}</span>
+            <span className={`badge ${isRunning ? "claimed" : "open"}`}>
+              {isRunning ? "Running" : "Ready"}
+            </span>
+          </div>
+
+          <div className="quick-action-title">{action.name}</div>
+
+          <div className="muted quick-action-summary">
+            {getActionSummary(action.name)}
+          </div>
+        </button>
+
+        <div className="quick-action-rail">
+          <button
+            type="button"
+            className="button ghost quick-action-info"
+            onClick={onToggle}
+          >
+            {isExpanded ? "Hide" : "Info"}
+          </button>
+
+          <button
+            className="button quick-action-run"
+            type="button"
+            disabled={!!isRunning || !hasStaffId}
+            onClick={onRun}
+          >
+            {isRunning ? "Running..." : "Run"}
+          </button>
+        </div>
+      </div>
+
+      {isExpanded ? (
+        <div className="quick-action-detail">
+          <div className="muted quick-action-description">
+            {action.description}
+          </div>
+
+          <div className="quick-action-meta-grid">
+            <div className="member-detail-item">
+              <span className="ticket-info-label">Action</span>
+              <span>{action.name}</span>
+            </div>
+
+            <div className="member-detail-item">
+              <span className="ticket-info-label">Requested By</span>
+              <span>{currentStaffId || "Missing staff session"}</span>
+            </div>
+
+            <div className="member-detail-item">
+              <span className="ticket-info-label">Best Use</span>
+              <span>{action.detail}</span>
+            </div>
+
+            <div className="member-detail-item">
+              <span className="ticket-info-label">State</span>
+              <span>
+                {!hasStaffId
+                  ? "Blocked"
+                  : isRunning
+                    ? "Running"
+                    : "Ready"}
+              </span>
+            </div>
+          </div>
+
+          <div className="quick-action-detail-buttons">
+            <button
+              className="button"
+              type="button"
+              disabled={!!isRunning || !hasStaffId}
+              onClick={onRun}
+            >
+              {isRunning
+                ? `Running ${action.compactLabel}...`
+                : `Run ${action.compactLabel}`}
+            </button>
+
+            <button
+              className="button ghost"
+              type="button"
+              onClick={onToggle}
+            >
+              Collapse
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <style jsx>{`
+        .quick-action-card {
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          background:
+            radial-gradient(circle at top right, rgba(93,255,141,0.05), transparent 34%),
+            rgba(255,255,255,0.025);
+          border-radius: 22px;
+          padding: 14px;
+          transition:
+            border-color 0.16s ease,
+            background 0.16s ease,
+            box-shadow 0.16s ease,
+            transform 0.16s ease;
+        }
+
+        .quick-action-card.expanded {
+          border-color: rgba(99, 213, 255, 0.18);
+          background:
+            radial-gradient(circle at top right, rgba(99,213,255,0.08), transparent 34%),
+            rgba(99,213,255,0.04);
+          box-shadow: 0 0 20px rgba(99, 213, 255, 0.08);
+        }
+
+        .quick-action-main {
+          display: grid;
+          grid-template-columns: 1fr auto;
+          gap: 12px;
+          align-items: start;
+        }
+
+        .quick-action-copy {
+          appearance: none;
+          -webkit-appearance: none;
+          background: transparent;
+          border: 0;
+          padding: 0;
+          text-align: left;
+          color: inherit;
+          cursor: pointer;
+          min-width: 0;
+        }
+
+        .quick-action-chip-row {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin-bottom: 8px;
+        }
+
+        .quick-action-title {
+          font-weight: 900;
+          color: var(--text-strong, #f8fafc);
+          line-height: 1.08;
+          letter-spacing: -0.02em;
+          overflow-wrap: anywhere;
+        }
+
+        .quick-action-summary {
+          margin-top: 6px;
+          font-size: 13px;
+          line-height: 1.5;
+          overflow-wrap: anywhere;
+        }
+
+        .quick-action-rail {
+          display: grid;
+          gap: 8px;
+          min-width: 110px;
+        }
+
+        .quick-action-info,
+        .quick-action-run {
+          width: 100%;
+          min-width: 0;
+        }
+
+        .quick-action-detail {
+          margin-top: 12px;
+          padding-top: 12px;
+          border-top: 1px solid rgba(255,255,255,0.08);
+          display: grid;
+          gap: 12px;
+        }
+
+        .quick-action-description {
+          line-height: 1.55;
+        }
+
+        .quick-action-meta-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .quick-action-detail-buttons {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+
+        @media (max-width: 720px) {
+          .quick-action-main {
+            grid-template-columns: 1fr;
+          }
+
+          .quick-action-rail {
+            grid-template-columns: 1fr 1fr;
+            min-width: 0;
+          }
+
+          .quick-action-meta-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .quick-action-detail-buttons {
+            display: grid;
+            grid-template-columns: 1fr;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 export default function QuickActions({
   onRefresh,
   currentStaffId = null,
@@ -89,7 +321,7 @@ export default function QuickActions({
         name: "Sync Active Tickets",
         compactLabel: "Sync Tickets",
         description:
-          "Ask the bot to scan real Discord ticket channels and backfill / repair missing ticket rows.",
+          "Ask the bot to scan real Discord ticket channels and backfill or repair missing ticket rows.",
         detail:
           "Best when Discord clearly has an active ticket but the dashboard queue does not show it.",
         runner: () =>
@@ -157,7 +389,7 @@ export default function QuickActions({
         <div style={{ minWidth: 0 }}>
           <h2 style={{ margin: 0 }}>Quick Actions</h2>
           <div className="muted" style={{ marginTop: 6 }}>
-            Compact mobile controls with expandable action details.
+            One-hand command actions with cleaner mobile control density.
           </div>
         </div>
 
@@ -190,192 +422,22 @@ export default function QuickActions({
         </div>
       ) : null}
 
-      <div
-        className="space"
-        style={{
-          display: "grid",
-          gap: 12,
-        }}
-      >
+      <div className="space" style={{ display: "grid", gap: 12 }}>
         {actions.map((action) => {
           const isRunning = running === action.name;
           const isExpanded = expandedAction === action.key;
 
           return (
-            <div
+            <ActionCard
               key={action.key}
-              className="card"
-              style={{
-                padding: 14,
-                borderRadius: 18,
-                border: "1px solid rgba(255,255,255,0.08)",
-                background: isExpanded
-                  ? "rgba(59,130,246,0.06)"
-                  : "rgba(255,255,255,0.02)",
-              }}
-            >
-              <div
-                className="row"
-                style={{
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 12,
-                  flexWrap: "nowrap",
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => toggleExpanded(action.key)}
-                  style={{
-                    background: "transparent",
-                    border: "none",
-                    padding: 0,
-                    textAlign: "left",
-                    cursor: "pointer",
-                    minWidth: 0,
-                    flex: 1,
-                  }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontWeight: 800,
-                        color: "var(--text-strong)",
-                        overflowWrap: "anywhere",
-                        lineHeight: 1.15,
-                      }}
-                    >
-                      {action.compactLabel}
-                    </div>
-
-                    <div
-                      className="muted"
-                      style={{
-                        marginTop: 4,
-                        fontSize: 13,
-                        overflowWrap: "anywhere",
-                      }}
-                    >
-                      {getActionSummary(action.name)}
-                    </div>
-                  </div>
-                </button>
-
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    alignItems: "center",
-                    flexShrink: 0,
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="badge"
-                    style={{ cursor: "pointer" }}
-                    onClick={() => toggleExpanded(action.key)}
-                  >
-                    {isExpanded ? "Hide" : "Info"}
-                  </button>
-
-                  <button
-                    className="button"
-                    type="button"
-                    style={{ width: "auto", minWidth: 116 }}
-                    disabled={!!running || !hasStaffId}
-                    onClick={() => runAction(action.name, action.runner)}
-                  >
-                    {isRunning ? "Running..." : "Run"}
-                  </button>
-                </div>
-              </div>
-
-              {isExpanded ? (
-                <div
-                  style={{
-                    marginTop: 12,
-                    paddingTop: 12,
-                    borderTop: "1px solid rgba(255,255,255,0.08)",
-                  }}
-                >
-                  <div
-                    className="muted"
-                    style={{
-                      lineHeight: 1.5,
-                      marginBottom: 12,
-                    }}
-                  >
-                    {action.description}
-                  </div>
-
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-                      gap: 10,
-                    }}
-                  >
-                    <div className="member-detail-item">
-                      <span className="ticket-info-label">Action</span>
-                      <span>{action.name}</span>
-                    </div>
-
-                    <div className="member-detail-item">
-                      <span className="ticket-info-label">Requested By</span>
-                      <span>{currentStaffId || "Missing staff session"}</span>
-                    </div>
-
-                    <div className="member-detail-item">
-                      <span className="ticket-info-label">Best Use</span>
-                      <span>{action.detail}</span>
-                    </div>
-
-                    <div className="member-detail-item">
-                      <span className="ticket-info-label">State</span>
-                      <span>
-                        {!hasStaffId
-                          ? "Blocked"
-                          : isRunning
-                          ? "Running"
-                          : running
-                          ? "Waiting"
-                          : "Ready"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 10,
-                      flexWrap: "wrap",
-                      marginTop: 12,
-                    }}
-                  >
-                    <button
-                      className="button"
-                      type="button"
-                      style={{ width: "auto", minWidth: 140 }}
-                      disabled={!!running || !hasStaffId}
-                      onClick={() => runAction(action.name, action.runner)}
-                    >
-                      {isRunning
-                        ? `Running ${action.compactLabel}...`
-                        : `Run ${action.compactLabel}`}
-                    </button>
-
-                    <button
-                      className="button ghost"
-                      type="button"
-                      style={{ width: "auto", minWidth: 110 }}
-                      onClick={() => toggleExpanded(action.key)}
-                    >
-                      Collapse
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
+              action={action}
+              isExpanded={isExpanded}
+              isRunning={isRunning}
+              hasStaffId={hasStaffId}
+              onToggle={() => toggleExpanded(action.key)}
+              onRun={() => runAction(action.name, action.runner)}
+              currentStaffId={currentStaffId}
+            />
           );
         })}
       </div>
