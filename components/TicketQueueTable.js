@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { timeAgo } from "@/lib/format";
 import TicketControls from "./dashboard/TicketControls";
 import CreateTicketButton from "./dashboard/CreateTicketButton";
@@ -286,22 +286,10 @@ function QuickModActions({ ticket, currentStaffId, onRefresh }) {
   if (!userId || !currentStaffId) return null;
 
   return (
-    <div
-      style={{
-        marginTop: 12,
-        paddingTop: 12,
-        borderTop: "1px solid rgba(255,255,255,0.08)",
-        display: "grid",
-        gap: 10,
-      }}
-    >
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-          gap: 10,
-        }}
-      >
+    <div className="queue-mod-card">
+      <div className="queue-mod-title">Quick Member Actions</div>
+
+      <div className="queue-mod-grid">
         <input
           className="input"
           placeholder="Reason"
@@ -316,7 +304,7 @@ function QuickModActions({ ticket, currentStaffId, onRefresh }) {
         />
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+      <div className="queue-mod-actions">
         <button
           type="button"
           className="button ghost"
@@ -358,6 +346,224 @@ function QuickModActions({ ticket, currentStaffId, onRefresh }) {
           {busy === "disconnect_member" ? "Working..." : "Disconnect VC"}
         </button>
       </div>
+
+      <style jsx>{`
+        .queue-mod-card {
+          margin-top: 12px;
+          padding-top: 12px;
+          border-top: 1px solid rgba(255,255,255,0.08);
+          display: grid;
+          gap: 10px;
+        }
+
+        .queue-mod-title {
+          font-weight: 800;
+          font-size: 14px;
+          color: var(--text-strong, #f8fafc);
+        }
+
+        .queue-mod-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .queue-mod-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        @media (max-width: 720px) {
+          .queue-mod-grid,
+          .queue-mod-actions {
+            grid-template-columns: 1fr;
+            display: grid;
+          }
+
+          .queue-mod-actions .button {
+            width: 100%;
+            min-width: 0;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const status = getStatus(ticket);
+  const channelId = getChannelId(ticket);
+  const missingChannel = hasMissingChannel(ticket);
+  const ghost = isGhost(ticket);
+
+  return (
+    <div
+      className={`ticket-mobile-card premium ${expanded ? "expanded" : ""}`}
+      style={{
+        border: missingChannel
+          ? "1px solid rgba(248,113,113,0.28)"
+          : undefined,
+        boxShadow: missingChannel
+          ? "0 0 0 1px rgba(248,113,113,0.08)"
+          : undefined,
+      }}
+    >
+      <button
+        type="button"
+        className="ticket-mobile-toggle"
+        onClick={() => setExpanded((prev) => !prev)}
+      >
+        <div
+          className="row"
+          style={{
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 10,
+            marginBottom: 10,
+            flexWrap: "nowrap",
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                alignItems: "center",
+                marginBottom: 6,
+              }}
+            >
+              <span className={badgeClass(status)}>
+                {safeText(ticket.status)}
+              </span>
+              <span className={badgeClass(ticket.priority)}>
+                {safeText(ticket.priority)}
+              </span>
+              {ghost ? <span className="badge">Ghost</span> : null}
+              {missingChannel ? (
+                <span className="badge danger">Missing Channel</span>
+              ) : null}
+            </div>
+
+            <div className="queue-ticket-name">{getTicketUserLabel(ticket)}</div>
+
+            <div className="muted queue-ticket-subtitle">
+              {getTicketTitle(ticket)}
+            </div>
+          </div>
+
+          <div className="muted queue-ticket-time">
+            {timeAgo(ticket.updated_at || ticket.created_at)}
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <CategoryDisplay ticket={ticket} compact />
+        </div>
+
+        <div className="row" style={{ justifyContent: "space-between", gap: 12 }}>
+          <div className="muted" style={{ fontSize: 12 }}>
+            {expanded ? "Hide actions" : "Open actions"}
+          </div>
+          <div className="badge open">{expanded ? "Expanded" : "Quick View"}</div>
+        </div>
+      </button>
+
+      {expanded ? (
+        <>
+          <div className="ticket-mobile-meta">
+            {metaBlock("Category", getDisplayedCategoryName(ticket))}
+            {metaBlock("Intake Type", getDisplayedIntakeType(ticket) || "—")}
+            {metaBlock("Claimed By", safeText(ticket.claimed_by))}
+            {metaBlock("Priority", safeText(ticket.priority))}
+            {metaBlock("Status", safeText(ticket.status))}
+            {metaBlock("Channel", channelId || "Missing", true)}
+            {metaBlock("User ID", safeText(ticket.user_id), true)}
+            {metaBlock("Ghost", ghost ? "yes" : "no")}
+            {metaBlock("Updated", timeAgo(ticket.updated_at || ticket.created_at))}
+            {metaBlock("Match Reason", getCategoryReason(ticket) || "—", true)}
+            {metaBlock("Suggestion", ticket.mod_suggestion || "—", true)}
+
+            {!!ticket.closed_reason
+              ? metaBlock("Closed Reason", ticket.closed_reason, true)
+              : null}
+          </div>
+
+          <div className="ticket-mobile-actions">
+            <Link className="button ghost" href={`/tickets/${ticket.id}`}>
+              Open Ticket View
+            </Link>
+          </div>
+
+          <QuickModActions
+            ticket={ticket}
+            currentStaffId={currentStaffId}
+            onRefresh={onRefresh}
+          />
+
+          <TicketControls
+            ticket={ticket}
+            currentStaffId={currentStaffId}
+            onChanged={onRefresh}
+          />
+        </>
+      ) : null}
+
+      <style jsx>{`
+        .ticket-mobile-card.premium {
+          border-radius: 22px;
+          padding: 14px;
+          background:
+            radial-gradient(circle at top right, rgba(93,255,141,0.06), transparent 38%),
+            linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)),
+            rgba(255,255,255,0.025);
+        }
+
+        .ticket-mobile-card.expanded {
+          background:
+            radial-gradient(circle at top right, rgba(99,213,255,0.08), transparent 38%),
+            rgba(99,213,255,0.05);
+        }
+
+        .ticket-mobile-toggle {
+          appearance: none;
+          -webkit-appearance: none;
+          width: 100%;
+          background: transparent;
+          border: 0;
+          padding: 0;
+          margin: 0;
+          text-align: left;
+          color: inherit;
+          cursor: pointer;
+        }
+
+        .queue-ticket-name {
+          font-weight: 900;
+          font-size: 16px;
+          overflow-wrap: anywhere;
+          line-height: 1.12;
+          color: var(--text-strong, #f8fafc);
+          letter-spacing: -0.02em;
+        }
+
+        .queue-ticket-subtitle {
+          margin-top: 6px;
+          font-size: 13px;
+          overflow-wrap: anywhere;
+          line-height: 1.35;
+        }
+
+        .queue-ticket-time {
+          font-size: 12px;
+          white-space: nowrap;
+          flex-shrink: 0;
+          text-align: right;
+        }
+      `}</style>
     </div>
   );
 }
@@ -369,7 +575,7 @@ export default function TicketQueueTable({
   createTicketUserId = null,
   createTicketTargetName = "",
 }) {
-  const stats = getSummaryStats(tickets);
+  const stats = useMemo(() => getSummaryStats(tickets), [tickets]);
 
   return (
     <div className="card" id="tickets">
@@ -446,145 +652,15 @@ export default function TicketQueueTable({
 
       {!!tickets.length ? (
         <>
-          <div className="ticket-mobile-list" style={{ display: "grid", gap: 12 }}>
-            {tickets.map((ticket) => {
-              const status = getStatus(ticket);
-              const channelId = getChannelId(ticket);
-              const missingChannel = hasMissingChannel(ticket);
-              const ghost = isGhost(ticket);
-
-              return (
-                <div
-                  key={ticket.id}
-                  className="ticket-mobile-card"
-                  style={{
-                    border: missingChannel
-                      ? "1px solid rgba(248,113,113,0.28)"
-                      : undefined,
-                    boxShadow: missingChannel
-                      ? "0 0 0 1px rgba(248,113,113,0.08)"
-                      : undefined,
-                  }}
-                >
-                  <div
-                    className="row"
-                    style={{
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      gap: 10,
-                      marginBottom: 10,
-                      flexWrap: "nowrap",
-                    }}
-                  >
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          flexWrap: "wrap",
-                          gap: 8,
-                          alignItems: "center",
-                          marginBottom: 6,
-                        }}
-                      >
-                        <span className={badgeClass(status)}>
-                          {safeText(ticket.status)}
-                        </span>
-                        <span className={badgeClass(ticket.priority)}>
-                          {safeText(ticket.priority)}
-                        </span>
-                        {ghost ? <span className="badge">Ghost</span> : null}
-                        {missingChannel ? (
-                          <span className="badge danger">Missing Channel</span>
-                        ) : null}
-                      </div>
-
-                      <div
-                        style={{
-                          fontWeight: 800,
-                          fontSize: 16,
-                          overflowWrap: "anywhere",
-                          lineHeight: 1.15,
-                        }}
-                      >
-                        {getTicketUserLabel(ticket)}
-                      </div>
-
-                      <div
-                        className="muted"
-                        style={{
-                          marginTop: 6,
-                          fontSize: 13,
-                          overflowWrap: "anywhere",
-                          lineHeight: 1.35,
-                        }}
-                      >
-                        {getTicketTitle(ticket)}
-                      </div>
-                    </div>
-
-                    <div
-                      className="muted"
-                      style={{
-                        fontSize: 12,
-                        whiteSpace: "nowrap",
-                        flexShrink: 0,
-                        textAlign: "right",
-                      }}
-                    >
-                      {timeAgo(ticket.updated_at || ticket.created_at)}
-                    </div>
-                  </div>
-
-                  <div style={{ marginBottom: 12 }}>
-                    <CategoryDisplay ticket={ticket} compact />
-                  </div>
-
-                  <div className="ticket-mobile-meta">
-                    {metaBlock("Category", getDisplayedCategoryName(ticket))}
-                    {metaBlock("Intake Type", getDisplayedIntakeType(ticket) || "—")}
-                    {metaBlock("Claimed By", safeText(ticket.claimed_by))}
-                    {metaBlock("Priority", safeText(ticket.priority))}
-                    {metaBlock("Status", safeText(ticket.status))}
-                    {metaBlock("Channel", channelId || "Missing", true)}
-                    {metaBlock("User ID", safeText(ticket.user_id), true)}
-                    {metaBlock("Ghost", ghost ? "yes" : "no")}
-                    {metaBlock("Updated", timeAgo(ticket.updated_at || ticket.created_at))}
-                    {metaBlock("Match Reason", getCategoryReason(ticket) || "—", true)}
-                    {metaBlock("Suggestion", ticket.mod_suggestion || "—", true)}
-
-                    {!!ticket.closed_reason ? (
-                      metaBlock("Closed Reason", ticket.closed_reason, true)
-                    ) : null}
-                  </div>
-
-                  <div
-                    className="ticket-mobile-actions"
-                    style={{
-                      display: "flex",
-                      flexWrap: "wrap",
-                      gap: 8,
-                      marginBottom: 12,
-                    }}
-                  >
-                    <Link className="button ghost" href={`/tickets/${ticket.id}`}>
-                      Open Ticket View
-                    </Link>
-                  </div>
-
-                  <QuickModActions
-                    ticket={ticket}
-                    currentStaffId={currentStaffId}
-                    onRefresh={onRefresh}
-                  />
-
-                  <TicketControls
-                    ticket={ticket}
-                    currentStaffId={currentStaffId}
-                    onChanged={onRefresh}
-                  />
-                </div>
-              );
-            })}
+          <div className="ticket-mobile-list queue-mobile-stack">
+            {tickets.map((ticket) => (
+              <MobileTicketCard
+                key={ticket.id}
+                ticket={ticket}
+                currentStaffId={currentStaffId}
+                onRefresh={onRefresh}
+              />
+            ))}
           </div>
 
           <div className="ticket-desktop-table">
@@ -879,6 +955,11 @@ export default function TicketQueueTable({
       ) : null}
 
       <style jsx>{`
+        .queue-mobile-stack {
+          display: grid;
+          gap: 12px;
+        }
+
         .queue-summary-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
