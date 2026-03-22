@@ -3,20 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
-function safeArray(value) {
+function safeArray<T = any>(value: T[] | unknown): T[] {
   return Array.isArray(value) ? value : [];
 }
 
-function safeText(value, fallback = "—") {
+function safeText(value: any, fallback = "—") {
   const text = String(value ?? "").trim();
   return text || fallback;
 }
 
-function normalizeText(value) {
-  return String(value ?? "").trim();
-}
-
-function getMemberName(member) {
+function getMemberName(member: any) {
   return (
     member?.display_name ||
     member?.nickname ||
@@ -26,18 +22,51 @@ function getMemberName(member) {
   );
 }
 
-function getMemberAvatar(member) {
-  return normalizeText(member?.avatar_url) || null;
+function getMemberAvatar(member: any) {
+  return String(member?.avatar_url || "").trim() || null;
 }
 
-function getRoleCount(member) {
-  const roles = safeArray(
-    member?.role_names || member?.roles || member?.role_ids
-  );
-  return roles.length;
+function getRoleNames(member: any) {
+  if (Array.isArray(member?.role_names)) {
+    return member.role_names.filter(Boolean).map((v: any) => String(v));
+  }
+
+  if (Array.isArray(member?.roles)) {
+    return member.roles
+      .map((role: any) => {
+        if (typeof role === "string") return role;
+        return role?.name || role?.id || "";
+      })
+      .filter(Boolean)
+      .map((v: any) => String(v));
+  }
+
+  return [];
 }
 
-function formatDateTime(value) {
+function getRoleIds(member: any) {
+  if (Array.isArray(member?.role_ids)) {
+    return member.role_ids.filter(Boolean).map((v: any) => String(v));
+  }
+
+  if (Array.isArray(member?.roles)) {
+    return member.roles
+      .map((role: any) => {
+        if (role && typeof role === "object") return role?.id || "";
+        return "";
+      })
+      .filter(Boolean)
+      .map((v: any) => String(v));
+  }
+
+  return [];
+}
+
+function getRoleCount(member: any) {
+  return getRoleNames(member).length;
+}
+
+function formatDateTime(value: any) {
   if (!value) return "Unknown";
   try {
     return new Date(value).toLocaleString();
@@ -46,7 +75,7 @@ function formatDateTime(value) {
   }
 }
 
-function formatCompactDateTime(value) {
+function formatCompactDateTime(value: any) {
   if (!value) return "Unknown";
   try {
     const date = new Date(value);
@@ -63,14 +92,14 @@ function formatCompactDateTime(value) {
   }
 }
 
-function initialsFromName(name) {
+function initialsFromName(name: string) {
   const cleaned = safeText(name, "U");
   const parts = cleaned.split(/\s+/).filter(Boolean).slice(0, 2);
   if (!parts.length) return "U";
   return parts.map((part) => part[0]?.toUpperCase() || "").join("") || "U";
 }
 
-function getMemberState(member) {
+function getMemberState(member: any) {
   if (member?.in_guild === false) return "Former";
   if (member?.has_staff_role) return "Staff";
   if (member?.has_verified_role) return "Verified";
@@ -78,7 +107,7 @@ function getMemberState(member) {
   return safeText(member?.role_state, "Tracked");
 }
 
-function getStateTone(member) {
+function getStateTone(member: any) {
   if (member?.in_guild === false) return "closed";
   if (member?.has_staff_role) return "claimed";
   if (member?.has_verified_role) return "low";
@@ -86,13 +115,13 @@ function getStateTone(member) {
   return "open";
 }
 
-function getSortTimestamp(member) {
+function getSortTimestamp(member: any) {
   return new Date(
     member?.updated_at || member?.last_seen_at || member?.joined_at || 0
   ).getTime();
 }
 
-function memberMatchesQuery(member, query) {
+function memberMatchesQuery(member: any, query: string) {
   const q = query.trim().toLowerCase();
   if (!q) return true;
 
@@ -110,17 +139,19 @@ function memberMatchesQuery(member, query) {
     .some((value) => String(value).toLowerCase().includes(q));
 }
 
-function memberMatchesFilter(member, filter) {
+function memberMatchesFilter(member: any, filter: string) {
   if (filter === "all") return true;
   if (filter === "active") return member?.in_guild !== false;
   if (filter === "former") return member?.in_guild === false;
   if (filter === "staff") return !!member?.has_staff_role;
   if (filter === "verified") return !!member?.has_verified_role;
   if (filter === "pending") return !!member?.has_unverified;
+  if (filter === "conflict")
+    return String(member?.role_state || "").toLowerCase().includes("conflict");
   return true;
 }
 
-function sortMembers(rows, mode) {
+function sortMembers(rows: any[], mode: string) {
   const list = [...rows];
 
   list.sort((a, b) => {
@@ -138,7 +169,50 @@ function sortMembers(rows, mode) {
   return list;
 }
 
-function MemberCard({ member, onSelect }) {
+function normalizeGuildRoles(rows: any[]) {
+  return safeArray(rows)
+    .map((role) => ({
+      id: String(role?.role_id || role?.id || "").trim(),
+      name: String(role?.name || role?.role_name || "").trim(),
+      position: Number(role?.position || 0),
+      member_count: Number(role?.member_count || 0),
+    }))
+    .filter((role) => role.id && role.name);
+}
+
+function parseDiscordErrorDetails(message: any) {
+  const raw = String(message || "");
+  const statusMatch = raw.match(/Discord API\s+(\d+)/i);
+  const status = statusMatch ? Number(statusMatch[1]) : null;
+
+  let retryAfter = null;
+  const jsonStart = raw.indexOf("{");
+  if (jsonStart >= 0) {
+    try {
+      const payload = JSON.parse(raw.slice(jsonStart));
+      if (payload && Number.isFinite(Number(payload.retry_after))) {
+        retryAfter = Number(payload.retry_after);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return {
+    status,
+    isRateLimited: status === 429 || /rate limit/i.test(raw),
+    isMissingMember: status === 404 || /unknown member/i.test(raw),
+    retryAfter,
+  };
+}
+
+function MemberCard({
+  member,
+  onSelect,
+}: {
+  member: any;
+  onSelect: (member: any) => void;
+}) {
   const name = getMemberName(member);
   const avatar = getMemberAvatar(member);
   const state = getMemberState(member);
@@ -148,15 +222,10 @@ function MemberCard({ member, onSelect }) {
     <button
       type="button"
       onClick={() => onSelect(member)}
-      className="member-card-button"
+      className="member-card-button member-card"
       style={{
         textAlign: "left",
         width: "100%",
-        border: "1px solid rgba(255,255,255,0.08)",
-        background: "rgba(255,255,255,0.02)",
-        borderRadius: 18,
-        padding: 12,
-        color: "var(--text-strong, #f8fafc)",
         cursor: "pointer",
         appearance: "none",
         WebkitAppearance: "none",
@@ -189,11 +258,7 @@ function MemberCard({ member, onSelect }) {
                 alt={name}
                 width="38"
                 height="38"
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "cover",
-                }}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
               />
             ) : (
               initialsFromName(name)
@@ -203,10 +268,11 @@ function MemberCard({ member, onSelect }) {
           <div style={{ minWidth: 0, flex: 1 }}>
             <div
               style={{
-                fontWeight: 800,
+                fontWeight: 900,
                 overflowWrap: "anywhere",
-                lineHeight: 1.15,
+                lineHeight: 1.08,
                 color: "var(--text-strong, #f8fafc)",
+                letterSpacing: "-0.02em",
               }}
             >
               {name}
@@ -283,9 +349,51 @@ function MemberCard({ member, onSelect }) {
   );
 }
 
-function MemberDrawerInner({ member, onClose }) {
-  const name = getMemberName(member);
-  const avatar = getMemberAvatar(member);
+function MemberDrawerInner({
+  member,
+  onClose,
+}: {
+  member: any;
+  onClose: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [modReason, setModReason] = useState("Dashboard moderation action");
+  const [timeoutMinutes, setTimeoutMinutes] = useState("10");
+  const [rateLimitNotice, setRateLimitNotice] = useState("");
+  const [memberMissingOnDiscord, setMemberMissingOnDiscord] = useState(false);
+  const [guildRoles, setGuildRoles] = useState<any[]>([]);
+  const [selectedRoleId, setSelectedRoleId] = useState("");
+  const [selectedVoiceChannelId, setSelectedVoiceChannelId] = useState("");
+  const [voiceChannels, setVoiceChannels] = useState<any[]>([]);
+  const [liveMember, setLiveMember] = useState(member || null);
+
+  const sourceMember = liveMember || member;
+  const name = getMemberName(sourceMember);
+  const avatar = getMemberAvatar(sourceMember);
+  const roleNames = getRoleNames(sourceMember);
+  const roleIds = getRoleIds(sourceMember);
+  const memberId = String(sourceMember?.user_id || "").trim();
+
+  const assignableRoles = useMemo(() => {
+    const assignedIdSet = new Set(roleIds);
+    const assignedNameSet = new Set(roleNames.map((name) => name.toLowerCase()));
+
+    return normalizeGuildRoles(guildRoles)
+      .filter((role) => role.name !== "@everyone")
+      .filter(
+        (role) =>
+          !assignedIdSet.has(role.id) &&
+          !assignedNameSet.has(role.name.toLowerCase())
+      )
+      .sort((a, b) => b.position - a.position);
+  }, [guildRoles, roleIds, roleNames]);
+
+  const selectedRole = useMemo(
+    () => assignableRoles.find((role) => role.id === selectedRoleId) || null,
+    [assignableRoles, selectedRoleId]
+  );
 
   useEffect(() => {
     const prevOverflow = document.body.style.overflow;
@@ -294,7 +402,7 @@ function MemberDrawerInner({ member, onClose }) {
     document.body.style.overflow = "hidden";
     document.body.style.touchAction = "none";
 
-    function onKeyDown(event) {
+    function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose?.();
     }
 
@@ -307,6 +415,171 @@ function MemberDrawerInner({ member, onClose }) {
     };
   }, [onClose]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function boot() {
+      try {
+        const res = await fetch("/api/dashboard/live", { cache: "no-store" });
+        const json = await res.json().catch(() => ({}));
+
+        if (!res.ok || cancelled) return;
+
+        setGuildRoles(normalizeGuildRoles(json?.roles || []));
+        setVoiceChannels(safeArray(json?.voiceChannels || []));
+      } catch {
+        // ignore
+      }
+    }
+
+    boot();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function copyText(text: string, successMessage: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setMessage(successMessage);
+      setError("");
+    } catch {
+      setError("Copy failed on this device.");
+      setMessage("");
+    }
+  }
+
+  async function refreshMemberDetails() {
+    if (!memberId) return;
+
+    try {
+      const res = await fetch(
+        `/api/discord/member-details?user_id=${encodeURIComponent(memberId)}`,
+        { cache: "no-store" }
+      );
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(json?.error || `Failed to load member details (${res.status}).`);
+      }
+
+      if (json?.member) {
+        setLiveMember(json.member);
+        setMemberMissingOnDiscord(Boolean(json.member?.discord_unavailable));
+        setRateLimitNotice("");
+      }
+    } catch (err: any) {
+      const details = parseDiscordErrorDetails(err?.message);
+      if (details.isMissingMember) {
+        setMemberMissingOnDiscord(true);
+      } else if (details.isRateLimited) {
+        const waitText = details.retryAfter
+          ? ` Retry after about ${details.retryAfter.toFixed(1)}s.`
+          : "";
+        setRateLimitNotice(
+          `Discord rate limited the live refresh. Showing the last good member data instead.${waitText}`
+        );
+      } else {
+        setError(err?.message || "Failed to refresh live member data.");
+      }
+    }
+  }
+
+  async function runModAction(action: string, extra: Record<string, any> = {}) {
+    if (!memberId) return;
+
+    setBusy(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const payload = {
+        action,
+        user_id: memberId,
+        username: name,
+        reason: modReason.trim() || "Dashboard moderation action",
+        minutes: Number(timeoutMinutes || 10),
+        ...extra,
+      };
+
+      const res = await fetch("/api/discord/mod-action", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(json?.error || `${action} failed`);
+      }
+
+      if (json?.member) {
+        setLiveMember(json.member);
+        setMemberMissingOnDiscord(Boolean(json.member?.discord_unavailable));
+        setRateLimitNotice(json?.refresh_warning || "");
+      } else {
+        await refreshMemberDetails();
+      }
+
+      if (action === "timeout") {
+        setMessage(
+          `Timed out ${name} for ${json.timeout_minutes || payload.minutes} minute(s).`
+        );
+      } else if (action === "remove_timeout") {
+        setMessage(`Removed timeout from ${name}.`);
+      } else if (action === "warn") {
+        setMessage(`Warn recorded for ${name}.`);
+      } else if (action === "kick") {
+        setMessage(`${name} was kicked.`);
+      } else if (action === "ban") {
+        setMessage(`${name} was banned.`);
+      } else if (action === "add_role") {
+        setSelectedRoleId("");
+        setMessage(`Added ${selectedRole?.name || "role"} to ${name}.`);
+      } else if (action === "remove_role") {
+        setMessage(`Removed ${extra.role_name || "role"} from ${name}.`);
+      } else if (action === "mute") {
+        setMessage(`Server-muted ${name}.`);
+      } else if (action === "unmute") {
+        setMessage(`Removed server mute from ${name}.`);
+      } else if (action === "deafen") {
+        setMessage(`Server-deafened ${name}.`);
+      } else if (action === "undeafen") {
+        setMessage(`Removed server deafen from ${name}.`);
+      } else if (action === "disconnect_voice") {
+        setMessage(`Disconnected ${name} from voice.`);
+      } else if (action === "move_voice") {
+        setMessage(`Moved ${name} to the selected voice channel.`);
+      } else {
+        setMessage(`${action} completed for ${name}.`);
+      }
+    } catch (err: any) {
+      const details = parseDiscordErrorDetails(err?.message);
+      if (details.isRateLimited) {
+        const waitText = details.retryAfter
+          ? ` Retry after about ${details.retryAfter.toFixed(1)}s.`
+          : "";
+        setRateLimitNotice(`Discord rate limited this action refresh.${waitText}`);
+      }
+      setError(err?.message || "Moderation action failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const inVoice = Boolean(sourceMember?.voice_channel_id || sourceMember?.voice_state?.channel_id);
+  const activeVoiceChannelId =
+    String(
+      sourceMember?.voice_channel_id ||
+        sourceMember?.voice_state?.channel_id ||
+        ""
+    ).trim();
+
   return (
     <div
       role="dialog"
@@ -316,7 +589,7 @@ function MemberDrawerInner({ member, onClose }) {
         position: "fixed",
         inset: 0,
         zIndex: 2000,
-        background: "rgba(0,0,0,0.58)",
+        background: "rgba(0,0,0,0.66)",
         backdropFilter: "blur(10px)",
         WebkitBackdropFilter: "blur(10px)",
         display: "flex",
@@ -327,29 +600,20 @@ function MemberDrawerInner({ member, onClose }) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        className="member-drawer"
         style={{
           width: "100%",
-          maxWidth: 760,
-          maxHeight: "88vh",
+          maxWidth: 980,
+          maxHeight: "90vh",
           overflowY: "auto",
-          borderRadius: 24,
+          borderRadius: 26,
           border: "1px solid rgba(255,255,255,0.10)",
-          background:
-            "linear-gradient(180deg, rgba(19,32,49,0.98), rgba(17,26,41,0.98))",
           boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
           color: "var(--text-strong, #f8fafc)",
           padding: 16,
         }}
       >
-        <div
-          style={{
-            width: 42,
-            height: 5,
-            borderRadius: 999,
-            background: "rgba(255,255,255,0.18)",
-            margin: "0 auto 14px",
-          }}
-        />
+        <div className="member-drawer-handle" />
 
         <div
           className="row"
@@ -358,20 +622,16 @@ function MemberDrawerInner({ member, onClose }) {
             alignItems: "flex-start",
             gap: 12,
             marginBottom: 14,
+            flexWrap: "wrap",
           }}
         >
           <div
             className="row"
-            style={{
-              alignItems: "center",
-              gap: 12,
-              minWidth: 0,
-              flex: 1,
-            }}
+            style={{ alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}
           >
             <div
-              className="avatar"
-              style={{ width: 52, height: 52, fontSize: 16 }}
+              className="avatar member-drawer-avatar"
+              style={{ fontSize: 16 }}
             >
               {avatar ? (
                 <img
@@ -379,11 +639,7 @@ function MemberDrawerInner({ member, onClose }) {
                   alt={name}
                   width="52"
                   height="52"
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                  }}
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 />
               ) : (
                 initialsFromName(name)
@@ -394,22 +650,40 @@ function MemberDrawerInner({ member, onClose }) {
               <div
                 style={{
                   fontWeight: 900,
-                  fontSize: 20,
-                  lineHeight: 1.15,
+                  fontSize: 24,
+                  lineHeight: 1.05,
                   overflowWrap: "anywhere",
+                  letterSpacing: "-0.04em",
                 }}
               >
                 {name}
               </div>
               <div
-                style={{
-                  marginTop: 4,
-                  fontSize: 13,
-                  color: "var(--text-muted, rgba(255,255,255,0.72))",
-                  overflowWrap: "anywhere",
-                }}
+                className="muted"
+                style={{ marginTop: 4, fontSize: 13, overflowWrap: "anywhere" }}
               >
-                {safeText(member?.user_id, "No member ID")}
+                {safeText(sourceMember?.user_id, "No member ID")}
+              </div>
+
+              <div className="member-drawer-badges">
+                <span className={`badge ${getStateTone(sourceMember)}`}>
+                  {getMemberState(sourceMember)}
+                </span>
+                <span
+                  className={`badge ${
+                    sourceMember?.in_guild === false ? "closed" : "low"
+                  }`}
+                >
+                  {sourceMember?.in_guild === false ? "Former" : "In Server"}
+                </span>
+                <span
+                  className={`badge ${
+                    sourceMember?.has_verified_role ? "low" : "medium"
+                  }`}
+                >
+                  {sourceMember?.has_verified_role ? "Verified" : "Not Verified"}
+                </span>
+                {inVoice ? <span className="badge open">In Voice</span> : null}
               </div>
             </div>
           </div>
@@ -417,159 +691,406 @@ function MemberDrawerInner({ member, onClose }) {
           <button
             type="button"
             className="button ghost"
-            style={{ width: "auto", minWidth: 100 }}
+            style={{ width: "auto", minWidth: 108 }}
             onClick={onClose}
           >
             Close
           </button>
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 8,
-            marginBottom: 14,
-          }}
-        >
-          <span className={`badge ${getStateTone(member)}`}>
-            {getMemberState(member)}
-          </span>
-          <span className={`badge ${member?.in_guild === false ? "closed" : "low"}`}>
-            {member?.in_guild === false ? "Former" : "In Server"}
-          </span>
-          <span className={`badge ${member?.has_verified_role ? "low" : "medium"}`}>
-            {member?.has_verified_role ? "Verified" : "Not Verified"}
-          </span>
-          <span className={`badge ${member?.has_staff_role ? "claimed" : "open"}`}>
-            {member?.has_staff_role ? "Staff" : "Member"}
-          </span>
-        </div>
+        {memberMissingOnDiscord ? (
+          <div className="warning-banner" style={{ marginBottom: 12 }}>
+            Discord no longer reports this member. Showing the latest stored record.
+          </div>
+        ) : null}
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-            gap: 10,
-            marginBottom: 12,
-          }}
-        >
+        {rateLimitNotice ? (
+          <div className="warning-banner" style={{ marginBottom: 12 }}>
+            {rateLimitNotice}
+          </div>
+        ) : null}
+
+        {error ? (
+          <div className="error-banner" style={{ marginBottom: 12 }}>
+            {error}
+          </div>
+        ) : null}
+
+        {message ? (
+          <div className="info-banner" style={{ marginBottom: 12 }}>
+            {message}
+          </div>
+        ) : null}
+
+        <div className="member-detail-grid" style={{ marginBottom: 14 }}>
           <div className="member-detail-item">
             <span className="ticket-info-label">Display Name</span>
-            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-              {safeText(member?.display_name, "Unknown")}
-            </span>
+            <span>{safeText(sourceMember?.display_name, "Unknown")}</span>
           </div>
 
           <div className="member-detail-item">
             <span className="ticket-info-label">Username</span>
-            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-              {safeText(member?.username, "Unknown")}
-            </span>
+            <span>{safeText(sourceMember?.username, "Unknown")}</span>
           </div>
 
           <div className="member-detail-item">
             <span className="ticket-info-label">Nickname</span>
-            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-              {safeText(member?.nickname, "None")}
-            </span>
+            <span>{safeText(sourceMember?.nickname, "None")}</span>
           </div>
 
           <div className="member-detail-item">
             <span className="ticket-info-label">Top Role</span>
-            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-              {safeText(member?.top_role || member?.highest_role_name, "None")}
-            </span>
-          </div>
-
-          <div className="member-detail-item">
-            <span className="ticket-info-label">Role Count</span>
-            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-              {getRoleCount(member)}
-            </span>
+            <span>{safeText(sourceMember?.top_role || sourceMember?.highest_role_name, "None")}</span>
           </div>
 
           <div className="member-detail-item">
             <span className="ticket-info-label">Role State</span>
-            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-              {safeText(member?.role_state, "unknown")}
-            </span>
+            <span>{safeText(sourceMember?.role_state, "unknown")}</span>
           </div>
 
           <div className="member-detail-item">
             <span className="ticket-info-label">Joined</span>
-            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-              {formatDateTime(member?.joined_at)}
-            </span>
+            <span>{formatDateTime(sourceMember?.joined_at)}</span>
           </div>
 
-          <div className="member-detail-item">
-            <span className="ticket-info-label">Updated</span>
-            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-              {formatDateTime(
-                member?.updated_at || member?.last_seen_at || member?.synced_at
-              )}
-            </span>
-          </div>
-
-          <div className="member-detail-item">
-            <span className="ticket-info-label">Last Seen</span>
-            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-              {formatDateTime(member?.last_seen_at)}
-            </span>
-          </div>
-        </div>
-
-        {member?.role_state_reason ? (
-          <div className="member-detail-item" style={{ marginBottom: 12 }}>
+          <div className="member-detail-item full">
             <span className="ticket-info-label">Reason</span>
-            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-              {member.role_state_reason}
-            </span>
+            <span>{safeText(sourceMember?.role_state_reason, "No extra notes.")}</span>
           </div>
-        ) : null}
-
-        <div className="member-detail-item" style={{ marginBottom: 12 }}>
-          <span className="ticket-info-label">Current Roles</span>
-          <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-            {safeArray(member?.role_names).length
-              ? safeArray(member.role_names).join(", ")
-              : "No roles tracked"}
-          </span>
         </div>
 
-        {safeArray(member?.previous_usernames).length ? (
-          <div className="member-detail-item" style={{ marginBottom: 12 }}>
-            <span className="ticket-info-label">Previous Usernames</span>
-            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-              {safeArray(member.previous_usernames).join(", ")}
-            </span>
+        <div className="card tight" style={{ marginBottom: 14 }}>
+          <div
+            className="row"
+            style={{
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 10,
+            }}
+          >
+            <div style={{ fontWeight: 900, fontSize: 18 }}>Quick Staff Actions</div>
+            <span className="badge open">One-tap control</span>
           </div>
-        ) : null}
 
-        {safeArray(member?.previous_display_names).length ? (
-          <div className="member-detail-item" style={{ marginBottom: 12 }}>
-            <span className="ticket-info-label">Previous Display Names</span>
-            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-              {safeArray(member.previous_display_names).join(", ")}
-            </span>
-          </div>
-        ) : null}
+          <div className="member-action-grid">
+            <button
+              className="button ghost"
+              disabled={busy}
+              onClick={() => copyText(memberId, "User ID copied.")}
+            >
+              Copy User ID
+            </button>
 
-        {safeArray(member?.previous_nicknames).length ? (
-          <div className="member-detail-item">
-            <span className="ticket-info-label">Previous Nicknames</span>
-            <span style={{ color: "var(--text-strong, #f8fafc)" }}>
-              {safeArray(member.previous_nicknames).join(", ")}
-            </span>
+            <button
+              className="button ghost"
+              disabled={busy}
+              onClick={() => copyText(`<@${memberId}>`, "Mention copied.")}
+            >
+              Copy Mention
+            </button>
+
+            <button
+              className="button ghost"
+              disabled={busy}
+              onClick={() => refreshMemberDetails()}
+            >
+              Refresh Member
+            </button>
+
+            <button
+              className="button ghost"
+              disabled={busy}
+              onClick={() =>
+                copyText(
+                  [
+                    `Member: ${name}`,
+                    `User ID: ${memberId}`,
+                    `State: ${safeText(sourceMember?.role_state)}`,
+                    `Top Role: ${safeText(
+                      sourceMember?.top_role || sourceMember?.highest_role_name,
+                      "None"
+                    )}`,
+                    `Roles: ${roleNames.join(", ") || "None"}`,
+                  ].join("\n"),
+                  "Staff summary copied."
+                )
+              }
+            >
+              Copy Summary
+            </button>
           </div>
-        ) : null}
+        </div>
+
+        <div className="card tight" style={{ marginBottom: 14 }}>
+          <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>
+            Moderation
+          </div>
+
+          <textarea
+            className="textarea"
+            rows={3}
+            value={modReason}
+            onChange={(e) => setModReason(e.target.value)}
+            placeholder="Moderation reason..."
+          />
+
+          <div
+            className="row"
+            style={{ alignItems: "stretch", gap: 10, marginTop: 10 }}
+          >
+            <input
+              className="input"
+              value={timeoutMinutes}
+              onChange={(e) => setTimeoutMinutes(e.target.value)}
+              placeholder="Timeout minutes"
+              inputMode="numeric"
+            />
+
+            <button
+              className="button"
+              disabled={busy || !memberId}
+              style={{ width: "auto", minWidth: 130 }}
+              onClick={() => runModAction("timeout")}
+            >
+              Timeout
+            </button>
+
+            <button
+              className="button ghost"
+              disabled={busy || !memberId}
+              style={{ width: "auto", minWidth: 150 }}
+              onClick={() => runModAction("remove_timeout")}
+            >
+              Remove Timeout
+            </button>
+          </div>
+
+          <div className="member-action-grid" style={{ marginTop: 10 }}>
+            <button
+              className="button ghost"
+              disabled={busy || !memberId}
+              onClick={() => runModAction("warn")}
+            >
+              Warn
+            </button>
+
+            <button
+              className="button danger"
+              disabled={busy || !memberId}
+              onClick={() => runModAction("kick")}
+            >
+              Kick
+            </button>
+
+            <button
+              className="button danger"
+              disabled={busy || !memberId}
+              onClick={() => runModAction("ban")}
+            >
+              Ban
+            </button>
+          </div>
+        </div>
+
+        <div className="card tight" style={{ marginBottom: 14 }}>
+          <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>
+            Roles
+          </div>
+
+          <div className="roles" style={{ marginBottom: 12 }}>
+            {roleNames.length ? (
+              roleNames.map((roleName, index) => {
+                const roleId = roleIds[index] || "";
+                return (
+                  <button
+                    key={`${roleId || roleName}-${index}`}
+                    type="button"
+                    className="badge"
+                    disabled={busy || sourceMember?.in_guild === false}
+                    onClick={() =>
+                      runModAction("remove_role", {
+                        role_id: roleId,
+                        role_name: roleName,
+                      })
+                    }
+                    style={{
+                      cursor:
+                        roleId && !busy && sourceMember?.in_guild !== false
+                          ? "pointer"
+                          : "default",
+                    }}
+                    title={roleId ? `Remove ${roleName}` : roleName}
+                  >
+                    {roleName}
+                    {roleId ? " ×" : ""}
+                  </button>
+                );
+              })
+            ) : (
+              <span className="muted">No tracked roles found.</span>
+            )}
+          </div>
+
+          <div
+            className="row"
+            style={{ alignItems: "stretch", gap: 10, marginTop: 10 }}
+          >
+            <select
+              className="input"
+              value={selectedRoleId}
+              onChange={(e) => setSelectedRoleId(e.target.value)}
+              disabled={
+                busy ||
+                !assignableRoles.length ||
+                sourceMember?.in_guild === false
+              }
+              style={{ flex: 1 }}
+            >
+              <option value="">
+                {sourceMember?.in_guild === false
+                  ? "Former members cannot receive roles"
+                  : assignableRoles.length
+                    ? "Add a server role..."
+                    : "No assignable roles available"}
+              </option>
+
+              {assignableRoles.map((role) => (
+                <option key={role.id} value={role.id}>
+                  {role.name}
+                </option>
+              ))}
+            </select>
+
+            <button
+              className="button"
+              disabled={
+                busy ||
+                !selectedRoleId ||
+                !selectedRole ||
+                sourceMember?.in_guild === false
+              }
+              style={{ width: "auto", minWidth: 130 }}
+              onClick={() =>
+                runModAction("add_role", {
+                  role_id: selectedRoleId,
+                  role_name: selectedRole?.name || "",
+                })
+              }
+            >
+              Add Role
+            </button>
+          </div>
+        </div>
+
+        <div className="card tight">
+          <div
+            className="row"
+            style={{
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ fontWeight: 900, fontSize: 18 }}>
+              Voice Controls
+            </div>
+            {inVoice ? (
+              <span className="badge open">
+                Current VC: {safeText(activeVoiceChannelId, "Unknown")}
+              </span>
+            ) : (
+              <span className="badge closed">Not in voice</span>
+            )}
+          </div>
+
+          <div className="member-action-grid" style={{ marginBottom: 10 }}>
+            <button
+              className="button ghost"
+              disabled={busy || !memberId}
+              onClick={() => runModAction("mute")}
+            >
+              Server Mute
+            </button>
+
+            <button
+              className="button ghost"
+              disabled={busy || !memberId}
+              onClick={() => runModAction("unmute")}
+            >
+              Remove Mute
+            </button>
+
+            <button
+              className="button ghost"
+              disabled={busy || !memberId}
+              onClick={() => runModAction("deafen")}
+            >
+              Server Deafen
+            </button>
+
+            <button
+              className="button ghost"
+              disabled={busy || !memberId}
+              onClick={() => runModAction("undeafen")}
+            >
+              Remove Deafen
+            </button>
+
+            <button
+              className="button danger"
+              disabled={busy || !memberId}
+              onClick={() => runModAction("disconnect_voice")}
+            >
+              Disconnect Voice
+            </button>
+          </div>
+
+          <div
+            className="row"
+            style={{ alignItems: "stretch", gap: 10, marginTop: 10 }}
+          >
+            <select
+              className="input"
+              value={selectedVoiceChannelId}
+              onChange={(e) => setSelectedVoiceChannelId(e.target.value)}
+              disabled={busy || !safeArray(voiceChannels).length}
+              style={{ flex: 1 }}
+            >
+              <option value="">Move to a voice channel...</option>
+              {safeArray(voiceChannels).map((channel) => (
+                <option key={channel.id} value={channel.id}>
+                  {safeText(channel.name, channel.id)}
+                </option>
+              ))}
+            </select>
+
+            <button
+              className="button"
+              disabled={busy || !selectedVoiceChannelId}
+              style={{ width: "auto", minWidth: 130 }}
+              onClick={() =>
+                runModAction("move_voice", {
+                  target_channel_id: selectedVoiceChannelId,
+                })
+              }
+            >
+              Move Voice
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-function MemberDrawer({ member, onClose }) {
+function MemberDrawer({
+  member,
+  onClose,
+}: {
+  member: any;
+  onClose: () => void;
+}) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -585,12 +1106,12 @@ function MemberDrawer({ member, onClose }) {
   );
 }
 
-export default function MemberSnapshot({ members = [] }) {
+export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
   const safeMembers = safeArray(members);
   const [query, setQuery] = useState("");
   const [stateFilter, setStateFilter] = useState("active");
   const [sortMode, setSortMode] = useState("recent");
-  const [selected, setSelected] = useState(null);
+  const [selected, setSelected] = useState<any | null>(null);
   const [showFormer, setShowFormer] = useState(false);
 
   const summary = useMemo(() => {
@@ -600,21 +1121,28 @@ export default function MemberSnapshot({ members = [] }) {
     const staff = safeMembers.filter((m) => !!m?.has_staff_role).length;
     const verified = safeMembers.filter((m) => !!m?.has_verified_role).length;
     const pending = safeMembers.filter((m) => !!m?.has_unverified).length;
+    const conflict = safeMembers.filter((m) =>
+      String(m?.role_state || "").toLowerCase().includes("conflict")
+    ).length;
 
-    return { total, active, former, staff, verified, pending };
+    return { total, active, former, staff, verified, pending, conflict };
   }, [safeMembers]);
 
   const filteredMembers = useMemo(() => {
     let rows = safeMembers.filter(
       (member) =>
-        memberMatchesQuery(member, query) && memberMatchesFilter(member, stateFilter)
+        memberMatchesQuery(member, query) &&
+        memberMatchesFilter(member, stateFilter)
     );
 
     return sortMembers(rows, sortMode);
   }, [safeMembers, query, stateFilter, sortMode]);
 
   const activeRows = useMemo(
-    () => filteredMembers.filter((member) => member?.in_guild !== false).slice(0, 40),
+    () =>
+      filteredMembers
+        .filter((member) => member?.in_guild !== false)
+        .slice(0, 48),
     [filteredMembers]
   );
 
@@ -624,7 +1152,7 @@ export default function MemberSnapshot({ members = [] }) {
   );
 
   const visibleFormerRows = useMemo(
-    () => (showFormer ? formerRows.slice(0, 40) : formerRows.slice(0, 8)),
+    () => (showFormer ? formerRows.slice(0, 48) : formerRows.slice(0, 8)),
     [formerRows, showFormer]
   );
 
@@ -640,27 +1168,31 @@ export default function MemberSnapshot({ members = [] }) {
       >
         <div className="member-detail-item">
           <span className="ticket-info-label">Total</span>
-          <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.total}</span>
+          <span>{summary.total}</span>
         </div>
         <div className="member-detail-item">
           <span className="ticket-info-label">Active</span>
-          <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.active}</span>
+          <span>{summary.active}</span>
         </div>
         <div className="member-detail-item">
           <span className="ticket-info-label">Former</span>
-          <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.former}</span>
+          <span>{summary.former}</span>
         </div>
         <div className="member-detail-item">
           <span className="ticket-info-label">Staff</span>
-          <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.staff}</span>
+          <span>{summary.staff}</span>
         </div>
         <div className="member-detail-item">
           <span className="ticket-info-label">Verified</span>
-          <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.verified}</span>
+          <span>{summary.verified}</span>
         </div>
         <div className="member-detail-item">
           <span className="ticket-info-label">Pending</span>
-          <span style={{ color: "var(--text-strong, #f8fafc)" }}>{summary.pending}</span>
+          <span>{summary.pending}</span>
+        </div>
+        <div className="member-detail-item">
+          <span className="ticket-info-label">Conflict</span>
+          <span>{summary.conflict}</span>
         </div>
       </div>
 
@@ -677,14 +1209,12 @@ export default function MemberSnapshot({ members = [] }) {
           placeholder="Search members"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          style={{ color: "var(--text-strong, #f8fafc)" }}
         />
 
         <select
           className="input"
           value={stateFilter}
           onChange={(e) => setStateFilter(e.target.value)}
-          style={{ color: "var(--text-strong, #f8fafc)" }}
         >
           <option value="active">Active members</option>
           <option value="all">All members</option>
@@ -692,13 +1222,13 @@ export default function MemberSnapshot({ members = [] }) {
           <option value="staff">Staff only</option>
           <option value="verified">Verified only</option>
           <option value="pending">Pending only</option>
+          <option value="conflict">Conflict only</option>
         </select>
 
         <select
           className="input"
           value={sortMode}
           onChange={(e) => setSortMode(e.target.value)}
-          style={{ color: "var(--text-strong, #f8fafc)" }}
         >
           <option value="recent">Recently updated</option>
           <option value="name">Name</option>
@@ -715,8 +1245,8 @@ export default function MemberSnapshot({ members = [] }) {
           {activeRows.length ? (
             <div style={{ marginBottom: 16 }}>
               <div
+                className="row"
                 style={{
-                  display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
                   gap: 12,
@@ -724,15 +1254,10 @@ export default function MemberSnapshot({ members = [] }) {
                   flexWrap: "wrap",
                 }}
               >
-                <div style={{ fontWeight: 800, color: "var(--text-strong, #f8fafc)" }}>
+                <div style={{ fontWeight: 900, color: "var(--text-strong, #f8fafc)" }}>
                   Active Members
                 </div>
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "var(--text-muted, rgba(255,255,255,0.72))",
-                  }}
-                >
+                <div className="muted" style={{ fontSize: 12 }}>
                   Showing {activeRows.length} active record{activeRows.length === 1 ? "" : "s"}
                 </div>
               </div>
@@ -752,8 +1277,8 @@ export default function MemberSnapshot({ members = [] }) {
           {formerRows.length ? (
             <div>
               <div
+                className="row"
                 style={{
-                  display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
                   gap: 12,
@@ -762,16 +1287,10 @@ export default function MemberSnapshot({ members = [] }) {
                 }}
               >
                 <div>
-                  <div style={{ fontWeight: 800, color: "var(--text-strong, #f8fafc)" }}>
+                  <div style={{ fontWeight: 900, color: "var(--text-strong, #f8fafc)" }}>
                     Former Members
                   </div>
-                  <div
-                    style={{
-                      marginTop: 4,
-                      fontSize: 12,
-                      color: "var(--text-muted, rgba(255,255,255,0.72))",
-                    }}
-                  >
+                  <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
                     Archived separately so they do not take over the live roster
                   </div>
                 </div>
