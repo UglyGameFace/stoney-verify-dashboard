@@ -1,21 +1,22 @@
-"use client"
+"use client";
 
-import { useMemo, useState } from "react"
+import { useMemo, useState } from "react";
 
 function safeText(value, fallback = "—") {
-  const text = String(value ?? "").trim()
-  return text || fallback
+  const text = String(value ?? "").trim();
+  return text || fallback;
 }
 
 function looksVerificationTicket(ticket) {
-  const category = String(ticket?.category || "").toLowerCase()
-  const title = String(ticket?.title || "").toLowerCase()
-  const initial = String(ticket?.initial_message || "").toLowerCase()
+  const category = String(ticket?.category || "").toLowerCase();
+  const title = String(ticket?.title || "").toLowerCase();
+  const initial = String(ticket?.initial_message || "").toLowerCase();
+
   return (
     category.includes("verification") ||
     title.includes("verification") ||
     initial.includes("verification")
-  )
+  );
 }
 
 export default function TicketVerificationActions({
@@ -23,20 +24,20 @@ export default function TicketVerificationActions({
   currentStaffId,
   onChanged,
 }) {
-  const [busy, setBusy] = useState("")
-  const [error, setError] = useState("")
-  const [message, setMessage] = useState("")
-  const [roleId, setRoleId] = useState("")
-  const [decisionReason, setDecisionReason] = useState("Approved by staff review")
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [decisionReason, setDecisionReason] = useState("Approved by staff review");
 
-  const visible = useMemo(() => looksVerificationTicket(ticket), [ticket])
-  const userId = String(ticket?.user_id || "").trim()
+  const visible = useMemo(() => looksVerificationTicket(ticket), [ticket]);
+  const userId = String(ticket?.user_id || "").trim();
 
   async function post(action, extra = {}) {
-    if (!ticket?.id) return
-    setBusy(action)
-    setError("")
-    setMessage("")
+    if (!ticket?.id) return;
+
+    setBusy(action);
+    setError("");
+    setMessage("");
 
     try {
       const res = await fetch(`/api/tickets/${ticket.id}/verify`, {
@@ -48,28 +49,27 @@ export default function TicketVerificationActions({
         body: JSON.stringify({
           action,
           staff_id: currentStaffId || null,
-          role_id: roleId || null,
           reason: decisionReason || "",
           ...extra,
         }),
-      })
+      });
 
-      const json = await res.json().catch(() => null)
+      const json = await res.json().catch(() => null);
 
       if (!res.ok || !json?.ok) {
-        throw new Error(json?.error || "Verification action failed.")
+        throw new Error(json?.error || "Verification action failed.");
       }
 
-      setMessage(json?.message || "Verification action queued.")
-      await onChanged?.()
+      setMessage(json?.message || "Verification action queued.");
+      await onChanged?.();
     } catch (err) {
-      setError(err?.message || "Verification action failed.")
+      setError(err?.message || "Verification action failed.");
     } finally {
-      setBusy("")
+      setBusy("");
     }
   }
 
-  if (!visible) return null
+  if (!visible) return null;
 
   return (
     <div className="card">
@@ -124,9 +124,7 @@ export default function TicketVerificationActions({
 
         <div className="ticket-info-item">
           <span className="ticket-info-label">User ID</span>
-          <span style={{ overflowWrap: "anywhere" }}>
-            {userId || "—"}
-          </span>
+          <span style={{ overflowWrap: "anywhere" }}>{userId || "—"}</span>
         </div>
 
         <div className="ticket-info-item full">
@@ -136,17 +134,6 @@ export default function TicketVerificationActions({
             value={decisionReason}
             onChange={(e) => setDecisionReason(e.target.value)}
             placeholder="Reason shown in logs / ticket history"
-          />
-        </div>
-
-        <div className="ticket-info-item full">
-          <span className="ticket-info-label">Primary Role ID (optional)</span>
-          <input
-            className="input"
-            value={roleId}
-            onChange={(e) => setRoleId(e.target.value)}
-            placeholder="Optional role ID to assign during verification"
-            inputMode="numeric"
           />
         </div>
       </div>
@@ -203,5 +190,5 @@ export default function TicketVerificationActions({
         }
       `}</style>
     </div>
-  )
+  );
 }
