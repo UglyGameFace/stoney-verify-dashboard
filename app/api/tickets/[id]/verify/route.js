@@ -13,17 +13,31 @@ function normalizeString(value) {
 }
 
 function getSessionUser(session) {
-  return session?.user || null
+  return session?.user || session?.discordUser || session?.staffUser || null
 }
 
 function getStaffId(session) {
   const user = getSessionUser(session)
-  return normalizeString(user?.id || "")
+  return normalizeString(
+    user?.id ||
+      user?.user_id ||
+      user?.discord_id ||
+      session?.discordUser?.id ||
+      ""
+  )
 }
 
 function getStaffName(session) {
   const user = getSessionUser(session)
-  return normalizeString(user?.username || env.defaultStaffName || "Dashboard Staff")
+  return normalizeString(
+    user?.global_name ||
+      user?.display_name ||
+      user?.username ||
+      user?.name ||
+      session?.discordUser?.username ||
+      env.defaultStaffName ||
+      "Dashboard Staff"
+  )
 }
 
 function json(data, status = 200) {
@@ -64,6 +78,45 @@ function buildHumanMessage(action, username) {
     default:
       return "Verification action queued."
   }
+}
+
+async function insertTicketNoteSafe(supabase, payload) {
+  const attempts = [
+    {
+      ticket_id: payload.ticket_id,
+      staff_id: payload.staff_id,
+      staff_name: payload.staff_name,
+      content: payload.content,
+      created_at: payload.created_at,
+    },
+    {
+      ticket_id: payload.ticket_id,
+      staff_id: payload.staff_id,
+      content: payload.content,
+      created_at: payload.created_at,
+    },
+    {
+      ticket_id: payload.ticket_id,
+      content: payload.content,
+      created_at: payload.created_at,
+    },
+    {
+      ticket_id: payload.ticket_id,
+      content: payload.content,
+    },
+  ]
+
+  let lastError = null
+
+  for (const candidate of attempts) {
+    const { error } = await supabase.from("ticket_notes").insert(candidate)
+    if (!error) {
+      return { ok: true }
+    }
+    lastError = error
+  }
+
+  return { ok: false, error: lastError }
 }
 
 export async function POST(request, { params }) {
@@ -110,7 +163,7 @@ export async function POST(request, { params }) {
       return json({ error: ticketError?.message || "Ticket not found." }, 404)
     }
 
-    const guildId = normalizeString(env.guildId || "")
+    const guildId = normalizeString(env.guildId || env.discordGuildId || "")
     if (!guildId) {
       return json({ error: "Missing Discord guild id in environment." }, 500)
     }
@@ -133,7 +186,7 @@ export async function POST(request, { params }) {
     const nowIso = new Date().toISOString()
 
     const noteLines = [
-      `Verification action requested from dashboard.`,
+      "Verification action requested from dashboard.",
       `Action: ${action}`,
       `Staff: ${staffName} (${staffId})`,
       `Reason: ${reason}`,
@@ -143,21 +196,18 @@ export async function POST(request, { params }) {
       noteLines.push(`Role ID: ${roleId}`)
     }
 
-    const notePayload = {
+    const noteResult = await insertTicketNoteSafe(supabase, {
       ticket_id: ticketId,
       staff_id: staffId,
       staff_name: staffName,
       content: noteLines.join("\n"),
       created_at: nowIso,
-      updated_at: nowIso,
-    }
+    })
 
-    const { error: noteError } = await supabase
-      .from("ticket_notes")
-      .insert(notePayload)
-
-    if (noteError) {
-      return json({ error: noteError.message || "Failed to write ticket note." }, 500)
+    let noteWarning = null
+    if (!noteResult.ok) {
+      noteWarning =
+        noteResult?.error?.message || "Ticket note could not be saved, but verification continued."
     }
 
     const commandPayload = {
@@ -209,6 +259,7 @@ export async function POST(request, { params }) {
       action,
       ticketId,
       commandId: commandRow?.id || null,
+      noteWarning,
       message: buildHumanMessage(action, username),
     })
 
