@@ -8,40 +8,35 @@ import { env } from "@/lib/env";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function normalizeString(value) {
+function normalizeString(value: unknown) {
   return String(value || "").trim();
 }
 
-function normalizeAttachments(value) {
+function normalizeAttachments(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value
     .map((item, index) => {
       const url =
         typeof item === "string"
           ? normalizeString(item)
-          : normalizeString(item?.url);
+          : normalizeString((item as any)?.url);
+
       const name =
         typeof item === "string"
           ? `attachment-${index + 1}`
-          : normalizeString(item?.name) || `attachment-${index + 1}`;
+          : normalizeString((item as any)?.name) || `attachment-${index + 1}`;
 
       if (!url) return null;
-
       return { name, url };
     })
     .filter(Boolean);
 }
 
-function getSessionUser(session) {
-  return (
-    session?.user ||
-    session?.discordUser ||
-    session?.staffUser ||
-    null
-  );
+function getSessionUser(session: any) {
+  return session?.user || session?.discordUser || session?.staffUser || null;
 }
 
-function getStaffId(session) {
+function getStaffId(session: any) {
   const user = getSessionUser(session);
   return normalizeString(
     user?.id ||
@@ -52,7 +47,7 @@ function getStaffId(session) {
   );
 }
 
-function getStaffName(session) {
+function getStaffName(session: any) {
   const user = getSessionUser(session);
   return normalizeString(
     user?.global_name ||
@@ -68,20 +63,27 @@ function getGuildId() {
   return normalizeString(env.guildId || env.discordGuildId || "");
 }
 
-export async function POST(request, { params }) {
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    },
+  });
+}
+
+export async function POST(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
   try {
     const { session, refreshedTokens } = await requireStaffSessionForRoute();
     const supabase = createServerSupabase();
 
     const ticketId = normalizeString(params?.id);
     if (!ticketId) {
-      return new Response(JSON.stringify({ error: "Missing ticket id." }), {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        },
-      });
+      return json({ error: "Missing ticket id." }, 400);
     }
 
     const body = await request.json().catch(() => ({}));
@@ -89,16 +91,7 @@ export async function POST(request, { params }) {
     const attachments = normalizeAttachments(body?.attachments);
 
     if (!message) {
-      return new Response(
-        JSON.stringify({ error: "Reply message cannot be empty." }),
-        {
-          status: 400,
-          headers: {
-            "Content-Type": "application/json",
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-          },
-        }
-      );
+      return json({ error: "Reply message cannot be empty." }, 400);
     }
 
     const staffId = getStaffId(session);
@@ -106,13 +99,7 @@ export async function POST(request, { params }) {
     const guildId = getGuildId();
 
     if (!staffId) {
-      return new Response(JSON.stringify({ error: "Missing staff identity." }), {
-        status: 401,
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        },
-      });
+      return json({ error: "Missing staff identity." }, 401);
     }
 
     const { data: ticket, error: ticketError } = await supabase
@@ -122,28 +109,18 @@ export async function POST(request, { params }) {
       .single();
 
     if (ticketError || !ticket) {
-      return new Response(
-        JSON.stringify({ error: ticketError?.message || "Ticket not found." }),
-        {
-          status: 404,
-          headers: {
-            "Content-Type": "application/json",
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-          },
-        }
-      );
+      return json({ error: ticketError?.message || "Ticket not found." }, 404);
     }
 
     const createdAt = new Date().toISOString();
 
+    // IMPORTANT:
+    // Keep this payload limited to columns that your current ticket_messages
+    // table can safely accept.
     const insertPayload = {
       ticket_id: ticketId,
-      staff_id: staffId,
-      staff_name: staffName,
       content: message,
       attachments,
-      source: "dashboard",
-      visibility: "staff",
       created_at: createdAt,
       updated_at: createdAt,
     };
@@ -155,18 +132,12 @@ export async function POST(request, { params }) {
       .single();
 
     if (insertError) {
-      return new Response(JSON.stringify({ error: insertError.message }), {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        },
-      });
+      return json({ error: insertError.message || "Failed to save reply." }, 500);
     }
 
     let mirroredToDiscord = false;
-    let mirrorCommandId = null;
-    let mirrorError = null;
+    let mirrorCommandId: string | null = null;
+    let mirrorError: string | null = null;
 
     const channelId = normalizeString(
       ticket.channel_id || ticket.discord_thread_id || ""
@@ -208,35 +179,19 @@ export async function POST(request, { params }) {
       mirrorError = "Ticket is not linked to a Discord channel.";
     }
 
-    const response = new Response(
-      JSON.stringify({
-        ok: true,
-        message: insertedMessage,
-        mirroredToDiscord,
-        mirrorCommandId,
-        mirrorError,
-      }),
-      {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        },
-      }
-    );
+    const response = json({
+      ok: true,
+      message: insertedMessage,
+      mirroredToDiscord,
+      mirrorCommandId,
+      mirrorError,
+    });
 
     applyAuthCookies(response, refreshedTokens);
     return response;
-  } catch (error) {
+  } catch (error: any) {
     const message = error?.message || "Unauthorized";
     const status = message === "Unauthorized" ? 401 : 500;
-
-    return new Response(JSON.stringify({ error: message }), {
-      status,
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-      },
-    });
+    return json({ error: message }, status);
   }
 }
