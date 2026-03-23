@@ -245,152 +245,6 @@ function CategoryDisplay({ ticket, compact = false }) {
   );
 }
 
-function QuickModActions({ ticket, currentStaffId, onRefresh }) {
-  const [busy, setBusy] = useState("");
-  const [reason, setReason] = useState("");
-  const [timeoutMinutes, setTimeoutMinutes] = useState("10");
-
-  async function queueAction(action, payload = {}) {
-    setBusy(action);
-    try {
-      const res = await fetch("/api/dashboard/mod-action", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store",
-        },
-        body: JSON.stringify({
-          action,
-          payload: {
-            ...payload,
-            staff_id: currentStaffId,
-            reason: String(reason || "").trim(),
-          },
-        }),
-      });
-
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.ok) {
-        throw new Error(json?.error || "Failed to queue mod action.");
-      }
-
-      await onRefresh?.();
-    } catch (err) {
-      alert(err?.message || "Failed to queue mod action.");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  const userId = String(ticket?.user_id || "").trim();
-  if (!userId || !currentStaffId) return null;
-
-  return (
-    <div className="queue-mod-card">
-      <div className="queue-mod-title">Quick Member Actions</div>
-
-      <div className="queue-mod-grid">
-        <input
-          className="input"
-          placeholder="Reason"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-        />
-        <input
-          className="input"
-          placeholder="Timeout minutes"
-          value={timeoutMinutes}
-          onChange={(e) => setTimeoutMinutes(e.target.value)}
-        />
-      </div>
-
-      <div className="queue-mod-actions">
-        <button
-          type="button"
-          className="button ghost"
-          disabled={Boolean(busy)}
-          onClick={() =>
-            queueAction("timeout_member", {
-              user_id: userId,
-              minutes: Number(timeoutMinutes || 10),
-            })
-          }
-        >
-          {busy === "timeout_member" ? "Working..." : "Timeout"}
-        </button>
-
-        <button
-          type="button"
-          className="button ghost"
-          disabled={Boolean(busy)}
-          onClick={() => queueAction("remove_timeout", { user_id: userId })}
-        >
-          {busy === "remove_timeout" ? "Working..." : "Remove Timeout"}
-        </button>
-
-        <button
-          type="button"
-          className="button ghost"
-          disabled={Boolean(busy)}
-          onClick={() => queueAction("mute_member", { user_id: userId })}
-        >
-          {busy === "mute_member" ? "Working..." : "Mute VC"}
-        </button>
-
-        <button
-          type="button"
-          className="button ghost"
-          disabled={Boolean(busy)}
-          onClick={() => queueAction("disconnect_member", { user_id: userId })}
-        >
-          {busy === "disconnect_member" ? "Working..." : "Disconnect VC"}
-        </button>
-      </div>
-
-      <style jsx>{`
-        .queue-mod-card {
-          margin-top: 12px;
-          padding-top: 12px;
-          border-top: 1px solid rgba(255,255,255,0.08);
-          display: grid;
-          gap: 10px;
-        }
-
-        .queue-mod-title {
-          font-weight: 800;
-          font-size: 14px;
-          color: var(--text-strong, #f8fafc);
-        }
-
-        .queue-mod-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 10px;
-        }
-
-        .queue-mod-actions {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-        }
-
-        @media (max-width: 720px) {
-          .queue-mod-grid,
-          .queue-mod-actions {
-            grid-template-columns: 1fr;
-            display: grid;
-          }
-
-          .queue-mod-actions .button {
-            width: 100%;
-            min-width: 0;
-          }
-        }
-      `}</style>
-    </div>
-  );
-}
-
 function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -486,7 +340,7 @@ function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
             }}
           >
             <div className="muted" style={{ fontSize: 12 }}>
-              Full ticket page gives you full conversation, reply flow, and notes.
+              Full ticket page gives you full conversation, reply flow, notes, and verification actions.
             </div>
 
             <Link
@@ -515,12 +369,6 @@ function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
               ? metaBlock("Closed Reason", ticket.closed_reason, true)
               : null}
           </div>
-
-          <QuickModActions
-            ticket={ticket}
-            currentStaffId={currentStaffId}
-            onRefresh={onRefresh}
-          />
 
           <TicketControls
             ticket={ticket}
@@ -952,12 +800,6 @@ export default function TicketQueueTable({
                         </div>
                       </div>
                     ) : null}
-
-                    <QuickModActions
-                      ticket={ticket}
-                      currentStaffId={currentStaffId}
-                      onRefresh={onRefresh}
-                    />
 
                     <TicketControls
                       ticket={ticket}
