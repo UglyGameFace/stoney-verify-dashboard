@@ -1376,3 +1376,5 @@ button:focus-visible,
     bottom: calc(6px + env(safe-area-inset-bottom, 0px)) !important;
   }
 }
+
+/* ---- production pass overrides: mobile flush + ticket controls cleanup ---- */
