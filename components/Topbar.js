@@ -19,8 +19,7 @@ function getHeaderContent(session) {
   return {
     eyebrow: "Member portal",
     title: "My Dashboard",
-    description:
-      "Your verification status, support access, and current ticket.",
+    description: "Your verification status, support access, and current ticket.",
     badge: "Member",
     tone: "member",
     accent: "green-purple",
@@ -115,22 +114,18 @@ export default function Topbar() {
         .topbar-shell {
           position: relative;
           overflow: hidden;
-          border-radius: 26px;
-          padding: 18px;
+          border-radius: 24px;
+          padding: 16px;
           border: 1px solid rgba(130, 255, 184, 0.12);
           background:
             radial-gradient(circle at top right, rgba(93, 255, 141, 0.07), transparent 28%),
             radial-gradient(circle at bottom left, rgba(99, 213, 255, 0.07), transparent 24%),
             linear-gradient(180deg, rgba(16, 28, 38, 0.95), rgba(7, 14, 24, 0.96));
-          box-shadow:
-            var(--shadow-strong),
-            var(--glow-green);
+          box-shadow: var(--shadow-strong), var(--glow-green);
         }
 
         .topbar-shell.member {
-          box-shadow:
-            var(--shadow-strong),
-            var(--glow-purple);
+          box-shadow: var(--shadow-strong), var(--glow-purple);
         }
 
         .topbar-grid {
@@ -228,10 +223,10 @@ export default function Topbar() {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          min-height: 32px;
-          padding: 7px 12px;
+          min-height: 30px;
+          padding: 6px 12px;
           border-radius: 999px;
-          font-size: 11px;
+          font-size: 10px;
           font-weight: 900;
           letter-spacing: 0.04em;
           text-transform: uppercase;
@@ -257,8 +252,8 @@ export default function Topbar() {
         .topbar-title {
           margin: 0;
           max-width: 760px;
-          font-size: clamp(30px, 5vw, 48px);
-          line-height: 0.96;
+          font-size: clamp(28px, 5vw, 46px);
+          line-height: 0.98;
           letter-spacing: -0.045em;
           font-weight: 950;
           color: var(--text-strong, #f8fafc);
@@ -274,7 +269,7 @@ export default function Topbar() {
 
         @media (min-width: 900px) {
           .topbar-grid {
-            grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+            grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
             gap: 16px;
             align-items: center;
           }
