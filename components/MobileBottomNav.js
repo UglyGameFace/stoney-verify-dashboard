@@ -1,40 +1,37 @@
 "use client";
 
-const LABELS = {
-  home: "Home",
-  tickets: "Tickets",
-  account: "Account",
-  help: "Help",
-  members: "Members",
-  categories: "Categories",
-  staff: "Staff",
-  settings: "Settings",
+const TAB_META = {
+  home: {
+    label: "Home",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 10.75 12 4l9 6.75V20a1 1 0 0 1-1 1h-5.5v-6h-5v6H4a1 1 0 0 1-1-1z" />
+      </svg>
+    ),
+  },
+  tickets: {
+    label: "Tickets",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h13A1.5 1.5 0 0 1 20 8.5V11a2 2 0 0 0 0 4v2.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5V15a2 2 0 0 0 0-4z" />
+        <path d="M12 7v10" />
+      </svg>
+    ),
+  },
+  account: {
+    label: "Account",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Z" />
+        <path d="M5 20a7 7 0 0 1 14 0" />
+      </svg>
+    ),
+  },
 };
 
-const ICONS = {
-  home: "🏠",
-  tickets: "🎟️",
-  account: "👤",
-  help: "❔",
-  members: "👥",
-  categories: "🧩",
-  staff: "🛡️",
-  settings: "⚙️",
-};
-
-function toDisplayLabel(tab) {
+function getTabMeta(tab) {
   const key = String(tab || "").trim().toLowerCase();
-  if (LABELS[key]) return LABELS[key];
-
-  const raw = String(tab || "").trim();
-  if (!raw) return "Tab";
-
-  return raw.charAt(0).toUpperCase() + raw.slice(1);
-}
-
-function toDisplayIcon(tab) {
-  const key = String(tab || "").trim().toLowerCase();
-  return ICONS[key] || "•";
+  return TAB_META[key] || { label: key || "Tab", icon: null };
 }
 
 export default function MobileBottomNav({
@@ -42,45 +39,28 @@ export default function MobileBottomNav({
   onChange,
   tabs = [],
 }) {
-  const normalizedTabs = Array.isArray(tabs) ? tabs.filter(Boolean) : [];
-  const visibleTabs = normalizedTabs.slice(0, 4);
-
-  function handleTab(tab) {
-    if (typeof onChange === "function") {
-      onChange(tab);
-    }
-  }
+  const visibleTabs = Array.isArray(tabs) ? tabs.filter(Boolean).slice(0, 3) : [];
 
   if (!visibleTabs.length) return null;
 
-  const columns = Math.min(Math.max(visibleTabs.length, 1), 4);
-
   return (
     <>
-      <nav
-        className="mobile-bottom-nav"
-        aria-label="Mobile navigation"
-        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
-      >
+      <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
         {visibleTabs.map((tab) => {
+          const meta = getTabMeta(tab);
           const active = activeTab === tab;
-          const label = toDisplayLabel(tab);
-          const icon = toDisplayIcon(tab);
 
           return (
             <button
               key={tab}
               type="button"
               className={`mobile-nav-link ${active ? "active" : ""}`}
-              onClick={() => handleTab(tab)}
-              aria-pressed={active}
+              onClick={() => onChange?.(tab)}
               aria-current={active ? "page" : undefined}
-              aria-label={label}
+              aria-pressed={active}
             >
-              <span className="mobile-nav-icon" aria-hidden="true">
-                {icon}
-              </span>
-              <span className="mobile-nav-label">{label}</span>
+              <span className="mobile-nav-icon">{meta.icon}</span>
+              <span className="mobile-nav-label">{meta.label}</span>
             </button>
           );
         })}
@@ -89,22 +69,22 @@ export default function MobileBottomNav({
       <style jsx>{`
         .mobile-bottom-nav {
           position: fixed;
-          left: 10px;
-          right: 10px;
-          bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-          z-index: 80;
+          left: 12px;
+          right: 12px;
+          bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+          z-index: 90;
           display: grid;
-          gap: 10px;
-          padding: 10px;
-          border-radius: 26px;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 8px;
+          padding: 8px;
+          border-radius: 20px;
           background:
-            radial-gradient(circle at top center, rgba(99, 213, 255, 0.08), transparent 45%),
-            linear-gradient(180deg, rgba(9, 14, 24, 0.96), rgba(4, 9, 18, 0.98));
+            linear-gradient(180deg, rgba(8, 12, 22, 0.94), rgba(5, 9, 17, 0.98));
           border: 1px solid rgba(255, 255, 255, 0.08);
           backdrop-filter: blur(18px);
           -webkit-backdrop-filter: blur(18px);
           box-shadow:
-            0 10px 30px rgba(0, 0, 0, 0.32),
+            0 14px 36px rgba(0, 0, 0, 0.38),
             inset 0 1px 0 rgba(255, 255, 255, 0.04);
         }
 
@@ -112,19 +92,18 @@ export default function MobileBottomNav({
           appearance: none;
           -webkit-appearance: none;
           border: 1px solid rgba(255, 255, 255, 0.06);
-          background: rgba(255, 255, 255, 0.025);
-          color: var(--text-muted, rgba(255, 255, 255, 0.76));
-          border-radius: 18px;
-          min-height: 64px;
-          padding: 10px 8px;
+          background: rgba(255, 255, 255, 0.02);
+          color: rgba(255, 255, 255, 0.72);
+          border-radius: 15px;
+          min-height: 58px;
+          padding: 8px 6px;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 6px;
-          text-align: center;
+          gap: 5px;
           transition:
-            transform 160ms ease,
+            transform 140ms ease,
             background 160ms ease,
             border-color 160ms ease,
             color 160ms ease,
@@ -132,36 +111,43 @@ export default function MobileBottomNav({
         }
 
         .mobile-nav-link:active {
-          transform: translateY(1px) scale(0.988);
+          transform: scale(0.985);
         }
 
         .mobile-nav-link.active {
-          color: var(--text-strong, #ffffff);
-          background:
-            linear-gradient(180deg, rgba(59, 130, 246, 0.16), rgba(69, 212, 131, 0.12));
+          color: #ffffff;
           border-color: rgba(99, 213, 255, 0.22);
+          background:
+            linear-gradient(180deg, rgba(59, 130, 246, 0.14), rgba(69, 212, 131, 0.1));
           box-shadow:
-            0 0 0 1px rgba(99, 213, 255, 0.08) inset,
+            0 0 0 1px rgba(99, 213, 255, 0.05) inset,
             0 8px 18px rgba(59, 130, 246, 0.14);
         }
 
         .mobile-nav-icon {
+          width: 18px;
+          height: 18px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .mobile-nav-icon :global(svg) {
+          width: 18px;
+          height: 18px;
           display: block;
-          font-size: 18px;
-          line-height: 1;
-          filter: saturate(1.05);
+          fill: none;
+          stroke: currentColor;
+          stroke-width: 1.9;
+          stroke-linecap: round;
+          stroke-linejoin: round;
         }
 
         .mobile-nav-label {
-          display: block;
           font-size: 12px;
           font-weight: 800;
-          line-height: 1.05;
+          line-height: 1;
           letter-spacing: 0.01em;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          max-width: 100%;
         }
 
         @media (min-width: 1024px) {
