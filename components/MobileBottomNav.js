@@ -45,34 +45,44 @@ export default function MobileBottomNav({
 
   return (
     <>
-      <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
-        {visibleTabs.map((tab) => {
-          const meta = getTabMeta(tab);
-          const active = activeTab === tab;
+      <nav className="mobile-bottom-nav-wrap" aria-label="Mobile navigation">
+        <div className="mobile-bottom-nav">
+          {visibleTabs.map((tab) => {
+            const meta = getTabMeta(tab);
+            const active = activeTab === tab;
 
-          return (
-            <button
-              key={tab}
-              type="button"
-              className={`mobile-nav-link ${active ? "active" : ""}`}
-              onClick={() => onChange?.(tab)}
-              aria-current={active ? "page" : undefined}
-              aria-pressed={active}
-            >
-              <span className="mobile-nav-icon">{meta.icon}</span>
-              <span className="mobile-nav-label">{meta.label}</span>
-            </button>
-          );
-        })}
+            return (
+              <button
+                key={tab}
+                type="button"
+                className={`mobile-nav-link ${active ? "active" : ""}`}
+                onClick={() => onChange?.(tab)}
+                aria-current={active ? "page" : undefined}
+                aria-pressed={active}
+              >
+                <span className="mobile-nav-icon">{meta.icon}</span>
+                <span className="mobile-nav-label">{meta.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </nav>
 
       <style jsx>{`
-        .mobile-bottom-nav {
+        .mobile-bottom-nav-wrap {
           position: fixed;
-          left: 12px;
-          right: 12px;
+          left: 0;
+          right: 0;
           bottom: calc(12px + env(safe-area-inset-bottom, 0px));
           z-index: 90;
+          display: flex;
+          justify-content: center;
+          pointer-events: none;
+        }
+
+        .mobile-bottom-nav {
+          pointer-events: auto;
+          width: min(340px, calc(100vw - 24px));
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
           gap: 8px;
@@ -151,7 +161,7 @@ export default function MobileBottomNav({
         }
 
         @media (min-width: 1024px) {
-          .mobile-bottom-nav {
+          .mobile-bottom-nav-wrap {
             display: none;
           }
         }
