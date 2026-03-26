@@ -11,7 +11,7 @@ const FALLBACK_CATEGORIES = [
     id: "fallback-verification",
     name: "Verification",
     slug: "verification",
-    description: "Help with pending verification, missing verified role, or verification review.",
+    description: "Help with pending verification or missing verified access.",
     intake_type: "verification",
     button_label: "Open Verification Ticket",
     is_default: true,
@@ -20,7 +20,7 @@ const FALLBACK_CATEGORIES = [
     id: "fallback-appeal",
     name: "Appeal",
     slug: "appeal",
-    description: "Appeal a moderation action or request review of a previous decision.",
+    description: "Appeal a moderation action or request a review.",
     intake_type: "appeal",
     button_label: "Open Appeal Ticket",
     is_default: false,
@@ -29,7 +29,7 @@ const FALLBACK_CATEGORIES = [
     id: "fallback-report",
     name: "Report / Incident",
     slug: "report",
-    description: "Report a member, suspicious activity, scam, abuse, or other incident.",
+    description: "Report a member, suspicious activity, scam, abuse, or another incident.",
     intake_type: "report",
     button_label: "Open Report Ticket",
     is_default: false,
@@ -38,7 +38,7 @@ const FALLBACK_CATEGORIES = [
     id: "fallback-question",
     name: "Question",
     slug: "question",
-    description: "General support questions, access issues, or guidance on what to do next.",
+    description: "General support questions, access issues, or guidance.",
     intake_type: "question",
     button_label: "Open Question Ticket",
     is_default: false,
@@ -147,10 +147,10 @@ function getPrimaryAction({ member, openTicket, verificationFlags }) {
   if (openTicket) {
     return {
       title: "You already have an open ticket",
-      body: "Keep updates inside that same ticket so staff can help you faster.",
+      body: "Keep updates in that same thread so staff can help you faster.",
       primaryLabel: "View My Ticket",
       primaryTab: "tickets",
-      secondaryLabel: "Account",
+      secondaryLabel: "View Account",
       secondaryTab: "account",
       suggestedCategorySlug: null,
       tone: "low",
@@ -556,18 +556,23 @@ function HomeTab({
   return (
     <div className="user-dashboard-grid">
       <Section
-        title="My Dashboard"
-        subtitle="Your verification status, support access, and current ticket"
+        title="Overview"
+        subtitle="Your status and next step"
         tone="account"
       >
-        <div className="member-hero-card">
-          <div style={{ minWidth: 0 }}>
-            <div className="member-kicker">Member portal</div>
-            <div className="profile-name hero-name">
-              {safeText(member?.display_name || viewer?.username, "Member")}
+        <div className="member-hero-card compact">
+          <div className="hero-profile">
+            <div className="hero-avatar">
+              {safeText(member?.display_name || viewer?.username, "M").charAt(0).toUpperCase()}
             </div>
-            <div className="muted" style={{ marginTop: 8, lineHeight: 1.55 }}>
-              Discord ID: {safeText(viewer?.discord_id)}
+
+            <div style={{ minWidth: 0 }}>
+              <div className="profile-name hero-name">
+                {safeText(member?.display_name || viewer?.username, "Member")}
+              </div>
+              <div className="muted hero-subline">
+                Discord ID: {safeText(viewer?.discord_id)}
+              </div>
             </div>
           </div>
 
@@ -623,7 +628,7 @@ function HomeTab({
       </Section>
 
       <Section
-        title="My Current Ticket"
+        title="Current Ticket"
         subtitle="Your active support thread"
         tone="ticket"
       >
@@ -632,7 +637,7 @@ function HomeTab({
 
       <Section
         title="Support Categories"
-        subtitle="Choose the category that best matches your issue"
+        subtitle="Pick the category that best matches your issue"
         tone="categories"
       >
         <div className="space">
@@ -744,7 +749,7 @@ function AccountTab({ viewer, member, verificationFlags }) {
     <div className="user-dashboard-grid">
       <Section
         title="My Account"
-        subtitle="Your basic server identity and access details"
+        subtitle="Basic server identity and access details"
         tone="account"
       >
         <div className="info-grid">
@@ -825,7 +830,7 @@ export default function UserDashboardClient({ initialData }) {
   const categories = safeArray(initialData?.categories);
   const verificationFlags = safeArray(initialData?.verificationFlags);
 
-  const primaryAction = useMemo(
+  useMemo(
     () =>
       getPrimaryAction({
         member,
@@ -1107,7 +1112,6 @@ export default function UserDashboardClient({ initialData }) {
         activeTab={activeTab}
         onChange={setActiveTab}
         tabs={USER_TABS}
-        title="Quick Menu"
       />
 
       <style jsx>{`
@@ -1132,7 +1136,7 @@ export default function UserDashboardClient({ initialData }) {
         }
 
         .member-section {
-          border-radius: 26px;
+          border-radius: 24px;
         }
 
         .member-section.tone-account {
@@ -1152,15 +1156,6 @@ export default function UserDashboardClient({ initialData }) {
           box-shadow: var(--shadow-strong), var(--glow-green);
         }
 
-        .member-kicker {
-          font-size: 12px;
-          font-weight: 800;
-          letter-spacing: 0.06em;
-          text-transform: uppercase;
-          color: var(--muted);
-          margin-bottom: 8px;
-        }
-
         .member-hero-card,
         .ticket-row-card {
           border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1169,6 +1164,37 @@ export default function UserDashboardClient({ initialData }) {
             rgba(255,255,255,0.025);
           border-radius: 22px;
           padding: 14px;
+        }
+
+        .member-hero-card.compact {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+
+        .hero-profile {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          min-width: 0;
+          flex: 1;
+        }
+
+        .hero-avatar {
+          width: 52px;
+          height: 52px;
+          min-width: 52px;
+          border-radius: 999px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 22px;
+          font-weight: 900;
+          color: #07131c;
+          background: linear-gradient(135deg, #68f5bf 0%, #63d5ff 100%);
+          box-shadow: 0 0 18px rgba(99, 213, 255, 0.16);
         }
 
         .ticket-row-card.emphasis,
@@ -1189,7 +1215,12 @@ export default function UserDashboardClient({ initialData }) {
         }
 
         .hero-name {
-          font-size: clamp(24px, 4vw, 34px);
+          font-size: clamp(24px, 4vw, 32px);
+        }
+
+        .hero-subline {
+          margin-top: 4px;
+          line-height: 1.5;
         }
 
         .summary-grid {
