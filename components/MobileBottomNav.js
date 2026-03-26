@@ -39,17 +39,16 @@ export default function MobileBottomNav({
   onChange,
   tabs = [],
 }) {
-  const visibleTabs = Array.isArray(tabs) ? tabs.filter(Boolean).slice(0, 3) : [];
+  const visibleTabs = Array.isArray(tabs)
+    ? tabs.filter(Boolean).slice(0, 3)
+    : [];
 
   if (!visibleTabs.length) return null;
 
   return (
     <>
       <nav className="mobile-bottom-nav-wrap" aria-label="Mobile navigation">
-        <div
-          className="mobile-bottom-nav"
-          style={{ gridTemplateColumns: `repeat(${visibleTabs.length}, minmax(0, 1fr))` }}
-        >
+        <div className="mobile-bottom-nav">
           {visibleTabs.map((tab) => {
             const meta = getTabMeta(tab);
             const active = activeTab === tab;
@@ -61,7 +60,6 @@ export default function MobileBottomNav({
                 className={`mobile-nav-link ${active ? "active" : ""}`}
                 onClick={() => onChange?.(tab)}
                 aria-current={active ? "page" : undefined}
-                aria-pressed={active}
               >
                 <span className="mobile-nav-icon">{meta.icon}</span>
                 <span className="mobile-nav-label">{meta.label}</span>
@@ -74,46 +72,44 @@ export default function MobileBottomNav({
       <style jsx>{`
         .mobile-bottom-nav-wrap {
           position: fixed;
-          left: 0;
-          right: 0;
+          left: 50%;
+          transform: translateX(-50%);
           bottom: calc(12px + env(safe-area-inset-bottom, 0px));
           z-index: 90;
-          display: flex;
-          justify-content: center;
-          pointer-events: none;
+          width: auto;
+          max-width: calc(100vw - 20px);
         }
 
         .mobile-bottom-nav {
-          pointer-events: auto;
-          width: fit-content;
-          max-width: calc(100vw - 24px);
-          display: grid;
-          gap: 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          width: auto;
           padding: 8px;
-          border-radius: 22px;
-          background:
-            linear-gradient(180deg, rgba(8, 12, 22, 0.96), rgba(5, 9, 17, 0.98));
+          border-radius: 20px;
+          background: rgba(7, 12, 22, 0.92);
           border: 1px solid rgba(255, 255, 255, 0.08);
           backdrop-filter: blur(18px);
           -webkit-backdrop-filter: blur(18px);
           box-shadow:
-            0 14px 36px rgba(0, 0, 0, 0.38),
+            0 14px 34px rgba(0, 0, 0, 0.34),
             inset 0 1px 0 rgba(255, 255, 255, 0.04);
         }
 
         .mobile-nav-link {
           appearance: none;
           -webkit-appearance: none;
-          width: 94px;
-          min-width: 94px;
-          min-height: 64px;
-          padding: 10px 8px;
+          width: 84px;
+          min-width: 84px;
+          height: 78px;
+          padding: 8px 6px;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
           gap: 6px;
-          border-radius: 18px;
+          border-radius: 16px;
           border: 1px solid rgba(255, 255, 255, 0.06);
           background: rgba(255, 255, 255, 0.02);
           color: rgba(255, 255, 255, 0.72);
@@ -132,24 +128,27 @@ export default function MobileBottomNav({
         .mobile-nav-link.active {
           color: #ffffff;
           border-color: rgba(99, 213, 255, 0.24);
-          background:
-            linear-gradient(180deg, rgba(59, 130, 246, 0.16), rgba(69, 212, 131, 0.11));
+          background: linear-gradient(
+            180deg,
+            rgba(59, 130, 246, 0.16),
+            rgba(69, 212, 131, 0.11)
+          );
           box-shadow:
             0 0 0 1px rgba(99, 213, 255, 0.05) inset,
-            0 8px 18px rgba(59, 130, 246, 0.14);
+            0 8px 18px rgba(59, 130, 246, 0.12);
         }
 
         .mobile-nav-icon {
-          width: 18px;
-          height: 18px;
+          width: 19px;
+          height: 19px;
           display: inline-flex;
           align-items: center;
           justify-content: center;
         }
 
         .mobile-nav-icon :global(svg) {
-          width: 18px;
-          height: 18px;
+          width: 19px;
+          height: 19px;
           display: block;
           fill: none;
           stroke: currentColor;
@@ -159,16 +158,22 @@ export default function MobileBottomNav({
         }
 
         .mobile-nav-label {
-          font-size: 12px;
+          font-size: 11px;
           font-weight: 800;
           line-height: 1;
           letter-spacing: 0.01em;
         }
 
         @media (max-width: 380px) {
+          .mobile-bottom-nav {
+            gap: 7px;
+            padding: 7px;
+          }
+
           .mobile-nav-link {
-            width: 86px;
-            min-width: 86px;
+            width: 78px;
+            min-width: 78px;
+            height: 74px;
           }
         }
 
