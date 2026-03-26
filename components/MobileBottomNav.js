@@ -47,8 +47,8 @@ export default function MobileBottomNav({
 
   return (
     <>
-      <nav className="mobile-bottom-nav-wrap" aria-label="Mobile navigation">
-        <div className="mobile-bottom-nav">
+      <nav className="sv-mobile-nav-wrap" aria-label="Mobile navigation">
+        <div className="sv-mobile-nav-shell">
           {visibleTabs.map((tab) => {
             const meta = getTabMeta(tab);
             const active = activeTab === tab;
@@ -57,12 +57,12 @@ export default function MobileBottomNav({
               <button
                 key={tab}
                 type="button"
-                className={`mobile-nav-link ${active ? "active" : ""}`}
+                className={`sv-mobile-nav-item ${active ? "active" : ""}`}
                 onClick={() => onChange?.(tab)}
                 aria-current={active ? "page" : undefined}
               >
-                <span className="mobile-nav-icon">{meta.icon}</span>
-                <span className="mobile-nav-label">{meta.label}</span>
+                <span className="sv-mobile-nav-icon">{meta.icon}</span>
+                <span className="sv-mobile-nav-text">{meta.label}</span>
               </button>
             );
           })}
@@ -70,62 +70,69 @@ export default function MobileBottomNav({
       </nav>
 
       <style jsx>{`
-        .mobile-bottom-nav-wrap {
+        .sv-mobile-nav-wrap {
           position: fixed;
           left: 50%;
           transform: translateX(-50%);
-          bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-          z-index: 90;
+          bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+          z-index: 9999;
           width: auto;
-          max-width: calc(100vw - 20px);
+          max-width: calc(100vw - 18px);
+          pointer-events: none;
         }
 
-        .mobile-bottom-nav {
+        .sv-mobile-nav-shell {
+          pointer-events: auto;
           display: flex;
           align-items: center;
           justify-content: center;
           gap: 8px;
           width: auto;
-          padding: 8px;
-          border-radius: 20px;
-          background: rgba(7, 12, 22, 0.92);
+          padding: 7px;
+          border-radius: 18px;
+          background: rgba(7, 12, 22, 0.9);
           border: 1px solid rgba(255, 255, 255, 0.08);
-          backdrop-filter: blur(18px);
-          -webkit-backdrop-filter: blur(18px);
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
           box-shadow:
-            0 14px 34px rgba(0, 0, 0, 0.34),
+            0 10px 28px rgba(0, 0, 0, 0.34),
             inset 0 1px 0 rgba(255, 255, 255, 0.04);
+          box-sizing: border-box;
         }
 
-        .mobile-nav-link {
-          appearance: none;
-          -webkit-appearance: none;
-          width: 84px;
-          min-width: 84px;
-          height: 78px;
-          padding: 8px 6px;
+        .sv-mobile-nav-item {
+          all: unset;
+          box-sizing: border-box;
+          width: 82px;
+          min-width: 82px;
+          height: 68px;
+          border-radius: 15px;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
           gap: 6px;
-          border-radius: 16px;
+          cursor: pointer;
+          user-select: none;
+          -webkit-tap-highlight-color: transparent;
+          color: rgba(255, 255, 255, 0.78);
+          background: rgba(255, 255, 255, 0.025);
           border: 1px solid rgba(255, 255, 255, 0.06);
-          background: rgba(255, 255, 255, 0.02);
-          color: rgba(255, 255, 255, 0.72);
           transition:
             transform 140ms ease,
             background 160ms ease,
             border-color 160ms ease,
             color 160ms ease,
             box-shadow 160ms ease;
+          text-align: center;
+          flex: 0 0 auto;
         }
 
-        .mobile-nav-link:active {
+        .sv-mobile-nav-item:active {
           transform: scale(0.985);
         }
 
-        .mobile-nav-link.active {
+        .sv-mobile-nav-item.active {
           color: #ffffff;
           border-color: rgba(99, 213, 255, 0.24);
           background: linear-gradient(
@@ -135,20 +142,22 @@ export default function MobileBottomNav({
           );
           box-shadow:
             0 0 0 1px rgba(99, 213, 255, 0.05) inset,
-            0 8px 18px rgba(59, 130, 246, 0.12);
+            0 6px 16px rgba(59, 130, 246, 0.12);
         }
 
-        .mobile-nav-icon {
-          width: 19px;
-          height: 19px;
+        .sv-mobile-nav-icon {
+          width: 18px;
+          height: 18px;
           display: inline-flex;
           align-items: center;
           justify-content: center;
+          flex: 0 0 18px;
+          line-height: 0;
         }
 
-        .mobile-nav-icon :global(svg) {
-          width: 19px;
-          height: 19px;
+        .sv-mobile-nav-icon :global(svg) {
+          width: 18px;
+          height: 18px;
           display: block;
           fill: none;
           stroke: currentColor;
@@ -157,28 +166,30 @@ export default function MobileBottomNav({
           stroke-linejoin: round;
         }
 
-        .mobile-nav-label {
+        .sv-mobile-nav-text {
+          display: block;
           font-size: 11px;
           font-weight: 800;
           line-height: 1;
           letter-spacing: 0.01em;
+          white-space: nowrap;
         }
 
         @media (max-width: 380px) {
-          .mobile-bottom-nav {
-            gap: 7px;
-            padding: 7px;
+          .sv-mobile-nav-shell {
+            gap: 6px;
+            padding: 6px;
           }
 
-          .mobile-nav-link {
-            width: 78px;
-            min-width: 78px;
-            height: 74px;
+          .sv-mobile-nav-item {
+            width: 76px;
+            min-width: 76px;
+            height: 64px;
           }
         }
 
         @media (min-width: 1024px) {
-          .mobile-bottom-nav-wrap {
+          .sv-mobile-nav-wrap {
             display: none;
           }
         }
