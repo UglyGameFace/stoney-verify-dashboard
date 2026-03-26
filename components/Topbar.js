@@ -6,22 +6,22 @@ import AuthStatus from "@/components/AuthStatus";
 function getHeaderContent(session) {
   if (session?.isStaff) {
     return {
-      eyebrow: "Stoney Balonney command cloud",
-      title: "Stoney Verify Dashboard",
+      eyebrow: "Staff control room",
+      title: "Stoney Verify",
       description:
-        "Run the verification pipeline, ticket pressure, role sync, fraud watch, and live moderation from one glowing control room.",
-      badge: "Staff Command",
+        "Verification, tickets, moderation, and live staff actions in one place.",
+      badge: "Staff",
       tone: "staff",
       accent: "green-blue",
     };
   }
 
   return {
-    eyebrow: "Member smoke lounge",
+    eyebrow: "Member portal",
     title: "My Dashboard",
     description:
-      "Track verification, support, ticket progress, and next steps in one clean portal built for quick mobile use.",
-    badge: "Member View",
+      "Your verification status, support access, and current ticket.",
+    badge: "Member",
     tone: "member",
     accent: "green-purple",
   };
@@ -77,55 +77,32 @@ export default function Topbar() {
   return (
     <div
       className={`card stoner-topbar topbar-shell ${content.tone}`}
-      style={{ marginBottom: 18 }}
+      style={{ marginBottom: 16 }}
     >
       <div className={`topbar-mist topbar-mist-a ${content.tone}`} />
       <div className={`topbar-mist topbar-mist-b ${content.tone}`} />
-      <div className={`topbar-mist topbar-mist-c ${content.tone}`} />
 
-      <div
-        className="row topbar-row"
-        style={{
-          justifyContent: "space-between",
-          alignItems: "stretch",
-          flexWrap: "wrap",
-          gap: 16,
-          position: "relative",
-          zIndex: 1,
-        }}
-      >
+      <div className="topbar-grid">
         <div className="topbar-copy">
           <div className="topbar-meta-row">
             <div className="topbar-eyebrow-wrap">
               <span className={orbClass} />
               <div className="muted topbar-eyebrow">
-                {loading ? "Booting dashboard..." : content.eyebrow}
+                {loading ? "Loading session..." : content.eyebrow}
               </div>
             </div>
 
             <span className={`topbar-badge ${content.tone}`}>
-              {loading ? "Checking Session" : content.badge}
+              {loading ? "Loading" : content.badge}
             </span>
           </div>
 
-          <h1 className="topbar-title neon-title">
+          <h1 className="topbar-title">
             {loading ? "Dashboard" : content.title}
           </h1>
 
           <div className="muted topbar-description">
-            {loading ? "Loading your dashboard..." : content.description}
-          </div>
-
-          <div className="topbar-chip-row">
-            <span className="topbar-chip">
-              One-hand mobile
-            </span>
-            <span className="topbar-chip">
-              Live ticket control
-            </span>
-            <span className="topbar-chip">
-              Verification command flow
-            </span>
+            {loading ? "Getting your dashboard ready..." : content.description}
           </div>
         </div>
 
@@ -138,13 +115,13 @@ export default function Topbar() {
         .topbar-shell {
           position: relative;
           overflow: hidden;
-          border-radius: 30px;
-          padding: 22px;
-          border: 1px solid rgba(130, 255, 184, 0.14);
+          border-radius: 26px;
+          padding: 18px;
+          border: 1px solid rgba(130, 255, 184, 0.12);
           background:
-            radial-gradient(circle at top right, rgba(93, 255, 141, 0.08), transparent 28%),
-            radial-gradient(circle at bottom left, rgba(99, 213, 255, 0.08), transparent 24%),
-            linear-gradient(180deg, rgba(16, 28, 38, 0.95), rgba(7, 14, 24, 0.95));
+            radial-gradient(circle at top right, rgba(93, 255, 141, 0.07), transparent 28%),
+            radial-gradient(circle at bottom left, rgba(99, 213, 255, 0.07), transparent 24%),
+            linear-gradient(180deg, rgba(16, 28, 38, 0.95), rgba(7, 14, 24, 0.96));
           box-shadow:
             var(--shadow-strong),
             var(--glow-green);
@@ -156,7 +133,21 @@ export default function Topbar() {
             var(--glow-purple);
         }
 
-        .topbar-row {
+        .topbar-grid {
+          position: relative;
+          z-index: 1;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr);
+          gap: 14px;
+          align-items: stretch;
+        }
+
+        .topbar-copy {
+          min-width: 0;
+        }
+
+        .topbar-auth-wrap {
+          width: 100%;
           min-width: 0;
         }
 
@@ -164,31 +155,23 @@ export default function Topbar() {
           position: absolute;
           border-radius: 999px;
           filter: blur(54px);
-          opacity: 0.48;
+          opacity: 0.42;
           pointer-events: none;
           mix-blend-mode: screen;
         }
 
         .topbar-mist-a {
-          width: 260px;
-          height: 260px;
+          width: 220px;
+          height: 220px;
           right: -60px;
           top: -80px;
         }
 
         .topbar-mist-b {
-          width: 190px;
-          height: 190px;
-          left: -30px;
-          bottom: -60px;
-        }
-
-        .topbar-mist-c {
-          width: 160px;
-          height: 160px;
-          right: 34%;
-          top: 24%;
-          opacity: 0.22;
+          width: 170px;
+          height: 170px;
+          left: -40px;
+          bottom: -50px;
         }
 
         .topbar-mist.staff {
@@ -199,25 +182,13 @@ export default function Topbar() {
           background: rgba(178, 109, 255, 0.18);
         }
 
-        .topbar-copy {
-          min-width: 0;
-          flex: 1 1 520px;
-        }
-
-        .topbar-auth-wrap {
-          width: 100%;
-          max-width: 380px;
-          display: flex;
-          align-items: stretch;
-        }
-
         .topbar-meta-row {
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: 10px;
           flex-wrap: wrap;
-          margin-bottom: 12px;
+          margin-bottom: 10px;
         }
 
         .topbar-eyebrow-wrap {
@@ -228,7 +199,7 @@ export default function Topbar() {
         }
 
         .topbar-eyebrow {
-          font-size: 14px;
+          font-size: 13px;
           letter-spacing: 0.02em;
         }
 
@@ -257,10 +228,10 @@ export default function Topbar() {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          min-height: 34px;
-          padding: 8px 13px;
+          min-height: 32px;
+          padding: 7px 12px;
           border-radius: 999px;
-          font-size: 12px;
+          font-size: 11px;
           font-weight: 900;
           letter-spacing: 0.04em;
           text-transform: uppercase;
@@ -285,64 +256,49 @@ export default function Topbar() {
 
         .topbar-title {
           margin: 0;
-          max-width: 900px;
+          max-width: 760px;
+          font-size: clamp(30px, 5vw, 48px);
+          line-height: 0.96;
+          letter-spacing: -0.045em;
+          font-weight: 950;
+          color: var(--text-strong, #f8fafc);
           text-wrap: balance;
         }
 
         .topbar-description {
-          margin-top: 12px;
-          max-width: 860px;
-          line-height: 1.6;
-          font-size: 15px;
+          margin-top: 10px;
+          max-width: 700px;
+          line-height: 1.55;
+          font-size: 14px;
         }
 
-        .topbar-chip-row {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-          margin-top: 16px;
-        }
-
-        .topbar-chip {
-          display: inline-flex;
-          align-items: center;
-          min-height: 30px;
-          padding: 7px 11px;
-          border-radius: 999px;
-          font-size: 12px;
-          font-weight: 700;
-          color: var(--text);
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(255, 255, 255, 0.035);
+        @media (min-width: 900px) {
+          .topbar-grid {
+            grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+            gap: 16px;
+            align-items: center;
+          }
         }
 
         @media (max-width: 767px) {
           .topbar-shell {
-            padding: 18px;
-            border-radius: 24px;
-          }
-
-          .topbar-auth-wrap {
-            max-width: none;
+            padding: 16px;
+            border-radius: 22px;
           }
 
           .topbar-title {
-            font-size: 30px !important;
+            font-size: 26px;
           }
 
           .topbar-description {
-            font-size: 14px;
-            line-height: 1.52;
+            font-size: 13px;
+            line-height: 1.5;
           }
 
-          .topbar-chip-row {
-            gap: 7px;
-          }
-
-          .topbar-chip {
-            min-height: 28px;
-            padding: 6px 10px;
-            font-size: 11px;
+          .topbar-badge {
+            min-height: 30px;
+            padding: 6px 11px;
+            font-size: 10px;
           }
         }
       `}</style>
