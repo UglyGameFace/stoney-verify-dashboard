@@ -13,6 +13,89 @@ const INTAKE_TYPES = [
   { value: "custom", label: "Custom" },
 ];
 
+const CATEGORY_PRESETS = [
+  {
+    key: "verification",
+    label: "Verification",
+    values: {
+      name: "Verification",
+      color: "#45d483",
+      description:
+        "Identity verification, secure uploads, VC verification, and verification-related issues.",
+      intake_type: "verification",
+      match_keywords:
+        "verification, verify, verify issue, verification issue, id verify, secure upload, vc verify, face check",
+      button_label: "Verification",
+      sort_order: "1",
+      is_default: false,
+    },
+  },
+  {
+    key: "support",
+    label: "General Support",
+    values: {
+      name: "Support",
+      color: "#5ea4ff",
+      description:
+        "General support questions, help requests, and non-specialized assistance.",
+      intake_type: "general",
+      match_keywords:
+        "support, help, general support, assistance, question, issue",
+      button_label: "Support",
+      sort_order: "50",
+      is_default: true,
+    },
+  },
+  {
+    key: "appeals",
+    label: "Appeals",
+    values: {
+      name: "Appeals",
+      color: "#ffb24d",
+      description:
+        "Ban appeals, timeout appeals, punishment reviews, and moderation reconsideration.",
+      intake_type: "appeal",
+      match_keywords:
+        "appeal, appeals, ban appeal, timeout appeal, punishment appeal, muted, banned",
+      button_label: "Appeals",
+      sort_order: "20",
+      is_default: false,
+    },
+  },
+  {
+    key: "reports",
+    label: "Reports",
+    values: {
+      name: "Reports",
+      color: "#ff6b6b",
+      description:
+        "User reports, abuse reports, scam reports, harassment, or incidents requiring staff attention.",
+      intake_type: "report",
+      match_keywords:
+        "report, reports, incident, scam, abuse, harassment, threat, rule break",
+      button_label: "Reports",
+      sort_order: "30",
+      is_default: false,
+    },
+  },
+  {
+    key: "cod-services",
+    label: "COD Services",
+    values: {
+      name: "COD Services",
+      color: "#8d7dff",
+      description:
+        "Older Call of Duty services including challenge lobbies, unlock all, recoveries, and legacy COD help.",
+      intake_type: "custom",
+      match_keywords:
+        "cod, call of duty, cod services, cod recovery, recovery, recoveries, challenge lobby, challenge lobbies, modded lobby, modded lobbies, unlock all, prestige, rank unlock, account recovery, old cod, older cod, legacy cod, bo1, bo2, bo3, black ops 1, black ops 2, black ops 3, mw2, mw3, modern warfare 2, modern warfare 3, waw, world at war, zombies rank, camo unlock, camo service, bot lobby",
+      button_label: "COD Services",
+      sort_order: "10",
+      is_default: false,
+    },
+  },
+];
+
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -32,6 +115,115 @@ function csvToArray(value) {
     .filter(Boolean);
 }
 
+function uniqueNormalizedKeywords(values) {
+  const seen = new Set();
+  const out = [];
+
+  for (const raw of values) {
+    const value = String(raw || "").trim();
+    if (!value) continue;
+
+    const normalized = value.toLowerCase();
+    if (seen.has(normalized)) continue;
+
+    seen.add(normalized);
+    out.push(value);
+  }
+
+  return out;
+}
+
+function buildKeywordCsv(...sources) {
+  const merged = uniqueNormalizedKeywords(
+    sources.flatMap((source) => csvToArray(source))
+  );
+  return merged.join(", ");
+}
+
+function looksLikeCodCategoryDraft(draft) {
+  const haystack = [
+    draft?.name,
+    draft?.description,
+    draft?.button_label,
+    draft?.intake_type,
+    draft?.match_keywords,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return [
+    "cod",
+    "call of duty",
+    "bo2",
+    "black ops 2",
+    "challenge lobby",
+    "unlock all",
+    "mw2",
+    "mw3",
+    "waw",
+    "older cod",
+    "old cod",
+  ].some((term) => haystack.includes(term));
+}
+
+function codKeywordSuggestions() {
+  return [
+    "cod",
+    "call of duty",
+    "cod services",
+    "cod recovery",
+    "recovery",
+    "recoveries",
+    "challenge lobby",
+    "challenge lobbies",
+    "modded lobby",
+    "modded lobbies",
+    "unlock all",
+    "prestige",
+    "rank unlock",
+    "account recovery",
+    "old cod",
+    "older cod",
+    "legacy cod",
+    "bo1",
+    "bo2",
+    "bo3",
+    "black ops 1",
+    "black ops 2",
+    "black ops 3",
+    "mw2",
+    "mw3",
+    "modern warfare 2",
+    "modern warfare 3",
+    "waw",
+    "world at war",
+    "zombies rank",
+    "camo unlock",
+    "camo service",
+    "bot lobby",
+  ];
+}
+
+function ensureHelpfulKeywords(payload) {
+  const keywords = uniqueNormalizedKeywords(payload.match_keywords || []);
+
+  if (looksLikeCodCategoryDraft(payload)) {
+    return {
+      ...payload,
+      match_keywords: uniqueNormalizedKeywords([
+        ...keywords,
+        ...codKeywordSuggestions(),
+      ]),
+    };
+  }
+
+  return {
+    ...payload,
+    match_keywords: keywords,
+  };
+}
+
 function emptyDraft() {
   return {
     name: "",
@@ -48,13 +240,13 @@ function emptyDraft() {
 function categoryPayloadFromDraft(draft) {
   const name = String(draft?.name || "").trim();
 
-  return {
+  const basePayload = {
     name,
     slug: slugify(name),
     color: draft?.color || "#45d483",
     description: String(draft?.description || "").trim(),
     intake_type: String(draft?.intake_type || "general").trim(),
-    match_keywords: csvToArray(draft?.match_keywords),
+    match_keywords: uniqueNormalizedKeywords(csvToArray(draft?.match_keywords)),
     button_label: String(draft?.button_label || "").trim(),
     sort_order:
       draft?.sort_order === "" || draft?.sort_order === null
@@ -62,6 +254,8 @@ function categoryPayloadFromDraft(draft) {
         : Number(draft.sort_order),
     is_default: Boolean(draft?.is_default),
   };
+
+  return ensureHelpfulKeywords(basePayload);
 }
 
 function sortCategories(categories, sortBy) {
@@ -187,7 +381,12 @@ function CategoryPreview({ draft }) {
           {payload.name || "New category"}
         </div>
         <span className="badge">{payload.intake_type || "general"}</span>
-        {payload.is_default ? <span className="badge claimed">Default</span> : null}
+        {payload.is_default ? (
+          <span className="badge claimed">Default</span>
+        ) : null}
+        {looksLikeCodCategoryDraft(payload) ? (
+          <span className="badge low">COD-aware</span>
+        ) : null}
       </div>
 
       <div
@@ -209,12 +408,39 @@ function CategoryPreview({ draft }) {
         }}
       >
         <span className="badge low">{buttonLabel}</span>
-        {keywords.map((keyword) => (
+        {keywords.slice(0, 18).map((keyword) => (
           <span key={keyword} className="badge">
             {keyword}
           </span>
         ))}
+        {keywords.length > 18 ? (
+          <span className="badge">+{keywords.length - 18} more</span>
+        ) : null}
       </div>
+    </div>
+  );
+}
+
+function PresetRow({ onApplyPreset }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 8,
+        flexWrap: "wrap",
+        marginBottom: 12,
+      }}
+    >
+      {CATEGORY_PRESETS.map((preset) => (
+        <button
+          key={preset.key}
+          type="button"
+          className="button ghost"
+          onClick={() => onApplyPreset(preset)}
+        >
+          Use {preset.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -230,6 +456,7 @@ function CategoryCard({
   onRemove,
   onStartEdit,
   onFindTickets,
+  onApplyEditPreset,
 }) {
   const isEditing = editingId === category.id;
   const keywords = safeArray(category?.match_keywords);
@@ -246,6 +473,8 @@ function CategoryCard({
     >
       {isEditing ? (
         <div className="space">
+          <PresetRow onApplyPreset={onApplyEditPreset} />
+
           <div
             style={{
               display: "grid",
@@ -321,6 +550,13 @@ function CategoryCard({
               setDraft((prev) => ({ ...prev, match_keywords: e.target.value }))
             }
           />
+
+          {looksLikeCodCategoryDraft(draft) ? (
+            <div className="info-banner">
+              COD/legacy COD signals detected. Recommended aliases will be merged
+              automatically on save.
+            </div>
+          ) : null}
 
           <div
             style={{
@@ -423,6 +659,15 @@ function CategoryCard({
                 {category.is_default ? (
                   <span className="badge claimed">Default</span>
                 ) : null}
+                {looksLikeCodCategoryDraft({
+                  name: category.name,
+                  description: category.description,
+                  button_label: category.button_label,
+                  intake_type: category.intake_type,
+                  match_keywords: safeArray(category.match_keywords).join(", "),
+                }) ? (
+                  <span className="badge low">COD-aware</span>
+                ) : null}
                 <span className="badge low">
                   {Number(category._ticketCount || 0)} ticket
                   {Number(category._ticketCount || 0) === 1 ? "" : "s"}
@@ -467,11 +712,14 @@ function CategoryCard({
                   <span className="badge">Order {category.sort_order}</span>
                 ) : null}
 
-                {keywords.map((keyword) => (
+                {keywords.slice(0, 18).map((keyword) => (
                   <span key={keyword} className="badge">
                     {keyword}
                   </span>
                 ))}
+                {keywords.length > 18 ? (
+                  <span className="badge">+{keywords.length - 18} more</span>
+                ) : null}
               </div>
             </div>
 
@@ -547,6 +795,28 @@ export default function CategoryManager({
         setMessage("");
       }, 2200);
     }
+  }
+
+  function applyCreatePreset(preset) {
+    const next = {
+      ...emptyDraft(),
+      ...preset.values,
+      match_keywords: buildKeywordCsv(preset.values.match_keywords),
+    };
+    setCreateDraft(next);
+    setError("");
+    setMessage(`Loaded ${preset.label} preset.`);
+  }
+
+  function applyEditPreset(preset) {
+    const next = {
+      ...emptyDraft(),
+      ...preset.values,
+      match_keywords: buildKeywordCsv(preset.values.match_keywords),
+    };
+    setEditDraft(next);
+    setError("");
+    setMessage(`Loaded ${preset.label} preset into editor.`);
   }
 
   async function createCategory(e) {
@@ -687,8 +957,8 @@ export default function CategoryManager({
             className="muted"
             style={{ marginTop: 6, fontSize: 13, lineHeight: 1.5 }}
           >
-            Define what each ticket type is for, how it should appear, and jump
-            straight into tickets for that category.
+            Define what each ticket type is for, how it should appear, and make
+            category matching stronger with cleaner aliases.
           </div>
         </div>
 
@@ -724,6 +994,8 @@ export default function CategoryManager({
       ) : null}
 
       <form className="space" onSubmit={createCategory}>
+        <PresetRow onApplyPreset={applyCreatePreset} />
+
         <div
           style={{
             display: "grid",
@@ -812,6 +1084,13 @@ export default function CategoryManager({
             }))
           }
         />
+
+        {looksLikeCodCategoryDraft(createDraft) ? (
+          <div className="info-banner">
+            This looks like a COD services category. Legacy COD aliases will be
+            auto-merged when saved.
+          </div>
+        ) : null}
 
         <div
           style={{
@@ -918,6 +1197,7 @@ export default function CategoryManager({
             onRemove={removeCategory}
             onStartEdit={startEdit}
             onFindTickets={handleFindTickets}
+            onApplyEditPreset={applyEditPreset}
           />
         ))}
       </div>
