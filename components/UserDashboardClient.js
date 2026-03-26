@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Topbar from "@/components/Topbar";
 import MobileBottomNav from "@/components/MobileBottomNav";
 
@@ -110,6 +110,31 @@ function getRoleSummary(member) {
   if (!member) return [];
   const names = Array.isArray(member?.role_names) ? member.role_names : [];
   return names.filter(Boolean).slice(0, 8);
+}
+
+function getDisplayName(viewer, member) {
+  return (
+    member?.display_name ||
+    member?.global_name ||
+    viewer?.global_name ||
+    viewer?.username ||
+    "Member"
+  );
+}
+
+function getUsername(viewer, member) {
+  return member?.username || viewer?.username || "Unknown";
+}
+
+function getMemberAvatarUrl(viewer, member) {
+  return (
+    member?.avatar_url ||
+    viewer?.avatar_url ||
+    viewer?.avatar ||
+    viewer?.image ||
+    viewer?.picture ||
+    ""
+  );
 }
 
 function buildDiscordChannelUrl(ticket, initialData) {
@@ -377,9 +402,7 @@ function CategoryCard({ category, highlighted, onUseThisCategory, isCreating }) 
           onClick={() => onUseThisCategory(category)}
           disabled={isCreating}
         >
-          {isCreating
-            ? "Submitting..."
-            : safeText(category?.button_label, "Use This Category")}
+          {isCreating ? "Submitting..." : safeText(category?.button_label, "Use This Category")}
         </button>
       </div>
     </div>
@@ -539,7 +562,6 @@ function TicketCard({
 }
 
 function HomeTab({
-  viewer,
   member,
   openTicket,
   verificationFlags,
@@ -560,30 +582,6 @@ function HomeTab({
         subtitle="Your status and next step"
         tone="account"
       >
-        <div className="member-hero-card compact">
-          <div className="hero-profile">
-            <div className="hero-avatar">
-              {safeText(member?.display_name || viewer?.username, "M").charAt(0).toUpperCase()}
-            </div>
-
-            <div style={{ minWidth: 0 }}>
-              <div className="profile-name hero-name">
-                {safeText(member?.display_name || viewer?.username, "Member")}
-              </div>
-              <div className="muted hero-subline">
-                Discord ID: {safeText(viewer?.discord_id)}
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <StatusBadge label={verification.label} tone={verification.tone} />
-            {member?.in_guild === false ? (
-              <StatusBadge label="Not In Server" tone="danger" />
-            ) : null}
-          </div>
-        </div>
-
         <OverviewTiles
           verification={verification}
           openTicket={openTicket}
@@ -744,6 +742,9 @@ function TicketsTab({
 function AccountTab({ viewer, member, verificationFlags }) {
   const verification = getVerificationState(member, verificationFlags);
   const roles = getRoleSummary(member);
+  const avatarUrl = getMemberAvatarUrl(viewer, member);
+  const displayName = getDisplayName(viewer, member);
+  const username = getUsername(viewer, member);
 
   return (
     <div className="user-dashboard-grid">
@@ -752,17 +753,31 @@ function AccountTab({ viewer, member, verificationFlags }) {
         subtitle="Basic server identity and access details"
         tone="account"
       >
-        <div className="info-grid">
-          <div className="mini-card">
-            <div className="ticket-info-label">Display Name</div>
-            <div>{safeText(member?.display_name || viewer?.username)}</div>
+        <div className="account-header">
+          <div className="account-avatar">
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt={`${displayName} avatar`}
+                width="64"
+                height="64"
+              />
+            ) : (
+              <div className="account-avatar-fallback" />
+            )}
           </div>
 
-          <div className="mini-card">
-            <div className="ticket-info-label">Username</div>
-            <div>{safeText(member?.username || viewer?.username)}</div>
+          <div className="account-header-copy">
+            <div className="profile-name" style={{ fontSize: 22 }}>
+              {displayName}
+            </div>
+            <div className="muted" style={{ marginTop: 4 }}>
+              {username}
+            </div>
           </div>
+        </div>
 
+        <div className="info-grid" style={{ marginTop: 14 }}>
           <div className="mini-card">
             <div className="ticket-info-label">Discord ID</div>
             <div>{safeText(viewer?.discord_id)}</div>
@@ -829,16 +844,6 @@ export default function UserDashboardClient({ initialData }) {
   const member = initialData?.member || null;
   const categories = safeArray(initialData?.categories);
   const verificationFlags = safeArray(initialData?.verificationFlags);
-
-  useMemo(
-    () =>
-      getPrimaryAction({
-        member,
-        openTicket: userOpenTicket,
-        verificationFlags,
-      }),
-    [member, userOpenTicket, verificationFlags]
-  );
 
   function goToTab(tab) {
     if (USER_TABS.includes(tab)) {
@@ -1076,7 +1081,6 @@ export default function UserDashboardClient({ initialData }) {
 
         <section className={activeTab === "home" ? "user-tab active" : "user-tab"}>
           <HomeTab
-            viewer={viewer}
             member={member}
             openTicket={userOpenTicket}
             verificationFlags={verificationFlags}
@@ -1143,10 +1147,6 @@ export default function UserDashboardClient({ initialData }) {
           box-shadow: var(--shadow-strong), var(--glow-green);
         }
 
-        .member-section.tone-actions {
-          box-shadow: var(--shadow-strong), var(--glow-blue);
-        }
-
         .member-section.tone-ticket,
         .member-section.tone-history {
           box-shadow: var(--shadow), var(--glow-purple);
@@ -1156,7 +1156,6 @@ export default function UserDashboardClient({ initialData }) {
           box-shadow: var(--shadow-strong), var(--glow-green);
         }
 
-        .member-hero-card,
         .ticket-row-card {
           border: 1px solid rgba(255, 255, 255, 0.08);
           background:
@@ -1164,37 +1163,6 @@ export default function UserDashboardClient({ initialData }) {
             rgba(255,255,255,0.025);
           border-radius: 22px;
           padding: 14px;
-        }
-
-        .member-hero-card.compact {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 12px;
-          flex-wrap: wrap;
-        }
-
-        .hero-profile {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          min-width: 0;
-          flex: 1;
-        }
-
-        .hero-avatar {
-          width: 52px;
-          height: 52px;
-          min-width: 52px;
-          border-radius: 999px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 22px;
-          font-weight: 900;
-          color: #07131c;
-          background: linear-gradient(135deg, #68f5bf 0%, #63d5ff 100%);
-          box-shadow: 0 0 18px rgba(99, 213, 255, 0.16);
         }
 
         .ticket-row-card.emphasis,
@@ -1214,20 +1182,10 @@ export default function UserDashboardClient({ initialData }) {
           letter-spacing: -0.03em;
         }
 
-        .hero-name {
-          font-size: clamp(24px, 4vw, 32px);
-        }
-
-        .hero-subline {
-          margin-top: 4px;
-          line-height: 1.5;
-        }
-
         .summary-grid {
           display: grid;
           grid-template-columns: repeat(1, minmax(0, 1fr));
           gap: 10px;
-          margin-top: 14px;
         }
 
         .summary-tile {
@@ -1306,6 +1264,42 @@ export default function UserDashboardClient({ initialData }) {
           margin-bottom: 8px;
           color: var(--text-strong, #f8fafc);
           letter-spacing: -0.03em;
+        }
+
+        .account-header {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          min-width: 0;
+        }
+
+        .account-avatar {
+          width: 64px;
+          height: 64px;
+          min-width: 64px;
+          border-radius: 999px;
+          overflow: hidden;
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          background: rgba(255, 255, 255, 0.04);
+          box-shadow: 0 0 18px rgba(99, 213, 255, 0.12);
+        }
+
+        .account-avatar img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
+
+        .account-avatar-fallback {
+          width: 100%;
+          height: 100%;
+          background: linear-gradient(135deg, #68f5bf 0%, #63d5ff 100%);
+        }
+
+        .account-header-copy {
+          min-width: 0;
+          flex: 1;
         }
 
         @media (min-width: 768px) {
