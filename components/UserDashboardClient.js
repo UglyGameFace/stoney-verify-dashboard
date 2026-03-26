@@ -4,15 +4,14 @@ import { useMemo, useState } from "react";
 import Topbar from "@/components/Topbar";
 import MobileBottomNav from "@/components/MobileBottomNav";
 
-const USER_TABS = ["home", "tickets", "help"];
+const USER_TABS = ["home", "tickets", "account"];
 
 const FALLBACK_CATEGORIES = [
   {
     id: "fallback-verification",
     name: "Verification",
     slug: "verification",
-    description:
-      "Help with pending verification, missing verified role, or verification review.",
+    description: "Help with pending verification, missing verified role, or verification review.",
     intake_type: "verification",
     button_label: "Open Verification Ticket",
     is_default: true,
@@ -21,8 +20,7 @@ const FALLBACK_CATEGORIES = [
     id: "fallback-appeal",
     name: "Appeal",
     slug: "appeal",
-    description:
-      "Appeal a moderation action or request review of a previous decision.",
+    description: "Appeal a moderation action or request review of a previous decision.",
     intake_type: "appeal",
     button_label: "Open Appeal Ticket",
     is_default: false,
@@ -31,8 +29,7 @@ const FALLBACK_CATEGORIES = [
     id: "fallback-report",
     name: "Report / Incident",
     slug: "report",
-    description:
-      "Report a member, suspicious activity, scam, abuse, or other incident.",
+    description: "Report a member, suspicious activity, scam, abuse, or other incident.",
     intake_type: "report",
     button_label: "Open Report Ticket",
     is_default: false,
@@ -41,8 +38,7 @@ const FALLBACK_CATEGORIES = [
     id: "fallback-question",
     name: "Question",
     slug: "question",
-    description:
-      "General support questions, access issues, or guidance on what to do next.",
+    description: "General support questions, access issues, or guidance on what to do next.",
     intake_type: "question",
     button_label: "Open Question Ticket",
     is_default: false,
@@ -69,6 +65,7 @@ function formatTime(value) {
 
 function timeAgo(value) {
   if (!value) return "—";
+
   try {
     const ms = new Date(value).getTime();
     if (!Number.isFinite(ms)) return "—";
@@ -93,26 +90,26 @@ function normalizeStatus(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-function getVerificationState(member, flags = []) {
+function getVisibleCategories(categories) {
+  const rows = safeArray(categories).filter((item) => item && item.name);
+  return rows.length ? rows : FALLBACK_CATEGORIES;
+}
+
+function getVerificationState(member, verificationFlags = []) {
   if (!member) return { label: "Not Synced Yet", tone: "warn" };
   if (member?.has_staff_role) return { label: "Staff", tone: "low" };
   if (member?.has_verified_role) return { label: "Verified", tone: "low" };
   if (member?.has_unverified) return { label: "Pending Verification", tone: "medium" };
-  if (safeArray(flags).some((f) => Boolean(f?.flagged))) {
+  if (safeArray(verificationFlags).some((f) => Boolean(f?.flagged))) {
     return { label: "Needs Review", tone: "danger" };
   }
-  return { label: safeText(member?.role_state, "Unknown"), tone: "medium" };
+  return { label: "Unknown", tone: "warn" };
 }
 
 function getRoleSummary(member) {
   if (!member) return [];
   const names = Array.isArray(member?.role_names) ? member.role_names : [];
-  return names.filter(Boolean).slice(0, 10);
-}
-
-function getVisibleCategories(categories) {
-  const rows = safeArray(categories).filter((item) => item && item.name);
-  return rows.length ? rows : FALLBACK_CATEGORIES;
+  return names.filter(Boolean).slice(0, 8);
 }
 
 function buildDiscordChannelUrl(ticket, initialData) {
@@ -122,6 +119,7 @@ function buildDiscordChannelUrl(ticket, initialData) {
     initialData?.member?.guild_id ||
     initialData?.guild_id ||
     "";
+
   const channelId = String(ticket?.channel_id || "").trim();
 
   if (!guildId || !channelId) return "";
@@ -143,114 +141,70 @@ function buildTicketSummary(ticket) {
   ].join("\n");
 }
 
-function getActionPlan({ member, openTicket, verificationFlags, vcVerifySession }) {
+function getPrimaryAction({ member, openTicket, verificationFlags }) {
   const hasFlags = safeArray(verificationFlags).some((f) => Boolean(f?.flagged));
-  const vcStatus = String(vcVerifySession?.status || "").toUpperCase();
 
   if (openTicket) {
     return {
-      title: "Stay in your current ticket",
-      body: "You already have an active ticket. Keep everything inside that same thread so staff can move faster and your issue stays clean.",
-      tone: "low",
-      primaryLabel: "Go To My Tickets",
-      primaryTargetTab: "tickets",
-      secondaryLabel: "Open Support Categories",
-      secondaryTargetTab: "help",
+      title: "You already have an open ticket",
+      body: "Keep updates inside that same ticket so staff can help you faster.",
+      primaryLabel: "View My Ticket",
+      primaryTab: "tickets",
+      secondaryLabel: "Account",
+      secondaryTab: "account",
       suggestedCategorySlug: null,
-      bullets: [
-        "Avoid duplicate tickets for the same issue.",
-        "Reply in your active ticket if you have updates.",
-        "Use the ticket action menu for fast copy and Discord access.",
-      ],
-    };
-  }
-
-  if (vcVerifySession && vcStatus === "PENDING") {
-    return {
-      title: "Finish your VC verify flow",
-      body: "You already have a pending VC verification session. Complete that flow first before starting anything new.",
-      tone: "medium",
-      primaryLabel: "View Account Status",
-      primaryTargetTab: "home",
-      secondaryLabel: "Open Support Categories",
-      secondaryTargetTab: "help",
-      suggestedCategorySlug: "verification",
-      bullets: [
-        "Complete the active VC verify steps first.",
-        "If the flow is stuck, open a verification support ticket.",
-        "Do not start multiple verification flows at once.",
-      ],
+      tone: "low",
     };
   }
 
   if (member?.has_unverified) {
     return {
-      title: "Open a verification ticket",
-      body: "Your account still appears unverified. The fastest next move is a verification ticket so staff can review and update your access.",
-      tone: "medium",
-      primaryLabel: "Open Verification Options",
-      primaryTargetTab: "help",
-      secondaryLabel: "View My Tickets",
-      secondaryTargetTab: "tickets",
+      title: "You still need verification",
+      body: "Open a verification ticket so staff can review your access.",
+      primaryLabel: "Open Verification Ticket",
+      primaryTab: "home",
+      secondaryLabel: "View Account",
+      secondaryTab: "account",
       suggestedCategorySlug: "verification",
-      bullets: [
-        "Use the verification-related category.",
-        "Explain what role or access you expected.",
-        "Once opened, keep all updates in that same ticket.",
-      ],
+      tone: "medium",
     };
   }
 
   if (hasFlags) {
     return {
-      title: "Request manual review",
-      body: "Your account has recent verification flags or conflicting state. Open a support ticket so staff can manually review it.",
-      tone: "danger",
-      primaryLabel: "Open Review Options",
-      primaryTargetTab: "help",
-      secondaryLabel: "View Account Status",
-      secondaryTargetTab: "home",
+      title: "Your account needs review",
+      body: "Open a support ticket so staff can manually review your account state.",
+      primaryLabel: "Open Review Ticket",
+      primaryTab: "home",
+      secondaryLabel: "View Account",
+      secondaryTab: "account",
       suggestedCategorySlug: "verification",
-      bullets: [
-        "Mention any missing role or blocked access.",
-        "Choose the category closest to the issue.",
-        "Keep your updates inside one ticket after it opens.",
-      ],
+      tone: "danger",
     };
   }
 
   if (member?.has_verified_role) {
     return {
       title: "You are verified",
-      body: "Your verified role is present. If something still feels wrong, use a support ticket under the category that best matches the issue.",
-      tone: "low",
-      primaryLabel: "See Support Categories",
-      primaryTargetTab: "help",
+      body: "If something still looks wrong, open the support category that best matches your issue.",
+      primaryLabel: "Open Support Ticket",
+      primaryTab: "home",
       secondaryLabel: "View My Tickets",
-      secondaryTargetTab: "tickets",
+      secondaryTab: "tickets",
       suggestedCategorySlug: null,
-      bullets: [
-        "Only open support if something is missing or broken.",
-        "Pick the closest category to your issue.",
-        "Your past tickets stay visible in the Tickets tab.",
-      ],
+      tone: "low",
     };
   }
 
   return {
-    title: "Open support if needed",
-    body: "If your access looks wrong or you need help, open a support ticket and choose the category that best matches your issue.",
-    tone: "medium",
-    primaryLabel: "See Support Categories",
-    primaryTargetTab: "help",
-    secondaryLabel: "View My Tickets",
-    secondaryTargetTab: "tickets",
+    title: "Need help?",
+    body: "Open the support category that best matches your issue.",
+    primaryLabel: "Open Support Ticket",
+    primaryTab: "home",
+    secondaryLabel: "View Account",
+    secondaryTab: "account",
     suggestedCategorySlug: null,
-    bullets: [
-      "Choose the closest help category.",
-      "Explain what role or access you expected.",
-      "Keep your issue in one ticket thread.",
-    ],
+    tone: "medium",
   };
 }
 
@@ -272,12 +226,6 @@ function Section({ title, subtitle, children, actions = null, tone = "default" }
         }}
       >
         <div>
-          <div className="section-chip-row">
-            <span className="section-chip">Member Portal</span>
-            {tone !== "default" ? (
-              <span className={`section-chip tone-${tone}`}>{tone}</span>
-            ) : null}
-          </div>
           <h2 style={{ margin: 0 }}>{title}</h2>
           {subtitle ? (
             <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
@@ -292,21 +240,20 @@ function Section({ title, subtitle, children, actions = null, tone = "default" }
   );
 }
 
-function SummaryTiles({ member, openTicket, verificationFlags }) {
-  const roles = getRoleSummary(member);
-  const flagCount = safeArray(verificationFlags).length;
+function OverviewTiles({ verification, openTicket, member }) {
+  const accessLabel = member?.has_verified_role
+    ? "Verified Access"
+    : member?.has_unverified
+      ? "Limited Access"
+      : member?.has_staff_role
+        ? "Staff Access"
+        : "Unknown";
 
   return (
     <div className="summary-grid">
       <div className="summary-tile neon-green">
         <div className="ticket-info-label">Verification</div>
-        <div className="summary-value">
-          {member?.has_verified_role
-            ? "Verified"
-            : member?.has_unverified
-              ? "Pending"
-              : "Unknown"}
-        </div>
+        <div className="summary-value">{verification.label}</div>
       </div>
 
       <div className="summary-tile neon-blue">
@@ -315,84 +262,125 @@ function SummaryTiles({ member, openTicket, verificationFlags }) {
       </div>
 
       <div className="summary-tile neon-purple">
-        <div className="ticket-info-label">Tracked Roles</div>
-        <div className="summary-value">{roles.length}</div>
-      </div>
-
-      <div className="summary-tile neon-amber">
-        <div className="ticket-info-label">Recent Flags</div>
-        <div className="summary-value">{flagCount}</div>
+        <div className="ticket-info-label">Access</div>
+        <div className="summary-value">{accessLabel}</div>
       </div>
     </div>
   );
 }
 
-function ActionCenter({
-  plan,
-  onGoPrimary,
-  onGoSecondary,
-  canRequestVerification,
-  onRequestVerification,
-  isCreating,
-}) {
+function CurrentTicketCard({ ticket, initialData }) {
+  if (!ticket) {
+    return <div className="empty-state">You do not currently have an open ticket.</div>;
+  }
+
+  const discordUrl = buildDiscordChannelUrl(ticket, initialData);
+
   return (
-    <div className={`status-panel ${plan.tone}`}>
-      <div className="status-title">{plan.title}</div>
-      <div className="muted" style={{ lineHeight: 1.6 }}>
-        {plan.body}
-      </div>
-
-      {safeArray(plan.bullets).length ? (
-        <div style={{ marginTop: 12, display: "grid", gap: 7 }}>
-          {plan.bullets.map((bullet) => (
-            <div key={bullet} className="muted" style={{ lineHeight: 1.5 }}>
-              • {bullet}
-            </div>
-          ))}
-        </div>
-      ) : null}
-
+    <div className="ticket-row-card emphasis">
       <div
+        className="row"
         style={{
-          display: "flex",
-          gap: 10,
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 12,
           flexWrap: "wrap",
-          marginTop: 14,
         }}
       >
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="profile-name" style={{ fontSize: 18 }}>
+            {safeText(ticket?.title, "Open Ticket")}
+          </div>
+          <div className="muted" style={{ marginTop: 6 }}>
+            Updated {timeAgo(ticket?.updated_at || ticket?.created_at)}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <StatusBadge label={safeText(ticket?.status)} tone="medium" />
+          <StatusBadge label={safeText(ticket?.priority)} />
+        </div>
+      </div>
+
+      <div className="info-grid" style={{ marginTop: 12 }}>
+        <div className="mini-card">
+          <div className="ticket-info-label">Category</div>
+          <div>{safeText(ticket?.matched_category_name || ticket?.category)}</div>
+        </div>
+
+        <div className="mini-card">
+          <div className="ticket-info-label">Channel</div>
+          <div>{safeText(ticket?.channel_name || ticket?.channel_id)}</div>
+        </div>
+
+        <div className="mini-card">
+          <div className="ticket-info-label">Created</div>
+          <div>{formatTime(ticket?.created_at)}</div>
+        </div>
+
+        <div className="mini-card">
+          <div className="ticket-info-label">Claimed By</div>
+          <div>{safeText(ticket?.claimed_by)}</div>
+        </div>
+      </div>
+
+      {discordUrl ? (
+        <div style={{ marginTop: 12 }}>
+          <a
+            href={discordUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="button ghost"
+            style={{ width: "auto", minWidth: 180, textAlign: "center", textDecoration: "none" }}
+          >
+            Open In Discord
+          </a>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CategoryCard({ category, highlighted, onUseThisCategory, isCreating }) {
+  return (
+    <div className={`ticket-row-card category-card ${highlighted ? "emphasis" : ""}`}>
+      <div
+        className="row"
+        style={{
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="profile-name" style={{ fontSize: 16 }}>
+            {safeText(category?.name)}
+          </div>
+          <div className="muted" style={{ marginTop: 6, lineHeight: 1.55 }}>
+            {safeText(category?.description, "No description provided.")}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <StatusBadge label={safeText(category?.intake_type, "general")} />
+          {category?.is_default ? <StatusBadge label="Default" tone="low" /> : null}
+          {highlighted ? <StatusBadge label="Recommended" tone="medium" /> : null}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
         <button
           type="button"
           className="button primary"
-          style={{ width: "auto", minWidth: 170 }}
-          onClick={onGoPrimary}
+          style={{ width: "auto", minWidth: 190 }}
+          onClick={() => onUseThisCategory(category)}
           disabled={isCreating}
         >
-          {plan.primaryLabel}
+          {isCreating
+            ? "Submitting..."
+            : safeText(category?.button_label, "Use This Category")}
         </button>
-
-        {plan.secondaryLabel ? (
-          <button
-            type="button"
-            className="button ghost"
-            style={{ width: "auto", minWidth: 170 }}
-            onClick={onGoSecondary}
-            disabled={isCreating}
-          >
-            {plan.secondaryLabel}
-          </button>
-        ) : null}
-
-        {canRequestVerification ? (
-          <button
-            type="button"
-            className="button ghost"
-            style={{ width: "auto", minWidth: 210 }}
-            onClick={onRequestVerification}
-            disabled={isCreating}
-          >
-            {isCreating ? "Submitting..." : "Request Verification Ticket"}
-          </button>
-        ) : null}
       </div>
     </div>
   );
@@ -402,7 +390,6 @@ function TicketActions({
   ticket,
   initialData,
   onRefreshStatus,
-  onOpenCategories,
   onRequestReopen,
   onNotice,
 }) {
@@ -428,7 +415,7 @@ function TicketActions({
             target="_blank"
             rel="noreferrer"
             className="button ghost"
-            style={{ width: "auto", minWidth: 150, textAlign: "center" }}
+            style={{ width: "auto", minWidth: 150, textAlign: "center", textDecoration: "none" }}
           >
             Open In Discord
           </a>
@@ -447,9 +434,7 @@ function TicketActions({
           type="button"
           className="button ghost"
           style={{ width: "auto", minWidth: 160 }}
-          onClick={() =>
-            copyText(buildTicketSummary(ticket), "Ticket summary copied.")
-          }
+          onClick={() => copyText(buildTicketSummary(ticket), "Ticket summary copied.")}
         >
           Copy Ticket Summary
         </button>
@@ -463,15 +448,6 @@ function TicketActions({
           Refresh Status
         </button>
 
-        <button
-          type="button"
-          className="button ghost"
-          style={{ width: "auto", minWidth: 150 }}
-          onClick={onOpenCategories}
-        >
-          Open Categories
-        </button>
-
         {isClosed && !isDeleted ? (
           <button
             type="button"
@@ -483,42 +459,6 @@ function TicketActions({
           </button>
         ) : null}
       </div>
-
-      <div className="mini-card">
-        <div className="ticket-info-label">Ticket Details</div>
-
-        <div className="info-grid" style={{ marginTop: 10 }}>
-          <div className="mini-card">
-            <div className="ticket-info-label">Created</div>
-            <div>{formatTime(ticket?.created_at)}</div>
-          </div>
-
-          <div className="mini-card">
-            <div className="ticket-info-label">Updated</div>
-            <div>{formatTime(ticket?.updated_at)}</div>
-          </div>
-
-          <div className="mini-card">
-            <div className="ticket-info-label">Claimed By</div>
-            <div>{safeText(ticket?.claimed_by)}</div>
-          </div>
-
-          <div className="mini-card">
-            <div className="ticket-info-label">Closed Reason</div>
-            <div>{safeText(ticket?.closed_reason)}</div>
-          </div>
-
-          <div className="mini-card">
-            <div className="ticket-info-label">Channel ID</div>
-            <div>{safeText(ticket?.channel_id)}</div>
-          </div>
-
-          <div className="mini-card">
-            <div className="ticket-info-label">Channel Name</div>
-            <div>{safeText(ticket?.channel_name)}</div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -529,7 +469,6 @@ function TicketCard({
   onToggle,
   initialData,
   onRefreshStatus,
-  onOpenCategories,
   onRequestReopen,
   onNotice,
 }) {
@@ -591,7 +530,6 @@ function TicketCard({
           ticket={ticket}
           initialData={initialData}
           onRefreshStatus={onRefreshStatus}
-          onOpenCategories={onOpenCategories}
           onRequestReopen={onRequestReopen}
           onNotice={onNotice}
         />
@@ -605,35 +543,26 @@ function HomeTab({
   member,
   openTicket,
   verificationFlags,
-  vcVerifySession,
+  categories,
+  initialData,
+  onUseCategory,
   onGoToTab,
-  onRequestVerification,
   isCreating,
 }) {
   const verification = getVerificationState(member, verificationFlags);
-  const roles = getRoleSummary(member);
-  const actionPlan = getActionPlan({
-    member,
-    openTicket,
-    verificationFlags,
-    vcVerifySession,
-  });
-
-  const canRequestVerification =
-    !openTicket &&
-    (member?.has_unverified ||
-      safeArray(verificationFlags).some((f) => Boolean(f?.flagged)));
+  const action = getPrimaryAction({ member, openTicket, verificationFlags });
+  const visibleCategories = getVisibleCategories(categories);
 
   return (
     <div className="user-dashboard-grid">
       <Section
-        title="My Smoke Sheet"
-        subtitle="Your server identity, access state, and verification position"
+        title="My Dashboard"
+        subtitle="Your verification status, support access, and current ticket"
         tone="account"
       >
         <div className="member-hero-card">
           <div style={{ minWidth: 0 }}>
-            <div className="member-kicker">Member support portal</div>
+            <div className="member-kicker">Member portal</div>
             <div className="profile-name hero-name">
               {safeText(member?.display_name || viewer?.username, "Member")}
             </div>
@@ -650,341 +579,68 @@ function HomeTab({
           </div>
         </div>
 
-        <SummaryTiles
-          member={member}
+        <OverviewTiles
+          verification={verification}
           openTicket={openTicket}
-          verificationFlags={verificationFlags}
+          member={member}
         />
 
-        <div className="info-grid" style={{ marginTop: 14 }}>
-          <div className="mini-card">
-            <div className="ticket-info-label">Display Name</div>
-            <div>{safeText(member?.display_name || viewer?.username)}</div>
+        <div className={`status-panel ${action.tone}`} style={{ marginTop: 14 }}>
+          <div className="status-title">{action.title}</div>
+          <div className="muted" style={{ lineHeight: 1.6 }}>
+            {action.body}
           </div>
 
-          <div className="mini-card">
-            <div className="ticket-info-label">Username</div>
-            <div>{safeText(member?.username || viewer?.username)}</div>
-          </div>
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              flexWrap: "wrap",
+              marginTop: 14,
+            }}
+          >
+            <button
+              type="button"
+              className="button primary"
+              style={{ width: "auto", minWidth: 170 }}
+              onClick={() => onGoToTab(action.primaryTab)}
+              disabled={isCreating}
+            >
+              {action.primaryLabel}
+            </button>
 
-          <div className="mini-card">
-            <div className="ticket-info-label">Role State</div>
-            <div>{safeText(member?.role_state)}</div>
-          </div>
-
-          <div className="mini-card">
-            <div className="ticket-info-label">Joined</div>
-            <div>{formatTime(member?.joined_at)}</div>
+            <button
+              type="button"
+              className="button ghost"
+              style={{ width: "auto", minWidth: 170 }}
+              onClick={() => onGoToTab(action.secondaryTab)}
+              disabled={isCreating}
+            >
+              {action.secondaryLabel}
+            </button>
           </div>
         </div>
-
-        {roles.length ? (
-          <div style={{ marginTop: 14 }}>
-            <div className="ticket-info-label" style={{ marginBottom: 8 }}>
-              My Roles
-            </div>
-            <div className="roles">
-              {roles.map((role) => (
-                <span key={role} className="badge">
-                  {role}
-                </span>
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </Section>
-
-      <Section
-        title="Action Center"
-        subtitle="Only the next move you really need"
-        tone="actions"
-      >
-        <ActionCenter
-          plan={actionPlan}
-          canRequestVerification={canRequestVerification}
-          onRequestVerification={onRequestVerification}
-          onGoPrimary={() => onGoToTab(actionPlan.primaryTargetTab)}
-          onGoSecondary={() =>
-            actionPlan.secondaryTargetTab
-              ? onGoToTab(actionPlan.secondaryTargetTab)
-              : null
-          }
-          isCreating={isCreating}
-        />
-
-        {vcVerifySession ? (
-          <div className="mini-card" style={{ marginTop: 14 }}>
-            <div className="ticket-info-label">VC Verify Session</div>
-            <div style={{ marginTop: 8 }}>
-              Status: {safeText(vcVerifySession?.status)}
-            </div>
-            <div className="muted" style={{ marginTop: 6 }}>
-              Created: {formatTime(vcVerifySession?.created_at)}
-            </div>
-          </div>
-        ) : null}
       </Section>
 
       <Section
         title="My Current Ticket"
-        subtitle="Your most recent active support thread"
+        subtitle="Your active support thread"
         tone="ticket"
       >
-        {openTicket ? (
-          <div className="space">
-            <div className="ticket-row-card emphasis">
-              <div
-                className="row"
-                style={{
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  gap: 12,
-                  flexWrap: "wrap",
-                }}
-              >
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div className="profile-name" style={{ fontSize: 18 }}>
-                    {safeText(openTicket?.title, "Open Ticket")}
-                  </div>
-                  <div className="muted" style={{ marginTop: 6 }}>
-                    Updated {timeAgo(openTicket?.updated_at || openTicket?.created_at)}
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <StatusBadge label={safeText(openTicket?.status)} tone="medium" />
-                  <StatusBadge label={safeText(openTicket?.priority)} />
-                </div>
-              </div>
-
-              <div className="info-grid" style={{ marginTop: 12 }}>
-                <div className="mini-card">
-                  <div className="ticket-info-label">Category</div>
-                  <div>{safeText(openTicket?.matched_category_name || openTicket?.category)}</div>
-                </div>
-
-                <div className="mini-card">
-                  <div className="ticket-info-label">Channel</div>
-                  <div>{safeText(openTicket?.channel_name || openTicket?.channel_id)}</div>
-                </div>
-
-                <div className="mini-card">
-                  <div className="ticket-info-label">Claimed By</div>
-                  <div>{safeText(openTicket?.claimed_by)}</div>
-                </div>
-
-                <div className="mini-card">
-                  <div className="ticket-info-label">Created</div>
-                  <div>{formatTime(openTicket?.created_at)}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="empty-state">
-            You do not currently have an open ticket.
-          </div>
-        )}
-      </Section>
-    </div>
-  );
-}
-
-function TicketsTab({
-  recentTickets,
-  showDeletedHistory,
-  onToggleDeletedHistory,
-  isPolling,
-  initialData,
-  onRefreshAllTickets,
-  onOpenCategories,
-  onRequestReopen,
-  onNotice,
-}) {
-  const [expandedTicketId, setExpandedTicketId] = useState(null);
-
-  const activeTickets = safeArray(recentTickets).filter((ticket) =>
-    ["open", "claimed"].includes(normalizeStatus(ticket?.status))
-  );
-
-  const closedTickets = safeArray(recentTickets).filter(
-    (ticket) => normalizeStatus(ticket?.status) === "closed"
-  );
-
-  const deletedTickets = safeArray(recentTickets).filter(
-    (ticket) => normalizeStatus(ticket?.status) === "deleted"
-  );
-
-  function toggleTicket(id) {
-    setExpandedTicketId((prev) => (prev === id ? null : id));
-  }
-
-  return (
-    <div className="user-dashboard-grid">
-      <Section
-        title="Active Tickets"
-        subtitle={`${activeTickets.length} active ticket${activeTickets.length === 1 ? "" : "s"}`}
-        tone="ticket"
-        actions={isPolling ? <span className="badge medium">Waiting for bot…</span> : null}
-      >
-        {!activeTickets.length ? (
-          <div className="empty-state">You do not currently have an active ticket.</div>
-        ) : (
-          <div className="space">
-            {activeTickets.map((ticket) => (
-              <TicketCard
-                key={ticket.id}
-                ticket={ticket}
-                expanded={expandedTicketId === ticket.id}
-                onToggle={() => toggleTicket(ticket.id)}
-                initialData={initialData}
-                onRefreshStatus={onRefreshAllTickets}
-                onOpenCategories={onOpenCategories}
-                onRequestReopen={() => onRequestReopen(ticket)}
-                onNotice={onNotice}
-              />
-            ))}
-          </div>
-        )}
+        <CurrentTicketCard ticket={openTicket} initialData={initialData} />
       </Section>
 
-      <Section
-        title="Closed Ticket History"
-        subtitle={`${closedTickets.length} closed ticket${closedTickets.length === 1 ? "" : "s"}`}
-        tone="history"
-      >
-        {!closedTickets.length ? (
-          <div className="empty-state">No closed ticket history found.</div>
-        ) : (
-          <div className="space">
-            {closedTickets.map((ticket) => (
-              <TicketCard
-                key={ticket.id}
-                ticket={ticket}
-                expanded={expandedTicketId === ticket.id}
-                onToggle={() => toggleTicket(ticket.id)}
-                initialData={initialData}
-                onRefreshStatus={onRefreshAllTickets}
-                onOpenCategories={onOpenCategories}
-                onRequestReopen={() => onRequestReopen(ticket)}
-                onNotice={onNotice}
-              />
-            ))}
-          </div>
-        )}
-      </Section>
-
-      <Section
-        title="Deleted / Archived History"
-        subtitle={`${deletedTickets.length} deleted ticket${deletedTickets.length === 1 ? "" : "s"}`}
-        tone="history"
-        actions={
-          <button
-            type="button"
-            className="button ghost"
-            style={{ width: "auto", minWidth: 150 }}
-            onClick={onToggleDeletedHistory}
-          >
-            {showDeletedHistory ? "Hide Deleted" : "Show Deleted"}
-          </button>
-        }
-      >
-        {!showDeletedHistory ? (
-          <div className="empty-state">
-            Deleted ticket rows are hidden by default so your history stays cleaner.
-          </div>
-        ) : !deletedTickets.length ? (
-          <div className="empty-state">No deleted ticket history found.</div>
-        ) : (
-          <div className="space">
-            {deletedTickets.map((ticket) => (
-              <TicketCard
-                key={ticket.id}
-                ticket={ticket}
-                expanded={expandedTicketId === ticket.id}
-                onToggle={() => toggleTicket(ticket.id)}
-                initialData={initialData}
-                onRefreshStatus={onRefreshAllTickets}
-                onOpenCategories={onOpenCategories}
-                onRequestReopen={() => onRequestReopen(ticket)}
-                onNotice={onNotice}
-              />
-            ))}
-          </div>
-        )}
-      </Section>
-    </div>
-  );
-}
-
-function CategoryCard({ category, highlighted, onUseThisCategory, isCreating }) {
-  return (
-    <div className={`ticket-row-card category-card ${highlighted ? "emphasis" : ""}`}>
-      <div
-        className="row"
-        style={{
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
-      >
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="profile-name" style={{ fontSize: 16 }}>
-            {safeText(category?.name)}
-          </div>
-          <div className="muted" style={{ marginTop: 6, lineHeight: 1.55 }}>
-            {safeText(category?.description, "No description provided.")}
-          </div>
-        </div>
-
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <StatusBadge label={safeText(category?.intake_type, "general")} />
-          {category?.is_default ? <StatusBadge label="Default" tone="low" /> : null}
-          {highlighted ? <StatusBadge label="Recommended" tone="medium" /> : null}
-        </div>
-      </div>
-
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
-        <button
-          type="button"
-          className="button primary"
-          style={{ width: "auto", minWidth: 190 }}
-          onClick={() => onUseThisCategory(category)}
-          disabled={isCreating}
-        >
-          {isCreating
-            ? "Submitting..."
-            : safeText(category?.button_label, "Use This Category")}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function HelpTab({
-  categories,
-  openTicket,
-  onGoToTab,
-  recommendedCategorySlug,
-  onUseCategory,
-  isCreating,
-}) {
-  const rows = getVisibleCategories(categories);
-
-  return (
-    <div className="user-dashboard-grid">
       <Section
         title="Support Categories"
-        subtitle="Pick the category that best matches your issue"
+        subtitle="Choose the category that best matches your issue"
         tone="categories"
       >
         <div className="space">
-          {rows.map((category) => {
+          {visibleCategories.map((category) => {
             const highlighted =
-              recommendedCategorySlug &&
+              action?.suggestedCategorySlug &&
               String(category?.slug || "").trim().toLowerCase() ===
-                String(recommendedCategorySlug || "").trim().toLowerCase();
+                String(action.suggestedCategorySlug || "").trim().toLowerCase();
 
             return (
               <CategoryCard
@@ -998,43 +654,157 @@ function HelpTab({
           })}
         </div>
       </Section>
+    </div>
+  );
+}
+
+function TicketsTab({
+  recentTickets,
+  initialData,
+  isPolling,
+  onRefreshAllTickets,
+  onRequestReopen,
+  onNotice,
+}) {
+  const [expandedTicketId, setExpandedTicketId] = useState(null);
+
+  const activeTickets = safeArray(recentTickets).filter((ticket) =>
+    ["open", "claimed"].includes(normalizeStatus(ticket?.status))
+  );
+
+  const closedTickets = safeArray(recentTickets)
+    .filter((ticket) => normalizeStatus(ticket?.status) === "closed")
+    .slice(0, 8);
+
+  function toggleTicket(id) {
+    setExpandedTicketId((prev) => (prev === id ? null : id));
+  }
+
+  return (
+    <div className="user-dashboard-grid">
+      <Section
+        title="Active Tickets"
+        subtitle={`${activeTickets.length} active ticket${activeTickets.length === 1 ? "" : "s"}`}
+        tone="ticket"
+        actions={isPolling ? <span className="badge medium">Refreshing…</span> : null}
+      >
+        {!activeTickets.length ? (
+          <div className="empty-state">You do not currently have an active ticket.</div>
+        ) : (
+          <div className="space">
+            {activeTickets.map((ticket) => (
+              <TicketCard
+                key={ticket.id}
+                ticket={ticket}
+                expanded={expandedTicketId === ticket.id}
+                onToggle={() => toggleTicket(ticket.id)}
+                initialData={initialData}
+                onRefreshStatus={onRefreshAllTickets}
+                onRequestReopen={() => onRequestReopen(ticket)}
+                onNotice={onNotice}
+              />
+            ))}
+          </div>
+        )}
+      </Section>
 
       <Section
-        title="Best Next Step"
-        subtitle="What you should do right now"
-        tone="actions"
+        title="Recent Closed Tickets"
+        subtitle={`${closedTickets.length} recent closed ticket${closedTickets.length === 1 ? "" : "s"}`}
+        tone="history"
       >
-        <div className="status-panel low">
-          <div className="status-title">
-            {openTicket ? "Use your current ticket" : "Submit a support request"}
+        {!closedTickets.length ? (
+          <div className="empty-state">No recent closed ticket history found.</div>
+        ) : (
+          <div className="space">
+            {closedTickets.map((ticket) => (
+              <TicketCard
+                key={ticket.id}
+                ticket={ticket}
+                expanded={expandedTicketId === ticket.id}
+                onToggle={() => toggleTicket(ticket.id)}
+                initialData={initialData}
+                onRefreshStatus={onRefreshAllTickets}
+                onRequestReopen={() => onRequestReopen(ticket)}
+                onNotice={onNotice}
+              />
+            ))}
           </div>
-          <div className="muted" style={{ lineHeight: 1.6 }}>
-            {openTicket
-              ? "You already have an active ticket. Continue there so staff can help you faster and keep everything in one place."
-              : "Use one of the categories above to queue a support request. Your Discord ticket should appear shortly after the bot processes it."}
+        )}
+      </Section>
+    </div>
+  );
+}
+
+function AccountTab({ viewer, member, verificationFlags }) {
+  const verification = getVerificationState(member, verificationFlags);
+  const roles = getRoleSummary(member);
+
+  return (
+    <div className="user-dashboard-grid">
+      <Section
+        title="My Account"
+        subtitle="Your basic server identity and access details"
+        tone="account"
+      >
+        <div className="info-grid">
+          <div className="mini-card">
+            <div className="ticket-info-label">Display Name</div>
+            <div>{safeText(member?.display_name || viewer?.username)}</div>
           </div>
 
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
-            <button
-              type="button"
-              className="button ghost"
-              style={{ width: "auto", minWidth: 150 }}
-              onClick={() => onGoToTab("tickets")}
-              disabled={isCreating}
-            >
-              View My Tickets
-            </button>
-
-            <button
-              type="button"
-              className="button ghost"
-              style={{ width: "auto", minWidth: 160 }}
-              onClick={() => onGoToTab("home")}
-              disabled={isCreating}
-            >
-              View Account Status
-            </button>
+          <div className="mini-card">
+            <div className="ticket-info-label">Username</div>
+            <div>{safeText(member?.username || viewer?.username)}</div>
           </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Discord ID</div>
+            <div>{safeText(viewer?.discord_id)}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Joined</div>
+            <div>{formatTime(member?.joined_at)}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Verification</div>
+            <div>{verification.label}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Access</div>
+            <div>
+              {member?.has_verified_role
+                ? "Verified"
+                : member?.has_unverified
+                  ? "Limited"
+                  : member?.has_staff_role
+                    ? "Staff"
+                    : "Unknown"}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 14 }}>
+          <div className="ticket-info-label" style={{ marginBottom: 8 }}>
+            Roles
+          </div>
+
+          {roles.length ? (
+            <div className="roles">
+              {roles.map((role) => (
+                <span key={role} className="badge">
+                  {role}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state" style={{ padding: 14 }}>
+              No roles are currently visible here.
+            </div>
+          )}
         </div>
       </Section>
     </div>
@@ -1043,7 +813,6 @@ function HelpTab({
 
 export default function UserDashboardClient({ initialData }) {
   const [activeTab, setActiveTab] = useState("home");
-  const [showDeletedHistory, setShowDeletedHistory] = useState(false);
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState("info");
   const [isCreating, setIsCreating] = useState(false);
@@ -1055,17 +824,15 @@ export default function UserDashboardClient({ initialData }) {
   const member = initialData?.member || null;
   const categories = safeArray(initialData?.categories);
   const verificationFlags = safeArray(initialData?.verificationFlags);
-  const vcVerifySession = initialData?.vcVerifySession || null;
 
-  const actionPlan = useMemo(
+  const primaryAction = useMemo(
     () =>
-      getActionPlan({
+      getPrimaryAction({
         member,
         openTicket: userOpenTicket,
         verificationFlags,
-        vcVerifySession,
       }),
-    [member, userOpenTicket, verificationFlags, vcVerifySession]
+    [member, userOpenTicket, verificationFlags]
   );
 
   function goToTab(tab) {
@@ -1255,24 +1022,6 @@ export default function UserDashboardClient({ initialData }) {
     queueTicketForCategory(category);
   }
 
-  function handleRequestVerification() {
-    const category =
-      getVisibleCategories(categories).find(
-        (item) =>
-          String(item?.slug || "").trim().toLowerCase() === "verification"
-      ) || FALLBACK_CATEGORIES[0];
-
-    queueTicketForCategory(
-      category,
-      "Member requested verification help from the dashboard."
-    );
-  }
-
-  function handleOpenCategories() {
-    goToTab("help");
-    showTempNotice("Choose a support category below.", "info");
-  }
-
   function handleRequestReopen(ticket) {
     const reopenCategory =
       getVisibleCategories(categories).find(
@@ -1326,9 +1075,10 @@ export default function UserDashboardClient({ initialData }) {
             member={member}
             openTicket={userOpenTicket}
             verificationFlags={verificationFlags}
-            vcVerifySession={vcVerifySession}
+            categories={categories}
+            initialData={initialData}
+            onUseCategory={handleUseCategory}
             onGoToTab={goToTab}
-            onRequestVerification={handleRequestVerification}
             isCreating={isCreating}
           />
         </section>
@@ -1336,25 +1086,19 @@ export default function UserDashboardClient({ initialData }) {
         <section className={activeTab === "tickets" ? "user-tab active" : "user-tab"}>
           <TicketsTab
             recentTickets={userTickets}
-            showDeletedHistory={showDeletedHistory}
-            onToggleDeletedHistory={() => setShowDeletedHistory((prev) => !prev)}
-            isPolling={isPolling}
             initialData={initialData}
+            isPolling={isPolling}
             onRefreshAllTickets={refreshTicketsNow}
-            onOpenCategories={handleOpenCategories}
             onRequestReopen={handleRequestReopen}
             onNotice={showTempNotice}
           />
         </section>
 
-        <section className={activeTab === "help" ? "user-tab active" : "user-tab"}>
-          <HelpTab
-            categories={categories}
-            openTicket={userOpenTicket}
-            onGoToTab={goToTab}
-            recommendedCategorySlug={actionPlan?.suggestedCategorySlug}
-            onUseCategory={handleUseCategory}
-            isCreating={isCreating}
+        <section className={activeTab === "account" ? "user-tab active" : "user-tab"}>
+          <AccountTab
+            viewer={viewer}
+            member={member}
+            verificationFlags={verificationFlags}
           />
         </section>
       </main>
@@ -1363,6 +1107,7 @@ export default function UserDashboardClient({ initialData }) {
         activeTab={activeTab}
         onChange={setActiveTab}
         tabs={USER_TABS}
+        title="Quick Menu"
       />
 
       <style jsx>{`
@@ -1407,38 +1152,6 @@ export default function UserDashboardClient({ initialData }) {
           box-shadow: var(--shadow-strong), var(--glow-green);
         }
 
-        .section-chip-row {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-          margin-bottom: 10px;
-        }
-
-        .section-chip {
-          display: inline-flex;
-          align-items: center;
-          min-height: 28px;
-          padding: 6px 10px;
-          border-radius: 999px;
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: 0.04em;
-          text-transform: uppercase;
-          color: var(--text);
-          border: 1px solid rgba(255,255,255,0.08);
-          background: rgba(255,255,255,0.03);
-        }
-
-        .section-chip.tone-account {
-          background: rgba(93,255,141,0.12);
-          border-color: rgba(93,255,141,0.18);
-        }
-
-        .section-chip.tone-actions {
-          background: rgba(99,213,255,0.12);
-          border-color: rgba(99,213,255,0.18);
-        }
-
         .member-kicker {
           font-size: 12px;
           font-weight: 800;
@@ -1481,7 +1194,7 @@ export default function UserDashboardClient({ initialData }) {
 
         .summary-grid {
           display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+          grid-template-columns: repeat(1, minmax(0, 1fr));
           gap: 10px;
           margin-top: 14px;
         }
@@ -1504,10 +1217,6 @@ export default function UserDashboardClient({ initialData }) {
 
         .summary-tile.neon-purple {
           box-shadow: inset 0 0 0 1px rgba(178,109,255,0.06), 0 0 16px rgba(178,109,255,0.05);
-        }
-
-        .summary-tile.neon-amber {
-          box-shadow: inset 0 0 0 1px rgba(255,211,107,0.06), 0 0 16px rgba(255,211,107,0.05);
         }
 
         .summary-value {
@@ -1574,7 +1283,7 @@ export default function UserDashboardClient({ initialData }) {
           }
 
           .summary-grid {
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(3, minmax(0, 1fr));
           }
         }
 
