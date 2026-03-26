@@ -3,8 +3,97 @@ import { createServerSupabase } from "@/lib/supabase-server";
 import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
 import { env } from "@/lib/env";
 
+const PRESET_KEYWORDS = {
+  verification: [
+    "verification",
+    "verify",
+    "verification issue",
+    "id verification",
+    "secure upload",
+    "verify in vc",
+    "vc verify",
+  ],
+  appeal: [
+    "appeal",
+    "ban appeal",
+    "timeout appeal",
+    "unban",
+    "unmute",
+  ],
+  report: [
+    "report",
+    "incident",
+    "scam",
+    "abuse",
+    "harassment",
+  ],
+  partnership: [
+    "partnership",
+    "partner",
+    "collab",
+    "collaboration",
+    "sponsor",
+  ],
+  question: [
+    "question",
+    "questions",
+    "help question",
+    "how to",
+    "how do i",
+  ],
+  general: [
+    "support",
+    "help",
+    "general support",
+  ],
+};
+
+const COD_SERVICE_KEYWORDS = [
+  "cod",
+  "call of duty",
+  "cod service",
+  "cod services",
+  "cod recovery",
+  "recovery",
+  "recoveries",
+  "challenge lobby",
+  "challenge lobbies",
+  "modded lobby",
+  "modded lobbies",
+  "unlock all",
+  "prestige",
+  "rank unlock",
+  "camo unlock",
+  "account recovery",
+  "old cod",
+  "older cod",
+  "legacy cod",
+  "bo1",
+  "bo2",
+  "bo3",
+  "black ops 1",
+  "black ops 2",
+  "black ops 3",
+  "mw2",
+  "mw3",
+  "modern warfare 2",
+  "modern warfare 3",
+  "waw",
+  "world at war",
+  "bot lobby",
+  "zombies rank",
+];
+
 function normalizeString(value) {
   return String(value || "").trim();
+}
+
+function normalizeText(value) {
+  return normalizeString(value)
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function slugify(value) {
@@ -56,6 +145,54 @@ function normalizeBoolean(value) {
   return clean === "true" || clean === "1" || clean === "yes" || clean === "on";
 }
 
+function containsAny(haystack, needles) {
+  const cleanHaystack = normalizeText(haystack);
+  if (!cleanHaystack) return false;
+  return needles.some((needle) => {
+    const cleanNeedle = normalizeText(needle);
+    return cleanNeedle ? cleanHaystack.includes(cleanNeedle) : false;
+  });
+}
+
+function buildPresetKeywords(payload) {
+  const keywords = new Set();
+  const intakeType = normalizeIntakeType(payload?.intake_type);
+  const haystack = [
+    payload?.name,
+    payload?.slug,
+    payload?.description,
+    payload?.button_label,
+    intakeType,
+    ...(Array.isArray(payload?.match_keywords) ? payload.match_keywords : []),
+  ].join(" ");
+
+  for (const item of PRESET_KEYWORDS[intakeType] || []) {
+    keywords.add(normalizeString(item));
+  }
+
+  if (containsAny(haystack, COD_SERVICE_KEYWORDS)) {
+    for (const item of COD_SERVICE_KEYWORDS) {
+      keywords.add(normalizeString(item));
+    }
+  }
+
+  return [...keywords].filter(Boolean);
+}
+
+function mergeKeywords(...groups) {
+  const out = [];
+  for (const group of groups) {
+    const items = Array.isArray(group) ? group : [];
+    for (const item of items) {
+      const clean = normalizeString(item);
+      if (clean && !out.some((existing) => existing.toLowerCase() === clean.toLowerCase())) {
+        out.push(clean);
+      }
+    }
+  }
+  return out;
+}
+
 function buildCategoryPayload(body, guildId) {
   const name = normalizeString(body?.name);
   const slug = slugify(body?.slug || name);
@@ -68,7 +205,7 @@ function buildCategoryPayload(body, guildId) {
     throw new Error("Category slug is required.");
   }
 
-  return {
+  const basePayload = {
     guild_id: guildId,
     name,
     slug,
@@ -79,6 +216,14 @@ function buildCategoryPayload(body, guildId) {
     button_label: normalizeString(body?.button_label),
     sort_order: parseSortOrder(body?.sort_order),
     is_default: normalizeBoolean(body?.is_default),
+  };
+
+  return {
+    ...basePayload,
+    match_keywords: mergeKeywords(
+      basePayload.match_keywords,
+      buildPresetKeywords(basePayload)
+    ),
   };
 }
 
@@ -126,29 +271,3 @@ export async function POST(request) {
     if (!guildId) {
       return NextResponse.json({ error: "Missing guild id." }, { status: 500 });
     }
-
-    const payload = buildCategoryPayload(body, guildId);
-
-    if (payload.is_default) {
-      await clearOtherDefaults(supabase, guildId);
-    }
-
-    const { data, error } = await supabase
-      .from("ticket_categories")
-      .insert(payload)
-      .select("*")
-      .single();
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    const response = NextResponse.json({ category: data });
-    applyAuthCookies(response, refreshedTokens);
-    return response;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unauthorized";
-    const status = message === "Unauthorized" ? 401 : 400;
-    return NextResponse.json({ error: message }, { status });
-  }
-}
