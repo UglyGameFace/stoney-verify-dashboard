@@ -12,6 +12,7 @@ const PRESET_KEYWORDS = {
     "secure upload",
     "verify in vc",
     "vc verify",
+    "face check",
   ],
   appeal: [
     "appeal",
@@ -26,6 +27,7 @@ const PRESET_KEYWORDS = {
     "scam",
     "abuse",
     "harassment",
+    "threat",
   ],
   partnership: [
     "partnership",
@@ -45,6 +47,7 @@ const PRESET_KEYWORDS = {
     "support",
     "help",
     "general support",
+    "assistance",
   ],
 };
 
@@ -64,6 +67,7 @@ const COD_SERVICE_KEYWORDS = [
   "prestige",
   "rank unlock",
   "camo unlock",
+  "camo service",
   "account recovery",
   "old cod",
   "older cod",
@@ -110,12 +114,14 @@ function normalizeKeywords(value) {
     return [...new Set(value.map((item) => normalizeString(item)).filter(Boolean))];
   }
 
-  return [...new Set(
-    normalizeString(value)
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean)
-  )];
+  return [
+    ...new Set(
+      normalizeString(value)
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    ),
+  ];
 }
 
 function normalizeIntakeType(value) {
@@ -148,6 +154,7 @@ function normalizeBoolean(value) {
 function containsAny(haystack, needles) {
   const cleanHaystack = normalizeText(haystack);
   if (!cleanHaystack) return false;
+
   return needles.some((needle) => {
     const cleanNeedle = normalizeText(needle);
     return cleanNeedle ? cleanHaystack.includes(cleanNeedle) : false;
@@ -181,15 +188,19 @@ function buildPresetKeywords(payload) {
 
 function mergeKeywords(...groups) {
   const out = [];
+
   for (const group of groups) {
     const items = Array.isArray(group) ? group : [];
     for (const item of items) {
       const clean = normalizeString(item);
-      if (clean && !out.some((existing) => existing.toLowerCase() === clean.toLowerCase())) {
+      if (!clean) continue;
+
+      if (!out.some((existing) => existing.toLowerCase() === clean.toLowerCase())) {
         out.push(clean);
       }
     }
   }
+
   return out;
 }
 
@@ -271,3 +282,29 @@ export async function POST(request) {
     if (!guildId) {
       return NextResponse.json({ error: "Missing guild id." }, { status: 500 });
     }
+
+    const payload = buildCategoryPayload(body, guildId);
+
+    if (payload.is_default) {
+      await clearOtherDefaults(supabase, guildId);
+    }
+
+    const { data, error } = await supabase
+      .from("ticket_categories")
+      .insert(payload)
+      .select("*")
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    const response = NextResponse.json({ category: data });
+    applyAuthCookies(response, refreshedTokens);
+    return response;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unauthorized";
+    const status = message === "Unauthorized" ? 401 : 400;
+    return NextResponse.json({ error: message }, { status });
+  }
+}
