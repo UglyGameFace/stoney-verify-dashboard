@@ -46,7 +46,10 @@ export default function MobileBottomNav({
   return (
     <>
       <nav className="mobile-bottom-nav-wrap" aria-label="Mobile navigation">
-        <div className="mobile-bottom-nav">
+        <div
+          className="mobile-bottom-nav"
+          style={{ gridTemplateColumns: `repeat(${visibleTabs.length}, minmax(0, 1fr))` }}
+        >
           {visibleTabs.map((tab) => {
             const meta = getTabMeta(tab);
             const active = activeTab === tab;
@@ -82,14 +85,14 @@ export default function MobileBottomNav({
 
         .mobile-bottom-nav {
           pointer-events: auto;
-          width: min(340px, calc(100vw - 24px));
+          width: fit-content;
+          max-width: calc(100vw - 24px);
           display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 8px;
+          gap: 10px;
           padding: 8px;
-          border-radius: 20px;
+          border-radius: 22px;
           background:
-            linear-gradient(180deg, rgba(8, 12, 22, 0.94), rgba(5, 9, 17, 0.98));
+            linear-gradient(180deg, rgba(8, 12, 22, 0.96), rgba(5, 9, 17, 0.98));
           border: 1px solid rgba(255, 255, 255, 0.08);
           backdrop-filter: blur(18px);
           -webkit-backdrop-filter: blur(18px);
@@ -101,17 +104,19 @@ export default function MobileBottomNav({
         .mobile-nav-link {
           appearance: none;
           -webkit-appearance: none;
-          border: 1px solid rgba(255, 255, 255, 0.06);
-          background: rgba(255, 255, 255, 0.02);
-          color: rgba(255, 255, 255, 0.72);
-          border-radius: 15px;
-          min-height: 58px;
-          padding: 8px 6px;
+          width: 94px;
+          min-width: 94px;
+          min-height: 64px;
+          padding: 10px 8px;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 5px;
+          gap: 6px;
+          border-radius: 18px;
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          background: rgba(255, 255, 255, 0.02);
+          color: rgba(255, 255, 255, 0.72);
           transition:
             transform 140ms ease,
             background 160ms ease,
@@ -126,9 +131,9 @@ export default function MobileBottomNav({
 
         .mobile-nav-link.active {
           color: #ffffff;
-          border-color: rgba(99, 213, 255, 0.22);
+          border-color: rgba(99, 213, 255, 0.24);
           background:
-            linear-gradient(180deg, rgba(59, 130, 246, 0.14), rgba(69, 212, 131, 0.1));
+            linear-gradient(180deg, rgba(59, 130, 246, 0.16), rgba(69, 212, 131, 0.11));
           box-shadow:
             0 0 0 1px rgba(99, 213, 255, 0.05) inset,
             0 8px 18px rgba(59, 130, 246, 0.14);
@@ -158,6 +163,13 @@ export default function MobileBottomNav({
           font-weight: 800;
           line-height: 1;
           letter-spacing: 0.01em;
+        }
+
+        @media (max-width: 380px) {
+          .mobile-nav-link {
+            width: 86px;
+            min-width: 86px;
+          }
         }
 
         @media (min-width: 1024px) {
