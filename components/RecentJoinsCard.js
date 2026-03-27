@@ -42,7 +42,10 @@ function initials(value) {
   const raw = String(value || "?").trim();
   if (!raw) return "?";
   const parts = raw.split(/\s+/).filter(Boolean).slice(0, 2);
-  return parts.map((part) => part[0]?.toUpperCase() || "").join("") || raw.slice(0, 1).toUpperCase();
+  return (
+    parts.map((part) => part[0]?.toUpperCase() || "").join("") ||
+    raw.slice(0, 1).toUpperCase()
+  );
 }
 
 function getDisplayName(member) {
@@ -66,7 +69,9 @@ function getRoleLabel(member) {
 
 function getJoinTone(member) {
   if (member?.in_guild === false) return "closed";
-  if (String(member?.role_state || "").toLowerCase().includes("conflict")) return "danger";
+  if (String(member?.role_state || "").toLowerCase().includes("conflict")) {
+    return "danger";
+  }
   if (member?.has_verified_role) return "low";
   if (member?.has_unverified) return "medium";
   return "open";
@@ -74,7 +79,9 @@ function getJoinTone(member) {
 
 function getJoinStateLabel(member) {
   if (member?.in_guild === false) return "Former";
-  if (String(member?.role_state || "").toLowerCase().includes("conflict")) return "Conflict";
+  if (String(member?.role_state || "").toLowerCase().includes("conflict")) {
+    return "Conflict";
+  }
   if (member?.has_verified_role) return "Verified";
   if (member?.has_unverified) return "Pending";
   return safeText(member?.role_state, "Tracked");
@@ -84,7 +91,9 @@ function filterJoin(member, mode) {
   if (mode === "all") return true;
   if (mode === "verified") return !!member?.has_verified_role;
   if (mode === "pending") return !!member?.has_unverified;
-  if (mode === "conflict") return String(member?.role_state || "").toLowerCase().includes("conflict");
+  if (mode === "conflict") {
+    return String(member?.role_state || "").toLowerCase().includes("conflict");
+  }
   if (mode === "former") return member?.in_guild === false;
   return true;
 }
@@ -113,7 +122,7 @@ export default function RecentJoinsCard({ joins = [] }) {
   }, [rows]);
 
   return (
-    <div className="card">
+    <div className="card recent-joins-shell">
       <div
         className="row"
         style={{
@@ -191,7 +200,7 @@ export default function RecentJoinsCard({ joins = [] }) {
           No recent join records match the current filter.
         </div>
       ) : (
-        <div className="space" style={{ marginTop: 14 }}>
+        <div className="space recent-joins-list" style={{ marginTop: 14 }}>
           {filtered.map((member, index) => {
             const userId = String(member?.user_id || `join-${index}`);
             const expanded = expandedId === userId;
@@ -207,7 +216,9 @@ export default function RecentJoinsCard({ joins = [] }) {
                 <button
                   type="button"
                   className="recent-join-toggle"
-                  onClick={() => setExpandedId((prev) => (prev === userId ? "" : userId))}
+                  onClick={() =>
+                    setExpandedId((prev) => (prev === userId ? "" : userId))
+                  }
                 >
                   <div
                     className="row"
@@ -218,7 +229,10 @@ export default function RecentJoinsCard({ joins = [] }) {
                       flexWrap: "nowrap",
                     }}
                   >
-                    <div className="row" style={{ minWidth: 0, flex: 1, gap: 12, alignItems: "center" }}>
+                    <div
+                      className="row"
+                      style={{ minWidth: 0, flex: 1, gap: 12, alignItems: "center" }}
+                    >
                       <div className="avatar">
                         {avatarUrl ? (
                           <img
@@ -235,9 +249,7 @@ export default function RecentJoinsCard({ joins = [] }) {
 
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div className="recent-join-name">{displayName}</div>
-                        <div className="recent-join-id">
-                          {safeText(member?.user_id)}
-                        </div>
+                        <div className="recent-join-id">{safeText(member?.user_id)}</div>
                       </div>
                     </div>
 
@@ -251,7 +263,12 @@ export default function RecentJoinsCard({ joins = [] }) {
                       {getJoinStateLabel(member)}
                     </span>
                     <span className="badge">{roleLabel}</span>
-                    {member?.has_staff_role ? <span className="badge claimed">Staff</span> : null}
+                    {member?.has_staff_role ? (
+                      <span className="badge claimed">Staff</span>
+                    ) : null}
+                    {member?.source === "guild_members_fallback" ? (
+                      <span className="badge">Live Fallback</span>
+                    ) : null}
                   </div>
                 </button>
 
@@ -307,10 +324,25 @@ export default function RecentJoinsCard({ joins = [] }) {
       )}
 
       <style jsx>{`
+        .recent-joins-shell {
+          overflow: visible;
+        }
+
+        .recent-joins-list {
+          overflow: visible;
+        }
+
         .joins-filter-row {
           display: flex;
           gap: 8px;
           flex-wrap: wrap;
+          width: 100%;
+          max-width: 420px;
+        }
+
+        .joins-filter-row :global(button) {
+          width: auto !important;
+          min-width: 0 !important;
         }
 
         .joins-summary-grid {
@@ -320,25 +352,26 @@ export default function RecentJoinsCard({ joins = [] }) {
         }
 
         .joins-summary-card {
-          border: 1px solid rgba(255,255,255,0.08);
-          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          background: rgba(255, 255, 255, 0.025);
           border-radius: 16px;
           padding: 12px;
+          min-width: 0;
         }
 
         .joins-summary-card.low {
-          background: rgba(74,222,128,0.08);
-          border-color: rgba(74,222,128,0.18);
+          background: rgba(74, 222, 128, 0.08);
+          border-color: rgba(74, 222, 128, 0.18);
         }
 
         .joins-summary-card.medium {
-          background: rgba(251,191,36,0.08);
-          border-color: rgba(251,191,36,0.18);
+          background: rgba(251, 191, 36, 0.08);
+          border-color: rgba(251, 191, 36, 0.18);
         }
 
         .joins-summary-card.danger {
-          background: rgba(248,113,113,0.08);
-          border-color: rgba(248,113,113,0.20);
+          background: rgba(248, 113, 113, 0.08);
+          border-color: rgba(248, 113, 113, 0.2);
         }
 
         .joins-summary-value {
@@ -354,17 +387,18 @@ export default function RecentJoinsCard({ joins = [] }) {
           border-radius: 22px;
           padding: 14px;
           background:
-            radial-gradient(circle at top right, rgba(93,255,141,0.06), transparent 36%),
-            rgba(255,255,255,0.025);
-          border: 1px solid rgba(255,255,255,0.08);
+            radial-gradient(circle at top right, rgba(93, 255, 141, 0.06), transparent 36%),
+            rgba(255, 255, 255, 0.025);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          overflow: visible;
         }
 
         .recent-join-card.expanded {
           background:
-            radial-gradient(circle at top right, rgba(99,213,255,0.08), transparent 36%),
-            rgba(99,213,255,0.05);
-          border-color: rgba(99,213,255,0.18);
-          box-shadow: 0 0 18px rgba(99,213,255,0.08);
+            radial-gradient(circle at top right, rgba(99, 213, 255, 0.08), transparent 36%),
+            rgba(99, 213, 255, 0.05);
+          border-color: rgba(99, 213, 255, 0.18);
+          box-shadow: 0 0 18px rgba(99, 213, 255, 0.08);
         }
 
         .recent-join-toggle {
@@ -380,10 +414,25 @@ export default function RecentJoinsCard({ joins = [] }) {
           cursor: pointer;
         }
 
+        .recent-join-name,
+        .recent-join-id,
+        .recent-join-time {
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
+
+        .recent-join-badges {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 12px;
+        }
+
         .recent-join-expand {
           margin-top: 12px;
           padding-top: 12px;
-          border-top: 1px solid rgba(255,255,255,0.08);
+          border-top: 1px solid rgba(255, 255, 255, 0.08);
+          overflow: visible;
         }
 
         @media (max-width: 860px) {
@@ -392,9 +441,23 @@ export default function RecentJoinsCard({ joins = [] }) {
           }
         }
 
+        @media (max-width: 640px) {
+          .joins-filter-row {
+            max-width: none;
+          }
+
+          .joins-filter-row :global(button) {
+            flex: 1 1 calc(50% - 8px);
+          }
+        }
+
         @media (max-width: 560px) {
           .joins-summary-grid {
             grid-template-columns: 1fr 1fr;
+          }
+
+          .recent-join-time {
+            font-size: 12px;
           }
         }
       `}</style>
