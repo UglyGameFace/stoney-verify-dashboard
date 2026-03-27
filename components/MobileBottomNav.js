@@ -18,6 +18,27 @@ const TAB_META = {
       </svg>
     ),
   },
+  members: {
+    label: "Members",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M16 19a4 4 0 0 0-8 0" />
+        <path d="M12 13a3.25 3.25 0 1 0-3.25-3.25A3.25 3.25 0 0 0 12 13Z" />
+        <path d="M18.5 8.75a2.75 2.75 0 1 0-2.75-2.75" />
+        <path d="M20.25 18a3.25 3.25 0 0 0-3.25-3.25" />
+        <path d="M5.5 8.75A2.75 2.75 0 1 1 8.25 6" />
+        <path d="M3.75 18A3.25 3.25 0 0 1 7 14.75" />
+      </svg>
+    ),
+  },
+  categories: {
+    label: "Categories",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 6.5A1.5 1.5 0 0 1 5.5 5H11l2 2h5.5A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5z" />
+      </svg>
+    ),
+  },
   account: {
     label: "Account",
     icon: (
@@ -39,9 +60,7 @@ export default function MobileBottomNav({
   onChange,
   tabs = [],
 }) {
-  const visibleTabs = Array.isArray(tabs)
-    ? tabs.filter(Boolean).slice(0, 3)
-    : [];
+  const visibleTabs = Array.isArray(tabs) ? tabs.filter(Boolean).slice(0, 4) : [];
 
   if (!visibleTabs.length) return null;
 
@@ -76,18 +95,17 @@ export default function MobileBottomNav({
           transform: translateX(-50%);
           bottom: calc(10px + env(safe-area-inset-bottom, 0px));
           z-index: 9999;
-          width: auto;
-          max-width: calc(100vw - 18px);
+          width: min(calc(100vw - 18px), 430px);
           pointer-events: none;
         }
 
         .sv-mobile-nav-shell {
           pointer-events: auto;
-          display: flex;
-          align-items: center;
-          justify-content: center;
+          display: grid;
+          grid-template-columns: repeat(${visibleTabs.length}, minmax(0, 1fr));
+          align-items: stretch;
           gap: 8px;
-          width: auto;
+          width: 100%;
           padding: 7px;
           border-radius: 18px;
           background: rgba(7, 12, 22, 0.9);
@@ -103,9 +121,8 @@ export default function MobileBottomNav({
         .sv-mobile-nav-item {
           all: unset;
           box-sizing: border-box;
-          width: 82px;
-          min-width: 82px;
-          height: 68px;
+          min-width: 0;
+          height: 66px;
           border-radius: 15px;
           display: flex;
           flex-direction: column;
@@ -125,7 +142,6 @@ export default function MobileBottomNav({
             color 160ms ease,
             box-shadow 160ms ease;
           text-align: center;
-          flex: 0 0 auto;
         }
 
         .sv-mobile-nav-item:active {
@@ -176,15 +192,21 @@ export default function MobileBottomNav({
         }
 
         @media (max-width: 380px) {
+          .sv-mobile-nav-wrap {
+            width: min(calc(100vw - 14px), 420px);
+          }
+
           .sv-mobile-nav-shell {
             gap: 6px;
             padding: 6px;
           }
 
           .sv-mobile-nav-item {
-            width: 76px;
-            min-width: 76px;
-            height: 64px;
+            height: 62px;
+          }
+
+          .sv-mobile-nav-text {
+            font-size: 10px;
           }
         }
 
