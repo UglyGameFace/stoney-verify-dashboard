@@ -34,6 +34,7 @@ import DesktopDashboardView from "@/components/dashboard/DesktopDashboardView";
 const MOBILE_TABS = ["home", "tickets", "members", "categories"];
 const STALE_VISIBLE_REFRESH_MS = 20_000;
 const BACKUP_REFRESH_INTERVAL_MS = 45_000;
+const MOBILE_NAV_RESERVED_PX = 168;
 
 const LEGACY_CATEGORY_ALIASES = {
   verification: [
@@ -79,9 +80,7 @@ function getLegacyAliasesForCategory(category) {
 
   for (const key of keys) {
     const aliases = LEGACY_CATEGORY_ALIASES[key] || [];
-    for (const alias of aliases) {
-      out.add(normalizeText(alias));
-    }
+    for (const alias of aliases) out.add(normalizeText(alias));
   }
 
   return [...out];
@@ -380,7 +379,7 @@ function DashboardSection({
   const isOpen = expanded ?? defaultOpen;
 
   return (
-    <div className="card compact-panel">
+    <div className="card compact-panel dashboard-section-shell">
       <div
         className="panel-header"
         onClick={onToggle}
@@ -420,7 +419,7 @@ function DashboardSection({
         </div>
       </div>
 
-      {isOpen ? <div style={{ marginTop: 14 }}>{children}</div> : null}
+      {isOpen ? <div className="dashboard-section-body" style={{ marginTop: 14 }}>{children}</div> : null}
     </div>
   );
 }
@@ -704,15 +703,11 @@ export default function DashboardClient({
     } = {}) => {
       const now = Date.now();
 
-      if (!force && refreshInFlightRef.current) {
-        return;
-      }
+      if (!force && refreshInFlightRef.current) return;
 
       refreshInFlightRef.current = true;
 
-      if (!silent) {
-        setIsRefreshing(true);
-      }
+      if (!silent) setIsRefreshing(true);
 
       try {
         const res = await fetch(
@@ -740,10 +735,7 @@ export default function DashboardClient({
         setError(err?.message || "Failed to refresh dashboard.");
       } finally {
         refreshInFlightRef.current = false;
-
-        if (!silent) {
-          setIsRefreshing(false);
-        }
+        if (!silent) setIsRefreshing(false);
       }
     },
     []
@@ -1019,9 +1011,7 @@ export default function DashboardClient({
       setStatusFilter(status);
       setPriorityFilter(priority);
       setSelectedCategoryFilter(null);
-      if (typeof query === "string") {
-        setSearch(query);
-      }
+      if (typeof query === "string") setSearch(query);
 
       if (typeof window !== "undefined") {
         requestAnimationFrame(() => {
@@ -1169,21 +1159,18 @@ export default function DashboardClient({
           subtitle="Tap to open queue"
           onClick={() => jumpToTickets({ status: "active" })}
         />
-
         <ClickableStatCard
           title="Warns Today"
           value={counts.warnsToday}
           subtitle="Tap to review warnings"
           onClick={() => jumpToPanel("warns")}
         />
-
         <ClickableStatCard
           title="Raid Alerts"
           value={counts.raidAlerts}
           subtitle="Tap to review raids"
           onClick={() => jumpToPanel("raids")}
         />
-
         <ClickableStatCard
           title="Fraud Flags"
           value={counts.fraudFlags}
@@ -1238,16 +1225,10 @@ export default function DashboardClient({
                 <div style={{ fontWeight: 800 }}>
                   {safeText(warn?.display_name || warn?.username, "Unknown user")}
                 </div>
-                <div
-                  className="muted"
-                  style={{ marginTop: 6, fontSize: 13 }}
-                >
+                <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
                   {safeText(warn?.reason, "No reason provided")}
                 </div>
-                <div
-                  className="muted"
-                  style={{ marginTop: 8, fontSize: 12 }}
-                >
+                <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
                   {formatTime(warn?.created_at)}
                 </div>
               </div>
@@ -1276,18 +1257,12 @@ export default function DashboardClient({
                 <div style={{ fontWeight: 800 }}>
                   {safeText(raid?.summary, "Raid event")}
                 </div>
-                <div
-                  className="muted"
-                  style={{ marginTop: 6, fontSize: 13 }}
-                >
+                <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
                   Join count: {safeText(raid?.join_count, "—")} • Window:{" "}
                   {safeText(raid?.window_seconds, "—")}s • Severity:{" "}
                   {safeText(raid?.severity, "unknown")}
                 </div>
-                <div
-                  className="muted"
-                  style={{ marginTop: 8, fontSize: 12 }}
-                >
+                <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
                   {formatTime(raid?.created_at)}
                 </div>
               </div>
@@ -1317,19 +1292,13 @@ export default function DashboardClient({
                   <div style={{ fontWeight: 800 }}>
                     {safeText(fraud?.display_name || fraud?.username, "Suspicious member")}
                   </div>
-                  <div
-                    className="muted"
-                    style={{ marginTop: 6, fontSize: 13 }}
-                  >
+                  <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
                     Score: {safeText(fraud?.score, "0")} • Flagged:{" "}
                     {String(Boolean(fraud?.flagged))}
                   </div>
 
                   {Array.isArray(fraud?.reasons) && fraud.reasons.length ? (
-                    <div
-                      className="muted"
-                      style={{ marginTop: 8, fontSize: 12 }}
-                    >
+                    <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
                       {fraud.reasons.join(" • ")}
                     </div>
                   ) : null}
@@ -1348,16 +1317,10 @@ export default function DashboardClient({
                     <div style={{ fontWeight: 800 }}>
                       {getMemberDisplay(member)}
                     </div>
-                    <div
-                      className="muted"
-                      style={{ marginTop: 6, fontSize: 13 }}
-                    >
+                    <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
                       Role state: {safeText(member?.role_state)}
                     </div>
-                    <div
-                      className="muted"
-                      style={{ marginTop: 6, fontSize: 12 }}
-                    >
+                    <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
                       {safeText(
                         member?.role_state_reason,
                         "Role conflict detected"
@@ -1395,7 +1358,9 @@ export default function DashboardClient({
         expanded={expandedPanels.members}
         onToggle={() => togglePanel("members")}
       >
-        <MemberSnapshot members={safeMembers} />
+        <div className="profile-scroll-safe-zone">
+          <MemberSnapshot members={safeMembers} />
+        </div>
       </DashboardSection>
     ),
     staffMetrics: (
@@ -1432,10 +1397,12 @@ export default function DashboardClient({
         expanded={true}
         onToggle={null}
       >
-        <MemberSearchCard
-          currentStaffId={currentStaffId}
-          onRefresh={() => refresh({ force: true, reason: "member-search-action" })}
-        />
+        <div className="profile-scroll-safe-zone">
+          <MemberSearchCard
+            currentStaffId={currentStaffId}
+            onRefresh={() => refresh({ force: true, reason: "member-search-action" })}
+          />
+        </div>
       </DashboardSection>
     ),
   };
@@ -1453,12 +1420,14 @@ export default function DashboardClient({
     <>
       <Topbar />
 
-      <div style={{ paddingBottom: 96 }}>
+      <div
+        className="dashboard-page-shell"
+        style={{
+          paddingBottom: `calc(${MOBILE_NAV_RESERVED_PX}px + env(safe-area-inset-bottom, 0px))`,
+        }}
+      >
         <div className="desktop-only-nav">
-          <DesktopTabBar
-            activeTab={activeTab}
-            onChange={setActiveTab}
-          />
+          <DesktopTabBar activeTab={activeTab} onChange={setActiveTab} />
         </div>
 
         <div
@@ -1593,9 +1562,7 @@ export default function DashboardClient({
           density={density}
         />
 
-        <section
-          className={`mobile-tab-panel ${activeTab === "home" ? "active" : ""}`}
-        >
+        <section className={`mobile-tab-panel ${activeTab === "home" ? "active" : ""}`}>
           <div className="dashboard-home-grid">
             {homeLayout
               .filter((key) => sectionVisibility[key] !== false)
@@ -1605,9 +1572,7 @@ export default function DashboardClient({
           </div>
         </section>
 
-        <section
-          className={`mobile-tab-panel ${activeTab === "tickets" ? "active" : ""}`}
-        >
+        <section className={`mobile-tab-panel ${activeTab === "tickets" ? "active" : ""}`}>
           <div className="card">
             <div
               className="row"
@@ -1626,13 +1591,7 @@ export default function DashboardClient({
                 </div>
               </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  gap: 10,
-                  flexWrap: "wrap",
-                }}
-              >
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <button
                   type="button"
                   className="button ghost"
@@ -1768,19 +1727,19 @@ export default function DashboardClient({
               </select>
             </div>
 
-            <TicketQueueTable
-              tickets={filteredTickets}
-              currentStaffId={currentStaffId}
-              onRefresh={() =>
-                refresh({ force: true, reason: "ticket-controls" })
-              }
-            />
+            <div className="profile-scroll-safe-zone">
+              <TicketQueueTable
+                tickets={filteredTickets}
+                currentStaffId={currentStaffId}
+                onRefresh={() =>
+                  refresh({ force: true, reason: "ticket-controls" })
+                }
+              />
+            </div>
           </div>
         </section>
 
-        <section
-          className={`mobile-tab-panel ${activeTab === "members" ? "active" : ""}`}
-        >
+        <section className={`mobile-tab-panel ${activeTab === "members" ? "active" : ""}`}>
           <div className="dashboard-members-grid">
             {[...membersLayout]
               .filter((key, index, arr) => arr.indexOf(key) === index)
@@ -1791,16 +1750,16 @@ export default function DashboardClient({
           </div>
         </section>
 
-        <section
-          className={`mobile-tab-panel ${activeTab === "categories" ? "active" : ""}`}
-        >
+        <section className={`mobile-tab-panel ${activeTab === "categories" ? "active" : ""}`}>
           {sectionVisibility.categories !== false ? (
-            <CategoryManager
-              categories={safeCategories}
-              tickets={safeTickets}
-              onRefresh={() => refresh({ force: true, reason: "categories" })}
-              onFindTicketsByCategory={handleFindTicketsByCategory}
-            />
+            <div className="profile-scroll-safe-zone">
+              <CategoryManager
+                categories={safeCategories}
+                tickets={safeTickets}
+                onRefresh={() => refresh({ force: true, reason: "categories" })}
+                onFindTicketsByCategory={handleFindTicketsByCategory}
+              />
+            </div>
           ) : (
             <div className="empty-state">
               Categories is hidden in your personalization settings.
@@ -1837,6 +1796,10 @@ export default function DashboardClient({
       />
 
       <style jsx>{`
+        .dashboard-page-shell {
+          position: relative;
+        }
+
         .desktop-only-nav {
           display: none;
         }
@@ -1849,10 +1812,31 @@ export default function DashboardClient({
             : density === "spacious"
               ? "22px"
               : "16px"};
+          align-items: start;
+          overflow: visible;
         }
 
-        .dashboard-members-grid {
-          align-items: start;
+        .dashboard-section-shell,
+        .dashboard-section-body,
+        .profile-scroll-safe-zone {
+          overflow: visible !important;
+          min-height: 0;
+        }
+
+        .profile-scroll-safe-zone {
+          position: relative;
+          z-index: 1;
+          padding-bottom: 12px;
+        }
+
+        .mobile-tab-panel {
+          display: none;
+          overflow: visible;
+        }
+
+        .mobile-tab-panel.active {
+          display: block;
+          overflow: visible;
         }
 
         .metrics-grid {
@@ -2008,6 +1992,10 @@ export default function DashboardClient({
           .mobile-tab-panel {
             display: none !important;
           }
+
+          .dashboard-page-shell {
+            padding-bottom: 32px !important;
+          }
         }
 
         @media (max-width: 640px) {
@@ -2022,6 +2010,15 @@ export default function DashboardClient({
           .dashboard-refresh-actions :global(button) {
             flex: 1 1 0;
             min-width: 0 !important;
+          }
+
+          .dashboard-page-shell {
+            padding-bottom: calc(${MOBILE_NAV_RESERVED_PX}px + env(safe-area-inset-bottom, 0px));
+          }
+
+          .dashboard-home-grid,
+          .dashboard-members-grid {
+            padding-bottom: 8px;
           }
         }
       `}</style>
