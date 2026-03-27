@@ -12,6 +12,29 @@ function safeText(value: any, fallback = "—") {
   return text || fallback;
 }
 
+function firstNonEmpty(...values: any[]) {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function normalizeMaybeArray(value: any) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text) return [];
+    try {
+      const parsed = JSON.parse(text);
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : [text];
+    } catch {
+      return text.split(",").map((v) => v.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
 function getMemberName(member: any) {
   return (
     member?.display_name ||
@@ -130,6 +153,16 @@ function memberMatchesQuery(member: any, query: string) {
     member?.nickname,
     member?.username,
     member?.user_id,
+    member?.invited_by,
+    member?.invited_by_name,
+    member?.approved_by,
+    member?.approved_by_name,
+    member?.vouched_by,
+    member?.vouched_by_name,
+    member?.join_method,
+    member?.entry_method,
+    member?.verification_source,
+    member?.invite_code,
     ...(safeArray(member?.role_names)),
     ...(safeArray(member?.previous_usernames)),
     ...(safeArray(member?.previous_display_names)),
@@ -155,14 +188,8 @@ function sortMembers(rows: any[], mode: string) {
   const list = [...rows];
 
   list.sort((a, b) => {
-    if (mode === "recent") {
-      return getSortTimestamp(b) - getSortTimestamp(a);
-    }
-
-    if (mode === "roles") {
-      return getRoleCount(b) - getRoleCount(a);
-    }
-
+    if (mode === "recent") return getSortTimestamp(b) - getSortTimestamp(a);
+    if (mode === "roles") return getRoleCount(b) - getRoleCount(a);
     return getMemberName(a).localeCompare(getMemberName(b));
   });
 
@@ -206,6 +233,215 @@ function parseDiscordErrorDetails(message: any) {
   };
 }
 
+function getEntryPathRows(member: any) {
+  const rows = [
+    {
+      label: "How They Entered",
+      value: firstNonEmpty(
+        member?.join_method,
+        member?.entry_method,
+        member?.joined_via,
+        member?.verification_source,
+        member?.entry_source,
+        member?.source_type
+      ),
+    },
+    {
+      label: "Invited By",
+      value: firstNonEmpty(
+        member?.invited_by_name,
+        member?.invited_by,
+        member?.inviter_name,
+        member?.inviter_id
+      ),
+    },
+    {
+      label: "Invite Code",
+      value: firstNonEmpty(member?.invite_code, member?.discord_invite_code),
+    },
+    {
+      label: "Vouched By",
+      value: firstNonEmpty(
+        member?.vouched_by_name,
+        member?.vouched_by,
+        member?.voucher_name,
+        member?.voucher_id
+      ),
+    },
+    {
+      label: "Approved By",
+      value: firstNonEmpty(
+        member?.approved_by_name,
+        member?.approved_by,
+        member?.verified_by_name,
+        member?.verified_by,
+        member?.staff_actor_name,
+        member?.staff_actor_id
+      ),
+    },
+    {
+      label: "Ticket Link",
+      value: firstNonEmpty(
+        member?.verification_ticket_id,
+        member?.ticket_id,
+        member?.source_ticket_id,
+        member?.ticket_channel_id,
+        member?.channel_id
+      ),
+    },
+    {
+      label: "Join Note",
+      value: firstNonEmpty(
+        member?.entry_reason,
+        member?.join_note,
+        member?.verification_note,
+        member?.approval_reason
+      ),
+    },
+  ];
+
+  return rows.filter((row) => row.value);
+}
+
+function getTimelineRows(member: any) {
+  return [
+    { label: "Joined", value: formatDateTime(member?.joined_at) },
+    {
+      label: "Synced",
+      value: formatDateTime(member?.synced_at || member?.updated_at),
+    },
+    {
+      label: "Last Seen",
+      value: formatDateTime(member?.last_seen_at || member?.updated_at),
+    },
+    { label: "Left At", value: formatDateTime(member?.left_at) },
+    { label: "Rejoined At", value: formatDateTime(member?.rejoined_at) },
+  ];
+}
+
+function getHistoryRows(member: any) {
+  const previousUsernames = normalizeMaybeArray(member?.previous_usernames);
+  const previousDisplayNames = normalizeMaybeArray(member?.previous_display_names);
+  const previousNicknames = normalizeMaybeArray(member?.previous_nicknames);
+
+  return [
+    {
+      label: "Previous Usernames",
+      value: previousUsernames.length ? previousUsernames.join(", ") : "None",
+    },
+    {
+      label: "Previous Display Names",
+      value: previousDisplayNames.length ? previousDisplayNames.join(", ") : "None",
+    },
+    {
+      label: "Previous Nicknames",
+      value: previousNicknames.length ? previousNicknames.join(", ") : "None",
+    },
+  ];
+}
+
+function getActivityRows(member: any) {
+  const raw =
+    normalizeMaybeArray(member?.activity_log).length
+      ? normalizeMaybeArray(member?.activity_log)
+      : normalizeMaybeArray(member?.action_history).length
+        ? normalizeMaybeArray(member?.action_history)
+        : normalizeMaybeArray(member?.mod_history);
+
+  return raw.slice(0, 25).map((item: any, index: number) => {
+    if (typeof item === "string") {
+      return { id: `activity-${index}`, title: item, meta: "" };
+    }
+
+    const title = firstNonEmpty(
+      item?.action,
+      item?.event_type,
+      item?.title,
+      item?.label,
+      "Activity"
+    );
+
+    const actor = firstNonEmpty(
+      item?.actor_name,
+      item?.staff_name,
+      item?.moderator_name,
+      item?.actor_id,
+      item?.staff_id
+    );
+
+    const when = firstNonEmpty(
+      item?.created_at,
+      item?.timestamp,
+      item?.at
+    );
+
+    const reason = firstNonEmpty(
+      item?.reason,
+      item?.note,
+      item?.description
+    );
+
+    const metaParts = [
+      actor ? `By: ${actor}` : "",
+      when ? formatDateTime(when) : "",
+      reason ? reason : "",
+    ].filter(Boolean);
+
+    return {
+      id: item?.id || `activity-${index}`,
+      title,
+      meta: metaParts.join(" • "),
+    };
+  });
+}
+
+function DetailSection({
+  title,
+  subtitle,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="profile-block">
+      <button
+        type="button"
+        className="profile-block-toggle"
+        onClick={() => setOpen((prev) => !prev)}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div className="profile-block-title">{title}</div>
+          {subtitle ? <div className="profile-block-subtitle">{subtitle}</div> : null}
+        </div>
+        <span className="badge">{open ? "Hide" : "Show"}</span>
+      </button>
+      {open ? <div className="profile-block-body">{children}</div> : null}
+    </div>
+  );
+}
+
+function KeyValueGrid({ rows }: { rows: { label: string; value: string }[] }) {
+  return (
+    <div className="member-detail-grid">
+      {rows.map((row) => (
+        <div
+          key={`${row.label}-${row.value}`}
+          className={`member-detail-item ${String(row.value).length > 80 ? "full" : ""}`}
+        >
+          <span className="ticket-info-label">{row.label}</span>
+          <span>{safeText(row.value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function MemberCard({
   member,
   onSelect,
@@ -217,6 +453,16 @@ function MemberCard({
   const avatar = getMemberAvatar(member);
   const state = getMemberState(member);
   const tone = getStateTone(member);
+
+  const entryPreview = firstNonEmpty(
+    member?.join_method,
+    member?.entry_method,
+    member?.joined_via,
+    member?.verification_source,
+    member?.invited_by_name,
+    member?.vouched_by_name,
+    member?.approved_by_name
+  );
 
   return (
     <button
@@ -333,10 +579,23 @@ function MemberCard({
         </div>
       </div>
 
-      {member?.role_state_reason ? (
+      {entryPreview ? (
         <div
           style={{
             marginTop: 10,
+            fontSize: 12,
+            lineHeight: 1.45,
+            color: "var(--text-muted, rgba(255,255,255,0.72))",
+          }}
+        >
+          Entry path: {entryPreview}
+        </div>
+      ) : null}
+
+      {member?.role_state_reason ? (
+        <div
+          style={{
+            marginTop: 8,
             fontSize: 12,
             lineHeight: 1.45,
             color: "var(--text-muted, rgba(255,255,255,0.72))",
@@ -375,6 +634,10 @@ function MemberDrawerInner({
   const roleNames = getRoleNames(sourceMember);
   const roleIds = getRoleIds(sourceMember);
   const memberId = String(sourceMember?.user_id || "").trim();
+  const entryPathRows = getEntryPathRows(sourceMember);
+  const timelineRows = getTimelineRows(sourceMember);
+  const historyRows = getHistoryRows(sourceMember);
+  const activityRows = getActivityRows(sourceMember);
 
   const assignableRoles = useMemo(() => {
     const assignedIdSet = new Set(roleIds);
@@ -396,11 +659,21 @@ function MemberDrawerInner({
   );
 
   useEffect(() => {
-    const prevOverflow = document.body.style.overflow;
-    const prevTouchAction = document.body.style.touchAction;
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtmlOverflow = html.style.overflow;
+    const prevBodyOverflow = body.style.overflow;
+    const prevBodyTouchAction = body.style.touchAction;
+    const prevBodyPosition = body.style.position;
+    const prevBodyWidth = body.style.width;
+    const scrollY = window.scrollY;
 
-    document.body.style.overflow = "hidden";
-    document.body.style.touchAction = "none";
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    body.style.touchAction = "none";
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose?.();
@@ -409,9 +682,14 @@ function MemberDrawerInner({
     window.addEventListener("keydown", onKeyDown);
 
     return () => {
-      document.body.style.overflow = prevOverflow;
-      document.body.style.touchAction = prevTouchAction;
+      html.style.overflow = prevHtmlOverflow;
+      body.style.overflow = prevBodyOverflow;
+      body.style.touchAction = prevBodyTouchAction;
+      body.style.position = prevBodyPosition;
+      body.style.top = "";
+      body.style.width = prevBodyWidth;
       window.removeEventListener("keydown", onKeyDown);
+      window.scrollTo(0, scrollY);
     };
   }, [onClose]);
 
@@ -585,38 +863,16 @@ function MemberDrawerInner({
       role="dialog"
       aria-modal="true"
       onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 2000,
-        background: "rgba(0,0,0,0.66)",
-        backdropFilter: "blur(10px)",
-        WebkitBackdropFilter: "blur(10px)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "16px 12px calc(16px + env(safe-area-inset-bottom, 0px))",
-      }}
+      className="member-modal-backdrop"
     >
       <div
         onClick={(e) => e.stopPropagation()}
         className="member-drawer"
-        style={{
-          width: "100%",
-          maxWidth: 980,
-          maxHeight: "90vh",
-          overflowY: "auto",
-          borderRadius: 26,
-          border: "1px solid rgba(255,255,255,0.10)",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
-          color: "var(--text-strong, #f8fafc)",
-          padding: 16,
-        }}
       >
         <div className="member-drawer-handle" />
 
         <div
-          className="row"
+          className="row member-drawer-header"
           style={{
             justifyContent: "space-between",
             alignItems: "flex-start",
@@ -629,10 +885,7 @@ function MemberDrawerInner({
             className="row"
             style={{ alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}
           >
-            <div
-              className="avatar member-drawer-avatar"
-              style={{ fontSize: 16 }}
-            >
+            <div className="avatar member-drawer-avatar" style={{ fontSize: 16 }}>
               {avatar ? (
                 <img
                   src={avatar}
@@ -722,181 +975,64 @@ function MemberDrawerInner({
           </div>
         ) : null}
 
-        <div className="member-detail-grid" style={{ marginBottom: 14 }}>
-          <div className="member-detail-item">
-            <span className="ticket-info-label">Display Name</span>
-            <span>{safeText(sourceMember?.display_name, "Unknown")}</span>
-          </div>
-
-          <div className="member-detail-item">
-            <span className="ticket-info-label">Username</span>
-            <span>{safeText(sourceMember?.username, "Unknown")}</span>
-          </div>
-
-          <div className="member-detail-item">
-            <span className="ticket-info-label">Nickname</span>
-            <span>{safeText(sourceMember?.nickname, "None")}</span>
-          </div>
-
-          <div className="member-detail-item">
-            <span className="ticket-info-label">Top Role</span>
-            <span>{safeText(sourceMember?.top_role || sourceMember?.highest_role_name, "None")}</span>
-          </div>
-
-          <div className="member-detail-item">
-            <span className="ticket-info-label">Role State</span>
-            <span>{safeText(sourceMember?.role_state, "unknown")}</span>
-          </div>
-
-          <div className="member-detail-item">
-            <span className="ticket-info-label">Joined</span>
-            <span>{formatDateTime(sourceMember?.joined_at)}</span>
-          </div>
-
-          <div className="member-detail-item full">
-            <span className="ticket-info-label">Reason</span>
-            <span>{safeText(sourceMember?.role_state_reason, "No extra notes.")}</span>
-          </div>
-        </div>
-
-        <div className="card tight" style={{ marginBottom: 14 }}>
-          <div
-            className="row"
-            style={{
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: 10,
-            }}
-          >
-            <div style={{ fontWeight: 900, fontSize: 18 }}>Quick Staff Actions</div>
-            <span className="badge open">One-tap control</span>
-          </div>
-
-          <div className="member-action-grid">
-            <button
-              className="button ghost"
-              disabled={busy}
-              onClick={() => copyText(memberId, "User ID copied.")}
-            >
-              Copy User ID
-            </button>
-
-            <button
-              className="button ghost"
-              disabled={busy}
-              onClick={() => copyText(`<@${memberId}>`, "Mention copied.")}
-            >
-              Copy Mention
-            </button>
-
-            <button
-              className="button ghost"
-              disabled={busy}
-              onClick={() => refreshMemberDetails()}
-            >
-              Refresh Member
-            </button>
-
-            <button
-              className="button ghost"
-              disabled={busy}
-              onClick={() =>
-                copyText(
-                  [
-                    `Member: ${name}`,
-                    `User ID: ${memberId}`,
-                    `State: ${safeText(sourceMember?.role_state)}`,
-                    `Top Role: ${safeText(
-                      sourceMember?.top_role || sourceMember?.highest_role_name,
-                      "None"
-                    )}`,
-                    `Roles: ${roleNames.join(", ") || "None"}`,
-                  ].join("\n"),
-                  "Staff summary copied."
-                )
-              }
-            >
-              Copy Summary
-            </button>
-          </div>
-        </div>
-
-        <div className="card tight" style={{ marginBottom: 14 }}>
-          <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>
-            Moderation
-          </div>
-
-          <textarea
-            className="textarea"
-            rows={3}
-            value={modReason}
-            onChange={(e) => setModReason(e.target.value)}
-            placeholder="Moderation reason..."
+        <DetailSection
+          title="Core Profile"
+          subtitle="Current member identity and role state"
+          defaultOpen
+        >
+          <KeyValueGrid
+            rows={[
+              { label: "Display Name", value: safeText(sourceMember?.display_name, "Unknown") },
+              { label: "Username", value: safeText(sourceMember?.username, "Unknown") },
+              { label: "Nickname", value: safeText(sourceMember?.nickname, "None") },
+              {
+                label: "Top Role",
+                value: safeText(sourceMember?.top_role || sourceMember?.highest_role_name, "None"),
+              },
+              { label: "Role State", value: safeText(sourceMember?.role_state, "unknown") },
+              {
+                label: "Reason",
+                value: safeText(sourceMember?.role_state_reason, "No extra notes."),
+              },
+            ]}
           />
+        </DetailSection>
 
-          <div
-            className="row"
-            style={{ alignItems: "stretch", gap: 10, marginTop: 10 }}
-          >
-            <input
-              className="input"
-              value={timeoutMinutes}
-              onChange={(e) => setTimeoutMinutes(e.target.value)}
-              placeholder="Timeout minutes"
-              inputMode="numeric"
-            />
+        <DetailSection
+          title="How They Got In"
+          subtitle="Invite, vouch, approval, and ticket-entry clues from the stored record"
+          defaultOpen
+        >
+          {entryPathRows.length ? (
+            <KeyValueGrid rows={entryPathRows} />
+          ) : (
+            <div className="empty-state">
+              No entry-path fields are currently stored for this member. The dashboard can only show this after your bot/database writes inviter, vouch, approval, or verification-source fields onto the member record.
+            </div>
+          )}
+        </DetailSection>
 
-            <button
-              className="button"
-              disabled={busy || !memberId}
-              style={{ width: "auto", minWidth: 130 }}
-              onClick={() => runModAction("timeout")}
-            >
-              Timeout
-            </button>
+        <DetailSection
+          title="Identity History"
+          subtitle="Useful when members change names or come back later."
+          defaultOpen={false}
+        >
+          <KeyValueGrid rows={getHistoryRows(sourceMember)} />
+        </DetailSection>
 
-            <button
-              className="button ghost"
-              disabled={busy || !memberId}
-              style={{ width: "auto", minWidth: 150 }}
-              onClick={() => runModAction("remove_timeout")}
-            >
-              Remove Timeout
-            </button>
-          </div>
+        <DetailSection
+          title="Timestamps"
+          subtitle="Tracked join, sync, departure, and rejoin timing."
+          defaultOpen={false}
+        >
+          <KeyValueGrid rows={timelineRows} />
+        </DetailSection>
 
-          <div className="member-action-grid" style={{ marginTop: 10 }}>
-            <button
-              className="button ghost"
-              disabled={busy || !memberId}
-              onClick={() => runModAction("warn")}
-            >
-              Warn
-            </button>
-
-            <button
-              className="button danger"
-              disabled={busy || !memberId}
-              onClick={() => runModAction("kick")}
-            >
-              Kick
-            </button>
-
-            <button
-              className="button danger"
-              disabled={busy || !memberId}
-              onClick={() => runModAction("ban")}
-            >
-              Ban
-            </button>
-          </div>
-        </div>
-
-        <div className="card tight" style={{ marginBottom: 14 }}>
-          <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>
-            Roles
-          </div>
-
+        <DetailSection
+          title="Roles"
+          subtitle="Current tracked roles plus add/remove controls."
+          defaultOpen={false}
+        >
           <div className="roles" style={{ marginBottom: 12 }}>
             {roleNames.length ? (
               roleNames.map((roleName, index) => {
@@ -980,9 +1116,92 @@ function MemberDrawerInner({
               Add Role
             </button>
           </div>
-        </div>
+        </DetailSection>
 
-        <div className="card tight">
+        <DetailSection
+          title="Moderation"
+          subtitle="Timeouts, warnings, bans, and fast staff actions."
+          defaultOpen={false}
+        >
+          <textarea
+            className="textarea"
+            rows={3}
+            value={modReason}
+            onChange={(e) => setModReason(e.target.value)}
+            placeholder="Moderation reason..."
+          />
+
+          <div
+            className="row"
+            style={{ alignItems: "stretch", gap: 10, marginTop: 10, flexWrap: "wrap" }}
+          >
+            <input
+              className="input"
+              value={timeoutMinutes}
+              onChange={(e) => setTimeoutMinutes(e.target.value)}
+              placeholder="Timeout minutes"
+              inputMode="numeric"
+            />
+
+            <button
+              className="button"
+              disabled={busy || !memberId}
+              style={{ width: "auto", minWidth: 130 }}
+              onClick={() => runModAction("timeout")}
+            >
+              Timeout
+            </button>
+
+            <button
+              className="button ghost"
+              disabled={busy || !memberId}
+              style={{ width: "auto", minWidth: 150 }}
+              onClick={() => runModAction("remove_timeout")}
+            >
+              Remove Timeout
+            </button>
+          </div>
+
+          <div className="member-action-grid" style={{ marginTop: 10 }}>
+            <button
+              className="button ghost"
+              disabled={busy || !memberId}
+              onClick={() => runModAction("warn")}
+            >
+              Warn
+            </button>
+
+            <button
+              className="button danger"
+              disabled={busy || !memberId}
+              onClick={() => runModAction("kick")}
+            >
+              Kick
+            </button>
+
+            <button
+              className="button danger"
+              disabled={busy || !memberId}
+              onClick={() => runModAction("ban")}
+            >
+              Ban
+            </button>
+
+            <button
+              className="button ghost"
+              disabled={busy || !memberId}
+              onClick={() => refreshMemberDetails()}
+            >
+              Refresh Member
+            </button>
+          </div>
+        </DetailSection>
+
+        <DetailSection
+          title="Voice Controls"
+          subtitle="Voice moderation and channel movement."
+          defaultOpen={false}
+        >
           <div
             className="row"
             style={{
@@ -992,9 +1211,6 @@ function MemberDrawerInner({
               flexWrap: "wrap",
             }}
           >
-            <div style={{ fontWeight: 900, fontSize: 18 }}>
-              Voice Controls
-            </div>
             {inVoice ? (
               <span className="badge open">
                 Current VC: {safeText(activeVoiceChannelId, "Unknown")}
@@ -1048,7 +1264,7 @@ function MemberDrawerInner({
 
           <div
             className="row"
-            style={{ alignItems: "stretch", gap: 10, marginTop: 10 }}
+            style={{ alignItems: "stretch", gap: 10, marginTop: 10, flexWrap: "wrap" }}
           >
             <select
               className="input"
@@ -1078,7 +1294,77 @@ function MemberDrawerInner({
               Move Voice
             </button>
           </div>
-        </div>
+        </DetailSection>
+
+        <DetailSection
+          title="Activity Trail"
+          subtitle="Stored per-member action history when available."
+          defaultOpen={false}
+        >
+          {activityRows.length ? (
+            <div className="space">
+              {activityRows.map((row) => (
+                <div key={row.id} className="member-history-row">
+                  <div className="member-history-title">{row.title}</div>
+                  {row.meta ? (
+                    <div className="member-history-meta">{row.meta}</div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state">
+              No per-member activity trail is stored on this record yet.
+            </div>
+          )}
+        </DetailSection>
+
+        <DetailSection
+          title="Copy / Export"
+          subtitle="Quick copy actions for staff context."
+          defaultOpen={false}
+        >
+          <div className="member-action-grid">
+            <button
+              className="button ghost"
+              disabled={busy}
+              onClick={() => copyText(memberId, "User ID copied.")}
+            >
+              Copy User ID
+            </button>
+
+            <button
+              className="button ghost"
+              disabled={busy}
+              onClick={() => copyText(`<@${memberId}>`, "Mention copied.")}
+            >
+              Copy Mention
+            </button>
+
+            <button
+              className="button ghost"
+              disabled={busy}
+              onClick={() =>
+                copyText(
+                  [
+                    `Member: ${name}`,
+                    `User ID: ${memberId}`,
+                    `State: ${safeText(sourceMember?.role_state)}`,
+                    `Top Role: ${safeText(
+                      sourceMember?.top_role || sourceMember?.highest_role_name,
+                      "None"
+                    )}`,
+                    `Roles: ${roleNames.join(", ") || "None"}`,
+                    `Entry Path: ${entryPathRows.map((r) => `${r.label}: ${r.value}`).join(" | ") || "Unknown"}`,
+                  ].join("\n"),
+                  "Staff summary copied."
+                )
+              }
+            >
+              Copy Summary
+            </button>
+          </div>
+        </DetailSection>
       </div>
     </div>
   );
@@ -1320,6 +1606,169 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
       )}
 
       <MemberDrawer member={selected} onClose={() => setSelected(null)} />
+
+      <style jsx>{`
+        .member-modal-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 2000;
+          background: rgba(0, 0, 0, 0.66);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 16px 12px calc(16px + env(safe-area-inset-bottom, 0px));
+          overscroll-behavior: contain;
+        }
+
+        .member-drawer {
+          width: 100%;
+          max-width: 980px;
+          max-height: min(90vh, 900px);
+          overflow-y: auto;
+          overflow-x: hidden;
+          overscroll-behavior: contain;
+          -webkit-overflow-scrolling: touch;
+          border-radius: 26px;
+          border: 1px solid rgba(255,255,255,0.10);
+          box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+          color: var(--text-strong, #f8fafc);
+          padding: 16px;
+          background:
+            radial-gradient(circle at top right, rgba(99,213,255,0.08), transparent 32%),
+            radial-gradient(circle at bottom left, rgba(93,255,141,0.06), transparent 28%),
+            rgba(8, 14, 26, 0.95);
+        }
+
+        .member-drawer-handle {
+          width: 54px;
+          height: 6px;
+          border-radius: 999px;
+          margin: 0 auto 14px;
+          background: rgba(255,255,255,0.18);
+        }
+
+        .member-drawer-header {
+          position: sticky;
+          top: -16px;
+          z-index: 3;
+          background: linear-gradient(
+            180deg,
+            rgba(8, 14, 26, 0.98),
+            rgba(8, 14, 26, 0.88)
+          );
+          padding-top: 6px;
+          padding-bottom: 10px;
+          backdrop-filter: blur(8px);
+          -webkit-backdrop-filter: blur(8px);
+        }
+
+        .member-drawer-avatar {
+          width: 52px;
+          height: 52px;
+          min-width: 52px;
+          min-height: 52px;
+        }
+
+        .member-drawer-badges {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 10px;
+        }
+
+        .profile-block {
+          margin-bottom: 14px;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 20px;
+          background: rgba(255,255,255,0.025);
+          overflow: hidden;
+        }
+
+        .profile-block-toggle {
+          width: 100%;
+          text-align: left;
+          border: 0;
+          background: transparent;
+          color: inherit;
+          padding: 14px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          cursor: pointer;
+        }
+
+        .profile-block-title {
+          font-weight: 900;
+          font-size: 19px;
+          line-height: 1.1;
+          color: var(--text-strong, #f8fafc);
+        }
+
+        .profile-block-subtitle {
+          margin-top: 4px;
+          font-size: 13px;
+          color: var(--text-muted, rgba(255,255,255,0.72));
+          line-height: 1.45;
+        }
+
+        .profile-block-body {
+          padding: 0 14px 14px;
+        }
+
+        .member-action-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+          gap: 10px;
+        }
+
+        .member-history-row {
+          padding: 12px 14px;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 16px;
+          background: rgba(255,255,255,0.022);
+        }
+
+        .member-history-title {
+          font-weight: 800;
+          color: var(--text-strong, #f8fafc);
+        }
+
+        .member-history-meta {
+          margin-top: 6px;
+          font-size: 12px;
+          line-height: 1.45;
+          color: var(--text-muted, rgba(255,255,255,0.72));
+          overflow-wrap: anywhere;
+        }
+
+        @media (max-width: 640px) {
+          .member-modal-backdrop {
+            padding: 8px 8px calc(10px + env(safe-area-inset-bottom, 0px));
+            align-items: flex-end;
+          }
+
+          .member-drawer {
+            max-height: 92vh;
+            border-radius: 22px;
+            padding: 12px;
+          }
+
+          .member-drawer-header {
+            top: -12px;
+          }
+
+          .profile-block-title {
+            font-size: 17px;
+          }
+
+          .member-action-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+      `}</style>
     </>
   );
 }
