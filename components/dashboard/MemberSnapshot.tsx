@@ -663,17 +663,9 @@ function MemberDrawerInner({
     const body = document.body;
     const prevHtmlOverflow = html.style.overflow;
     const prevBodyOverflow = body.style.overflow;
-    const prevBodyTouchAction = body.style.touchAction;
-    const prevBodyPosition = body.style.position;
-    const prevBodyWidth = body.style.width;
-    const scrollY = window.scrollY;
 
     html.style.overflow = "hidden";
     body.style.overflow = "hidden";
-    body.style.touchAction = "none";
-    body.style.position = "fixed";
-    body.style.top = `-${scrollY}px`;
-    body.style.width = "100%";
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose?.();
@@ -684,12 +676,7 @@ function MemberDrawerInner({
     return () => {
       html.style.overflow = prevHtmlOverflow;
       body.style.overflow = prevBodyOverflow;
-      body.style.touchAction = prevBodyTouchAction;
-      body.style.position = prevBodyPosition;
-      body.style.top = "";
-      body.style.width = prevBodyWidth;
       window.removeEventListener("keydown", onKeyDown);
-      window.scrollTo(0, scrollY);
     };
   }, [onClose]);
 
@@ -1355,7 +1342,9 @@ function MemberDrawerInner({
                       "None"
                     )}`,
                     `Roles: ${roleNames.join(", ") || "None"}`,
-                    `Entry Path: ${entryPathRows.map((r) => `${r.label}: ${r.value}`).join(" | ") || "Unknown"}`,
+                    `Entry Path: ${
+                      entryPathRows.map((r) => `${r.label}: ${r.value}`).join(" | ") || "Unknown"
+                    }`,
                   ].join("\n"),
                   "Staff summary copied."
                 )
@@ -1618,17 +1607,17 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 16px 12px calc(16px + env(safe-area-inset-bottom, 0px));
-          overscroll-behavior: contain;
+          padding: 12px;
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
         }
 
         .member-drawer {
           width: 100%;
           max-width: 980px;
-          max-height: min(90vh, 900px);
+          max-height: calc(100dvh - 24px);
           overflow-y: auto;
           overflow-x: hidden;
-          overscroll-behavior: contain;
           -webkit-overflow-scrolling: touch;
           border-radius: 26px;
           border: 1px solid rgba(255,255,255,0.10);
@@ -1746,12 +1735,12 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
 
         @media (max-width: 640px) {
           .member-modal-backdrop {
-            padding: 8px 8px calc(10px + env(safe-area-inset-bottom, 0px));
-            align-items: flex-end;
+            padding: 8px;
+            align-items: flex-start;
           }
 
           .member-drawer {
-            max-height: 92vh;
+            max-height: calc(100dvh - 16px);
             border-radius: 22px;
             padding: 12px;
           }
