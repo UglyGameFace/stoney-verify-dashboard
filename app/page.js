@@ -194,9 +194,7 @@ function sanitizeUserCategory(category) {
 
 function normalizeRoleNames(roleNames) {
   return Array.isArray(roleNames)
-    ? roleNames
-        .map((name) => String(name || "").trim())
-        .filter(Boolean)
+    ? roleNames.map((name) => String(name || "").trim()).filter(Boolean)
     : [];
 }
 
@@ -382,6 +380,109 @@ function sanitizeVcVerifySession(session) {
     canceled_at: session?.canceled_at || null,
     access_minutes: Number(session?.access_minutes || 0),
   };
+}
+
+function buildRecentJoinRows(memberJoins = [], guildMembers = []) {
+  const joinRows = Array.isArray(memberJoins) ? memberJoins : [];
+  const memberRows = Array.isArray(guildMembers) ? guildMembers : [];
+
+  const membersById = new Map(
+    memberRows
+      .filter((row) => row?.user_id)
+      .map((row) => [String(row.user_id), row])
+  );
+
+  const mergedJoinRows = joinRows.map((join) => {
+    const key = String(join?.user_id || "");
+    const member = membersById.get(key);
+
+    return {
+      ...(member || {}),
+      ...(join || {}),
+      user_id: join?.user_id || member?.user_id || null,
+      username: join?.username || member?.username || null,
+      display_name: join?.display_name || member?.display_name || null,
+      nickname: join?.nickname || member?.nickname || null,
+      avatar_url: join?.avatar_url || member?.avatar_url || null,
+      joined_at: join?.joined_at || member?.joined_at || join?.created_at || null,
+      updated_at: join?.updated_at || member?.updated_at || member?.last_seen_at || null,
+      created_at: join?.created_at || member?.created_at || null,
+      role_names:
+        Array.isArray(join?.role_names) && join.role_names.length
+          ? join.role_names
+          : Array.isArray(member?.role_names)
+            ? member.role_names
+            : [],
+      has_verified_role:
+        typeof join?.has_verified_role === "boolean"
+          ? join.has_verified_role
+          : Boolean(member?.has_verified_role),
+      has_unverified:
+        typeof join?.has_unverified === "boolean"
+          ? join.has_unverified
+          : Boolean(member?.has_unverified),
+      has_staff_role:
+        typeof join?.has_staff_role === "boolean"
+          ? join.has_staff_role
+          : Boolean(member?.has_staff_role),
+      in_guild:
+        typeof join?.in_guild === "boolean"
+          ? join.in_guild
+          : member?.in_guild !== false,
+      role_state: join?.role_state || member?.role_state || "tracked",
+      role_state_reason:
+        join?.role_state_reason || member?.role_state_reason || null,
+      top_role:
+        join?.top_role ||
+        member?.top_role ||
+        member?.highest_role_name ||
+        (Array.isArray(member?.role_names) ? member.role_names[0] : null) ||
+        null,
+      highest_role_name:
+        join?.highest_role_name ||
+        member?.highest_role_name ||
+        join?.top_role ||
+        member?.top_role ||
+        null,
+      source: "member_joins",
+    };
+  });
+
+  if (mergedJoinRows.length) {
+    return mergedJoinRows
+      .sort(
+        (a, b) =>
+          parseDateMs(b?.joined_at || b?.created_at || b?.updated_at) -
+          parseDateMs(a?.joined_at || a?.created_at || a?.updated_at)
+      )
+      .slice(0, 50);
+  }
+
+  return memberRows
+    .filter((member) => {
+      const joinedAtMs = parseDateMs(member?.joined_at || member?.created_at);
+      return joinedAtMs > 0;
+    })
+    .sort(
+      (a, b) =>
+        parseDateMs(b?.joined_at || b?.created_at || b?.updated_at) -
+        parseDateMs(a?.joined_at || a?.created_at || a?.updated_at)
+    )
+    .slice(0, 50)
+    .map((member) => ({
+      ...member,
+      source: "guild_members_fallback",
+      top_role:
+        member?.top_role ||
+        member?.highest_role_name ||
+        (Array.isArray(member?.role_names) ? member.role_names[0] : null) ||
+        null,
+      highest_role_name:
+        member?.highest_role_name ||
+        member?.top_role ||
+        (Array.isArray(member?.role_names) ? member.role_names[0] : null) ||
+        null,
+    }));
 }
 
 async function getStaffDashboardData() {
@@ -636,10 +737,10 @@ async function getStaffDashboardData() {
   const roles = (rolesRes.data || []).map((role) => ({ ...role }));
   const metrics = deriveMetricsFromTickets(rawTickets, metricsRes.data || []);
   const categories = categoriesRes.data || [];
-  const recentJoins = memberJoinsRes.data || [];
   const recentActiveMembers = recentActiveMembersRes.data || [];
   const recentFormerMembers = recentFormerMembersRes.data || [];
   const guildMembers = allGuildMembersRes.data || [];
+  const recentJoins = buildRecentJoinRows(memberJoinsRes.data || [], guildMembers);
   const warns = warnsRowsRes.data || [];
   const raids = raidsRowsRes.data || [];
   const fraud = fraudRowsRes.data || [];
