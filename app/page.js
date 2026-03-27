@@ -192,25 +192,171 @@ function sanitizeUserCategory(category) {
   };
 }
 
-function sanitizeUserMember(member) {
-  if (!member) return null;
+function normalizeRoleNames(roleNames) {
+  return Array.isArray(roleNames)
+    ? roleNames
+        .map((name) => String(name || "").trim())
+        .filter(Boolean)
+    : [];
+}
+
+function deriveSessionMemberFallback(session) {
+  const sessionMember = session?.member || {};
+  const roleNames = normalizeRoleNames(sessionMember?.roles);
+  const roleNamesLower = roleNames.map((name) => name.toLowerCase());
+
+  const hasStaffRole = Boolean(sessionMember?.has_staff_role);
+  const hasVerifiedRole = Boolean(sessionMember?.has_verified_role);
+  const hasUnverified =
+    Boolean(sessionMember?.has_unverified_role) ||
+    roleNamesLower.some((name) => name === "unverified" || name.includes("unverified"));
+  const hasSecondaryVerifiedRole = roleNamesLower.some(
+    (name) =>
+      name === "resident" ||
+      name === "verified" ||
+      name.includes("verified") ||
+      name.includes("resident")
+  );
+
+  let roleState = "not_synced";
+  let roleStateReason = "Waiting for dashboard member sync.";
+
+  if (hasStaffRole) {
+    roleState = "staff_ok";
+    roleStateReason = "Live Discord session shows staff access.";
+  } else if (hasVerifiedRole || hasSecondaryVerifiedRole) {
+    roleState = "verified_ok";
+    roleStateReason = "Live Discord session shows verified access.";
+  } else if (hasUnverified) {
+    roleState = "unverified_only";
+    roleStateReason = "Live Discord session shows pending verification.";
+  }
 
   return {
-    user_id: member?.user_id || null,
-    username: member?.username || null,
-    display_name: member?.display_name || null,
-    nickname: member?.nickname || null,
-    avatar_url: member?.avatar_url || null,
-    in_guild: member?.in_guild !== false,
-    has_unverified: Boolean(member?.has_unverified),
-    has_verified_role: Boolean(member?.has_verified_role),
-    has_staff_role: Boolean(member?.has_staff_role),
-    has_secondary_verified_role: Boolean(member?.has_secondary_verified_role),
-    role_state: member?.role_state || "unknown",
-    role_state_reason: member?.role_state_reason || null,
-    joined_at: member?.joined_at || null,
-    role_names: Array.isArray(member?.role_names) ? member.role_names : [],
+    user_id:
+      session?.user?.discord_id ||
+      session?.user?.id ||
+      session?.discordUser?.id ||
+      null,
+    username:
+      session?.discordUser?.username ||
+      session?.user?.login ||
+      session?.user?.username ||
+      null,
+    display_name:
+      sessionMember?.display_name ||
+      session?.user?.username ||
+      session?.discordUser?.global_name ||
+      session?.discordUser?.username ||
+      null,
+    nickname: sessionMember?.nickname || null,
+    avatar_url:
+      sessionMember?.avatar_url ||
+      session?.user?.avatar_url ||
+      session?.user?.avatar ||
+      session?.user?.image ||
+      session?.user?.picture ||
+      session?.discordUser?.avatar_url ||
+      session?.discordUser?.avatar ||
+      null,
+    in_guild: true,
+    has_unverified: hasUnverified,
+    has_verified_role: hasVerifiedRole || hasSecondaryVerifiedRole,
+    has_staff_role: hasStaffRole,
+    has_secondary_verified_role: hasSecondaryVerifiedRole,
+    role_state: roleState,
+    role_state_reason: roleStateReason,
+    joined_at: null,
+    role_names: roleNames,
   };
+}
+
+function mergeMemberWithSession(member, session) {
+  const fallback = deriveSessionMemberFallback(session);
+
+  if (!member) {
+    return fallback;
+  }
+
+  const dbRoleNames = normalizeRoleNames(member?.role_names);
+  const fallbackRoleNames = normalizeRoleNames(fallback?.role_names);
+  const mergedRoleNames = dbRoleNames.length ? dbRoleNames : fallbackRoleNames;
+
+  const mergedHasStaffRole = Boolean(
+    member?.has_staff_role || fallback?.has_staff_role
+  );
+  const mergedHasVerifiedRole = Boolean(
+    member?.has_verified_role ||
+      member?.has_secondary_verified_role ||
+      fallback?.has_verified_role ||
+      fallback?.has_secondary_verified_role
+  );
+  const mergedHasUnverified = Boolean(
+    member?.has_unverified || fallback?.has_unverified
+  );
+  const mergedSecondaryVerified = Boolean(
+    member?.has_secondary_verified_role || fallback?.has_secondary_verified_role
+  );
+
+  let mergedRoleState = member?.role_state || fallback?.role_state || "not_synced";
+  let mergedRoleStateReason =
+    member?.role_state_reason || fallback?.role_state_reason || null;
+
+  if (mergedHasStaffRole) {
+    mergedRoleState = "staff_ok";
+    mergedRoleStateReason = "Staff access detected.";
+  } else if (mergedHasVerifiedRole) {
+    mergedRoleState = "verified_ok";
+    mergedRoleStateReason = "Verified access detected.";
+  } else if (mergedHasUnverified) {
+    mergedRoleState = "unverified_only";
+    mergedRoleStateReason = "Pending verification access detected.";
+  } else if (!member?.role_state || member?.role_state === "unknown") {
+    mergedRoleState = fallback?.role_state || "not_synced";
+    mergedRoleStateReason =
+      fallback?.role_state_reason || "Waiting for dashboard member sync.";
+  }
+
+  return {
+    ...member,
+    user_id: member?.user_id || fallback?.user_id || null,
+    username: member?.username || fallback?.username || null,
+    display_name: member?.display_name || fallback?.display_name || null,
+    nickname: member?.nickname || fallback?.nickname || null,
+    avatar_url: member?.avatar_url || fallback?.avatar_url || null,
+    in_guild: member?.in_guild !== false,
+    has_unverified: mergedHasUnverified,
+    has_verified_role: mergedHasVerifiedRole,
+    has_staff_role: mergedHasStaffRole,
+    has_secondary_verified_role: mergedSecondaryVerified,
+    role_state: mergedRoleState,
+    role_state_reason: mergedRoleStateReason,
+    joined_at: member?.joined_at || fallback?.joined_at || null,
+    role_names: mergedRoleNames,
+  };
+}
+
+function sanitizeUserMember(member, session = null) {
+  const cleaned = member
+    ? {
+        user_id: member?.user_id || null,
+        username: member?.username || null,
+        display_name: member?.display_name || null,
+        nickname: member?.nickname || null,
+        avatar_url: member?.avatar_url || null,
+        in_guild: member?.in_guild !== false,
+        has_unverified: Boolean(member?.has_unverified),
+        has_verified_role: Boolean(member?.has_verified_role),
+        has_staff_role: Boolean(member?.has_staff_role),
+        has_secondary_verified_role: Boolean(member?.has_secondary_verified_role),
+        role_state: member?.role_state || "unknown",
+        role_state_reason: member?.role_state_reason || null,
+        joined_at: member?.joined_at || null,
+        role_names: Array.isArray(member?.role_names) ? member.role_names : [],
+      }
+    : null;
+
+  return mergeMemberWithSession(cleaned, session);
 }
 
 function sanitizeVerificationFlag(flag) {
@@ -550,14 +696,35 @@ async function getUserDashboardData(session) {
     session?.user?.name ||
     "Member";
 
+  const viewerAvatar =
+    session?.user?.avatar_url ||
+    session?.user?.avatar ||
+    session?.user?.image ||
+    session?.user?.picture ||
+    session?.discordUser?.avatar_url ||
+    session?.discordUser?.avatar ||
+    null;
+
+  const viewerDisplayName =
+    session?.member?.display_name ||
+    session?.discordUser?.global_name ||
+    session?.user?.username ||
+    session?.discordUser?.username ||
+    "Member";
+
   if (!discordId) {
     return {
       viewer: {
         discord_id: null,
         username,
+        display_name: viewerDisplayName,
+        avatar_url: viewerAvatar,
+        avatar: viewerAvatar,
+        image: viewerAvatar,
+        picture: viewerAvatar,
         isStaff: false,
       },
-      member: null,
+      member: sanitizeUserMember(null, session),
       openTicket: null,
       recentTickets: [],
       categories: [],
@@ -612,7 +779,7 @@ async function getUserDashboardData(session) {
       .maybeSingle(),
   ]);
 
-  const member = sanitizeUserMember(memberRes.data || null);
+  const member = sanitizeUserMember(memberRes.data || null, session);
 
   const allTickets = (ticketsRes.data || []).map((ticket) => ({
     ...ticket,
@@ -633,7 +800,31 @@ async function getUserDashboardData(session) {
     viewer: {
       discord_id: discordId,
       username,
+      display_name: viewerDisplayName,
+      avatar_url: viewerAvatar,
+      avatar: viewerAvatar,
+      image: viewerAvatar,
+      picture: viewerAvatar,
       isStaff: false,
+      verification_label:
+        session?.member?.verification_label ||
+        (member?.has_staff_role
+          ? "Staff"
+          : member?.has_verified_role
+            ? "Verified"
+            : member?.has_unverified
+              ? "Pending Verification"
+              : "Not Synced Yet"),
+      access_label:
+        session?.member?.access_label ||
+        (member?.has_staff_role
+          ? "Staff"
+          : member?.has_verified_role
+            ? "Verified"
+            : member?.has_unverified
+              ? "Limited"
+              : "Not Synced Yet"),
+      role_names: member?.role_names || [],
     },
     member,
     openTicket,
