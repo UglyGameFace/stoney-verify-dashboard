@@ -90,25 +90,67 @@ function normalizeStatus(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function normalizeLabel(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 function getVisibleCategories(categories) {
   const rows = safeArray(categories).filter((item) => item && item.name);
   return rows.length ? rows : FALLBACK_CATEGORIES;
 }
 
-function getVerificationState(member, verificationFlags = []) {
-  if (!member) return { label: "Not Synced Yet", tone: "warn" };
+function getVerificationState(member, verificationFlags = [], viewer = {}) {
+  const viewerVerification = String(viewer?.verification_label || "").trim();
+
   if (member?.has_staff_role) return { label: "Staff", tone: "low" };
   if (member?.has_verified_role) return { label: "Verified", tone: "low" };
   if (member?.has_unverified) return { label: "Pending Verification", tone: "medium" };
+
+  if (viewerVerification) {
+    const normalized = normalizeLabel(viewerVerification);
+
+    if (normalized.includes("staff")) return { label: "Staff", tone: "low" };
+    if (normalized.includes("verified")) return { label: "Verified", tone: "low" };
+    if (normalized.includes("pending")) {
+      return { label: "Pending Verification", tone: "medium" };
+    }
+    if (normalized.includes("review")) return { label: "Needs Review", tone: "danger" };
+    if (normalized.includes("not synced")) return { label: "Not Synced Yet", tone: "warn" };
+
+    return { label: viewerVerification, tone: "warn" };
+  }
+
   if (safeArray(verificationFlags).some((f) => Boolean(f?.flagged))) {
     return { label: "Needs Review", tone: "danger" };
   }
-  return { label: "Unknown", tone: "warn" };
+
+  return { label: "Not Synced Yet", tone: "warn" };
 }
 
-function getRoleSummary(member) {
-  if (!member) return [];
-  const names = Array.isArray(member?.role_names) ? member.role_names : [];
+function getAccessLabel(member, viewer = {}) {
+  if (member?.has_staff_role) return "Staff";
+  if (member?.has_verified_role) return "Verified";
+  if (member?.has_unverified) return "Limited";
+
+  const viewerAccess = String(viewer?.access_label || "").trim();
+  if (viewerAccess) {
+    const normalized = normalizeLabel(viewerAccess);
+    if (normalized.includes("staff")) return "Staff";
+    if (normalized.includes("verified")) return "Verified";
+    if (normalized.includes("limited")) return "Limited";
+    if (normalized.includes("not synced")) return "Not Synced Yet";
+    return viewerAccess;
+  }
+
+  return "Not Synced Yet";
+}
+
+function getRoleSummary(member, viewer = {}) {
+  const names = Array.isArray(member?.role_names)
+    ? member.role_names
+    : Array.isArray(viewer?.role_names)
+      ? viewer.role_names
+      : [];
   return names.filter(Boolean).slice(0, 8);
 }
 
@@ -116,6 +158,7 @@ function getDisplayName(viewer, member) {
   return (
     member?.display_name ||
     member?.global_name ||
+    viewer?.display_name ||
     viewer?.global_name ||
     viewer?.username ||
     "Member"
@@ -127,14 +170,20 @@ function getUsername(viewer, member) {
 }
 
 function getMemberAvatarUrl(viewer, member) {
-  return (
-    member?.avatar_url ||
-    viewer?.avatar_url ||
-    viewer?.avatar ||
-    viewer?.image ||
-    viewer?.picture ||
-    ""
-  );
+  const candidates = [
+    member?.avatar_url,
+    viewer?.avatar_url,
+    viewer?.avatar,
+    viewer?.image,
+    viewer?.picture,
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate || "").trim();
+    if (value) return value;
+  }
+
+  return "";
 }
 
 function buildDiscordChannelUrl(ticket, initialData) {
@@ -166,8 +215,9 @@ function buildTicketSummary(ticket) {
   ].join("\n");
 }
 
-function getPrimaryAction({ member, openTicket, verificationFlags }) {
+function getPrimaryAction({ member, openTicket, verificationFlags, viewer }) {
   const hasFlags = safeArray(verificationFlags).some((f) => Boolean(f?.flagged));
+  const verification = getVerificationState(member, verificationFlags, viewer);
 
   if (openTicket) {
     return {
@@ -182,7 +232,7 @@ function getPrimaryAction({ member, openTicket, verificationFlags }) {
     };
   }
 
-  if (member?.has_unverified) {
+  if (member?.has_unverified || verification.label === "Pending Verification") {
     return {
       title: "You still need verification",
       body: "Open a verification ticket so staff can review your access.",
@@ -195,7 +245,7 @@ function getPrimaryAction({ member, openTicket, verificationFlags }) {
     };
   }
 
-  if (hasFlags) {
+  if (hasFlags || verification.label === "Needs Review") {
     return {
       title: "Your account needs review",
       body: "Open a support ticket so staff can manually review your account state.",
@@ -208,7 +258,7 @@ function getPrimaryAction({ member, openTicket, verificationFlags }) {
     };
   }
 
-  if (member?.has_verified_role) {
+  if (member?.has_verified_role || verification.label === "Verified") {
     return {
       title: "You are verified",
       body: "If something still looks wrong, open the support category that best matches your issue.",
@@ -265,14 +315,8 @@ function Section({ title, subtitle, children, actions = null, tone = "default" }
   );
 }
 
-function OverviewTiles({ verification, openTicket, member }) {
-  const accessLabel = member?.has_verified_role
-    ? "Verified Access"
-    : member?.has_unverified
-      ? "Limited Access"
-      : member?.has_staff_role
-        ? "Staff Access"
-        : "Unknown";
+function OverviewTiles({ verification, openTicket, member, viewer }) {
+  const accessLabel = getAccessLabel(member, viewer);
 
   return (
     <div className="summary-grid">
@@ -571,8 +615,9 @@ function HomeTab({
   onGoToTab,
   isCreating,
 }) {
-  const verification = getVerificationState(member, verificationFlags);
-  const action = getPrimaryAction({ member, openTicket, verificationFlags });
+  const viewer = initialData?.viewer || {};
+  const verification = getVerificationState(member, verificationFlags, viewer);
+  const action = getPrimaryAction({ member, openTicket, verificationFlags, viewer });
   const visibleCategories = getVisibleCategories(categories);
 
   return (
@@ -586,6 +631,7 @@ function HomeTab({
           verification={verification}
           openTicket={openTicket}
           member={member}
+          viewer={viewer}
         />
 
         <div className={`status-panel ${action.tone}`} style={{ marginTop: 14 }}>
@@ -740,11 +786,12 @@ function TicketsTab({
 }
 
 function AccountTab({ viewer, member, verificationFlags }) {
-  const verification = getVerificationState(member, verificationFlags);
-  const roles = getRoleSummary(member);
+  const verification = getVerificationState(member, verificationFlags, viewer);
+  const roles = getRoleSummary(member, viewer);
   const avatarUrl = getMemberAvatarUrl(viewer, member);
   const displayName = getDisplayName(viewer, member);
   const username = getUsername(viewer, member);
+  const accessLabel = getAccessLabel(member, viewer);
 
   return (
     <div className="user-dashboard-grid">
@@ -763,7 +810,9 @@ function AccountTab({ viewer, member, verificationFlags }) {
                 height="64"
               />
             ) : (
-              <div className="account-avatar-fallback" />
+              <div className="account-avatar-fallback">
+                <span>{String(displayName || "M").trim().charAt(0).toUpperCase() || "M"}</span>
+              </div>
             )}
           </div>
 
@@ -795,15 +844,7 @@ function AccountTab({ viewer, member, verificationFlags }) {
 
           <div className="mini-card">
             <div className="ticket-info-label">Access</div>
-            <div>
-              {member?.has_verified_role
-                ? "Verified"
-                : member?.has_unverified
-                  ? "Limited"
-                  : member?.has_staff_role
-                    ? "Staff"
-                    : "Unknown"}
-            </div>
+            <div>{accessLabel}</div>
           </div>
         </div>
 
@@ -1282,6 +1323,8 @@ export default function UserDashboardClient({ initialData }) {
           border: 1px solid rgba(255, 255, 255, 0.12);
           background: rgba(255, 255, 255, 0.04);
           box-shadow: 0 0 18px rgba(99, 213, 255, 0.12);
+          display: grid;
+          place-items: center;
         }
 
         .account-avatar img {
@@ -1294,7 +1337,13 @@ export default function UserDashboardClient({ initialData }) {
         .account-avatar-fallback {
           width: 100%;
           height: 100%;
+          display: grid;
+          place-items: center;
           background: linear-gradient(135deg, #68f5bf 0%, #63d5ff 100%);
+          color: #09111f;
+          font-weight: 900;
+          font-size: 24px;
+          letter-spacing: -0.04em;
         }
 
         .account-header-copy {
