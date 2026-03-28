@@ -36,6 +36,10 @@ async function discordApi(path) {
   return text ? JSON.parse(text) : null;
 }
 
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function normalizeStoredRoles(storedMember) {
   if (Array.isArray(storedMember?.roles) && storedMember.roles.length) {
     return storedMember.roles
@@ -131,6 +135,21 @@ function extractVoiceSnapshot(member, storedMember) {
   };
 }
 
+function normalizeStoredMemberPayload(storedMember = {}) {
+  return {
+    ...storedMember,
+    previous_usernames: safeArray(storedMember?.previous_usernames),
+    previous_display_names: safeArray(storedMember?.previous_display_names),
+    previous_nicknames: safeArray(storedMember?.previous_nicknames),
+    role_ids: safeArray(storedMember?.role_ids),
+    role_names: safeArray(storedMember?.role_names),
+    roles: safeArray(storedMember?.roles),
+    activity_log: safeArray(storedMember?.activity_log),
+    action_history: safeArray(storedMember?.action_history),
+    mod_history: safeArray(storedMember?.mod_history),
+  };
+}
+
 export async function GET(req) {
   try {
     const { refreshedTokens } = await requireStaffSessionForRoute();
@@ -160,13 +179,16 @@ export async function GET(req) {
       roles = results[1];
     } catch (err) {
       if (err?.status === 404) {
-        const storedMember = await getStoredMember(supabase, guildId, userId);
+        const storedMember = normalizeStoredMemberPayload(
+          await getStoredMember(supabase, guildId, userId)
+        );
         const storedRoles = normalizeStoredRoles(storedMember);
         const voice = extractVoiceSnapshot(null, storedMember);
 
         const response = NextResponse.json({
           ok: true,
           member: {
+            ...storedMember,
             user_id: storedMember?.user_id || userId,
             username: storedMember?.username || "",
             display_name: storedMember?.display_name || "",
@@ -175,10 +197,10 @@ export async function GET(req) {
             avatar_url: storedMember?.avatar_url || "",
             nickname: storedMember?.nickname || "",
             joined_at: storedMember?.joined_at || null,
-            role_ids: Array.isArray(storedMember?.role_ids)
+            role_ids: safeArray(storedMember?.role_ids).length
               ? storedMember.role_ids
               : storedRoles.map((role) => role.id),
-            role_names: Array.isArray(storedMember?.role_names)
+            role_names: safeArray(storedMember?.role_names).length
               ? storedMember.role_names
               : storedRoles.map((role) => role.name),
             top_role:
@@ -192,12 +214,12 @@ export async function GET(req) {
             data_health: storedMember?.data_health || "left_guild",
             role_state: storedMember?.role_state || "left_guild",
             role_state_reason: storedMember?.role_state_reason || "",
-            has_unverified: storedMember?.has_unverified || false,
-            has_verified_role: storedMember?.has_verified_role || false,
-            has_staff_role: storedMember?.has_staff_role || false,
+            has_unverified: Boolean(storedMember?.has_unverified),
+            has_verified_role: Boolean(storedMember?.has_verified_role),
+            has_staff_role: Boolean(storedMember?.has_staff_role),
             has_secondary_verified_role:
-              storedMember?.has_secondary_verified_role || false,
-            has_cosmetic_only: storedMember?.has_cosmetic_only || false,
+              Boolean(storedMember?.has_secondary_verified_role),
+            has_cosmetic_only: Boolean(storedMember?.has_cosmetic_only),
             synced_at: storedMember?.synced_at || null,
             updated_at: storedMember?.updated_at || null,
             last_seen_at: storedMember?.last_seen_at || null,
@@ -215,7 +237,9 @@ export async function GET(req) {
       throw err;
     }
 
-    const storedMember = await getStoredMember(supabase, guildId, userId);
+    const storedMember = normalizeStoredMemberPayload(
+      await getStoredMember(supabase, guildId, userId)
+    );
 
     const roleMap = new Map((roles || []).map((role) => [role.id, role]));
     const roleIds = Array.isArray(member?.roles) ? member.roles : [];
@@ -235,6 +259,7 @@ export async function GET(req) {
     const response = NextResponse.json({
       ok: true,
       member: {
+        ...storedMember,
         user_id: member?.user?.id || storedMember?.user_id || userId,
         username: member?.user?.username || storedMember?.username || "",
         display_name:
@@ -265,12 +290,12 @@ export async function GET(req) {
         data_health: storedMember?.data_health || "ok",
         role_state: storedMember?.role_state || "unknown",
         role_state_reason: storedMember?.role_state_reason || "",
-        has_unverified: storedMember?.has_unverified || false,
-        has_verified_role: storedMember?.has_verified_role || false,
-        has_staff_role: storedMember?.has_staff_role || false,
+        has_unverified: Boolean(storedMember?.has_unverified),
+        has_verified_role: Boolean(storedMember?.has_verified_role),
+        has_staff_role: Boolean(storedMember?.has_staff_role),
         has_secondary_verified_role:
-          storedMember?.has_secondary_verified_role || false,
-        has_cosmetic_only: storedMember?.has_cosmetic_only || false,
+          Boolean(storedMember?.has_secondary_verified_role),
+        has_cosmetic_only: Boolean(storedMember?.has_cosmetic_only),
         synced_at: storedMember?.synced_at || null,
         updated_at: storedMember?.updated_at || null,
         last_seen_at: storedMember?.last_seen_at || null,
