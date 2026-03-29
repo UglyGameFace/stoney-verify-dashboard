@@ -179,9 +179,8 @@ function memberMatchesFilter(member: any, filter: string) {
   if (filter === "staff") return !!member?.has_staff_role;
   if (filter === "verified") return !!member?.has_verified_role;
   if (filter === "pending") return !!member?.has_unverified;
-  if (filter === "conflict") {
+  if (filter === "conflict")
     return String(member?.role_state || "").toLowerCase().includes("conflict");
-  }
   return true;
 }
 
@@ -322,9 +321,7 @@ function getTimelineRows(member: any) {
 
 function getHistoryRows(member: any) {
   const previousUsernames = normalizeMaybeArray(member?.previous_usernames);
-  const previousDisplayNames = normalizeMaybeArray(
-    member?.previous_display_names
-  );
+  const previousDisplayNames = normalizeMaybeArray(member?.previous_display_names);
   const previousNicknames = normalizeMaybeArray(member?.previous_nicknames);
 
   return [
@@ -334,9 +331,7 @@ function getHistoryRows(member: any) {
     },
     {
       label: "Previous Display Names",
-      value: previousDisplayNames.length
-        ? previousDisplayNames.join(", ")
-        : "None",
+      value: previousDisplayNames.length ? previousDisplayNames.join(", ") : "None",
     },
     {
       label: "Previous Nicknames",
@@ -374,9 +369,17 @@ function getActivityRows(member: any) {
       item?.staff_id
     );
 
-    const when = firstNonEmpty(item?.created_at, item?.timestamp, item?.at);
+    const when = firstNonEmpty(
+      item?.created_at,
+      item?.timestamp,
+      item?.at
+    );
 
-    const reason = firstNonEmpty(item?.reason, item?.note, item?.description);
+    const reason = firstNonEmpty(
+      item?.reason,
+      item?.note,
+      item?.description
+    );
 
     const metaParts = [
       actor ? `By: ${actor}` : "",
@@ -414,9 +417,7 @@ function DetailSection({
       >
         <div style={{ minWidth: 0 }}>
           <div className="profile-block-title">{title}</div>
-          {subtitle ? (
-            <div className="profile-block-subtitle">{subtitle}</div>
-          ) : null}
+          {subtitle ? <div className="profile-block-subtitle">{subtitle}</div> : null}
         </div>
         <span className="badge">{open ? "Hide" : "Show"}</span>
       </button>
@@ -425,11 +426,7 @@ function DetailSection({
   );
 }
 
-function KeyValueGrid({
-  rows,
-}: {
-  rows: { label: string; value: string }[];
-}) {
+function KeyValueGrid({ rows }: { rows: { label: string; value: string }[] }) {
   return (
     <div className="member-detail-grid">
       {rows.map((row) => (
@@ -507,8 +504,6 @@ function MemberCard({
                 alt={name}
                 width="38"
                 height="38"
-                loading="lazy"
-                decoding="async"
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
               />
             ) : (
@@ -632,19 +627,6 @@ function MemberDrawerInner({
   const [selectedVoiceChannelId, setSelectedVoiceChannelId] = useState("");
   const [voiceChannels, setVoiceChannels] = useState<any[]>([]);
   const [liveMember, setLiveMember] = useState(member || null);
-  const [supportDataLoaded, setSupportDataLoaded] = useState(false);
-  const memberKey = String(member?.user_id || "");
-
-  useEffect(() => {
-    setBusy(false);
-    setMessage("");
-    setError("");
-    setRateLimitNotice("");
-    setMemberMissingOnDiscord(false);
-    setSelectedRoleId("");
-    setSelectedVoiceChannelId("");
-    setLiveMember(member || null);
-  }, [memberKey, member]);
 
   const sourceMember = liveMember || member;
   const name = getMemberName(sourceMember);
@@ -701,7 +683,7 @@ function MemberDrawerInner({
   useEffect(() => {
     let cancelled = false;
 
-    const timer = window.setTimeout(async () => {
+    async function boot() {
       try {
         const res = await fetch("/api/dashboard/live", { cache: "no-store" });
         const json = await res.json().catch(() => ({}));
@@ -710,19 +692,17 @@ function MemberDrawerInner({
 
         setGuildRoles(normalizeGuildRoles(json?.roles || []));
         setVoiceChannels(safeArray(json?.voiceChannels || []));
-        setSupportDataLoaded(true);
       } catch {
-        if (!cancelled) {
-          setSupportDataLoaded(false);
-        }
+        // ignore
       }
-    }, 120);
+    }
+
+    boot();
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
     };
-  }, [memberKey]);
+  }, []);
 
   async function copyText(text: string, successMessage: string) {
     try {
@@ -746,16 +726,13 @@ function MemberDrawerInner({
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error(
-          json?.error || `Failed to load member details (${res.status}).`
-        );
+        throw new Error(json?.error || `Failed to load member details (${res.status}).`);
       }
 
       if (json?.member) {
         setLiveMember(json.member);
         setMemberMissingOnDiscord(Boolean(json.member?.discord_unavailable));
         setRateLimitNotice("");
-        setError("");
       }
     } catch (err: any) {
       const details = parseDiscordErrorDetails(err?.message);
@@ -852,9 +829,7 @@ function MemberDrawerInner({
         const waitText = details.retryAfter
           ? ` Retry after about ${details.retryAfter.toFixed(1)}s.`
           : "";
-        setRateLimitNotice(
-          `Discord rate limited this action refresh.${waitText}`
-        );
+        setRateLimitNotice(`Discord rate limited this action refresh.${waitText}`);
       }
       setError(err?.message || "Moderation action failed.");
     } finally {
@@ -862,14 +837,13 @@ function MemberDrawerInner({
     }
   }
 
-  const inVoice = Boolean(
-    sourceMember?.voice_channel_id || sourceMember?.voice_state?.channel_id
-  );
-  const activeVoiceChannelId = String(
-    sourceMember?.voice_channel_id ||
-      sourceMember?.voice_state?.channel_id ||
-      ""
-  ).trim();
+  const inVoice = Boolean(sourceMember?.voice_channel_id || sourceMember?.voice_state?.channel_id);
+  const activeVoiceChannelId =
+    String(
+      sourceMember?.voice_channel_id ||
+        sourceMember?.voice_state?.channel_id ||
+        ""
+    ).trim();
 
   return (
     <div
@@ -878,7 +852,10 @@ function MemberDrawerInner({
       onClick={onClose}
       className="member-modal-backdrop"
     >
-      <div onClick={(e) => e.stopPropagation()} className="member-drawer">
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="member-drawer"
+      >
         <div className="member-drawer-handle" />
 
         <div
@@ -895,19 +872,13 @@ function MemberDrawerInner({
             className="row"
             style={{ alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}
           >
-            <div
-              className="avatar member-drawer-avatar"
-              style={{ fontSize: 16 }}
-            >
+            <div className="avatar member-drawer-avatar" style={{ fontSize: 16 }}>
               {avatar ? (
                 <img
-                  key={avatar}
                   src={avatar}
                   alt={name}
                   width="52"
                   height="52"
-                  loading="eager"
-                  decoding="async"
                   style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 />
               ) : (
@@ -950,9 +921,7 @@ function MemberDrawerInner({
                     sourceMember?.has_verified_role ? "low" : "medium"
                   }`}
                 >
-                  {sourceMember?.has_verified_role
-                    ? "Verified"
-                    : "Not Verified"}
+                  {sourceMember?.has_verified_role ? "Verified" : "Not Verified"}
                 </span>
                 {inVoice ? <span className="badge open">In Voice</span> : null}
               </div>
@@ -971,8 +940,7 @@ function MemberDrawerInner({
 
         {memberMissingOnDiscord ? (
           <div className="warning-banner" style={{ marginBottom: 12 }}>
-            Discord no longer reports this member. Showing the latest stored
-            record.
+            Discord no longer reports this member. Showing the latest stored record.
           </div>
         ) : null}
 
@@ -1001,35 +969,17 @@ function MemberDrawerInner({
         >
           <KeyValueGrid
             rows={[
-              {
-                label: "Display Name",
-                value: safeText(sourceMember?.display_name, "Unknown"),
-              },
-              {
-                label: "Username",
-                value: safeText(sourceMember?.username, "Unknown"),
-              },
-              {
-                label: "Nickname",
-                value: safeText(sourceMember?.nickname, "None"),
-              },
+              { label: "Display Name", value: safeText(sourceMember?.display_name, "Unknown") },
+              { label: "Username", value: safeText(sourceMember?.username, "Unknown") },
+              { label: "Nickname", value: safeText(sourceMember?.nickname, "None") },
               {
                 label: "Top Role",
-                value: safeText(
-                  sourceMember?.top_role || sourceMember?.highest_role_name,
-                  "None"
-                ),
+                value: safeText(sourceMember?.top_role || sourceMember?.highest_role_name, "None"),
               },
-              {
-                label: "Role State",
-                value: safeText(sourceMember?.role_state, "unknown"),
-              },
+              { label: "Role State", value: safeText(sourceMember?.role_state, "unknown") },
               {
                 label: "Reason",
-                value: safeText(
-                  sourceMember?.role_state_reason,
-                  "No extra notes."
-                ),
+                value: safeText(sourceMember?.role_state_reason, "No extra notes."),
               },
             ]}
           />
@@ -1044,10 +994,7 @@ function MemberDrawerInner({
             <KeyValueGrid rows={entryPathRows} />
           ) : (
             <div className="empty-state">
-              No entry-path fields are currently stored for this member. The
-              dashboard can only show this after your bot/database writes
-              inviter, vouch, approval, or verification-source fields onto the
-              member record.
+              No entry-path fields are currently stored for this member. The dashboard can only show this after your bot/database writes inviter, vouch, approval, or verification-source fields onto the member record.
             </div>
           )}
         </DetailSection>
@@ -1073,12 +1020,6 @@ function MemberDrawerInner({
           subtitle="Current tracked roles plus add/remove controls."
           defaultOpen={false}
         >
-          {!supportDataLoaded ? (
-            <div className="muted" style={{ marginBottom: 12 }}>
-              Loading server role data…
-            </div>
-          ) : null}
-
           <div className="roles" style={{ marginBottom: 12 }}>
             {roleNames.length ? (
               roleNames.map((roleName, index) => {
@@ -1179,12 +1120,7 @@ function MemberDrawerInner({
 
           <div
             className="row"
-            style={{
-              alignItems: "stretch",
-              gap: 10,
-              marginTop: 10,
-              flexWrap: "wrap",
-            }}
+            style={{ alignItems: "stretch", gap: 10, marginTop: 10, flexWrap: "wrap" }}
           >
             <input
               className="input"
@@ -1253,12 +1189,6 @@ function MemberDrawerInner({
           subtitle="Voice moderation and channel movement."
           defaultOpen={false}
         >
-          {!supportDataLoaded ? (
-            <div className="muted" style={{ marginBottom: 12 }}>
-              Loading voice channel data…
-            </div>
-          ) : null}
-
           <div
             className="row"
             style={{
@@ -1321,12 +1251,7 @@ function MemberDrawerInner({
 
           <div
             className="row"
-            style={{
-              alignItems: "stretch",
-              gap: 10,
-              marginTop: 10,
-              flexWrap: "wrap",
-            }}
+            style={{ alignItems: "stretch", gap: 10, marginTop: 10, flexWrap: "wrap" }}
           >
             <select
               className="input"
@@ -1449,7 +1374,7 @@ function MemberDrawer({
   if (!member || !mounted || typeof document === "undefined") return null;
 
   return createPortal(
-    <MemberDrawerInner key={String(member?.user_id || "member-drawer")} member={member} onClose={onClose} />,
+    <MemberDrawerInner member={member} onClose={onClose} />,
     document.body
   );
 }
@@ -1602,14 +1527,11 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
                   flexWrap: "wrap",
                 }}
               >
-                <div
-                  style={{ fontWeight: 900, color: "var(--text-strong, #f8fafc)" }}
-                >
+                <div style={{ fontWeight: 900, color: "var(--text-strong, #f8fafc)" }}>
                   Active Members
                 </div>
                 <div className="muted" style={{ fontSize: 12 }}>
-                  Showing {activeRows.length} active record
-                  {activeRows.length === 1 ? "" : "s"}
+                  Showing {activeRows.length} active record{activeRows.length === 1 ? "" : "s"}
                 </div>
               </div>
 
@@ -1638,9 +1560,7 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
                 }}
               >
                 <div>
-                  <div
-                    style={{ fontWeight: 900, color: "var(--text-strong, #f8fafc)" }}
-                  >
+                  <div style={{ fontWeight: 900, color: "var(--text-strong, #f8fafc)" }}>
                     Former Members
                   </div>
                   <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
@@ -1679,29 +1599,33 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           position: fixed;
           inset: 0;
           z-index: 2000;
-          background: rgba(2, 6, 23, 0.94);
+          background: rgba(0, 0, 0, 0.66);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 12px;
-          overflow-y: auto;
-          -webkit-overflow-scrolling: touch;
+          padding: 16px 12px calc(16px + env(safe-area-inset-bottom, 0px));
+          overscroll-behavior: contain;
         }
 
         .member-drawer {
           width: 100%;
           max-width: 980px;
-          max-height: calc(100dvh - 24px);
+          max-height: min(90vh, 900px);
           overflow-y: auto;
           overflow-x: hidden;
+          overscroll-behavior: contain;
           -webkit-overflow-scrolling: touch;
-          border-radius: 20px;
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+          border-radius: 26px;
+          border: 1px solid rgba(255,255,255,0.10);
+          box-shadow: 0 20px 60px rgba(0,0,0,0.35);
           color: var(--text-strong, #f8fafc);
           padding: 16px;
-          background: rgba(8, 14, 26, 0.98);
-          contain: layout paint;
+          background:
+            radial-gradient(circle at top right, rgba(99,213,255,0.08), transparent 32%),
+            radial-gradient(circle at bottom left, rgba(93,255,141,0.06), transparent 28%),
+            rgba(8, 14, 26, 0.95);
         }
 
         .member-drawer-handle {
@@ -1709,15 +1633,22 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           height: 6px;
           border-radius: 999px;
           margin: 0 auto 14px;
-          background: rgba(255, 255, 255, 0.18);
+          background: rgba(255,255,255,0.18);
         }
 
         .member-drawer-header {
-          position: static;
-          z-index: 1;
-          background: transparent;
-          padding-top: 0;
-          padding-bottom: 0;
+          position: sticky;
+          top: -16px;
+          z-index: 3;
+          background: linear-gradient(
+            180deg,
+            rgba(8, 14, 26, 0.98),
+            rgba(8, 14, 26, 0.88)
+          );
+          padding-top: 6px;
+          padding-bottom: 10px;
+          backdrop-filter: blur(8px);
+          -webkit-backdrop-filter: blur(8px);
         }
 
         .member-drawer-avatar {
@@ -1725,7 +1656,6 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           height: 52px;
           min-width: 52px;
           min-height: 52px;
-          overflow: hidden;
         }
 
         .member-drawer-badges {
@@ -1737,9 +1667,9 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
 
         .profile-block {
           margin-bottom: 14px;
-          border: 1px solid rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255,255,255,0.08);
           border-radius: 20px;
-          background: rgba(255, 255, 255, 0.025);
+          background: rgba(255,255,255,0.025);
           overflow: hidden;
         }
 
@@ -1767,7 +1697,7 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
         .profile-block-subtitle {
           margin-top: 4px;
           font-size: 13px;
-          color: var(--text-muted, rgba(255, 255, 255, 0.72));
+          color: var(--text-muted, rgba(255,255,255,0.72));
           line-height: 1.45;
         }
 
@@ -1783,9 +1713,9 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
 
         .member-history-row {
           padding: 12px 14px;
-          border: 1px solid rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255,255,255,0.08);
           border-radius: 16px;
-          background: rgba(255, 255, 255, 0.022);
+          background: rgba(255,255,255,0.022);
         }
 
         .member-history-title {
@@ -1797,24 +1727,24 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           margin-top: 6px;
           font-size: 12px;
           line-height: 1.45;
-          color: var(--text-muted, rgba(255, 255, 255, 0.72));
+          color: var(--text-muted, rgba(255,255,255,0.72));
           overflow-wrap: anywhere;
         }
 
         @media (max-width: 640px) {
           .member-modal-backdrop {
-            padding: 8px;
-            align-items: flex-start;
+            padding: 8px 8px calc(10px + env(safe-area-inset-bottom, 0px));
+            align-items: flex-end;
           }
 
           .member-drawer {
-            max-height: calc(100dvh - 16px);
-            border-radius: 18px;
+            max-height: 92vh;
+            border-radius: 22px;
             padding: 12px;
           }
 
           .member-drawer-header {
-            top: 0;
+            top: -12px;
           }
 
           .profile-block-title {
