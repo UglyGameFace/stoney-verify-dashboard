@@ -461,21 +461,21 @@ function DetailSection({
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <div className="profile-block">
+    <div className="msnap-profile-block">
       <button
         type="button"
-        className="profile-block-toggle"
+        className="msnap-profile-block-toggle"
         onClick={() => setOpen((prev) => !prev)}
       >
         <div style={{ minWidth: 0 }}>
-          <div className="profile-block-title">{title}</div>
+          <div className="msnap-profile-block-title">{title}</div>
           {subtitle ? (
-            <div className="profile-block-subtitle">{subtitle}</div>
+            <div className="msnap-profile-block-subtitle">{subtitle}</div>
           ) : null}
         </div>
         <span className="badge">{open ? "Hide" : "Show"}</span>
       </button>
-      {open ? <div className="profile-block-body">{children}</div> : null}
+      {open ? <div className="msnap-profile-block-body">{children}</div> : null}
     </div>
   );
 }
@@ -599,7 +599,7 @@ function MemberCard({
         <span className={`badge ${tone}`}>{state}</span>
       </div>
 
-      <div className="member-card-grid">
+      <div className="msnap-card-grid">
         <div className="member-detail-item">
           <span className="ticket-info-label">Top Role</span>
           <span style={{ color: "var(--text-strong, #f8fafc)" }}>
@@ -632,14 +632,14 @@ function MemberCard({
       </div>
 
       {entryPreview ? (
-        <div className="member-card-line">
+        <div className="msnap-card-line">
           <span className="ticket-info-label">Entry Path</span>
           <span>{entryPreview}</span>
         </div>
       ) : null}
 
       {previewRows.length ? (
-        <div className="member-card-preview-grid">
+        <div className="msnap-card-preview-grid">
           {previewRows.slice(0, 4).map((row) => (
             <div key={row.label} className="member-detail-item">
               <span className="ticket-info-label">{row.label}</span>
@@ -652,13 +652,13 @@ function MemberCard({
       ) : null}
 
       {member?.role_state_reason ? (
-        <div className="member-card-line">
+        <div className="msnap-card-line">
           <span className="ticket-info-label">Note</span>
           <span>{member.role_state_reason}</span>
         </div>
       ) : null}
 
-      <div className="member-card-footer-hint">Tap to open full profile</div>
+      <div className="msnap-card-footer-hint">Tap to open full profile</div>
     </button>
   );
 }
@@ -922,15 +922,15 @@ function MemberDrawerInner({
     <div
       role="dialog"
       aria-modal="true"
-      className="member-modal-backdrop"
+      className="msnap-modal-backdrop"
       onClick={onClose}
     >
-      <div className="member-drawer-shell">
-        <div onClick={(e) => e.stopPropagation()} className="member-drawer">
-          <div className="member-drawer-handle" />
+      <div className="msnap-drawer-shell">
+        <div onClick={(e) => e.stopPropagation()} className="msnap-drawer">
+          <div className="msnap-drawer-handle" />
 
           <div
-            className="row member-drawer-header"
+            className="row msnap-drawer-header"
             style={{
               justifyContent: "space-between",
               alignItems: "flex-start",
@@ -944,7 +944,7 @@ function MemberDrawerInner({
               style={{ alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}
             >
               <div
-                className="avatar member-drawer-avatar"
+                className="avatar msnap-drawer-avatar"
                 style={{ fontSize: 16 }}
               >
                 {avatar ? (
@@ -985,7 +985,7 @@ function MemberDrawerInner({
                   {safeText(sourceMember?.user_id, "No member ID")}
                 </div>
 
-                <div className="member-drawer-badges">
+                <div className="msnap-drawer-badges">
                   <span className={`badge ${getStateTone(sourceMember)}`}>
                     {getMemberState(sourceMember)}
                   </span>
@@ -1264,7 +1264,7 @@ function MemberDrawerInner({
               </button>
             </div>
 
-            <div className="member-action-grid" style={{ marginTop: 10 }}>
+            <div className="msnap-action-grid" style={{ marginTop: 10 }}>
               <button
                 className="button ghost"
                 disabled={busy || !memberId}
@@ -1328,7 +1328,7 @@ function MemberDrawerInner({
               )}
             </div>
 
-            <div className="member-action-grid" style={{ marginBottom: 10 }}>
+            <div className="msnap-action-grid" style={{ marginBottom: 10 }}>
               <button
                 className="button ghost"
                 disabled={busy || !memberId}
@@ -1417,10 +1417,10 @@ function MemberDrawerInner({
             {activityRows.length ? (
               <div className="space">
                 {activityRows.map((row) => (
-                  <div key={row.id} className="member-history-row">
-                    <div className="member-history-title">{row.title}</div>
+                  <div key={row.id} className="msnap-history-row">
+                    <div className="msnap-history-title">{row.title}</div>
                     {row.meta ? (
-                      <div className="member-history-meta">{row.meta}</div>
+                      <div className="msnap-history-meta">{row.meta}</div>
                     ) : null}
                   </div>
                 ))}
@@ -1437,7 +1437,7 @@ function MemberDrawerInner({
             subtitle="Quick copy actions for staff context."
             defaultOpen={false}
           >
-            <div className="member-action-grid">
+            <div className="msnap-action-grid">
               <button
                 className="button ghost"
                 disabled={busy}
@@ -1728,22 +1728,22 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
         </>
       )}
 
-      <style jsx>{`
-        .member-card-grid {
+      <style jsx global>{`
+        .msnap-card-grid {
           margin-top: 12px;
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 10px;
         }
 
-        .member-card-preview-grid {
+        .msnap-card-preview-grid {
           margin-top: 10px;
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 10px;
         }
 
-        .member-card-line {
+        .msnap-card-line {
           margin-top: 10px;
           display: grid;
           gap: 4px;
@@ -1755,18 +1755,18 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           overflow-wrap: anywhere;
         }
 
-        .member-card-footer-hint {
+        .msnap-card-footer-hint {
           margin-top: 10px;
           font-size: 12px;
           color: var(--text-muted, rgba(255, 255, 255, 0.72));
           text-align: right;
         }
 
-        .member-modal-backdrop {
+        .msnap-modal-backdrop {
           position: fixed;
           inset: 0;
           z-index: 2147483000;
-          background: rgba(2, 6, 23, 0.9);
+          background: rgba(2, 6, 23, 0.88);
           backdrop-filter: blur(10px);
           -webkit-backdrop-filter: blur(10px);
           display: flex;
@@ -1778,7 +1778,7 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           -webkit-overflow-scrolling: touch;
         }
 
-        .member-drawer-shell {
+        .msnap-drawer-shell {
           width: 100%;
           max-width: 980px;
           display: flex;
@@ -1787,7 +1787,7 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           pointer-events: none;
         }
 
-        .member-drawer {
+        .msnap-drawer {
           width: 100%;
           max-width: 980px;
           max-height: min(86dvh, 920px);
@@ -1807,7 +1807,7 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           pointer-events: auto;
         }
 
-        .member-drawer-handle {
+        .msnap-drawer-handle {
           width: 54px;
           height: 6px;
           border-radius: 999px;
@@ -1815,7 +1815,7 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           background: rgba(255, 255, 255, 0.18);
         }
 
-        .member-drawer-header {
+        .msnap-drawer-header {
           position: sticky;
           top: -16px;
           z-index: 2;
@@ -1830,7 +1830,7 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           -webkit-backdrop-filter: blur(8px);
         }
 
-        .member-drawer-avatar {
+        .msnap-drawer-avatar {
           width: 52px;
           height: 52px;
           min-width: 52px;
@@ -1838,14 +1838,14 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           overflow: hidden;
         }
 
-        .member-drawer-badges {
+        .msnap-drawer-badges {
           display: flex;
           flex-wrap: wrap;
           gap: 8px;
           margin-top: 10px;
         }
 
-        .profile-block {
+        .msnap-profile-block {
           margin-bottom: 14px;
           border: 1px solid rgba(255, 255, 255, 0.08);
           border-radius: 20px;
@@ -1853,7 +1853,7 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           overflow: hidden;
         }
 
-        .profile-block-toggle {
+        .msnap-profile-block-toggle {
           width: 100%;
           text-align: left;
           border: 0;
@@ -1867,43 +1867,43 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           cursor: pointer;
         }
 
-        .profile-block-title {
+        .msnap-profile-block-title {
           font-weight: 900;
           font-size: 19px;
           line-height: 1.1;
           color: var(--text-strong, #f8fafc);
         }
 
-        .profile-block-subtitle {
+        .msnap-profile-block-subtitle {
           margin-top: 4px;
           font-size: 13px;
           color: var(--text-muted, rgba(255, 255, 255, 0.72));
           line-height: 1.45;
         }
 
-        .profile-block-body {
+        .msnap-profile-block-body {
           padding: 0 14px 14px;
         }
 
-        .member-action-grid {
+        .msnap-action-grid {
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
           gap: 10px;
         }
 
-        .member-history-row {
+        .msnap-history-row {
           padding: 12px 14px;
           border: 1px solid rgba(255, 255, 255, 0.08);
           border-radius: 16px;
           background: rgba(255, 255, 255, 0.022);
         }
 
-        .member-history-title {
+        .msnap-history-title {
           font-weight: 800;
           color: var(--text-strong, #f8fafc);
         }
 
-        .member-history-meta {
+        .msnap-history-meta {
           margin-top: 6px;
           font-size: 12px;
           line-height: 1.45;
@@ -1912,31 +1912,31 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
         }
 
         @media (max-width: 640px) {
-          .member-card-grid,
-          .member-card-preview-grid {
+          .msnap-card-grid,
+          .msnap-card-preview-grid {
             grid-template-columns: 1fr;
           }
 
-          .member-modal-backdrop {
+          .msnap-modal-backdrop {
             padding: 8px 8px calc(96px + env(safe-area-inset-bottom, 0px));
             align-items: flex-start;
           }
 
-          .member-drawer {
+          .msnap-drawer {
             max-height: min(82dvh, 82dvh);
             border-radius: 20px;
             padding: 12px;
           }
 
-          .member-drawer-header {
+          .msnap-drawer-header {
             top: -12px;
           }
 
-          .profile-block-title {
+          .msnap-profile-block-title {
             font-size: 17px;
           }
 
-          .member-action-grid {
+          .msnap-action-grid {
             grid-template-columns: 1fr;
           }
         }
