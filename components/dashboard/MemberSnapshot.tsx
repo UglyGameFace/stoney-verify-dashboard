@@ -918,7 +918,7 @@ function InlineMemberDrawer({
   ).trim();
 
   return (
-    <div className="inline-member-modal-shell">
+    <div className="inline-member-modal-root">
       <div
         role="dialog"
         aria-modal="true"
@@ -1535,6 +1535,13 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
 
   return (
     <>
+      {selected ? (
+        <InlineMemberDrawer
+          member={selected}
+          onClose={() => setSelected(null)}
+        />
+      ) : null}
+
       <div
         style={{
           display: "grid",
@@ -1703,13 +1710,6 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
         </>
       )}
 
-      {selected ? (
-        <InlineMemberDrawer
-          member={selected}
-          onClose={() => setSelected(null)}
-        />
-      ) : null}
-
       <style jsx>{`
         .member-card-grid {
           margin-top: 12px;
@@ -1744,15 +1744,17 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           text-align: right;
         }
 
-        .inline-member-modal-shell {
-          position: relative;
-          z-index: 20;
+        .inline-member-modal-root {
+          position: fixed;
+          inset: 0;
+          z-index: 2147483000;
+          pointer-events: none;
         }
 
         .inline-backdrop {
           position: fixed;
           inset: 0;
-          z-index: 2000;
+          z-index: 2147483001;
           background: rgba(2, 6, 23, 0.94);
           display: flex;
           align-items: center;
@@ -1760,6 +1762,7 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           padding: 12px;
           overflow-y: auto;
           -webkit-overflow-scrolling: touch;
+          pointer-events: auto;
         }
 
         .member-drawer {
