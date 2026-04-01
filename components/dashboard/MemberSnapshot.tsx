@@ -473,10 +473,45 @@ function buildExportPayload(member: any) {
   };
 }
 
-function downloadJsonFile(filename: string, payload: unknown) {
-  const blob = new Blob([JSON.stringify(payload, null, 2)], {
-    type: "application/json",
-  });
+function buildPlainTextExport(member: any) {
+  const entryRows = getEntryPathRows(member);
+  const historyRows = getHistoryRows(member);
+  const timelineRows = getTimelineRows(member);
+  const activityRows = getActivityRows(member);
+  const roles = getRoleNames(member);
+
+  return [
+    `Member: ${getMemberName(member)}`,
+    `User ID: ${safeText(member?.user_id)}`,
+    `Username: ${safeText(member?.username)}`,
+    `Display Name: ${safeText(member?.display_name)}`,
+    `Nickname: ${safeText(member?.nickname, "None")}`,
+    `State: ${getMemberState(member)}`,
+    `Role State: ${safeText(member?.role_state, "Unknown")}`,
+    `State Reason: ${safeText(member?.role_state_reason, "None")}`,
+    `Top Role: ${safeText(member?.top_role || member?.highest_role_name, "None")}`,
+    `Roles: ${roles.join(", ") || "None"}`,
+    "",
+    "[How They Got In]",
+    ...(entryRows.length
+      ? entryRows.map((row) => `${row.label}: ${row.value}`)
+      : ["No entry-path fields stored"]),
+    "",
+    "[Timestamps]",
+    ...timelineRows.map((row) => `${row.label}: ${row.value}`),
+    "",
+    "[Identity History]",
+    ...historyRows.map((row) => `${row.label}: ${row.value}`),
+    "",
+    "[Activity Trail]",
+    ...(activityRows.length
+      ? activityRows.map((row) => `${row.title}${row.meta ? ` — ${row.meta}` : ""}`)
+      : ["No activity trail stored"]),
+  ].join("\n");
+}
+
+function downloadFile(filename: string, content: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -551,6 +586,7 @@ function MemberCard({
   const avatar = getMemberAvatar(member);
   const state = getMemberState(member);
   const tone = getStateTone(member);
+  const previewRows = getCardPreviewRows(member);
 
   const entryPreview = firstNonEmpty(
     member?.join_method,
@@ -558,8 +594,6 @@ function MemberCard({
     member?.joined_via,
     member?.verification_source
   );
-
-  const previewRows = getCardPreviewRows(member);
 
   return (
     <button
@@ -825,12 +859,31 @@ function MemberDrawerInner({
   function exportJson() {
     try {
       const payload = buildExportPayload(sourceMember);
-      const filename = `member-${safeText(sourceMember?.user_id, "unknown")}.json`;
-      downloadJsonFile(filename, payload);
+      downloadFile(
+        `member-${safeText(sourceMember?.user_id, "unknown")}.json`,
+        JSON.stringify(payload, null, 2),
+        "application/json"
+      );
       setMessage("JSON export started.");
       setError("");
     } catch {
-      setError("Export failed on this device.");
+      setError("JSON export failed on this device.");
+      setMessage("");
+    }
+  }
+
+  function exportText() {
+    try {
+      const text = buildPlainTextExport(sourceMember);
+      downloadFile(
+        `member-${safeText(sourceMember?.user_id, "unknown")}.txt`,
+        text,
+        "text/plain;charset=utf-8"
+      );
+      setMessage("Text export started.");
+      setError("");
+    } catch {
+      setError("Text export failed on this device.");
       setMessage("");
     }
   }
@@ -982,30 +1035,18 @@ function MemberDrawerInner({
         <div onClick={(e) => e.stopPropagation()} className="msnap-drawer">
           <div className="msnap-drawer-handle" />
 
-          <div
-            className="row msnap-drawer-header"
-            style={{
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-              gap: 12,
-              marginBottom: 14,
-              flexWrap: "wrap",
-            }}
-          >
+          <div className="row msnap-drawer-header">
             <div
               className="row"
               style={{ alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}
             >
-              <div
-                className="avatar msnap-drawer-avatar"
-                style={{ fontSize: 16 }}
-              >
+              <div className="avatar msnap-drawer-avatar">
                 {avatar ? (
                   <img
                     src={avatar}
                     alt={name}
-                    width="52"
-                    height="52"
+                    width="56"
+                    height="56"
                     loading="eager"
                     decoding="async"
                     style={{ width: "100%", height: "100%", objectFit: "cover" }}
@@ -1016,25 +1057,8 @@ function MemberDrawerInner({
               </div>
 
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div
-                  style={{
-                    fontWeight: 900,
-                    fontSize: 24,
-                    lineHeight: 1.05,
-                    overflowWrap: "anywhere",
-                    letterSpacing: "-0.04em",
-                  }}
-                >
-                  {name}
-                </div>
-                <div
-                  className="muted"
-                  style={{
-                    marginTop: 4,
-                    fontSize: 13,
-                    overflowWrap: "anywhere",
-                  }}
-                >
+                <div className="msnap-member-name">{name}</div>
+                <div className="msnap-member-id">
                   {safeText(sourceMember?.user_id, "No member ID")}
                 </div>
 
@@ -1071,6 +1095,31 @@ function MemberDrawerInner({
             >
               Close
             </button>
+          </div>
+
+          <div className="msnap-quick-stats">
+            <div className="member-detail-item">
+              <span className="ticket-info-label">Top Role</span>
+              <span>{safeText(sourceMember?.top_role || sourceMember?.highest_role_name, "None")}</span>
+            </div>
+            <div className="member-detail-item">
+              <span className="ticket-info-label">Roles</span>
+              <span>{getRoleCount(sourceMember)}</span>
+            </div>
+            <div className="member-detail-item">
+              <span className="ticket-info-label">Joined</span>
+              <span>{formatCompactDateTime(sourceMember?.joined_at)}</span>
+            </div>
+            <div className="member-detail-item">
+              <span className="ticket-info-label">Updated</span>
+              <span>
+                {formatCompactDateTime(
+                  sourceMember?.updated_at ||
+                    sourceMember?.last_seen_at ||
+                    sourceMember?.synced_at
+                )}
+              </span>
+            </div>
           </div>
 
           {memberMissingOnDiscord ? (
@@ -1217,10 +1266,7 @@ function MemberDrawerInner({
               )}
             </div>
 
-            <div
-              className="row"
-              style={{ alignItems: "stretch", gap: 10, marginTop: 10 }}
-            >
+            <div className="row" style={{ alignItems: "stretch", gap: 10 }}>
               <select
                 className="input"
                 value={selectedRoleId}
@@ -1487,7 +1533,7 @@ function MemberDrawerInner({
 
           <DetailSection
             title="Copy / Export"
-            subtitle="Copy shortcuts and a real JSON export for this member."
+            subtitle="Quick copy actions and real exports for this member."
             defaultOpen={false}
           >
             <div className="msnap-action-grid">
@@ -1521,7 +1567,10 @@ function MemberDrawerInner({
                         "None"
                       )}`,
                       `Roles: ${roleNames.join(", ") || "None"}`,
-                      `Entry Path: ${entryPathRows.map((r) => `${r.label}: ${r.value}`).join(" | ") || "Unknown"}`,
+                      `Entry Path: ${
+                        entryPathRows.map((r) => `${r.label}: ${r.value}`).join(" | ") ||
+                        "Unknown"
+                      }`,
                     ].join("\n"),
                     "Staff summary copied."
                   )
@@ -1530,12 +1579,12 @@ function MemberDrawerInner({
                 Copy Summary
               </button>
 
-              <button
-                className="button"
-                disabled={busy}
-                onClick={exportJson}
-              >
+              <button className="button" disabled={busy} onClick={exportJson}>
                 Export JSON
+              </button>
+
+              <button className="button ghost" disabled={busy} onClick={exportText}>
+                Export TXT
               </button>
             </div>
           </DetailSection>
@@ -1892,11 +1941,28 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
         }
 
         .msnap-drawer-avatar {
-          width: 52px;
-          height: 52px;
-          min-width: 52px;
-          min-height: 52px;
+          width: 56px;
+          height: 56px;
+          min-width: 56px;
+          min-height: 56px;
           overflow: hidden;
+          border-radius: 18px;
+        }
+
+        .msnap-member-name {
+          font-weight: 900;
+          font-size: clamp(28px, 6vw, 40px);
+          line-height: 1.02;
+          overflow-wrap: anywhere;
+          letter-spacing: -0.04em;
+          color: var(--text-strong, #f8fafc);
+        }
+
+        .msnap-member-id {
+          margin-top: 4px;
+          font-size: 13px;
+          color: var(--text-muted, rgba(255, 255, 255, 0.72));
+          overflow-wrap: anywhere;
         }
 
         .msnap-drawer-badges {
@@ -1904,6 +1970,13 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           flex-wrap: wrap;
           gap: 8px;
           margin-top: 10px;
+        }
+
+        .msnap-quick-stats {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 10px;
+          margin-bottom: 14px;
         }
 
         .msnap-profile-block {
@@ -1972,9 +2045,16 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           overflow-wrap: anywhere;
         }
 
+        @media (max-width: 820px) {
+          .msnap-quick-stats {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+        }
+
         @media (max-width: 640px) {
           .msnap-card-grid,
-          .msnap-card-preview-grid {
+          .msnap-card-preview-grid,
+          .msnap-quick-stats {
             grid-template-columns: 1fr;
           }
 
