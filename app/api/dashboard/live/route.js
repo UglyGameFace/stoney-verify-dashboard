@@ -1035,17 +1035,93 @@ function buildIntelligence({ counts, memberCounts, fraud, guildMembers }) {
   };
 }
 
-export async function GET() {
+function buildSupportPayload({ roles, voiceChannels, debugInfo = null }) {
+  return {
+    roles,
+    voiceChannels,
+    supportOnly: true,
+    debug: debugEnabled() ? debugInfo : undefined,
+  };
+}
+
+export async function GET(request) {
   try {
     await requireStaffSessionForRoute();
 
     const supabase = createServerSupabase();
     const guildId = env.guildId || "";
+    const url = new URL(request.url);
+    const supportOnly =
+      url.searchParams.get("support_only") === "1" ||
+      url.searchParams.get("supportOnly") === "1" ||
+      url.searchParams.get("mode") === "support";
 
     if (debugEnabled()) {
       console.log("[dashboard/live] env.guildId =", guildId);
       console.log("[dashboard/live] DISCORD_GUILD_ID =", process.env.DISCORD_GUILD_ID || "");
       console.log("[dashboard/live] GUILD_ID =", process.env.GUILD_ID || "");
+      console.log("[dashboard/live] supportOnly =", supportOnly);
+    }
+
+    if (!guildId) {
+      return Response.json(
+        { error: "Missing guild id." },
+        {
+          status: 500,
+          headers: { "Cache-Control": "no-store, max-age=0" },
+        }
+      );
+    }
+
+    if (supportOnly) {
+      const [rolesRes, discordChannelsResult] = await Promise.all([
+        supabase
+          .from("guild_roles")
+          .select("*")
+          .eq("guild_id", guildId)
+          .order("position", { ascending: false })
+          .limit(100),
+
+        discordApi(`/guilds/${guildId}/channels`).catch((error) => ({
+          __discord_error: error?.message || "Failed to load Discord channels.",
+        })),
+      ]);
+
+      if (rolesRes.error) {
+        return Response.json(
+          { error: rolesRes.error.message || "Failed to load support data." },
+          {
+            status: 500,
+            headers: { "Cache-Control": "no-store, max-age=0" },
+          }
+        );
+      }
+
+      const roles = safeArray(rolesRes.data).map((role) => ({
+        ...role,
+        member_count: Number(role?.member_count || 0),
+      }));
+
+      const voiceChannels = discordChannelsResult?.__discord_error
+        ? []
+        : mapVoiceChannels(discordChannelsResult || []);
+
+      return Response.json(
+        buildSupportPayload({
+          roles,
+          voiceChannels,
+          debugInfo: {
+            guildId,
+            rolesCount: roles.length,
+            voiceChannelsCount: voiceChannels.length,
+            voiceChannelsError: discordChannelsResult?.__discord_error || null,
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Cache-Control": "no-store, max-age=0" },
+        }
+      );
     }
 
     const last24hIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -1333,6 +1409,17 @@ export async function GET() {
         .map((joinRow) =>
           mergeJoinWithMember(joinRow, memberMap.get(String(joinRow.user_id)))
         )
+        .sort(
+          (a, b) =>
+            toJoinedTimestamp(b.joined_at || b.created_at) -
+            toJoinedTimestamp(a.joined_at || a.created_at)
+        )
+        .slice(0, 25);
+    }
+
+    if (!recentJoins.length) {
+      recentJoins = recentActiveMembers
+        .slice()
         .sort(
           (a, b) =>
             toJoinedTimestamp(b.joined_at || b.created_at) -
