@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
 
 function safeArray<T = any>(value: T[] | unknown): T[] {
   return Array.isArray(value) ? value : [];
@@ -663,7 +662,7 @@ function MemberCard({
   );
 }
 
-function MemberDrawerInner({
+function InlineMemberDrawer({
   member,
   onClose,
 }: {
@@ -697,56 +696,13 @@ function MemberDrawerInner({
     setLiveMember(member || null);
   }, [member, memberKey]);
 
-  const sourceMember = liveMember || member;
-  const name = getMemberName(sourceMember);
-  const avatar = getMemberAvatar(sourceMember);
-  const roleNames = getRoleNames(sourceMember);
-  const roleIds = getRoleIds(sourceMember);
-  const memberId = String(sourceMember?.user_id || "").trim();
-  const entryPathRows = getEntryPathRows(sourceMember);
-  const timelineRows = getTimelineRows(sourceMember);
-  const historyRows = getHistoryRows(sourceMember);
-  const activityRows = getActivityRows(sourceMember);
-
-  const assignableRoles = useMemo(() => {
-    const assignedIdSet = new Set(getRoleIds(sourceMember));
-    const assignedNameSet = new Set(
-      getRoleNames(sourceMember).map((n) => n.toLowerCase())
-    );
-
-    return normalizeGuildRoles(guildRoles)
-      .filter((role) => role.name !== "@everyone")
-      .filter(
-        (role) =>
-          !assignedIdSet.has(role.id) &&
-          !assignedNameSet.has(role.name.toLowerCase())
-      )
-      .sort((a, b) => b.position - a.position);
-  }, [guildRoles, sourceMember]);
-
-  const selectedRole = useMemo(
-    () => assignableRoles.find((role) => role.id === selectedRoleId) || null,
-    [assignableRoles, selectedRoleId]
-  );
-
   useEffect(() => {
-    const html = document.documentElement;
-    const body = document.body;
-    const prevHtmlOverflow = html.style.overflow;
-    const prevBodyOverflow = body.style.overflow;
-
-    html.style.overflow = "hidden";
-    body.style.overflow = "hidden";
-
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose?.();
     }
 
     window.addEventListener("keydown", onKeyDown);
-
     return () => {
-      html.style.overflow = prevHtmlOverflow;
-      body.style.overflow = prevBodyOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [onClose]);
@@ -781,6 +737,38 @@ function MemberDrawerInner({
       cancelled = true;
     };
   }, []);
+
+  const sourceMember = liveMember || member;
+  const name = getMemberName(sourceMember);
+  const avatar = getMemberAvatar(sourceMember);
+  const roleNames = getRoleNames(sourceMember);
+  const roleIds = getRoleIds(sourceMember);
+  const memberId = String(sourceMember?.user_id || "").trim();
+  const entryPathRows = getEntryPathRows(sourceMember);
+  const timelineRows = getTimelineRows(sourceMember);
+  const historyRows = getHistoryRows(sourceMember);
+  const activityRows = getActivityRows(sourceMember);
+
+  const assignableRoles = useMemo(() => {
+    const assignedIdSet = new Set(getRoleIds(sourceMember));
+    const assignedNameSet = new Set(
+      getRoleNames(sourceMember).map((n) => n.toLowerCase())
+    );
+
+    return normalizeGuildRoles(guildRoles)
+      .filter((role) => role.name !== "@everyone")
+      .filter(
+        (role) =>
+          !assignedIdSet.has(role.id) &&
+          !assignedNameSet.has(role.name.toLowerCase())
+      )
+      .sort((a, b) => b.position - a.position);
+  }, [guildRoles, sourceMember]);
+
+  const selectedRole = useMemo(
+    () => assignableRoles.find((role) => role.id === selectedRoleId) || null,
+    [assignableRoles, selectedRoleId]
+  );
 
   async function copyText(text: string, successMessage: string) {
     try {
@@ -930,584 +918,568 @@ function MemberDrawerInner({
   ).trim();
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-      className="member-modal-backdrop"
-    >
-      <div onClick={(e) => e.stopPropagation()} className="member-drawer">
-        <div className="member-drawer-handle" />
+    <div className="inline-member-modal-shell">
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="member-modal-backdrop inline-backdrop"
+        onClick={onClose}
+      >
+        <div onClick={(e) => e.stopPropagation()} className="member-drawer">
+          <div className="member-drawer-handle" />
 
-        <div
-          className="row member-drawer-header"
-          style={{
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-            gap: 12,
-            marginBottom: 14,
-            flexWrap: "wrap",
-          }}
-        >
           <div
-            className="row"
-            style={{ alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}
+            className="row member-drawer-header"
+            style={{
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              gap: 12,
+              marginBottom: 14,
+              flexWrap: "wrap",
+            }}
           >
             <div
-              className="avatar member-drawer-avatar"
-              style={{ fontSize: 16 }}
+              className="row"
+              style={{ alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}
             >
-              {avatar ? (
-                <img
-                  src={avatar}
-                  alt={name}
-                  width="52"
-                  height="52"
-                  loading="eager"
-                  decoding="async"
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
+              <div
+                className="avatar member-drawer-avatar"
+                style={{ fontSize: 16 }}
+              >
+                {avatar ? (
+                  <img
+                    src={avatar}
+                    alt={name}
+                    width="52"
+                    height="52"
+                    loading="eager"
+                    decoding="async"
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
+                ) : (
+                  initialsFromName(name)
+                )}
+              </div>
+
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontWeight: 900,
+                    fontSize: 24,
+                    lineHeight: 1.05,
+                    overflowWrap: "anywhere",
+                    letterSpacing: "-0.04em",
+                  }}
+                >
+                  {name}
+                </div>
+                <div
+                  className="muted"
+                  style={{
+                    marginTop: 4,
+                    fontSize: 13,
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {safeText(sourceMember?.user_id, "No member ID")}
+                </div>
+
+                <div className="member-drawer-badges">
+                  <span className={`badge ${getStateTone(sourceMember)}`}>
+                    {getMemberState(sourceMember)}
+                  </span>
+                  <span
+                    className={`badge ${
+                      sourceMember?.in_guild === false ? "closed" : "low"
+                    }`}
+                  >
+                    {sourceMember?.in_guild === false ? "Former" : "In Server"}
+                  </span>
+                  <span
+                    className={`badge ${
+                      sourceMember?.has_verified_role ? "low" : "medium"
+                    }`}
+                  >
+                    {sourceMember?.has_verified_role
+                      ? "Verified"
+                      : "Not Verified"}
+                  </span>
+                  {inVoice ? <span className="badge open">In Voice</span> : null}
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="button ghost"
+              style={{ width: "auto", minWidth: 108 }}
+              onClick={onClose}
+            >
+              Close
+            </button>
+          </div>
+
+          {memberMissingOnDiscord ? (
+            <div className="warning-banner" style={{ marginBottom: 12 }}>
+              Discord no longer reports this member. Showing the latest stored
+              record.
+            </div>
+          ) : null}
+
+          {rateLimitNotice ? (
+            <div className="warning-banner" style={{ marginBottom: 12 }}>
+              {rateLimitNotice}
+            </div>
+          ) : null}
+
+          {error ? (
+            <div className="error-banner" style={{ marginBottom: 12 }}>
+              {error}
+            </div>
+          ) : null}
+
+          {message ? (
+            <div className="info-banner" style={{ marginBottom: 12 }}>
+              {message}
+            </div>
+          ) : null}
+
+          <DetailSection
+            title="Core Profile"
+            subtitle="Current member identity and role state"
+            defaultOpen
+          >
+            <KeyValueGrid
+              rows={[
+                {
+                  label: "Display Name",
+                  value: safeText(sourceMember?.display_name, "Unknown"),
+                },
+                {
+                  label: "Username",
+                  value: safeText(sourceMember?.username, "Unknown"),
+                },
+                {
+                  label: "Nickname",
+                  value: safeText(sourceMember?.nickname, "None"),
+                },
+                {
+                  label: "Top Role",
+                  value: safeText(
+                    sourceMember?.top_role || sourceMember?.highest_role_name,
+                    "None"
+                  ),
+                },
+                {
+                  label: "Role State",
+                  value: safeText(sourceMember?.role_state, "unknown"),
+                },
+                {
+                  label: "Reason",
+                  value: safeText(
+                    sourceMember?.role_state_reason,
+                    "No extra notes."
+                  ),
+                },
+              ]}
+            />
+          </DetailSection>
+
+          <DetailSection
+            title="How They Got In"
+            subtitle="Invite, vouch, approval, and ticket-entry clues from the stored record"
+            defaultOpen
+          >
+            {entryPathRows.length ? (
+              <KeyValueGrid rows={entryPathRows} />
+            ) : (
+              <div className="empty-state">
+                No entry-path fields are currently stored for this member. The
+                dashboard can only show this after your bot/database writes
+                inviter, vouch, approval, or verification-source fields onto the
+                member record.
+              </div>
+            )}
+          </DetailSection>
+
+          <DetailSection
+            title="Identity History"
+            subtitle="Useful when members change names or come back later."
+            defaultOpen={false}
+          >
+            <KeyValueGrid rows={historyRows} />
+          </DetailSection>
+
+          <DetailSection
+            title="Timestamps"
+            subtitle="Tracked join, sync, departure, and rejoin timing."
+            defaultOpen={false}
+          >
+            <KeyValueGrid rows={timelineRows} />
+          </DetailSection>
+
+          <DetailSection
+            title="Roles"
+            subtitle="Current tracked roles plus add/remove controls."
+            defaultOpen={false}
+          >
+            {!supportDataLoaded ? (
+              <div className="muted" style={{ marginBottom: 12 }}>
+                Loading server role data…
+              </div>
+            ) : null}
+
+            <div className="roles" style={{ marginBottom: 12 }}>
+              {roleNames.length ? (
+                roleNames.map((roleName, index) => {
+                  const roleId = roleIds[index] || "";
+                  return (
+                    <button
+                      key={`${roleId || roleName}-${index}`}
+                      type="button"
+                      className="badge"
+                      disabled={busy || sourceMember?.in_guild === false}
+                      onClick={() =>
+                        runModAction("remove_role", {
+                          role_id: roleId,
+                          role_name: roleName,
+                        })
+                      }
+                      style={{
+                        cursor:
+                          roleId && !busy && sourceMember?.in_guild !== false
+                            ? "pointer"
+                            : "default",
+                      }}
+                      title={roleId ? `Remove ${roleName}` : roleName}
+                    >
+                      {roleName}
+                      {roleId ? " ×" : ""}
+                    </button>
+                  );
+                })
               ) : (
-                initialsFromName(name)
+                <span className="muted">No tracked roles found.</span>
               )}
             </div>
 
-            <div style={{ minWidth: 0 }}>
-              <div
-                style={{
-                  fontWeight: 900,
-                  fontSize: 24,
-                  lineHeight: 1.05,
-                  overflowWrap: "anywhere",
-                  letterSpacing: "-0.04em",
-                }}
-              >
-                {name}
-              </div>
-              <div
-                className="muted"
-                style={{ marginTop: 4, fontSize: 13, overflowWrap: "anywhere" }}
-              >
-                {safeText(sourceMember?.user_id, "No member ID")}
-              </div>
-
-              <div className="member-drawer-badges">
-                <span className={`badge ${getStateTone(sourceMember)}`}>
-                  {getMemberState(sourceMember)}
-                </span>
-                <span
-                  className={`badge ${
-                    sourceMember?.in_guild === false ? "closed" : "low"
-                  }`}
-                >
-                  {sourceMember?.in_guild === false ? "Former" : "In Server"}
-                </span>
-                <span
-                  className={`badge ${
-                    sourceMember?.has_verified_role ? "low" : "medium"
-                  }`}
-                >
-                  {sourceMember?.has_verified_role
-                    ? "Verified"
-                    : "Not Verified"}
-                </span>
-                {inVoice ? <span className="badge open">In Voice</span> : null}
-              </div>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            className="button ghost"
-            style={{ width: "auto", minWidth: 108 }}
-            onClick={onClose}
-          >
-            Close
-          </button>
-        </div>
-
-        {memberMissingOnDiscord ? (
-          <div className="warning-banner" style={{ marginBottom: 12 }}>
-            Discord no longer reports this member. Showing the latest stored
-            record.
-          </div>
-        ) : null}
-
-        {rateLimitNotice ? (
-          <div className="warning-banner" style={{ marginBottom: 12 }}>
-            {rateLimitNotice}
-          </div>
-        ) : null}
-
-        {error ? (
-          <div className="error-banner" style={{ marginBottom: 12 }}>
-            {error}
-          </div>
-        ) : null}
-
-        {message ? (
-          <div className="info-banner" style={{ marginBottom: 12 }}>
-            {message}
-          </div>
-        ) : null}
-
-        <DetailSection
-          title="Core Profile"
-          subtitle="Current member identity and role state"
-          defaultOpen
-        >
-          <KeyValueGrid
-            rows={[
-              {
-                label: "Display Name",
-                value: safeText(sourceMember?.display_name, "Unknown"),
-              },
-              {
-                label: "Username",
-                value: safeText(sourceMember?.username, "Unknown"),
-              },
-              {
-                label: "Nickname",
-                value: safeText(sourceMember?.nickname, "None"),
-              },
-              {
-                label: "Top Role",
-                value: safeText(
-                  sourceMember?.top_role || sourceMember?.highest_role_name,
-                  "None"
-                ),
-              },
-              {
-                label: "Role State",
-                value: safeText(sourceMember?.role_state, "unknown"),
-              },
-              {
-                label: "Reason",
-                value: safeText(
-                  sourceMember?.role_state_reason,
-                  "No extra notes."
-                ),
-              },
-            ]}
-          />
-        </DetailSection>
-
-        <DetailSection
-          title="How They Got In"
-          subtitle="Invite, vouch, approval, and ticket-entry clues from the stored record"
-          defaultOpen
-        >
-          {entryPathRows.length ? (
-            <KeyValueGrid rows={entryPathRows} />
-          ) : (
-            <div className="empty-state">
-              No entry-path fields are currently stored for this member. The
-              dashboard can only show this after your bot/database writes
-              inviter, vouch, approval, or verification-source fields onto the
-              member record.
-            </div>
-          )}
-        </DetailSection>
-
-        <DetailSection
-          title="Identity History"
-          subtitle="Useful when members change names or come back later."
-          defaultOpen={false}
-        >
-          <KeyValueGrid rows={historyRows} />
-        </DetailSection>
-
-        <DetailSection
-          title="Timestamps"
-          subtitle="Tracked join, sync, departure, and rejoin timing."
-          defaultOpen={false}
-        >
-          <KeyValueGrid rows={timelineRows} />
-        </DetailSection>
-
-        <DetailSection
-          title="Roles"
-          subtitle="Current tracked roles plus add/remove controls."
-          defaultOpen={false}
-        >
-          {!supportDataLoaded ? (
-            <div className="muted" style={{ marginBottom: 12 }}>
-              Loading server role data…
-            </div>
-          ) : null}
-
-          <div className="roles" style={{ marginBottom: 12 }}>
-            {roleNames.length ? (
-              roleNames.map((roleName, index) => {
-                const roleId = roleIds[index] || "";
-                return (
-                  <button
-                    key={`${roleId || roleName}-${index}`}
-                    type="button"
-                    className="badge"
-                    disabled={busy || sourceMember?.in_guild === false}
-                    onClick={() =>
-                      runModAction("remove_role", {
-                        role_id: roleId,
-                        role_name: roleName,
-                      })
-                    }
-                    style={{
-                      cursor:
-                        roleId && !busy && sourceMember?.in_guild !== false
-                          ? "pointer"
-                          : "default",
-                    }}
-                    title={roleId ? `Remove ${roleName}` : roleName}
-                  >
-                    {roleName}
-                    {roleId ? " ×" : ""}
-                  </button>
-                );
-              })
-            ) : (
-              <span className="muted">No tracked roles found.</span>
-            )}
-          </div>
-
-          <div
-            className="row"
-            style={{ alignItems: "stretch", gap: 10, marginTop: 10 }}
-          >
-            <select
-              className="input"
-              value={selectedRoleId}
-              onChange={(e) => setSelectedRoleId(e.target.value)}
-              disabled={
-                busy ||
-                !assignableRoles.length ||
-                sourceMember?.in_guild === false
-              }
-              style={{ flex: 1 }}
+            <div
+              className="row"
+              style={{ alignItems: "stretch", gap: 10, marginTop: 10 }}
             >
-              <option value="">
-                {sourceMember?.in_guild === false
-                  ? "Former members cannot receive roles"
-                  : assignableRoles.length
-                    ? "Add a server role..."
-                    : "No assignable roles available"}
-              </option>
-
-              {assignableRoles.map((role) => (
-                <option key={role.id} value={role.id}>
-                  {role.name}
+              <select
+                className="input"
+                value={selectedRoleId}
+                onChange={(e) => setSelectedRoleId(e.target.value)}
+                disabled={
+                  busy ||
+                  !assignableRoles.length ||
+                  sourceMember?.in_guild === false
+                }
+                style={{ flex: 1 }}
+              >
+                <option value="">
+                  {sourceMember?.in_guild === false
+                    ? "Former members cannot receive roles"
+                    : assignableRoles.length
+                      ? "Add a server role..."
+                      : "No assignable roles available"}
                 </option>
-              ))}
-            </select>
 
-            <button
-              className="button"
-              disabled={
-                busy ||
-                !selectedRoleId ||
-                !selectedRole ||
-                sourceMember?.in_guild === false
-              }
-              style={{ width: "auto", minWidth: 130 }}
-              onClick={() =>
-                runModAction("add_role", {
-                  role_id: selectedRoleId,
-                  role_name: selectedRole?.name || "",
-                })
-              }
-            >
-              Add Role
-            </button>
-          </div>
-        </DetailSection>
+                {assignableRoles.map((role) => (
+                  <option key={role.id} value={role.id}>
+                    {role.name}
+                  </option>
+                ))}
+              </select>
 
-        <DetailSection
-          title="Moderation"
-          subtitle="Timeouts, warnings, bans, and fast staff actions."
-          defaultOpen={false}
-        >
-          <textarea
-            className="textarea"
-            rows={3}
-            value={modReason}
-            onChange={(e) => setModReason(e.target.value)}
-            placeholder="Moderation reason..."
-          />
+              <button
+                className="button"
+                disabled={
+                  busy ||
+                  !selectedRoleId ||
+                  !selectedRole ||
+                  sourceMember?.in_guild === false
+                }
+                style={{ width: "auto", minWidth: 130 }}
+                onClick={() =>
+                  runModAction("add_role", {
+                    role_id: selectedRoleId,
+                    role_name: selectedRole?.name || "",
+                  })
+                }
+              >
+                Add Role
+              </button>
+            </div>
+          </DetailSection>
 
-          <div
-            className="row"
-            style={{
-              alignItems: "stretch",
-              gap: 10,
-              marginTop: 10,
-              flexWrap: "wrap",
-            }}
+          <DetailSection
+            title="Moderation"
+            subtitle="Timeouts, warnings, bans, and fast staff actions."
+            defaultOpen={false}
           >
-            <input
-              className="input"
-              value={timeoutMinutes}
-              onChange={(e) => setTimeoutMinutes(e.target.value)}
-              placeholder="Timeout minutes"
-              inputMode="numeric"
+            <textarea
+              className="textarea"
+              rows={3}
+              value={modReason}
+              onChange={(e) => setModReason(e.target.value)}
+              placeholder="Moderation reason..."
             />
 
-            <button
-              className="button"
-              disabled={busy || !memberId}
-              style={{ width: "auto", minWidth: 130 }}
-              onClick={() => runModAction("timeout")}
+            <div
+              className="row"
+              style={{
+                alignItems: "stretch",
+                gap: 10,
+                marginTop: 10,
+                flexWrap: "wrap",
+              }}
             >
-              Timeout
-            </button>
+              <input
+                className="input"
+                value={timeoutMinutes}
+                onChange={(e) => setTimeoutMinutes(e.target.value)}
+                placeholder="Timeout minutes"
+                inputMode="numeric"
+              />
 
-            <button
-              className="button ghost"
-              disabled={busy || !memberId}
-              style={{ width: "auto", minWidth: 150 }}
-              onClick={() => runModAction("remove_timeout")}
-            >
-              Remove Timeout
-            </button>
-          </div>
+              <button
+                className="button"
+                disabled={busy || !memberId}
+                style={{ width: "auto", minWidth: 130 }}
+                onClick={() => runModAction("timeout")}
+              >
+                Timeout
+              </button>
 
-          <div className="member-action-grid" style={{ marginTop: 10 }}>
-            <button
-              className="button ghost"
-              disabled={busy || !memberId}
-              onClick={() => runModAction("warn")}
-            >
-              Warn
-            </button>
-
-            <button
-              className="button danger"
-              disabled={busy || !memberId}
-              onClick={() => runModAction("kick")}
-            >
-              Kick
-            </button>
-
-            <button
-              className="button danger"
-              disabled={busy || !memberId}
-              onClick={() => runModAction("ban")}
-            >
-              Ban
-            </button>
-
-            <button
-              className="button ghost"
-              disabled={busy || !memberId}
-              onClick={() => refreshMemberDetails()}
-            >
-              Refresh Member
-            </button>
-          </div>
-        </DetailSection>
-
-        <DetailSection
-          title="Voice Controls"
-          subtitle="Voice moderation and channel movement."
-          defaultOpen={false}
-        >
-          {!supportDataLoaded ? (
-            <div className="muted" style={{ marginBottom: 12 }}>
-              Loading voice channel data…
+              <button
+                className="button ghost"
+                disabled={busy || !memberId}
+                style={{ width: "auto", minWidth: 150 }}
+                onClick={() => runModAction("remove_timeout")}
+              >
+                Remove Timeout
+              </button>
             </div>
-          ) : null}
 
-          <div
-            className="row"
-            style={{
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: 10,
-              flexWrap: "wrap",
-            }}
+            <div className="member-action-grid" style={{ marginTop: 10 }}>
+              <button
+                className="button ghost"
+                disabled={busy || !memberId}
+                onClick={() => runModAction("warn")}
+              >
+                Warn
+              </button>
+
+              <button
+                className="button danger"
+                disabled={busy || !memberId}
+                onClick={() => runModAction("kick")}
+              >
+                Kick
+              </button>
+
+              <button
+                className="button danger"
+                disabled={busy || !memberId}
+                onClick={() => runModAction("ban")}
+              >
+                Ban
+              </button>
+
+              <button
+                className="button ghost"
+                disabled={busy || !memberId}
+                onClick={() => refreshMemberDetails()}
+              >
+                Refresh Member
+              </button>
+            </div>
+          </DetailSection>
+
+          <DetailSection
+            title="Voice Controls"
+            subtitle="Voice moderation and channel movement."
+            defaultOpen={false}
           >
-            {inVoice ? (
-              <span className="badge open">
-                Current VC: {safeText(activeVoiceChannelId, "Unknown")}
-              </span>
+            {!supportDataLoaded ? (
+              <div className="muted" style={{ marginBottom: 12 }}>
+                Loading voice channel data…
+              </div>
+            ) : null}
+
+            <div
+              className="row"
+              style={{
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 10,
+                flexWrap: "wrap",
+              }}
+            >
+              {inVoice ? (
+                <span className="badge open">
+                  Current VC: {safeText(activeVoiceChannelId, "Unknown")}
+                </span>
+              ) : (
+                <span className="badge closed">Not in voice</span>
+              )}
+            </div>
+
+            <div className="member-action-grid" style={{ marginBottom: 10 }}>
+              <button
+                className="button ghost"
+                disabled={busy || !memberId}
+                onClick={() => runModAction("mute")}
+              >
+                Server Mute
+              </button>
+
+              <button
+                className="button ghost"
+                disabled={busy || !memberId}
+                onClick={() => runModAction("unmute")}
+              >
+                Remove Mute
+              </button>
+
+              <button
+                className="button ghost"
+                disabled={busy || !memberId}
+                onClick={() => runModAction("deafen")}
+              >
+                Server Deafen
+              </button>
+
+              <button
+                className="button ghost"
+                disabled={busy || !memberId}
+                onClick={() => runModAction("undeafen")}
+              >
+                Remove Deafen
+              </button>
+
+              <button
+                className="button danger"
+                disabled={busy || !memberId}
+                onClick={() => runModAction("disconnect_voice")}
+              >
+                Disconnect Voice
+              </button>
+            </div>
+
+            <div
+              className="row"
+              style={{
+                alignItems: "stretch",
+                gap: 10,
+                marginTop: 10,
+                flexWrap: "wrap",
+              }}
+            >
+              <select
+                className="input"
+                value={selectedVoiceChannelId}
+                onChange={(e) => setSelectedVoiceChannelId(e.target.value)}
+                disabled={busy || !safeArray(voiceChannels).length}
+                style={{ flex: 1 }}
+              >
+                <option value="">Move to a voice channel...</option>
+                {safeArray(voiceChannels).map((channel) => (
+                  <option key={channel.id} value={channel.id}>
+                    {safeText(channel.name, channel.id)}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                className="button"
+                disabled={busy || !selectedVoiceChannelId}
+                style={{ width: "auto", minWidth: 130 }}
+                onClick={() =>
+                  runModAction("move_voice", {
+                    target_channel_id: selectedVoiceChannelId,
+                  })
+                }
+              >
+                Move Voice
+              </button>
+            </div>
+          </DetailSection>
+
+          <DetailSection
+            title="Activity Trail"
+            subtitle="Stored per-member action history when available."
+            defaultOpen={false}
+          >
+            {activityRows.length ? (
+              <div className="space">
+                {activityRows.map((row) => (
+                  <div key={row.id} className="member-history-row">
+                    <div className="member-history-title">{row.title}</div>
+                    {row.meta ? (
+                      <div className="member-history-meta">{row.meta}</div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
             ) : (
-              <span className="badge closed">Not in voice</span>
+              <div className="empty-state">
+                No per-member activity trail is stored on this record yet.
+              </div>
             )}
-          </div>
+          </DetailSection>
 
-          <div className="member-action-grid" style={{ marginBottom: 10 }}>
-            <button
-              className="button ghost"
-              disabled={busy || !memberId}
-              onClick={() => runModAction("mute")}
-            >
-              Server Mute
-            </button>
-
-            <button
-              className="button ghost"
-              disabled={busy || !memberId}
-              onClick={() => runModAction("unmute")}
-            >
-              Remove Mute
-            </button>
-
-            <button
-              className="button ghost"
-              disabled={busy || !memberId}
-              onClick={() => runModAction("deafen")}
-            >
-              Server Deafen
-            </button>
-
-            <button
-              className="button ghost"
-              disabled={busy || !memberId}
-              onClick={() => runModAction("undeafen")}
-            >
-              Remove Deafen
-            </button>
-
-            <button
-              className="button danger"
-              disabled={busy || !memberId}
-              onClick={() => runModAction("disconnect_voice")}
-            >
-              Disconnect Voice
-            </button>
-          </div>
-
-          <div
-            className="row"
-            style={{
-              alignItems: "stretch",
-              gap: 10,
-              marginTop: 10,
-              flexWrap: "wrap",
-            }}
+          <DetailSection
+            title="Copy / Export"
+            subtitle="Quick copy actions for staff context."
+            defaultOpen={false}
           >
-            <select
-              className="input"
-              value={selectedVoiceChannelId}
-              onChange={(e) => setSelectedVoiceChannelId(e.target.value)}
-              disabled={busy || !safeArray(voiceChannels).length}
-              style={{ flex: 1 }}
-            >
-              <option value="">Move to a voice channel...</option>
-              {safeArray(voiceChannels).map((channel) => (
-                <option key={channel.id} value={channel.id}>
-                  {safeText(channel.name, channel.id)}
-                </option>
-              ))}
-            </select>
+            <div className="member-action-grid">
+              <button
+                className="button ghost"
+                disabled={busy}
+                onClick={() => copyText(memberId, "User ID copied.")}
+              >
+                Copy User ID
+              </button>
 
-            <button
-              className="button"
-              disabled={busy || !selectedVoiceChannelId}
-              style={{ width: "auto", minWidth: 130 }}
-              onClick={() =>
-                runModAction("move_voice", {
-                  target_channel_id: selectedVoiceChannelId,
-                })
-              }
-            >
-              Move Voice
-            </button>
-          </div>
-        </DetailSection>
+              <button
+                className="button ghost"
+                disabled={busy}
+                onClick={() => copyText(`<@${memberId}>`, "Mention copied.")}
+              >
+                Copy Mention
+              </button>
 
-        <DetailSection
-          title="Activity Trail"
-          subtitle="Stored per-member action history when available."
-          defaultOpen={false}
-        >
-          {activityRows.length ? (
-            <div className="space">
-              {activityRows.map((row) => (
-                <div key={row.id} className="member-history-row">
-                  <div className="member-history-title">{row.title}</div>
-                  {row.meta ? (
-                    <div className="member-history-meta">{row.meta}</div>
-                  ) : null}
-                </div>
-              ))}
+              <button
+                className="button ghost"
+                disabled={busy}
+                onClick={() =>
+                  copyText(
+                    [
+                      `Member: ${name}`,
+                      `User ID: ${memberId}`,
+                      `State: ${safeText(sourceMember?.role_state)}`,
+                      `Top Role: ${safeText(
+                        sourceMember?.top_role || sourceMember?.highest_role_name,
+                        "None"
+                      )}`,
+                      `Roles: ${roleNames.join(", ") || "None"}`,
+                      `Entry Path: ${entryPathRows.map((r) => `${r.label}: ${r.value}`).join(" | ") || "Unknown"}`,
+                    ].join("\n"),
+                    "Staff summary copied."
+                  )
+                }
+              >
+                Copy Summary
+              </button>
             </div>
-          ) : (
-            <div className="empty-state">
-              No per-member activity trail is stored on this record yet.
-            </div>
-          )}
-        </DetailSection>
-
-        <DetailSection
-          title="Copy / Export"
-          subtitle="Quick copy actions for staff context."
-          defaultOpen={false}
-        >
-          <div className="member-action-grid">
-            <button
-              className="button ghost"
-              disabled={busy}
-              onClick={() => copyText(memberId, "User ID copied.")}
-            >
-              Copy User ID
-            </button>
-
-            <button
-              className="button ghost"
-              disabled={busy}
-              onClick={() => copyText(`<@${memberId}>`, "Mention copied.")}
-            >
-              Copy Mention
-            </button>
-
-            <button
-              className="button ghost"
-              disabled={busy}
-              onClick={() =>
-                copyText(
-                  [
-                    `Member: ${name}`,
-                    `User ID: ${memberId}`,
-                    `State: ${safeText(sourceMember?.role_state)}`,
-                    `Top Role: ${safeText(
-                      sourceMember?.top_role || sourceMember?.highest_role_name,
-                      "None"
-                    )}`,
-                    `Roles: ${roleNames.join(", ") || "None"}`,
-                    `Entry Path: ${entryPathRows.map((r) => `${r.label}: ${r.value}`).join(" | ") || "Unknown"}`,
-                  ].join("\n"),
-                  "Staff summary copied."
-                )
-              }
-            >
-              Copy Summary
-            </button>
-          </div>
-        </DetailSection>
+          </DetailSection>
+        </div>
       </div>
     </div>
-  );
-}
-
-function MemberDrawer({
-  member,
-  onClose,
-}: {
-  member: any;
-  onClose: () => void;
-}) {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-    return () => setMounted(false);
-  }, []);
-
-  if (!member || !mounted || typeof document === "undefined") return null;
-
-  return createPortal(
-    <MemberDrawerInner member={member} onClose={onClose} />,
-    document.body
   );
 }
 
@@ -1731,7 +1703,12 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
         </>
       )}
 
-      <MemberDrawer member={selected} onClose={() => setSelected(null)} />
+      {selected ? (
+        <InlineMemberDrawer
+          member={selected}
+          onClose={() => setSelected(null)}
+        />
+      ) : null}
 
       <style jsx>{`
         .member-card-grid {
@@ -1767,7 +1744,12 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           text-align: right;
         }
 
-        .member-modal-backdrop {
+        .inline-member-modal-shell {
+          position: relative;
+          z-index: 20;
+        }
+
+        .inline-backdrop {
           position: fixed;
           inset: 0;
           z-index: 2000;
@@ -1793,7 +1775,6 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           color: var(--text-strong, #f8fafc);
           padding: 16px;
           background: rgba(8, 14, 26, 0.98);
-          contain: layout paint;
         }
 
         .member-drawer-handle {
@@ -1899,7 +1880,7 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
             grid-template-columns: 1fr;
           }
 
-          .member-modal-backdrop {
+          .inline-backdrop {
             padding: 8px;
             align-items: flex-start;
           }
