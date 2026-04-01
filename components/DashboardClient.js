@@ -32,9 +32,10 @@ import DashboardSettingsPanel from "@/components/dashboard/DashboardSettingsPane
 import DesktopDashboardView from "@/components/dashboard/DesktopDashboardView";
 
 const MOBILE_TABS = ["home", "tickets", "members", "categories"];
-const STALE_VISIBLE_REFRESH_MS = 20_000;
-const BACKUP_REFRESH_INTERVAL_MS = 45_000;
+const STALE_VISIBLE_REFRESH_MS = 45_000;
+const BACKUP_REFRESH_INTERVAL_MS = 90_000;
 const MOBILE_NAV_RESERVED_PX = 168;
+const REALTIME_DEBOUNCE_MS = 1250;
 
 const LEGACY_CATEGORY_ALIASES = {
   verification: [
@@ -258,6 +259,15 @@ function getPanelToneClass(level) {
   return "ok";
 }
 
+function isBlockingModalOpen() {
+  if (typeof document === "undefined") return false;
+
+  return Boolean(
+    document.querySelector(".member-modal-backdrop") ||
+      document.querySelector('[role="dialog"][aria-modal="true"]')
+  );
+}
+
 function buildModeratorIntelligence(data) {
   const counts = data?.counts || {};
   const tickets = safeArray(data?.tickets);
@@ -419,7 +429,11 @@ function DashboardSection({
         </div>
       </div>
 
-      {isOpen ? <div className="dashboard-section-body" style={{ marginTop: 14 }}>{children}</div> : null}
+      {isOpen ? (
+        <div className="dashboard-section-body" style={{ marginTop: 14 }}>
+          {children}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -630,6 +644,7 @@ export default function DashboardClient({
   const [maintenanceError, setMaintenanceError] = useState("");
   const [isMaintaining, setIsMaintaining] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
@@ -652,6 +667,7 @@ export default function DashboardClient({
 
   const refreshTimer = useRef(null);
   const refreshInFlightRef = useRef(false);
+  const pendingRefreshReasonRef = useRef("");
   const lastRefreshAtRef = useRef(Date.now());
   const backupIntervalRef = useRef(null);
 
@@ -702,8 +718,16 @@ export default function DashboardClient({
       reason = "manual",
     } = {}) => {
       const now = Date.now();
+      const modalOpenNow = isBlockingModalOpen();
 
-      if (!force && refreshInFlightRef.current) return;
+      if (modalOpenNow) {
+        setIsModalOpen(true);
+      }
+
+      if (!force && (refreshInFlightRef.current || modalOpenNow)) {
+        pendingRefreshReasonRef.current = reason;
+        return;
+      }
 
       refreshInFlightRef.current = true;
 
@@ -731,6 +755,7 @@ export default function DashboardClient({
         setData(json);
         setError("");
         lastRefreshAtRef.current = Date.now();
+        pendingRefreshReasonRef.current = "";
       } catch (err) {
         setError(err?.message || "Failed to refresh dashboard.");
       } finally {
@@ -743,6 +768,12 @@ export default function DashboardClient({
 
   const maybeRefreshIfStale = useCallback(
     async (reason) => {
+      if (isBlockingModalOpen()) {
+        pendingRefreshReasonRef.current = reason;
+        setIsModalOpen(true);
+        return;
+      }
+
       const age = Date.now() - lastRefreshAtRef.current;
       if (age >= STALE_VISIBLE_REFRESH_MS) {
         await refresh({ silent: true, force: false, reason });
@@ -843,12 +874,23 @@ export default function DashboardClient({
   useEffect(() => {
     let supabase;
     let channel;
+    let observer;
 
-    function handleRealtimeChange() {
+    function scheduleRefresh(reason, force = false) {
       clearTimeout(refreshTimer.current);
       refreshTimer.current = setTimeout(() => {
-        refresh({ silent: true, force: false, reason: "realtime" });
-      }, 500);
+        if (isBlockingModalOpen() && !force) {
+          pendingRefreshReasonRef.current = reason;
+          setIsModalOpen(true);
+          return;
+        }
+
+        refresh({ silent: true, force, reason });
+      }, REALTIME_DEBOUNCE_MS);
+    }
+
+    function handleRealtimeChange() {
+      scheduleRefresh("realtime");
     }
 
     function handleWindowFocus() {
@@ -862,14 +904,30 @@ export default function DashboardClient({
     }
 
     function handleOnline() {
+      if (isBlockingModalOpen()) {
+        pendingRefreshReasonRef.current = "online";
+        setIsModalOpen(true);
+        return;
+      }
       refresh({ silent: true, force: true, reason: "online" });
     }
 
-    async function initialRefresh() {
-      await refresh({ silent: true, force: true, reason: "mount" });
+    function handleModalStateCheck() {
+      const open = isBlockingModalOpen();
+      setIsModalOpen(open);
+
+      if (!open && pendingRefreshReasonRef.current && !refreshInFlightRef.current) {
+        const reason = pendingRefreshReasonRef.current;
+        pendingRefreshReasonRef.current = "";
+        refresh({ silent: true, force: true, reason: `${reason}-resume` });
+      }
     }
 
-    initialRefresh();
+    if (!initialData) {
+      refresh({ silent: true, force: true, reason: "mount-no-data" });
+    } else {
+      lastRefreshAtRef.current = Date.now();
+    }
 
     try {
       supabase = getBrowserSupabase();
@@ -881,17 +939,19 @@ export default function DashboardClient({
           { event: "*", schema: "public" },
           handleRealtimeChange
         )
-        .subscribe((status) => {
-          if (status === "SUBSCRIBED") {
-            refresh({
-              silent: true,
-              force: true,
-              reason: "realtime-subscribed",
-            });
-          }
-        });
+        .subscribe();
     } catch (err) {
       setError(err?.message || "Realtime client unavailable.");
+    }
+
+    if (typeof MutationObserver !== "undefined" && typeof document !== "undefined") {
+      observer = new MutationObserver(handleModalStateCheck);
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+      });
+      handleModalStateCheck();
     }
 
     window.addEventListener("focus", handleWindowFocus);
@@ -911,6 +971,8 @@ export default function DashboardClient({
         clearInterval(backupIntervalRef.current);
       }
 
+      if (observer) observer.disconnect();
+
       window.removeEventListener("focus", handleWindowFocus);
       window.removeEventListener("online", handleOnline);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
@@ -919,7 +981,7 @@ export default function DashboardClient({
         supabase.removeChannel(channel);
       }
     };
-  }, [maybeRefreshIfStale, refresh]);
+  }, [initialData, maybeRefreshIfStale, refresh]);
 
   const counts = data?.counts || {
     openTickets: 0,
@@ -1445,6 +1507,7 @@ export default function DashboardClient({
           >
             <div className="muted" style={{ fontSize: 13 }}>
               Last successful refresh: {lastRefreshLabel}
+              {isModalOpen ? " • paused while profile modal is open" : ""}
             </div>
 
             <div
