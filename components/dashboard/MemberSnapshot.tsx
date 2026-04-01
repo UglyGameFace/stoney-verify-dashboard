@@ -22,6 +22,7 @@ function firstNonEmpty(...values: any[]) {
 
 function normalizeMaybeArray(value: any) {
   if (Array.isArray(value)) return value.filter(Boolean);
+
   if (typeof value === "string") {
     const text = value.trim();
     if (!text) return [];
@@ -35,6 +36,7 @@ function normalizeMaybeArray(value: any) {
         .filter(Boolean);
     }
   }
+
   return [];
 }
 
@@ -96,8 +98,8 @@ function getRoleCount(member: any) {
 function formatDateTime(value: any) {
   if (!value) return "Unknown";
   try {
-    const d = new Date(value);
-    return isNaN(d.getTime()) ? "Unknown" : d.toLocaleString();
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "Unknown" : date.toLocaleString();
   } catch {
     return "Unknown";
   }
@@ -107,15 +109,11 @@ function formatCompactDateTime(value: any) {
   if (!value) return "Unknown";
   try {
     const date = new Date(value);
-    if (isNaN(date.getTime())) return "Unknown";
-    return (
-      date.toLocaleDateString() +
-      " " +
-      date.toLocaleTimeString([], {
-        hour: "numeric",
-        minute: "2-digit",
-      })
-    );
+    if (Number.isNaN(date.getTime())) return "Unknown";
+    return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    })}`;
   } catch {
     return "Unknown";
   }
@@ -148,7 +146,7 @@ function getSortTimestamp(member: any) {
   const t = new Date(
     member?.updated_at || member?.last_seen_at || member?.joined_at || 0
   ).getTime();
-  return isNaN(t) ? 0 : t;
+  return Number.isNaN(t) ? 0 : t;
 }
 
 function memberMatchesQuery(member: any, query: string) {
@@ -201,11 +199,13 @@ function sortMembers(rows: any[], mode: string) {
       if (diff !== 0) return diff;
       return getMemberName(a).localeCompare(getMemberName(b));
     }
+
     if (mode === "roles") {
       const diff = getRoleCount(b) - getRoleCount(a);
       if (diff !== 0) return diff;
       return getMemberName(a).localeCompare(getMemberName(b));
     }
+
     return getMemberName(a).localeCompare(getMemberName(b));
   });
 
@@ -445,6 +445,46 @@ function getCardPreviewRows(member: any) {
       value: firstNonEmpty(member?.invite_code, member?.discord_invite_code),
     },
   ].filter((row) => row.value);
+}
+
+function buildExportPayload(member: any) {
+  return {
+    exported_at: new Date().toISOString(),
+    user_id: member?.user_id || null,
+    username: member?.username || null,
+    display_name: member?.display_name || null,
+    nickname: member?.nickname || null,
+    avatar_url: member?.avatar_url || null,
+    state: getMemberState(member),
+    role_state: member?.role_state || null,
+    role_state_reason: member?.role_state_reason || null,
+    joined_at: member?.joined_at || null,
+    synced_at: member?.synced_at || null,
+    updated_at: member?.updated_at || null,
+    last_seen_at: member?.last_seen_at || null,
+    left_at: member?.left_at || null,
+    rejoined_at: member?.rejoined_at || null,
+    join_path: getEntryPathRows(member),
+    history: getHistoryRows(member),
+    roles: getRoleNames(member),
+    role_ids: getRoleIds(member),
+    activity: getActivityRows(member),
+    raw_member: member,
+  };
+}
+
+function downloadJsonFile(filename: string, payload: unknown) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 function DetailSection({
@@ -782,6 +822,19 @@ function MemberDrawerInner({
     }
   }
 
+  function exportJson() {
+    try {
+      const payload = buildExportPayload(sourceMember);
+      const filename = `member-${safeText(sourceMember?.user_id, "unknown")}.json`;
+      downloadJsonFile(filename, payload);
+      setMessage("JSON export started.");
+      setError("");
+    } catch {
+      setError("Export failed on this device.");
+      setMessage("");
+    }
+  }
+
   async function refreshMemberDetails() {
     if (!memberId) return;
 
@@ -962,7 +1015,7 @@ function MemberDrawerInner({
                 )}
               </div>
 
-              <div style={{ minWidth: 0 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
                 <div
                   style={{
                     fontWeight: 900,
@@ -1434,7 +1487,7 @@ function MemberDrawerInner({
 
           <DetailSection
             title="Copy / Export"
-            subtitle="Quick copy actions for staff context."
+            subtitle="Copy shortcuts and a real JSON export for this member."
             defaultOpen={false}
           >
             <div className="msnap-action-grid">
@@ -1475,6 +1528,14 @@ function MemberDrawerInner({
                 }
               >
                 Copy Summary
+              </button>
+
+              <button
+                className="button"
+                disabled={busy}
+                onClick={exportJson}
+              >
+                Export JSON
               </button>
             </div>
           </DetailSection>
@@ -1529,7 +1590,7 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
   }, [safeMembers]);
 
   const filteredMembers = useMemo(() => {
-    let rows = safeMembers.filter(
+    const rows = safeMembers.filter(
       (member) =>
         memberMatchesQuery(member, query) &&
         memberMatchesFilter(member, stateFilter)
@@ -1772,7 +1833,7 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 16px 12px calc(92px + env(safe-area-inset-bottom, 0px));
+          padding: 18px 14px calc(104px + env(safe-area-inset-bottom, 0px));
           overflow-y: auto;
           overscroll-behavior: contain;
           -webkit-overflow-scrolling: touch;
@@ -1790,7 +1851,7 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
         .msnap-drawer {
           width: 100%;
           max-width: 980px;
-          max-height: min(86dvh, 920px);
+          max-height: min(84dvh, 920px);
           overflow-y: auto;
           overflow-x: hidden;
           overscroll-behavior: contain;
@@ -1918,12 +1979,12 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           }
 
           .msnap-modal-backdrop {
-            padding: 8px 8px calc(96px + env(safe-area-inset-bottom, 0px));
+            padding: 10px 10px calc(110px + env(safe-area-inset-bottom, 0px));
             align-items: flex-start;
           }
 
           .msnap-drawer {
-            max-height: min(82dvh, 82dvh);
+            max-height: min(80dvh, 80dvh);
             border-radius: 20px;
             padding: 12px;
           }
