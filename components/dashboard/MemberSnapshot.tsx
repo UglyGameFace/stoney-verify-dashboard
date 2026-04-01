@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
 function safeArray<T = any>(value: T[] | unknown): T[] {
   return Array.isArray(value) ? value : [];
@@ -662,7 +663,7 @@ function MemberCard({
   );
 }
 
-function InlineMemberDrawer({
+function MemberDrawerInner({
   member,
   onClose,
 }: {
@@ -918,13 +919,13 @@ function InlineMemberDrawer({
   ).trim();
 
   return (
-    <div className="inline-member-modal-root">
-      <div
-        role="dialog"
-        aria-modal="true"
-        className="member-modal-backdrop inline-backdrop"
-        onClick={onClose}
-      >
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="member-modal-backdrop"
+      onClick={onClose}
+    >
+      <div className="member-drawer-shell">
         <div onClick={(e) => e.stopPropagation()} className="member-drawer">
           <div className="member-drawer-handle" />
 
@@ -1483,6 +1484,28 @@ function InlineMemberDrawer({
   );
 }
 
+function MemberDrawer({
+  member,
+  onClose,
+}: {
+  member: any;
+  onClose: () => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
+
+  if (!member || !mounted || typeof document === "undefined") return null;
+
+  return createPortal(
+    <MemberDrawerInner member={member} onClose={onClose} />,
+    document.body
+  );
+}
+
 export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
   const safeMembers = useMemo(() => safeArray(members), [members]);
   const [query, setQuery] = useState("");
@@ -1535,12 +1558,7 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
 
   return (
     <>
-      {selected ? (
-        <InlineMemberDrawer
-          member={selected}
-          onClose={() => setSelected(null)}
-        />
-      ) : null}
+      <MemberDrawer member={selected} onClose={() => setSelected(null)} />
 
       <div
         style={{
@@ -1744,40 +1762,49 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
           text-align: right;
         }
 
-        .inline-member-modal-root {
+        .member-modal-backdrop {
           position: fixed;
           inset: 0;
           z-index: 2147483000;
-          pointer-events: none;
-        }
-
-        .inline-backdrop {
-          position: fixed;
-          inset: 0;
-          z-index: 2147483001;
-          background: rgba(2, 6, 23, 0.94);
+          background: rgba(2, 6, 23, 0.9);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 12px;
+          padding: 16px 12px calc(92px + env(safe-area-inset-bottom, 0px));
           overflow-y: auto;
+          overscroll-behavior: contain;
           -webkit-overflow-scrolling: touch;
-          pointer-events: auto;
+        }
+
+        .member-drawer-shell {
+          width: 100%;
+          max-width: 980px;
+          display: flex;
+          justify-content: center;
+          align-items: flex-start;
+          pointer-events: none;
         }
 
         .member-drawer {
           width: 100%;
           max-width: 980px;
-          max-height: calc(100dvh - 24px);
+          max-height: min(86dvh, 920px);
           overflow-y: auto;
           overflow-x: hidden;
+          overscroll-behavior: contain;
           -webkit-overflow-scrolling: touch;
-          border-radius: 20px;
+          border-radius: 24px;
           border: 1px solid rgba(255, 255, 255, 0.1);
           box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
           color: var(--text-strong, #f8fafc);
           padding: 16px;
-          background: rgba(8, 14, 26, 0.98);
+          background:
+            radial-gradient(circle at top right, rgba(99, 213, 255, 0.08), transparent 32%),
+            radial-gradient(circle at bottom left, rgba(93, 255, 141, 0.06), transparent 28%),
+            rgba(8, 14, 26, 0.97);
+          pointer-events: auto;
         }
 
         .member-drawer-handle {
@@ -1789,11 +1816,18 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
         }
 
         .member-drawer-header {
-          position: static;
-          z-index: 1;
-          background: transparent;
-          padding-top: 0;
-          padding-bottom: 0;
+          position: sticky;
+          top: -16px;
+          z-index: 2;
+          background: linear-gradient(
+            180deg,
+            rgba(8, 14, 26, 0.98),
+            rgba(8, 14, 26, 0.9)
+          );
+          padding-top: 6px;
+          padding-bottom: 10px;
+          backdrop-filter: blur(8px);
+          -webkit-backdrop-filter: blur(8px);
         }
 
         .member-drawer-avatar {
@@ -1883,15 +1917,19 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
             grid-template-columns: 1fr;
           }
 
-          .inline-backdrop {
-            padding: 8px;
+          .member-modal-backdrop {
+            padding: 8px 8px calc(96px + env(safe-area-inset-bottom, 0px));
             align-items: flex-start;
           }
 
           .member-drawer {
-            max-height: calc(100dvh - 16px);
-            border-radius: 18px;
+            max-height: min(82dvh, 82dvh);
+            border-radius: 20px;
             padding: 12px;
+          }
+
+          .member-drawer-header {
+            top: -12px;
           }
 
           .profile-block-title {
