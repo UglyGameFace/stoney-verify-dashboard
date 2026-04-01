@@ -34,6 +34,7 @@ import DesktopDashboardView from "@/components/dashboard/DesktopDashboardView";
 const MOBILE_TABS = ["home", "tickets", "members", "categories"];
 const STALE_VISIBLE_REFRESH_MS = 45_000;
 const BACKUP_REFRESH_INTERVAL_MS = 90_000;
+const RESUME_PENDING_REFRESH_CHECK_MS = 1500;
 const MOBILE_NAV_RESERVED_PX = 168;
 const REALTIME_DEBOUNCE_MS = 1250;
 
@@ -296,15 +297,27 @@ function buildModeratorIntelligence(data) {
   );
 
   const fraudRisk = data?.intelligence?.fraudRisk || (
-    fraudFlags >= 5 ? "High" : fraudFlags >= 1 || pendingVerification >= 12 ? "Moderate" : "Low"
+    fraudFlags >= 5
+      ? "High"
+      : fraudFlags >= 1 || pendingVerification >= 12
+        ? "Moderate"
+        : "Low"
   );
 
   const ticketPressure = data?.intelligence?.ticketPressure || (
-    openTickets >= 14 || claimedTickets >= 8 ? "High" : openTickets >= 6 || claimedTickets >= 4 ? "Moderate" : "Low"
+    openTickets >= 14 || claimedTickets >= 8
+      ? "High"
+      : openTickets >= 6 || claimedTickets >= 4
+        ? "Moderate"
+        : "Low"
   );
 
   const verificationPressure = data?.intelligence?.verificationPressure || (
-    pendingVerification >= 16 ? "High" : pendingVerification >= 8 ? "Moderate" : "Low"
+    pendingVerification >= 16
+      ? "High"
+      : pendingVerification >= 8
+        ? "Moderate"
+        : "Low"
   );
 
   const verifiedRate =
@@ -644,7 +657,7 @@ export default function DashboardClient({
   const [maintenanceError, setMaintenanceError] = useState("");
   const [isMaintaining, setIsMaintaining] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isModalPaused, setIsModalPaused] = useState(false);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
@@ -670,6 +683,7 @@ export default function DashboardClient({
   const pendingRefreshReasonRef = useRef("");
   const lastRefreshAtRef = useRef(Date.now());
   const backupIntervalRef = useRef(null);
+  const resumeIntervalRef = useRef(null);
 
   const warnsSectionRef = useRef(null);
   const raidsSectionRef = useRef(null);
@@ -721,7 +735,9 @@ export default function DashboardClient({
       const modalOpenNow = isBlockingModalOpen();
 
       if (modalOpenNow) {
-        setIsModalOpen(true);
+        setIsModalPaused(true);
+      } else {
+        setIsModalPaused(false);
       }
 
       if (!force && (refreshInFlightRef.current || modalOpenNow)) {
@@ -756,6 +772,7 @@ export default function DashboardClient({
         setError("");
         lastRefreshAtRef.current = Date.now();
         pendingRefreshReasonRef.current = "";
+        setIsModalPaused(false);
       } catch (err) {
         setError(err?.message || "Failed to refresh dashboard.");
       } finally {
@@ -768,11 +785,15 @@ export default function DashboardClient({
 
   const maybeRefreshIfStale = useCallback(
     async (reason) => {
-      if (isBlockingModalOpen()) {
+      const modalOpen = isBlockingModalOpen();
+
+      if (modalOpen) {
         pendingRefreshReasonRef.current = reason;
-        setIsModalOpen(true);
+        setIsModalPaused(true);
         return;
       }
+
+      setIsModalPaused(false);
 
       const age = Date.now() - lastRefreshAtRef.current;
       if (age >= STALE_VISIBLE_REFRESH_MS) {
@@ -874,15 +895,20 @@ export default function DashboardClient({
   useEffect(() => {
     let supabase;
     let channel;
-    let observer;
 
     function scheduleRefresh(reason, force = false) {
       clearTimeout(refreshTimer.current);
       refreshTimer.current = setTimeout(() => {
-        if (isBlockingModalOpen() && !force) {
+        const modalOpen = isBlockingModalOpen();
+
+        if (modalOpen && !force) {
           pendingRefreshReasonRef.current = reason;
-          setIsModalOpen(true);
+          setIsModalPaused(true);
           return;
+        }
+
+        if (!modalOpen) {
+          setIsModalPaused(false);
         }
 
         refresh({ silent: true, force, reason });
@@ -904,23 +930,16 @@ export default function DashboardClient({
     }
 
     function handleOnline() {
-      if (isBlockingModalOpen()) {
+      const modalOpen = isBlockingModalOpen();
+
+      if (modalOpen) {
         pendingRefreshReasonRef.current = "online";
-        setIsModalOpen(true);
+        setIsModalPaused(true);
         return;
       }
+
+      setIsModalPaused(false);
       refresh({ silent: true, force: true, reason: "online" });
-    }
-
-    function handleModalStateCheck() {
-      const open = isBlockingModalOpen();
-      setIsModalOpen(open);
-
-      if (!open && pendingRefreshReasonRef.current && !refreshInFlightRef.current) {
-        const reason = pendingRefreshReasonRef.current;
-        pendingRefreshReasonRef.current = "";
-        refresh({ silent: true, force: true, reason: `${reason}-resume` });
-      }
     }
 
     if (!initialData) {
@@ -944,16 +963,6 @@ export default function DashboardClient({
       setError(err?.message || "Realtime client unavailable.");
     }
 
-    if (typeof MutationObserver !== "undefined" && typeof document !== "undefined") {
-      observer = new MutationObserver(handleModalStateCheck);
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-      });
-      handleModalStateCheck();
-    }
-
     window.addEventListener("focus", handleWindowFocus);
     window.addEventListener("online", handleOnline);
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -964,6 +973,26 @@ export default function DashboardClient({
       }
     }, BACKUP_REFRESH_INTERVAL_MS);
 
+    resumeIntervalRef.current = setInterval(() => {
+      const pendingReason = pendingRefreshReasonRef.current;
+      if (!pendingReason) return;
+      if (refreshInFlightRef.current) return;
+
+      const modalOpen = isBlockingModalOpen();
+      if (modalOpen) {
+        setIsModalPaused(true);
+        return;
+      }
+
+      setIsModalPaused(false);
+      pendingRefreshReasonRef.current = "";
+      refresh({
+        silent: true,
+        force: true,
+        reason: `${pendingReason}-resume`,
+      });
+    }, RESUME_PENDING_REFRESH_CHECK_MS);
+
     return () => {
       clearTimeout(refreshTimer.current);
 
@@ -971,7 +1000,9 @@ export default function DashboardClient({
         clearInterval(backupIntervalRef.current);
       }
 
-      if (observer) observer.disconnect();
+      if (resumeIntervalRef.current) {
+        clearInterval(resumeIntervalRef.current);
+      }
 
       window.removeEventListener("focus", handleWindowFocus);
       window.removeEventListener("online", handleOnline);
@@ -1507,7 +1538,7 @@ export default function DashboardClient({
           >
             <div className="muted" style={{ fontSize: 13 }}>
               Last successful refresh: {lastRefreshLabel}
-              {isModalOpen ? " • paused while profile modal is open" : ""}
+              {isModalPaused ? " • refresh paused while profile is open" : ""}
             </div>
 
             <div
