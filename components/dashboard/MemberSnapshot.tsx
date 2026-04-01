@@ -362,7 +362,11 @@ function getActivityRows(member: any) {
   const actionHistory = normalizeMaybeArray(member?.action_history);
   const modHistory = normalizeMaybeArray(member?.mod_history);
 
-  const raw = activityLog.length ? activityLog : actionHistory.length ? actionHistory : modHistory;
+  const raw = activityLog.length
+    ? activityLog
+    : actionHistory.length
+      ? actionHistory
+      : modHistory;
 
   return raw.slice(0, 25).map((item: any, index: number) => {
     if (typeof item === "string") {
@@ -643,6 +647,7 @@ function MemberDrawerInner({
   const [voiceChannels, setVoiceChannels] = useState<any[]>([]);
   const [liveMember, setLiveMember] = useState(member || null);
   const [supportDataLoaded, setSupportDataLoaded] = useState(false);
+
   const memberKey = String(member?.user_id || "");
 
   useEffect(() => {
@@ -654,7 +659,7 @@ function MemberDrawerInner({
     setSelectedRoleId("");
     setSelectedVoiceChannelId("");
     setLiveMember(member || null);
-  }, [memberKey, member]);
+  }, [member, memberKey]);
 
   const sourceMember = liveMember || member;
   const name = getMemberName(sourceMember);
@@ -669,7 +674,9 @@ function MemberDrawerInner({
 
   const assignableRoles = useMemo(() => {
     const assignedIdSet = new Set(getRoleIds(sourceMember));
-    const assignedNameSet = new Set(getRoleNames(sourceMember).map((n) => n.toLowerCase()));
+    const assignedNameSet = new Set(
+      getRoleNames(sourceMember).map((n) => n.toLowerCase())
+    );
 
     return normalizeGuildRoles(guildRoles)
       .filter((role) => role.name !== "@everyone")
@@ -702,8 +709,8 @@ function MemberDrawerInner({
     window.addEventListener("keydown", onKeyDown);
 
     return () => {
-      html.style.overflow = prevHtmlOverflow === "hidden" ? "" : prevHtmlOverflow;
-      body.style.overflow = prevBodyOverflow === "hidden" ? "" : prevBodyOverflow;
+      html.style.overflow = prevHtmlOverflow;
+      body.style.overflow = prevBodyOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [onClose]);
@@ -711,9 +718,13 @@ function MemberDrawerInner({
   useEffect(() => {
     let cancelled = false;
 
-    const timer = window.setTimeout(async () => {
+    async function loadSupportData() {
       try {
-        const res = await fetch("/api/dashboard/live", { cache: "no-store" });
+        setSupportDataLoaded(false);
+
+        const res = await fetch("/api/dashboard/live?support_only=1", {
+          cache: "no-store",
+        });
         const json = await res.json().catch(() => ({}));
 
         if (!res.ok || cancelled) return;
@@ -726,13 +737,14 @@ function MemberDrawerInner({
           setSupportDataLoaded(false);
         }
       }
-    }, 120);
+    }
+
+    loadSupportData();
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
     };
-  }, [memberKey]);
+  }, []);
 
   async function copyText(text: string, successMessage: string) {
     try {
@@ -911,7 +923,6 @@ function MemberDrawerInner({
             >
               {avatar ? (
                 <img
-                  key={avatar}
                   src={avatar}
                   alt={name}
                   width="52"
@@ -1067,7 +1078,7 @@ function MemberDrawerInner({
           subtitle="Useful when members change names or come back later."
           defaultOpen={false}
         >
-          <KeyValueGrid rows={getHistoryRows(sourceMember)} />
+          <KeyValueGrid rows={historyRows} />
         </DetailSection>
 
         <DetailSection
@@ -1459,7 +1470,7 @@ function MemberDrawer({
   if (!member || !mounted || typeof document === "undefined") return null;
 
   return createPortal(
-    <MemberDrawerInner key={String(member?.user_id || "member-drawer")} member={member} onClose={onClose} />,
+    <MemberDrawerInner member={member} onClose={onClose} />,
     document.body
   );
 }
@@ -1823,10 +1834,6 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
             max-height: calc(100dvh - 16px);
             border-radius: 18px;
             padding: 12px;
-          }
-
-          .member-drawer-header {
-            top: 0;
           }
 
           .profile-block-title {
