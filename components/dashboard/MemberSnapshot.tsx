@@ -29,7 +29,10 @@ function normalizeMaybeArray(value: any) {
       const parsed = JSON.parse(text);
       return Array.isArray(parsed) ? parsed.filter(Boolean) : [text];
     } catch {
-      return text.split(",").map((v) => v.trim()).filter(Boolean);
+      return text
+        .split(",")
+        .map((v) => v.trim())
+        .filter(Boolean);
     }
   }
   return [];
@@ -75,7 +78,7 @@ function getRoleIds(member: any) {
   if (Array.isArray(member?.roles)) {
     return member.roles
       .map((role: any) => {
-        if (typeof role === "string") return role;
+        if (typeof role === "string") return "";
         if (role && typeof role === "object") return role?.id || "";
         return "";
       })
@@ -406,6 +409,44 @@ function getActivityRows(member: any) {
   });
 }
 
+function getCardPreviewRows(member: any) {
+  return [
+    {
+      label: "Invited By",
+      value: firstNonEmpty(
+        member?.invited_by_name,
+        member?.invited_by,
+        member?.inviter_name,
+        member?.inviter_id
+      ),
+    },
+    {
+      label: "Approved By",
+      value: firstNonEmpty(
+        member?.approved_by_name,
+        member?.approved_by,
+        member?.verified_by_name,
+        member?.verified_by,
+        member?.staff_actor_name,
+        member?.staff_actor_id
+      ),
+    },
+    {
+      label: "Vouched By",
+      value: firstNonEmpty(
+        member?.vouched_by_name,
+        member?.vouched_by,
+        member?.voucher_name,
+        member?.voucher_id
+      ),
+    },
+    {
+      label: "Invite Code",
+      value: firstNonEmpty(member?.invite_code, member?.discord_invite_code),
+    },
+  ].filter((row) => row.value);
+}
+
 function DetailSection({
   title,
   subtitle,
@@ -475,11 +516,10 @@ function MemberCard({
     member?.join_method,
     member?.entry_method,
     member?.joined_via,
-    member?.verification_source,
-    member?.invited_by_name,
-    member?.vouched_by_name,
-    member?.approved_by_name
+    member?.verification_source
   );
+
+  const previewRows = getCardPreviewRows(member);
 
   return (
     <button
@@ -559,14 +599,7 @@ function MemberCard({
         <span className={`badge ${tone}`}>{state}</span>
       </div>
 
-      <div
-        style={{
-          marginTop: 12,
-          display: "grid",
-          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-          gap: 10,
-        }}
-      >
+      <div className="member-card-grid">
         <div className="member-detail-item">
           <span className="ticket-info-label">Top Role</span>
           <span style={{ color: "var(--text-strong, #f8fafc)" }}>
@@ -599,30 +632,33 @@ function MemberCard({
       </div>
 
       {entryPreview ? (
-        <div
-          style={{
-            marginTop: 10,
-            fontSize: 12,
-            lineHeight: 1.45,
-            color: "var(--text-muted, rgba(255,255,255,0.72))",
-          }}
-        >
-          Entry path: {entryPreview}
+        <div className="member-card-line">
+          <span className="ticket-info-label">Entry Path</span>
+          <span>{entryPreview}</span>
+        </div>
+      ) : null}
+
+      {previewRows.length ? (
+        <div className="member-card-preview-grid">
+          {previewRows.slice(0, 4).map((row) => (
+            <div key={row.label} className="member-detail-item">
+              <span className="ticket-info-label">{row.label}</span>
+              <span style={{ color: "var(--text-strong, #f8fafc)" }}>
+                {safeText(row.value)}
+              </span>
+            </div>
+          ))}
         </div>
       ) : null}
 
       {member?.role_state_reason ? (
-        <div
-          style={{
-            marginTop: 8,
-            fontSize: 12,
-            lineHeight: 1.45,
-            color: "var(--text-muted, rgba(255,255,255,0.72))",
-          }}
-        >
-          {member.role_state_reason}
+        <div className="member-card-line">
+          <span className="ticket-info-label">Note</span>
+          <span>{member.role_state_reason}</span>
         </div>
       ) : null}
+
+      <div className="member-card-footer-hint">Tap to open full profile</div>
     </button>
   );
 }
@@ -1698,6 +1734,39 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
       <MemberDrawer member={selected} onClose={() => setSelected(null)} />
 
       <style jsx>{`
+        .member-card-grid {
+          margin-top: 12px;
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .member-card-preview-grid {
+          margin-top: 10px;
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .member-card-line {
+          margin-top: 10px;
+          display: grid;
+          gap: 4px;
+          padding: 10px 12px;
+          border-radius: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          background: rgba(255, 255, 255, 0.02);
+          color: var(--text-strong, #f8fafc);
+          overflow-wrap: anywhere;
+        }
+
+        .member-card-footer-hint {
+          margin-top: 10px;
+          font-size: 12px;
+          color: var(--text-muted, rgba(255, 255, 255, 0.72));
+          text-align: right;
+        }
+
         .member-modal-backdrop {
           position: fixed;
           inset: 0;
@@ -1825,6 +1894,11 @@ export default function MemberSnapshot({ members = [] }: { members?: any[] }) {
         }
 
         @media (max-width: 640px) {
+          .member-card-grid,
+          .member-card-preview-grid {
+            grid-template-columns: 1fr;
+          }
+
           .member-modal-backdrop {
             padding: 8px;
             align-items: flex-start;
