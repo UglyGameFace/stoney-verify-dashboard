@@ -917,7 +917,7 @@ export default function TicketQueueTable({
             radial-gradient(circle at top right, rgba(93, 255, 141, 0.08), transparent 26%),
             radial-gradient(circle at bottom left, rgba(99, 213, 255, 0.06), transparent 22%),
             linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
-            linear-gradient(180deg, rgba(14, 25, 35, 0.96), rgba(7, 13, 21, 0.96));
+            linear-gradient(180deg, rgba(14, 25, 35, 0.98), rgba(7, 13, 21, 0.98));
           overflow: hidden;
         }
 
@@ -998,10 +998,11 @@ export default function TicketQueueTable({
             radial-gradient(circle at top right, rgba(93,255,141,0.08), transparent 36%),
             radial-gradient(circle at bottom left, rgba(99,213,255,0.06), transparent 28%),
             linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)),
-            linear-gradient(180deg, rgba(17, 28, 39, 0.96), rgba(9, 16, 24, 0.96));
+            linear-gradient(180deg, rgba(17, 28, 39, 0.98), rgba(9, 16, 24, 0.98)) !important;
           box-shadow:
             0 14px 30px rgba(0,0,0,0.24),
             0 0 0 1px rgba(255,255,255,0.02) inset;
+          -webkit-tap-highlight-color: transparent;
         }
 
         .ticket-mobile-card.premium::before {
@@ -1027,7 +1028,7 @@ export default function TicketQueueTable({
           background:
             radial-gradient(circle at top right, rgba(99,213,255,0.1), transparent 38%),
             radial-gradient(circle at bottom left, rgba(93,255,141,0.08), transparent 28%),
-            linear-gradient(180deg, rgba(19, 33, 46, 0.98), rgba(10, 17, 26, 0.98));
+            linear-gradient(180deg, rgba(19, 33, 46, 0.99), rgba(10, 17, 26, 0.99)) !important;
           box-shadow:
             0 16px 34px rgba(0,0,0,0.28),
             0 0 0 1px rgba(99,213,255,0.08) inset;
@@ -1090,6 +1091,34 @@ export default function TicketQueueTable({
           gap: 12px;
         }
 
+        .ticket-mobile-meta {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .ticket-mobile-meta-item {
+          display: grid;
+          gap: 4px;
+          padding: 10px 12px;
+          border-radius: 14px;
+          border: 1px solid rgba(255,255,255,0.06);
+          background: rgba(255,255,255,0.025);
+          min-width: 0;
+          color: var(--text, #dbe4ee);
+        }
+
+        .ticket-mobile-meta-item.full {
+          grid-column: 1 / -1;
+        }
+
+        .ticket-mobile-meta-label {
+          font-size: 11px;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          color: var(--muted, #9fb0c3);
+        }
+
         .ticket-desktop-expanded {
           padding: 16px;
           background:
@@ -1113,6 +1142,18 @@ export default function TicketQueueTable({
         @media (min-width: 768px) {
           .queue-summary-grid {
             grid-template-columns: repeat(4, minmax(0, 1fr));
+          }
+        }
+
+        @media (max-width: 1023px) {
+          :global(.table-wrap),
+          :global(table),
+          :global(thead),
+          :global(tbody),
+          :global(tr),
+          :global(td),
+          :global(th) {
+            background: transparent !important;
           }
         }
 
