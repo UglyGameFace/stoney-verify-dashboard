@@ -316,26 +316,19 @@ export default function DashboardSettingsPanel({
 
     const prevHtmlOverflow = html.style.overflow;
     const prevBodyOverflow = body.style.overflow;
+    const prevHtmlOverscroll = html.style.overscrollBehavior;
     const prevBodyOverscroll = body.style.overscrollBehavior;
-    const prevBodyPosition = body.style.position;
-    const prevBodyWidth = body.style.width;
-    const scrollY = window.scrollY;
 
     html.style.overflow = "hidden";
     body.style.overflow = "hidden";
+    html.style.overscrollBehavior = "none";
     body.style.overscrollBehavior = "none";
-    body.style.position = "fixed";
-    body.style.top = `-${scrollY}px`;
-    body.style.width = "100%";
 
     return () => {
       html.style.overflow = prevHtmlOverflow;
       body.style.overflow = prevBodyOverflow;
+      html.style.overscrollBehavior = prevHtmlOverscroll;
       body.style.overscrollBehavior = prevBodyOverscroll;
-      body.style.position = prevBodyPosition;
-      body.style.top = "";
-      body.style.width = prevBodyWidth;
-      window.scrollTo(0, scrollY);
     };
   }, [open]);
 
@@ -685,6 +678,7 @@ export default function DashboardSettingsPanel({
               10px
               calc(20px + env(safe-area-inset-bottom, 0px) + 84px);
             overscroll-behavior: contain;
+            touch-action: auto;
           }
 
           .settings-sheet {
@@ -692,6 +686,7 @@ export default function DashboardSettingsPanel({
             max-width: 1080px;
             max-height: min(92vh, 920px);
             overflow-y: auto;
+            overflow-x: hidden;
             -webkit-overflow-scrolling: touch;
             overscroll-behavior: contain;
             touch-action: pan-y;
@@ -704,6 +699,7 @@ export default function DashboardSettingsPanel({
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.42);
             color: var(--text-strong, #f8fafc);
             padding: 14px;
+            will-change: transform;
           }
 
           .settings-sheet-handle {
