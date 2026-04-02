@@ -1,6 +1,11 @@
 import { createServerSupabase } from "@/lib/supabase-server";
 import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
 import { env } from "@/lib/env";
+import {
+  insertMemberEvent,
+  patchGuildMemberEntryFields,
+  patchLatestMemberJoinContext,
+} from "@/lib/memberEventWrites";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -24,6 +29,22 @@ function buildCategoryPatch(body) {
     ),
     category_set_by: normalizeString(body?.category_set_by) || null,
     category_set_at: new Date().toISOString(),
+  };
+}
+
+function getActorIdentity(session) {
+  return {
+    actorId:
+      session?.user?.discord_id ||
+      session?.user?.id ||
+      session?.user?.user_id ||
+      session?.discordUser?.id ||
+      null,
+    actorName:
+      session?.user?.username ||
+      session?.user?.name ||
+      session?.discordUser?.username ||
+      "Dashboard Staff",
   };
 }
 
@@ -91,6 +112,7 @@ export async function PATCH(request, { params }) {
     const body = await request.json();
     const ticketId = params?.id;
     const guildId = env.guildId || "";
+    const { actorId, actorName } = getActorIdentity(session);
 
     if (!ticketId) {
       return new Response(JSON.stringify({ error: "Missing ticket id." }), {
@@ -114,14 +136,30 @@ export async function PATCH(request, { params }) {
       });
     }
 
+    const { data: existingTicket, error: existingTicketError } = await supabase
+      .from("tickets")
+      .select("*")
+      .eq("id", ticketId)
+      .single();
+
+    if (existingTicketError || !existingTicket) {
+      return new Response(
+        JSON.stringify({ error: existingTicketError?.message || "Ticket not found." }),
+        {
+          status: 404,
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+          },
+        }
+      );
+    }
+
     const patch = buildCategoryPatch({
       ...body,
       category_set_by:
         body?.category_set_by ||
-        session?.user?.id ||
-        session?.user?.user_id ||
-        session?.user?.discord_id ||
-        session?.discordUser?.id ||
+        actorId ||
         "",
     });
 
@@ -157,6 +195,13 @@ export async function PATCH(request, { params }) {
       categoryRow = Array.isArray(data) && data.length ? data[0] : null;
     }
 
+    const selectedCategorySlug =
+      categoryRow?.slug || patch.category || null;
+    const selectedCategoryName =
+      categoryRow?.name || patch.category || null;
+    const selectedIntakeType =
+      categoryRow?.intake_type || null;
+
     const updatePayload = {
       updated_at: new Date().toISOString(),
       category_override: patch.category_override,
@@ -164,14 +209,13 @@ export async function PATCH(request, { params }) {
       category_set_at: patch.category_set_at,
       category_id: categoryRow?.id || patch.category_id || null,
       category:
-        categoryRow?.slug ||
-        categoryRow?.name ||
-        patch.category ||
+        selectedCategorySlug ||
+        selectedCategoryName ||
         null,
       matched_category_id: categoryRow?.id || null,
-      matched_category_name: categoryRow?.name || null,
-      matched_category_slug: categoryRow?.slug || null,
-      matched_intake_type: categoryRow?.intake_type || null,
+      matched_category_name: selectedCategoryName,
+      matched_category_slug: selectedCategorySlug,
+      matched_intake_type: selectedIntakeType,
       matched_category_reason: "manual-override",
       matched_category_score: 999,
     };
@@ -191,6 +235,110 @@ export async function PATCH(request, { params }) {
           "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         },
       });
+    }
+
+    await insertMemberEvent(
+      {
+        guildId,
+        userId: String(existingTicket.user_id || "").trim(),
+        actorId,
+        actorName,
+        eventType: "ticket_category_overridden",
+        title: "Ticket Category Overridden",
+        reason: `Manual category override set to ${selectedCategoryName || selectedCategorySlug || "unknown"}.`,
+        metadata: {
+          ticket_id: ticketId,
+          ticket_number: existingTicket.ticket_number || null,
+          previous_category: existingTicket.category || null,
+          previous_category_id: existingTicket.category_id || null,
+          previous_matched_category_id: existingTicket.matched_category_id || null,
+          previous_matched_category_name: existingTicket.matched_category_name || null,
+          next_category: updatePayload.category,
+          next_category_id: updatePayload.category_id,
+          matched_category_name: updatePayload.matched_category_name,
+          matched_category_slug: updatePayload.matched_category_slug,
+          matched_intake_type: updatePayload.matched_intake_type,
+          source: "dashboard_ticket_patch",
+        },
+      },
+      supabase
+    );
+
+    const shouldPatchEntryContext =
+      String(selectedIntakeType || "").toLowerCase() === "verification" ||
+      String(selectedCategorySlug || "").toLowerCase().includes("verification") ||
+      String(selectedCategoryName || "").toLowerCase().includes("verification");
+
+    if (shouldPatchEntryContext) {
+      await patchGuildMemberEntryFields(
+        {
+          guildId,
+          userId: String(existingTicket.user_id || "").trim(),
+          approvedBy: actorId,
+          approvedByName: actorName,
+          sourceTicketId: ticketId,
+          verificationTicketId: ticketId,
+          entryMethod:
+            normalizeString(body?.entry_method) ||
+            normalizeString(body?.verification_source) ||
+            "verification_ticket",
+          verificationSource:
+            normalizeString(body?.verification_source) ||
+            "dashboard_manual_category_override",
+          entryReason:
+            normalizeString(body?.entry_reason) ||
+            `Ticket category manually set to ${selectedCategoryName || selectedCategorySlug || "verification"}.`,
+          approvalReason:
+            normalizeString(body?.approval_reason) ||
+            `Dashboard staff manually set verification category on ticket ${ticketId}.`,
+        },
+        supabase
+      );
+
+      await patchLatestMemberJoinContext(
+        {
+          guildId,
+          userId: String(existingTicket.user_id || "").trim(),
+          username: existingTicket.username || null,
+          approvedBy: actorId,
+          approvedByName: actorName,
+          sourceTicketId: ticketId,
+          entryMethod:
+            normalizeString(body?.entry_method) ||
+            "verification_ticket",
+          verificationSource:
+            normalizeString(body?.verification_source) ||
+            "dashboard_manual_category_override",
+          joinNote:
+            normalizeString(body?.entry_reason) ||
+            `Verification context linked from ticket ${ticketId}.`,
+        },
+        supabase
+      );
+
+      await insertMemberEvent(
+        {
+          guildId,
+          userId: String(existingTicket.user_id || "").trim(),
+          actorId,
+          actorName,
+          eventType: "verification_context_linked",
+          title: "Verification Context Linked",
+          reason:
+            normalizeString(body?.approval_reason) ||
+            "Verification entry context was linked from dashboard ticket override.",
+          metadata: {
+            ticket_id: ticketId,
+            verification_ticket_id: ticketId,
+            category_name: selectedCategoryName,
+            category_slug: selectedCategorySlug,
+            verification_source:
+              normalizeString(body?.verification_source) ||
+              "dashboard_manual_category_override",
+          },
+        },
+        supabase
+      );
     }
 
     const response = new Response(JSON.stringify({ ok: true, ticket }), {
