@@ -11,8 +11,6 @@ import {
 } from "@/lib/auth-server";
 import { env } from "@/lib/env";
 
-const DESKTOP_LAYOUT_MIN_WIDTH = 1024;
-
 function normalizeStaffKey(value) {
   return String(value || "").trim();
 }
@@ -209,7 +207,9 @@ function deriveSessionMemberFallback(session) {
   const hasVerifiedRole = Boolean(sessionMember?.has_verified_role);
   const hasUnverified =
     Boolean(sessionMember?.has_unverified_role) ||
-    roleNamesLower.some((name) => name === "unverified" || name.includes("unverified"));
+    roleNamesLower.some(
+      (name) => name === "unverified" || name.includes("unverified")
+    );
   const hasSecondaryVerifiedRole = roleNamesLower.some(
     (name) =>
       name === "resident" ||
@@ -407,7 +407,8 @@ function buildRecentJoinRows(memberJoins = [], guildMembers = []) {
       nickname: join?.nickname || member?.nickname || null,
       avatar_url: join?.avatar_url || member?.avatar_url || null,
       joined_at: join?.joined_at || member?.joined_at || join?.created_at || null,
-      updated_at: join?.updated_at || member?.updated_at || member?.last_seen_at || null,
+      updated_at:
+        join?.updated_at || member?.updated_at || member?.last_seen_at || null,
       created_at: join?.created_at || member?.created_at || null,
       role_names:
         Array.isArray(join?.role_names) && join.role_names.length
@@ -935,51 +936,10 @@ async function getUserDashboardData(session) {
 
 function StaffShell({ children }) {
   return (
-    <>
-      <div className="shell staff-shell">
-        <Sidebar />
-        <main className="content staff-content">{children}</main>
-      </div>
-
-      <style jsx global>{`
-        @media (max-width: ${DESKTOP_LAYOUT_MIN_WIDTH - 1}px) {
-          .staff-shell.shell {
-            grid-template-columns: 1fr !important;
-          }
-
-          .staff-shell .sidebar {
-            display: none !important;
-          }
-
-          .staff-shell .staff-content.content {
-            padding: 14px !important;
-            padding-bottom: 104px !important;
-          }
-        }
-
-        @media (min-width: ${DESKTOP_LAYOUT_MIN_WIDTH}px) {
-          .staff-shell.shell {
-            grid-template-columns: 292px 1fr !important;
-          }
-
-          .staff-shell .sidebar {
-            display: block !important;
-          }
-
-          .staff-shell .staff-content.content {
-            padding: 18px !important;
-            padding-bottom: 108px !important;
-          }
-        }
-
-        @media (max-width: 420px) {
-          .staff-shell .staff-content.content {
-            padding: 12px !important;
-            padding-bottom: 98px !important;
-          }
-        }
-      `}</style>
-    </>
+    <div className="shell staff-shell">
+      <Sidebar />
+      <main className="content staff-content">{children}</main>
+    </div>
   );
 }
 
