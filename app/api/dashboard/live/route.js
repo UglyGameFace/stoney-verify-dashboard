@@ -1371,9 +1371,8 @@ export async function GET(request) {
       return true;
     });
 
-    const closedTickets = canonicalTickets.filter(
-      (ticket) =>
-        isClosedLikeStatus(ticket?.status) || shouldHideStaleOpenTicket(ticket)
+    const closedTickets = canonicalTickets.filter((ticket) =>
+      isClosedLikeStatus(ticket?.status)
     );
 
     const events = buildTimeline(auditLogs, auditEvents, staffMessages, guildMembers);
@@ -1491,7 +1490,7 @@ export async function GET(request) {
     }
 
     const payload = {
-      tickets: sortTickets(activeTickets, "priority_desc"),
+      tickets: sortTickets(canonicalTickets, "updated_desc"),
       activeTickets: sortTickets(activeTickets, "priority_desc"),
       closedTickets: sortTickets(closedTickets, "updated_desc"),
       events,
