@@ -44,7 +44,7 @@ function DesktopKpiStrip({
       label: "Pending Verify",
       value: Number(intelligence?.pendingVerification || 0),
       helper: "Queue pressure",
-      action: () => jumpToPanel?.("fraud"),
+      action: () => jumpToTickets?.({ status: "active" }),
       tone: "purple",
     },
     {
@@ -61,7 +61,7 @@ function DesktopKpiStrip({
     <>
       <div className="desktop-kpi-strip">
         {items.map((item) => {
-          const card = (
+          const content = (
             <>
               <span className="desktop-kpi-label">{item.label}</span>
               <span className={`desktop-kpi-value tone-${item.tone}`}>
@@ -79,14 +79,17 @@ function DesktopKpiStrip({
                 className={`desktop-kpi-card clickable tone-${item.tone}`}
                 onClick={item.action}
               >
-                {card}
+                {content}
               </button>
             );
           }
 
           return (
-            <div key={item.key} className={`desktop-kpi-card tone-${item.tone}`}>
-              {card}
+            <div
+              key={item.key}
+              className={`desktop-kpi-card tone-${item.tone}`}
+            >
+              {content}
             </div>
           );
         })}
@@ -109,11 +112,11 @@ function DesktopKpiStrip({
           display: grid;
           gap: 8px;
           min-height: 110px;
-          border: 1px solid rgba(255,255,255,0.08);
+          border: 1px solid rgba(255, 255, 255, 0.08);
           background:
-            radial-gradient(circle at top right, rgba(93,255,141,0.07), transparent 34%),
-            linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)),
-            linear-gradient(180deg, rgba(18,30,42,0.95), rgba(8,16,26,0.95));
+            radial-gradient(circle at top right, rgba(93, 255, 141, 0.07), transparent 34%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015)),
+            linear-gradient(180deg, rgba(18, 30, 42, 0.95), rgba(8, 16, 26, 0.95));
           overflow: hidden;
         }
 
@@ -125,8 +128,8 @@ function DesktopKpiStrip({
           pointer-events: none;
           background: linear-gradient(
             180deg,
-            rgba(255,255,255,0.06),
-            rgba(255,255,255,0)
+            rgba(255, 255, 255, 0.06),
+            rgba(255, 255, 255, 0)
           );
           opacity: 0.55;
         }
@@ -141,13 +144,13 @@ function DesktopKpiStrip({
 
         .desktop-kpi-card.clickable:hover {
           transform: translateY(-2px);
-          border-color: rgba(93,255,141,0.18);
+          border-color: rgba(93, 255, 141, 0.18);
           box-shadow: var(--glow-green);
         }
 
         .desktop-kpi-label {
           font-size: 12px;
-          color: var(--muted, rgba(255,255,255,0.72));
+          color: var(--muted, rgba(255, 255, 255, 0.72));
           line-height: 1.2;
           position: relative;
           z-index: 1;
@@ -165,7 +168,7 @@ function DesktopKpiStrip({
 
         .desktop-kpi-helper {
           font-size: 12px;
-          color: var(--muted, rgba(255,255,255,0.72));
+          color: var(--muted, rgba(255, 255, 255, 0.72));
           position: relative;
           z-index: 1;
         }
@@ -211,7 +214,13 @@ function DesktopKpiStrip({
   );
 }
 
-function DesktopPageShell({ title, subtitle, actions, children, tone = "default" }) {
+function DesktopPageShell({
+  title,
+  subtitle,
+  actions,
+  children,
+  tone = "default",
+}) {
   return (
     <div className={`desktop-page-shell card tone-${tone}`}>
       <div className="desktop-page-head">
@@ -294,23 +303,23 @@ function DesktopPageShell({ title, subtitle, actions, children, tone = "default"
           letter-spacing: 0.04em;
           text-transform: uppercase;
           color: var(--text);
-          border: 1px solid rgba(255,255,255,0.08);
-          background: rgba(255,255,255,0.03);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          background: rgba(255, 255, 255, 0.03);
         }
 
         .desktop-page-chip.tone-tickets {
-          background: rgba(93,255,141,0.12);
-          border-color: rgba(93,255,141,0.18);
+          background: rgba(93, 255, 141, 0.12);
+          border-color: rgba(93, 255, 141, 0.18);
         }
 
         .desktop-page-chip.tone-members {
-          background: rgba(99,213,255,0.12);
-          border-color: rgba(99,213,255,0.18);
+          background: rgba(99, 213, 255, 0.12);
+          border-color: rgba(99, 213, 255, 0.18);
         }
 
         .desktop-page-chip.tone-categories {
-          background: rgba(178,109,255,0.12);
-          border-color: rgba(178,109,255,0.18);
+          background: rgba(178, 109, 255, 0.12);
+          border-color: rgba(178, 109, 255, 0.18);
         }
 
         .desktop-page-title {
@@ -321,8 +330,8 @@ function DesktopPageShell({ title, subtitle, actions, children, tone = "default"
           font-weight: 900;
           color: var(--text-strong);
           text-shadow:
-            0 0 18px rgba(93,255,141,0.08),
-            0 0 20px rgba(99,213,255,0.06);
+            0 0 18px rgba(93, 255, 141, 0.08),
+            0 0 20px rgba(99, 213, 255, 0.06);
         }
 
         .desktop-page-subtitle {
@@ -415,7 +424,9 @@ function DesktopTicketsHeader({
           type="button"
           className="button ghost"
           style={{ width: "auto", minWidth: 132 }}
-          onClick={() => refresh({ force: true, reason: "desktop-ticket-refresh" })}
+          onClick={() =>
+            refresh({ force: true, reason: "desktop-ticket-refresh" })
+          }
         >
           Refresh Queue
         </button>
@@ -515,7 +526,18 @@ export default function DesktopDashboardView({
   density = "comfortable",
 }) {
   const gap =
-    density === "compact" ? "14px" : density === "spacious" ? "24px" : "18px";
+    density === "compact"
+      ? "14px"
+      : density === "spacious"
+        ? "24px"
+        : "18px";
+
+  const visibleHomeKeys = homeLayout.filter(
+    (key) => sectionVisibility[key] !== false
+  );
+  const visibleMembersKeys = membersLayout.filter(
+    (key) => sectionVisibility[key] !== false
+  );
 
   return (
     <div className="desktop-dashboard-shell">
@@ -529,16 +551,14 @@ export default function DesktopDashboardView({
           />
 
           <div className="desktop-home-grid">
-            {homeLayout
-              .filter((key) => sectionVisibility[key] !== false)
-              .map((key, index) => (
-                <div
-                  key={`desktop-home-${key}`}
-                  className={`desktop-grid-item desktop-home-item desktop-home-item-${index + 1}`}
-                >
-                  {homeSections[key] || null}
-                </div>
-              ))}
+            {visibleHomeKeys.map((key, index) => (
+              <div
+                key={`desktop-home-${key}`}
+                className={`desktop-grid-item desktop-home-item desktop-home-item-${index + 1}`}
+              >
+                {homeSections[key] || null}
+              </div>
+            ))}
           </div>
         </section>
       ) : null}
@@ -546,8 +566,28 @@ export default function DesktopDashboardView({
       {activeTab === "tickets" ? (
         <section className="desktop-tab-section">
           <DesktopPageShell
-            title="Active Ticket Queue"
-            subtitle="Smoke-tested live moderation queue with fast filtering, repair controls, and cleaner action density."
+            title={
+              statusFilter === "closed"
+                ? "Closed Ticket History"
+                : statusFilter === "deleted"
+                  ? "Deleted Ticket History"
+                  : statusFilter === "all"
+                    ? "Ticket History & Queue"
+                    : statusFilter === "claimed"
+                      ? "Claimed Ticket Queue"
+                      : statusFilter === "open_only"
+                        ? "Open Ticket Queue"
+                        : "Active Ticket Queue"
+            }
+            subtitle={
+              statusFilter === "closed"
+                ? "Closed tickets remain visible here so staff can review and reopen when needed."
+                : statusFilter === "deleted"
+                  ? "Deleted ticket records remain visible here for audit and historical review."
+                  : statusFilter === "all"
+                    ? "Active and historical tickets together for review, auditing, and reopen workflows."
+                    : "Smoke-tested live moderation queue with fast filtering, repair controls, and cleaner action density."
+            }
             tone="tickets"
           >
             <DesktopTicketsHeader
@@ -567,8 +607,9 @@ export default function DesktopDashboardView({
             />
 
             <div className="muted desktop-ticket-note">
-              Reconcile repairs stale ticket rows that no longer reflect Discord truth.
-              Purge removes dead closed or deleted rows that no longer have a usable live channel.
+              Reconcile repairs stale ticket rows that no longer reflect Discord
+              truth. Purge removes dead closed or deleted rows that no longer
+              have a usable live channel.
             </div>
 
             <div>{filteredTickets}</div>
@@ -584,16 +625,14 @@ export default function DesktopDashboardView({
             tone="members"
           >
             <div className="desktop-members-grid">
-              {membersLayout
-                .filter((key) => sectionVisibility[key] !== false)
-                .map((key, index) => (
-                  <div
-                    key={`desktop-members-${key}`}
-                    className={`desktop-grid-item desktop-members-item desktop-members-item-${index + 1}`}
-                  >
-                    {membersSections[key] || null}
-                  </div>
-                ))}
+              {visibleMembersKeys.map((key, index) => (
+                <div
+                  key={`desktop-members-${key}`}
+                  className={`desktop-grid-item desktop-members-item desktop-members-item-${index + 1}`}
+                >
+                  {membersSections[key] || null}
+                </div>
+              ))}
             </div>
           </DesktopPageShell>
         </section>
@@ -656,7 +695,9 @@ export default function DesktopDashboardView({
           .desktop-home-item-4,
           .desktop-home-item-5,
           .desktop-home-item-6,
-          .desktop-home-item-7 {
+          .desktop-home-item-7,
+          .desktop-home-item-8,
+          .desktop-home-item-9 {
             grid-column: span 6;
           }
 
@@ -677,8 +718,13 @@ export default function DesktopDashboardView({
           }
 
           .desktop-members-item-4,
-          .desktop-members-item-5 {
+          .desktop-members-item-5,
+          .desktop-members-item-6 {
             grid-column: span 6;
+          }
+
+          .desktop-grid-item {
+            min-width: 0;
           }
         }
 
@@ -688,7 +734,9 @@ export default function DesktopDashboardView({
           .desktop-home-item-4,
           .desktop-home-item-5,
           .desktop-home-item-6,
-          .desktop-home-item-7 {
+          .desktop-home-item-7,
+          .desktop-home-item-8,
+          .desktop-home-item-9 {
             grid-column: span 12;
           }
 
@@ -696,7 +744,8 @@ export default function DesktopDashboardView({
           .desktop-members-item-2,
           .desktop-members-item-3,
           .desktop-members-item-4,
-          .desktop-members-item-5 {
+          .desktop-members-item-5,
+          .desktop-members-item-6 {
             grid-column: span 12;
           }
         }
