@@ -71,6 +71,8 @@ type ActionState =
 
 type PanelName = "overview" | "category" | "transcript" | "close" | "delete";
 
+const MOBILE_LAYOUT_MAX_WIDTH = 1023;
+
 function getChannelId(ticket: TicketLike): string {
   return String(ticket.channel_id || ticket.discord_thread_id || "").trim();
 }
@@ -172,7 +174,11 @@ function ActionAccordion({
   danger?: boolean;
 }) {
   return (
-    <div className={`ticket-action-accordion ${open ? "open" : ""} ${danger ? "danger" : ""}`}>
+    <div
+      className={`ticket-action-accordion ${open ? "open" : ""} ${
+        danger ? "danger" : ""
+      }`}
+    >
       <button
         type="button"
         className="ticket-action-accordion-head"
@@ -187,7 +193,9 @@ function ActionAccordion({
 
         <div className="ticket-action-accordion-side">
           {badge}
-          <span className={`ticket-action-chevron ${open ? "open" : ""}`}>⌄</span>
+          <span className={`ticket-action-chevron ${open ? "open" : ""}`}>
+            ⌄
+          </span>
         </div>
       </button>
 
@@ -205,20 +213,37 @@ export default function TicketControls({
   onChanged,
 }: TicketControlsProps) {
   const channelId = useMemo(() => getChannelId(ticket), [ticket]);
-  const ghost = normalizeBoolean(ticket.is_ghost);
-  const closed = isClosed(ticket.status);
-  const deleted = isDeleted(ticket.status);
-  const open = isOpen(ticket.status);
-  const claimed = isClaimed(ticket.status);
 
-  const transcriptUrl = normalizeString(ticket.transcript_url);
-  const transcriptMessageId = normalizeString(ticket.transcript_message_id);
-  const transcriptChannelId = normalizeString(ticket.transcript_channel_id);
-  const hasTranscript =
-    !!transcriptUrl || !!transcriptMessageId || !!transcriptChannelId;
+  const derived = useMemo(() => {
+    const ghost = normalizeBoolean(ticket.is_ghost);
+    const closed = isClosed(ticket.status);
+    const deleted = isDeleted(ticket.status);
+    const open = isOpen(ticket.status);
+    const claimed = isClaimed(ticket.status);
+
+    const transcriptUrl = normalizeString(ticket.transcript_url);
+    const transcriptMessageId = normalizeString(ticket.transcript_message_id);
+    const transcriptChannelId = normalizeString(ticket.transcript_channel_id);
+
+    const hasTranscript =
+      !!transcriptUrl || !!transcriptMessageId || !!transcriptChannelId;
+
+    return {
+      ghost,
+      closed,
+      deleted,
+      open,
+      claimed,
+      transcriptUrl,
+      transcriptMessageId,
+      transcriptChannelId,
+      hasTranscript,
+    };
+  }, [ticket]);
 
   const [actionState, setActionState] = useState<ActionState>("idle");
   const [error, setError] = useState("");
+  const [categoryLoadError, setCategoryLoadError] = useState("");
   const [message, setMessage] = useState("");
 
   const [deleteReason, setDeleteReason] = useState("Deleted from dashboard");
@@ -241,6 +266,15 @@ export default function TicketControls({
 
   useEffect(() => {
     setSelectedCategoryId(getCurrentCategoryId(ticket));
+    setError("");
+    setMessage("");
+    setForceTranscript(false);
+    setOpenPanels((prev) => ({
+      ...prev,
+      overview: true,
+      close: false,
+      delete: false,
+    }));
   }, [ticket?.id, ticket?.category_id, ticket?.matched_category_id]);
 
   useEffect(() => {
@@ -248,6 +282,7 @@ export default function TicketControls({
 
     async function loadCategories() {
       setLoadingCategories(true);
+      setCategoryLoadError("");
 
       try {
         const res = await fetch("/api/ticket-categories", {
@@ -269,7 +304,7 @@ export default function TicketControls({
         }
       } catch (err) {
         if (!cancelled) {
-          setError(
+          setCategoryLoadError(
             err instanceof Error ? err.message : "Failed to load categories."
           );
         }
@@ -288,10 +323,12 @@ export default function TicketControls({
   }, []);
 
   const busy = actionState !== "idle";
-  const assignDisabled = busy || !channelId || !currentStaffId || deleted;
-  const closeDisabled = busy || !channelId || deleted || closed;
-  const reopenDisabled = busy || !channelId || deleted || open;
-  const deleteDisabled = busy || !channelId || deleted;
+
+  const assignDisabled =
+    busy || !channelId || !currentStaffId || derived.deleted;
+  const closeDisabled = busy || !channelId || derived.deleted || derived.closed;
+  const reopenDisabled = busy || !channelId || derived.deleted || derived.open;
+  const deleteDisabled = busy || !channelId || derived.deleted;
   const saveCategoryDisabled =
     busy || !ticket?.id || !selectedCategoryId || loadingCategories;
 
@@ -303,10 +340,24 @@ export default function TicketControls({
     [categories, selectedCategoryId]
   );
 
+  function clearFeedback() {
+    setError("");
+    setMessage("");
+  }
+
   function togglePanel(name: PanelName) {
+    clearFeedback();
     setOpenPanels((prev) => ({
       ...prev,
       [name]: !prev[name],
+    }));
+  }
+
+  function openPanel(name: PanelName) {
+    clearFeedback();
+    setOpenPanels((prev) => ({
+      ...prev,
+      [name]: true,
     }));
   }
 
@@ -333,8 +384,7 @@ export default function TicketControls({
       return;
     }
 
-    setError("");
-    setMessage("");
+    clearFeedback();
     setActionState("assigning");
 
     try {
@@ -363,8 +413,7 @@ export default function TicketControls({
       return;
     }
 
-    setError("");
-    setMessage("");
+    clearFeedback();
     setActionState("closing");
 
     try {
@@ -380,7 +429,11 @@ export default function TicketControls({
       }
 
       setMessage("Ticket closed.");
-      setOpenPanels((prev) => ({ ...prev, close: false, transcript: true }));
+      setOpenPanels((prev) => ({
+        ...prev,
+        close: false,
+        transcript: true,
+      }));
       await afterChange(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to close ticket.");
@@ -395,8 +448,7 @@ export default function TicketControls({
       return;
     }
 
-    setError("");
-    setMessage("");
+    clearFeedback();
     setActionState("reopening");
 
     try {
@@ -425,15 +477,14 @@ export default function TicketControls({
       return;
     }
 
-    setError("");
-    setMessage("");
+    clearFeedback();
     setActionState("deleting");
 
     try {
       const result = await deleteTicketAction({
         channelId,
-        ghost,
-        forceTranscript: ghost ? forceTranscript : true,
+        ghost: derived.ghost,
+        forceTranscript: derived.ghost ? forceTranscript : true,
         reason: deleteReason.trim() || "Deleted from dashboard",
         staffId: currentStaffId ?? null,
         requestedBy: currentStaffId ?? null,
@@ -444,7 +495,7 @@ export default function TicketControls({
       }
 
       setMessage(
-        ghost
+        derived.ghost
           ? forceTranscript
             ? "Ghost ticket deleted with transcript."
             : "Ghost ticket deleted."
@@ -471,8 +522,7 @@ export default function TicketControls({
       return;
     }
 
-    setError("");
-    setMessage("");
+    clearFeedback();
     setActionState("saving-category");
 
     try {
@@ -515,7 +565,8 @@ export default function TicketControls({
           <div style={{ minWidth: 0, flex: 1 }}>
             <div className="ticket-controls-header-title">Ticket Actions</div>
             <div className="muted ticket-controls-header-copy">
-              Cleaner mobile-first control sheet for status, category, transcript, and deletion workflow.
+              Cleaner mobile-first control sheet for status, category,
+              transcript, and deletion workflow.
             </div>
           </div>
 
@@ -523,8 +574,8 @@ export default function TicketControls({
             <span className={`badge ${getStatusTone(ticket.status)}`}>
               {safeText(ticket.status, "unknown")}
             </span>
-            {ghost ? <span className="badge">Ghost</span> : null}
-            {hasTranscript ? (
+            {derived.ghost ? <span className="badge">Ghost</span> : null}
+            {derived.hasTranscript ? (
               <span className="badge claimed">Transcript</span>
             ) : (
               <span className="badge">No Transcript</span>
@@ -539,16 +590,20 @@ export default function TicketControls({
             disabled={assignDisabled}
             onClick={handleAssign}
           >
-            {actionState === "assigning" ? "Assigning..." : claimed ? "Re-Assign" : "Assign / Claim"}
+            {actionState === "assigning"
+              ? "Assigning..."
+              : derived.claimed
+                ? "Re-Assign"
+                : "Assign / Claim"}
           </button>
 
           <button
             type="button"
             className="button ghost"
             disabled={closeDisabled}
-            onClick={() => togglePanel("close")}
+            onClick={() => openPanel("close")}
           >
-            {closed ? "Already Closed" : "Close"}
+            {derived.closed ? "Already Closed" : "Close"}
           </button>
 
           <button
@@ -564,7 +619,7 @@ export default function TicketControls({
             type="button"
             className="button danger"
             disabled={deleteDisabled}
-            onClick={() => togglePanel("delete")}
+            onClick={() => openPanel("delete")}
           >
             Delete
           </button>
@@ -637,7 +692,9 @@ export default function TicketControls({
             <button
               type="button"
               className="button ghost"
-              onClick={() => copyText(String(ticket.title), "Ticket title copied.")}
+              onClick={() =>
+                copyText(String(ticket.title), "Ticket title copied.")
+              }
             >
               Copy Title
             </button>
@@ -699,6 +756,10 @@ export default function TicketControls({
             </div>
           </div>
         </div>
+
+        {categoryLoadError ? (
+          <div className="warning-banner">{categoryLoadError}</div>
+        ) : null}
 
         <div className="ticket-controls-select-row">
           <select
@@ -769,7 +830,7 @@ export default function TicketControls({
         title="Transcript & History"
         subtitle="Closure, deletion, transcript links, and archival proof."
         badge={
-          hasTranscript ? (
+          derived.hasTranscript ? (
             <span className="badge claimed">Available</span>
           ) : (
             <span className="badge">Pending</span>
@@ -782,9 +843,9 @@ export default function TicketControls({
           <div className="member-detail-item">
             <div className="ticket-info-label">Transcript URL</div>
             <div className="ticket-controls-mini-value">
-              {transcriptUrl ? (
+              {derived.transcriptUrl ? (
                 <a
-                  href={transcriptUrl}
+                  href={derived.transcriptUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="ticket-inline-link"
@@ -800,14 +861,14 @@ export default function TicketControls({
           <div className="member-detail-item">
             <div className="ticket-info-label">Transcript Message ID</div>
             <div className="ticket-controls-mini-value">
-              {transcriptMessageId || "—"}
+              {derived.transcriptMessageId || "—"}
             </div>
           </div>
 
           <div className="member-detail-item">
             <div className="ticket-info-label">Transcript Channel ID</div>
             <div className="ticket-controls-mini-value">
-              {transcriptChannelId || "—"}
+              {derived.transcriptChannelId || "—"}
             </div>
           </div>
 
@@ -847,11 +908,11 @@ export default function TicketControls({
           </div>
         </div>
 
-        {hasTranscript ? (
+        {derived.hasTranscript ? (
           <div className="ticket-controls-actions">
-            {transcriptUrl ? (
+            {derived.transcriptUrl ? (
               <a
-                href={transcriptUrl}
+                href={derived.transcriptUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="button primary"
@@ -860,24 +921,30 @@ export default function TicketControls({
               </a>
             ) : null}
 
-            {transcriptMessageId ? (
+            {derived.transcriptMessageId ? (
               <button
                 type="button"
                 className="button ghost"
                 onClick={() =>
-                  copyText(transcriptMessageId, "Transcript message ID copied.")
+                  copyText(
+                    derived.transcriptMessageId,
+                    "Transcript message ID copied."
+                  )
                 }
               >
                 Copy Message ID
               </button>
             ) : null}
 
-            {transcriptChannelId ? (
+            {derived.transcriptChannelId ? (
               <button
                 type="button"
                 className="button ghost"
                 onClick={() =>
-                  copyText(transcriptChannelId, "Transcript channel ID copied.")
+                  copyText(
+                    derived.transcriptChannelId,
+                    "Transcript channel ID copied."
+                  )
                 }
               >
                 Copy Channel ID
@@ -886,7 +953,8 @@ export default function TicketControls({
           </div>
         ) : (
           <div className="empty-state" style={{ padding: 12 }}>
-            Transcript data will appear here after the ticket is closed or deleted through the bot workflow.
+            Transcript data will appear here after the ticket is closed or
+            deleted through the bot workflow.
           </div>
         )}
       </ActionAccordion>
@@ -927,9 +995,9 @@ export default function TicketControls({
       </ActionAccordion>
 
       <ActionAccordion
-        title={ghost ? "Delete Ghost Ticket" : "Delete Ticket"}
+        title={derived.ghost ? "Delete Ghost Ticket" : "Delete Ticket"}
         subtitle={
-          ghost
+          derived.ghost
             ? "Ghost tickets can skip transcript posting unless staff explicitly want one."
             : "Normal tickets should delete only after transcript workflow is complete."
         }
@@ -945,7 +1013,7 @@ export default function TicketControls({
           placeholder="Reason for deletion"
         />
 
-        {ghost ? (
+        {derived.ghost ? (
           <label className="ticket-controls-check">
             <input
               type="checkbox"
@@ -999,7 +1067,7 @@ export default function TicketControls({
         </div>
         <div>
           <span className="ticket-controls-footnote-label">Ghost:</span>{" "}
-          {ghost ? "yes" : "no"}
+          {derived.ghost ? "yes" : "no"}
         </div>
       </div>
 
@@ -1010,12 +1078,12 @@ export default function TicketControls({
         }
 
         .ticket-controls-header-card {
-          border: 1px solid rgba(255,255,255,0.08);
+          border: 1px solid rgba(255, 255, 255, 0.08);
           border-radius: 20px;
           padding: 14px;
           background:
-            radial-gradient(circle at top right, rgba(93,255,141,0.06), transparent 36%),
-            rgba(255,255,255,0.025);
+            radial-gradient(circle at top right, rgba(93, 255, 141, 0.06), transparent 36%),
+            rgba(255, 255, 255, 0.025);
         }
 
         .ticket-controls-header-top {
@@ -1056,23 +1124,23 @@ export default function TicketControls({
         }
 
         .ticket-action-accordion {
-          border: 1px solid rgba(255,255,255,0.08);
+          border: 1px solid rgba(255, 255, 255, 0.08);
           border-radius: 20px;
           overflow: hidden;
           background:
-            radial-gradient(circle at top right, rgba(99,213,255,0.04), transparent 34%),
-            rgba(255,255,255,0.02);
+            radial-gradient(circle at top right, rgba(99, 213, 255, 0.04), transparent 34%),
+            rgba(255, 255, 255, 0.02);
         }
 
         .ticket-action-accordion.danger {
-          border-color: rgba(248,113,113,0.18);
+          border-color: rgba(248, 113, 113, 0.18);
           background:
-            radial-gradient(circle at top right, rgba(248,113,113,0.06), transparent 34%),
-            rgba(255,255,255,0.02);
+            radial-gradient(circle at top right, rgba(248, 113, 113, 0.06), transparent 34%),
+            rgba(255, 255, 255, 0.02);
         }
 
         .ticket-action-accordion.open {
-          box-shadow: 0 0 18px rgba(99,213,255,0.06);
+          box-shadow: 0 0 18px rgba(99, 213, 255, 0.06);
         }
 
         .ticket-action-accordion-head {
@@ -1084,8 +1152,8 @@ export default function TicketControls({
           outline: none !important;
           box-shadow: none !important;
           background:
-            radial-gradient(circle at top right, rgba(99,213,255,0.04), transparent 36%),
-            rgba(255,255,255,0.015) !important;
+            radial-gradient(circle at top right, rgba(99, 213, 255, 0.04), transparent 36%),
+            rgba(255, 255, 255, 0.015) !important;
           color: var(--text-strong, #f8fafc) !important;
           text-align: left;
           padding: 14px;
@@ -1100,8 +1168,8 @@ export default function TicketControls({
 
         .ticket-action-accordion-head:hover {
           background:
-            radial-gradient(circle at top right, rgba(99,213,255,0.08), transparent 36%),
-            rgba(255,255,255,0.03) !important;
+            radial-gradient(circle at top right, rgba(99, 213, 255, 0.08), transparent 36%),
+            rgba(255, 255, 255, 0.03) !important;
         }
 
         .ticket-action-accordion-title {
@@ -1115,7 +1183,7 @@ export default function TicketControls({
           margin-top: 6px;
           font-size: 13px;
           line-height: 1.45;
-          color: var(--text-muted, rgba(255,255,255,0.72)) !important;
+          color: var(--text-muted, rgba(255, 255, 255, 0.72)) !important;
         }
 
         .ticket-action-accordion-side {
@@ -1186,10 +1254,10 @@ export default function TicketControls({
         }
 
         .ticket-controls-footnote {
-          border: 1px solid rgba(255,255,255,0.08);
+          border: 1px solid rgba(255, 255, 255, 0.08);
           border-radius: 16px;
           padding: 12px 14px;
-          background: rgba(255,255,255,0.02);
+          background: rgba(255, 255, 255, 0.02);
           color: var(--muted);
           font-size: 12px;
           line-height: 1.55;
@@ -1202,7 +1270,7 @@ export default function TicketControls({
           color: var(--text-strong, #f8fafc);
         }
 
-        @media (max-width: 860px) {
+        @media (max-width: ${MOBILE_LAYOUT_MAX_WIDTH}px) {
           .ticket-primary-actions {
             grid-template-columns: repeat(2, minmax(0, 1fr));
           }
