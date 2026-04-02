@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { env } from "@/lib/env";
+import { insertMemberEvent } from "@/lib/memberEventWrites";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -283,7 +284,6 @@ async function buildFreshMemberSnapshot({ supabase, guildId, userId }) {
     .sort((a, b) => b.position - a.position);
 
   const roleNames = fullRoles.map((role) => role.name);
-
   const highestRole = fullRoles[0] || null;
 
   const grouped = resolveRoleGroups({
@@ -450,6 +450,129 @@ async function refreshMemberAfterAction({ supabase, guildId, userId, action }) {
   }
 }
 
+function buildMemberEventDetails({
+  normalizedAction,
+  reason,
+  timeoutMinutes,
+  roleId,
+  roleName,
+  targetChannelId,
+  actorId,
+  actorName,
+}) {
+  switch (normalizedAction) {
+    case "warn":
+      return {
+        eventType: "warned",
+        title: "Warn Issued",
+        reason,
+        metadata: {},
+      };
+    case "timeout":
+      return {
+        eventType: "timed_out",
+        title: "Timeout Applied",
+        reason,
+        metadata: { timeout_minutes: timeoutMinutes },
+      };
+    case "untimeout":
+      return {
+        eventType: "timeout_removed",
+        title: "Timeout Removed",
+        reason,
+        metadata: {},
+      };
+    case "kick":
+      return {
+        eventType: "kicked",
+        title: "Member Kicked",
+        reason,
+        metadata: {},
+      };
+    case "ban":
+      return {
+        eventType: "banned",
+        title: "Member Banned",
+        reason,
+        metadata: {},
+      };
+    case "add_role":
+      return {
+        eventType: "role_added",
+        title: "Role Added",
+        reason,
+        metadata: {
+          role_id: roleId || null,
+          role_name: roleName || null,
+        },
+      };
+    case "remove_role":
+      return {
+        eventType: "role_removed",
+        title: "Role Removed",
+        reason,
+        metadata: {
+          role_id: roleId || null,
+          role_name: roleName || null,
+        },
+      };
+    case "mute":
+      return {
+        eventType: "voice_muted",
+        title: "Server Mute Applied",
+        reason,
+        metadata: {},
+      };
+    case "unmute":
+      return {
+        eventType: "voice_unmuted",
+        title: "Server Mute Removed",
+        reason,
+        metadata: {},
+      };
+    case "deafen":
+      return {
+        eventType: "voice_deafened",
+        title: "Server Deafen Applied",
+        reason,
+        metadata: {},
+      };
+    case "undeafen":
+      return {
+        eventType: "voice_undeafened",
+        title: "Server Deafen Removed",
+        reason,
+        metadata: {},
+      };
+    case "disconnect_voice":
+      return {
+        eventType: "voice_disconnected",
+        title: "Disconnected From Voice",
+        reason,
+        metadata: {},
+      };
+    case "move_voice":
+      return {
+        eventType: "voice_moved",
+        title: "Moved Voice Channel",
+        reason,
+        metadata: {
+          target_channel_id: targetChannelId || null,
+        },
+      };
+    default:
+      return {
+        eventType: `member_${normalizedAction}`,
+        title: `Member ${normalizedAction}`,
+        reason,
+        metadata: {
+          actor_id: actorId || null,
+          actor_name: actorName || null,
+        },
+      };
+  }
+}
+
 export async function POST(req) {
   try {
     const { session, refreshedTokens } = await requireStaffSessionForRoute();
@@ -470,7 +593,11 @@ export async function POST(req) {
       session?.user?.name ||
       env.defaultStaffName ||
       "Dashboard Staff";
-    const staffId = session?.user?.id || "unknown";
+    const staffId =
+      session?.user?.discord_id ||
+      session?.user?.id ||
+      session?.discordUser?.id ||
+      "unknown";
 
     if (!guildId) {
       return NextResponse.json({ error: "Missing guild id" }, { status: 500 });
@@ -482,6 +609,11 @@ export async function POST(req) {
 
     const normalizedAction =
       action === "remove_timeout" ? "untimeout" : action;
+
+    const roleId = String(body.role_id || "").trim() || null;
+    const roleName = String(body.role_name || "").trim() || null;
+    const targetChannelId =
+      String(body.target_channel_id || body.channel_id || "").trim() || null;
 
     if (normalizedAction === "warn") {
       const { error } = await supabase.from("warns").insert({
@@ -522,8 +654,6 @@ export async function POST(req) {
       normalizedAction === "add_role" ||
       normalizedAction === "remove_role"
     ) {
-      const roleId = String(body.role_id || "").trim();
-
       if (!roleId) {
         return NextResponse.json({ error: "Missing role_id" }, { status: 400 });
       }
@@ -576,10 +706,6 @@ export async function POST(req) {
         reason: `${reason} — by ${staffName}`,
       });
     } else if (normalizedAction === "move_voice") {
-      const targetChannelId = String(
-        body.target_channel_id || body.channel_id || ""
-      ).trim();
-
       if (!targetChannelId) {
         return NextResponse.json(
           { error: "Missing target_channel_id" },
@@ -605,9 +731,18 @@ export async function POST(req) {
         .eq("user_id", userId)
         .order("created_at", { ascending: false });
 
+      const { data: memberEvents } = await supabase
+        .from("member_events")
+        .select("*")
+        .eq("guild_id", guildId)
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(100);
+
       const response = NextResponse.json({
         warns: warns || [],
         tickets: tickets || [],
+        member_events: memberEvents || [],
       });
       applyAuthCookies(response, refreshedTokens);
       return response;
@@ -628,6 +763,41 @@ export async function POST(req) {
       event_type: `member_${normalizedAction}`,
       related_id: userId,
     });
+
+    const eventDetails = buildMemberEventDetails({
+      normalizedAction,
+      reason,
+      timeoutMinutes,
+      roleId,
+      roleName,
+      targetChannelId,
+      actorId: staffId,
+      actorName: staffName,
+    });
+
+    await insertMemberEvent(
+      {
+        guildId,
+        userId,
+        actorId: staffId,
+        actorName: staffName,
+        eventType: eventDetails.eventType,
+        title: eventDetails.title,
+        reason: eventDetails.reason,
+        metadata: {
+          action: normalizedAction,
+          timeout_minutes:
+            normalizedAction === "timeout" ? timeoutMinutes : null,
+          role_id: roleId,
+          role_name: roleName,
+          target_channel_id: targetChannelId,
+          source: "dashboard_mod_action",
+          original_action: action,
+          ...eventDetails.metadata,
+        },
+      },
+      supabase
+    );
 
     let refreshedMember = null;
     let refreshWarning = null;
