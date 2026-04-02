@@ -52,6 +52,11 @@ function shouldHideStaleTicket(ticket) {
   return ageMs > 5 * 60 * 1000;
 }
 
+function isActiveTicketStatus(status) {
+  const value = String(status || "").trim().toLowerCase();
+  return value === "open" || value === "claimed";
+}
+
 function deriveMetricsFromTickets(tickets = [], existingMetrics = []) {
   const byStaff = new Map();
 
@@ -685,9 +690,11 @@ async function getStaffDashboardData() {
     (ticket) => !shouldHideStaleTicket(ticket)
   );
 
-  const openTicketsCount = visibleTickets.filter((ticket) =>
-    ["open", "claimed"].includes(String(ticket?.status || "").toLowerCase())
-  ).length;
+  const activeTickets = visibleTickets.filter((ticket) =>
+    isActiveTicketStatus(ticket?.status)
+  );
+
+  const openTicketsCount = activeTickets.length;
 
   const events = [
     ...(auditLogsRes.data || []).map((row) => ({
@@ -749,7 +756,8 @@ async function getStaffDashboardData() {
   const fraud = fraudRowsRes.data || [];
 
   return {
-    tickets: sortTickets(visibleTickets, "priority_desc"),
+    tickets: sortTickets(visibleTickets, "updated_desc"),
+    activeTickets: sortTickets(activeTickets, "priority_desc"),
     events,
     warns,
     raids,
