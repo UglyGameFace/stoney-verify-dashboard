@@ -723,13 +723,8 @@ tbody tr:hover {
   background: rgba(255, 255, 255, 0.02);
 }
 
-.ticket-mobile-list {
-  display: none;
-}
-
-.ticket-desktop-table {
-  display: block;
-}
+/* intentionally no global .ticket-mobile-list or .ticket-desktop-table styling here anymore
+   so TicketQueueTable can fully own its responsive layout */
 
 /* intentionally no global .ticket-mobile-card styling here anymore
    so TicketQueueTable can fully own its mobile card look */
@@ -1067,7 +1062,6 @@ tbody tr:hover {
 .density-preview,
 .settings-accordion-head,
 .quick-action-copy,
-.ticket-mobile-toggle,
 .member-search-toggle,
 .recent-join-toggle,
 .member-card-button {
@@ -1229,15 +1223,6 @@ tbody tr:hover {
   .recent-join-card,
   .member-search-result {
     padding: 12px;
-  }
-
-  .ticket-mobile-list {
-    display: grid;
-    gap: 12px;
-  }
-
-  .ticket-desktop-table {
-    display: none;
   }
 
   .ticket-controls-bar,
