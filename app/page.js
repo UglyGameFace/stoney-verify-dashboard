@@ -11,6 +11,8 @@ import {
 } from "@/lib/auth-server";
 import { env } from "@/lib/env";
 
+const DESKTOP_LAYOUT_MIN_WIDTH = 1024;
+
 function normalizeStaffKey(value) {
   return String(value || "").trim();
 }
@@ -834,51 +836,46 @@ async function getUserDashboardData(session) {
     };
   }
 
-  const [
-    memberRes,
-    ticketsRes,
-    categoriesRes,
-    flagsRes,
-    vcRes,
-  ] = await Promise.all([
-    supabase
-      .from("guild_members")
-      .select("*")
-      .eq("guild_id", guildId)
-      .eq("user_id", discordId)
-      .maybeSingle(),
+  const [memberRes, ticketsRes, categoriesRes, flagsRes, vcRes] =
+    await Promise.all([
+      supabase
+        .from("guild_members")
+        .select("*")
+        .eq("guild_id", guildId)
+        .eq("user_id", discordId)
+        .maybeSingle(),
 
-    supabase
-      .from("tickets")
-      .select("*")
-      .eq("guild_id", guildId)
-      .eq("user_id", discordId)
-      .order("updated_at", { ascending: false })
-      .limit(25),
+      supabase
+        .from("tickets")
+        .select("*")
+        .eq("guild_id", guildId)
+        .eq("user_id", discordId)
+        .order("updated_at", { ascending: false })
+        .limit(25),
 
-    supabase
-      .from("ticket_categories")
-      .select("*")
-      .eq("guild_id", guildId)
-      .order("sort_order", { ascending: true, nullsFirst: false })
-      .order("name", { ascending: true }),
+      supabase
+        .from("ticket_categories")
+        .select("*")
+        .eq("guild_id", guildId)
+        .order("sort_order", { ascending: true, nullsFirst: false })
+        .order("name", { ascending: true }),
 
-    supabase
-      .from("verification_flags")
-      .select("*")
-      .eq("guild_id", guildId)
-      .eq("user_id", discordId)
-      .order("created_at", { ascending: false })
-      .limit(5),
+      supabase
+        .from("verification_flags")
+        .select("*")
+        .eq("guild_id", guildId)
+        .eq("user_id", discordId)
+        .order("created_at", { ascending: false })
+        .limit(5),
 
-    supabase
-      .from("vc_verify_sessions")
-      .select("*")
-      .eq("owner_id", Number(discordId))
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
+      supabase
+        .from("vc_verify_sessions")
+        .select("*")
+        .eq("owner_id", Number(discordId))
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
 
   const member = sanitizeUserMember(memberRes.data || null, session);
 
@@ -936,6 +933,56 @@ async function getUserDashboardData(session) {
   };
 }
 
+function StaffShell({ children }) {
+  return (
+    <>
+      <div className="shell staff-shell">
+        <Sidebar />
+        <main className="content staff-content">{children}</main>
+      </div>
+
+      <style jsx global>{`
+        @media (max-width: ${DESKTOP_LAYOUT_MIN_WIDTH - 1}px) {
+          .staff-shell.shell {
+            grid-template-columns: 1fr !important;
+          }
+
+          .staff-shell .sidebar {
+            display: none !important;
+          }
+
+          .staff-shell .staff-content.content {
+            padding: 14px !important;
+            padding-bottom: 104px !important;
+          }
+        }
+
+        @media (min-width: ${DESKTOP_LAYOUT_MIN_WIDTH}px) {
+          .staff-shell.shell {
+            grid-template-columns: 292px 1fr !important;
+          }
+
+          .staff-shell .sidebar {
+            display: block !important;
+          }
+
+          .staff-shell .staff-content.content {
+            padding: 18px !important;
+            padding-bottom: 108px !important;
+          }
+        }
+
+        @media (max-width: 420px) {
+          .staff-shell .staff-content.content {
+            padding: 12px !important;
+            padding-bottom: 98px !important;
+          }
+        }
+      `}</style>
+    </>
+  );
+}
+
 export default async function HomePage() {
   const session = await getSession();
 
@@ -981,15 +1028,12 @@ export default async function HomePage() {
     const data = await getStaffDashboardData();
 
     return (
-      <div className="shell">
-        <Sidebar />
-        <main className="content">
-          <DashboardClient
-            initialData={data}
-            staffName={session?.user?.username || env.defaultStaffName}
-          />
-        </main>
-      </div>
+      <StaffShell>
+        <DashboardClient
+          initialData={data}
+          staffName={session?.user?.username || env.defaultStaffName}
+        />
+      </StaffShell>
     );
   }
 
