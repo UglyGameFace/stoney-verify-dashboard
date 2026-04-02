@@ -144,7 +144,11 @@ function deriveFallbackCategoryFromTicket(ticket) {
       return "Support";
     }
 
-    if (value === "report" || value === "report_issue" || value === "report issue") {
+    if (
+      value === "report" ||
+      value === "report_issue" ||
+      value === "report issue"
+    ) {
       return "Report";
     }
 
@@ -189,25 +193,6 @@ function getDisplayedCategoryName(ticket) {
   }
 
   return deriveFallbackCategoryFromTicket(ticket);
-}
-
-function getDisplayedCategorySlug(ticket) {
-  const values = [
-    ticket?.matched_category_slug,
-    ticket?.matched_category_name,
-    ticket?.raw_category,
-    ticket?.category,
-  ]
-    .map((v) => String(v || "").trim())
-    .filter(Boolean);
-
-  for (const value of values) {
-    if (!isPlaceholderCategory(value)) {
-      return titleize(value);
-    }
-  }
-
-  return "";
 }
 
 function getDisplayedIntakeType(ticket) {
@@ -337,7 +322,9 @@ function getQueueHeading(tickets, explicitMode) {
   const label =
     statuses.length === 0
       ? "No ticket records"
-      : statuses.map((status) => status.charAt(0).toUpperCase() + status.slice(1)).join(", ");
+      : statuses
+          .map((status) => status.charAt(0).toUpperCase() + status.slice(1))
+          .join(", ");
 
   return {
     title: "Filtered Ticket View",
@@ -374,11 +361,21 @@ function MiniField({ label, value, full = false }) {
 
 function CategoryDisplay({ ticket, compact = false }) {
   const categoryName = getDisplayedCategoryName(ticket);
-  const categorySlug = getDisplayedCategorySlug(ticket);
   const intakeType = getDisplayedIntakeType(ticket);
   const reason = getCategoryReason(ticket);
   const score = getCategoryScore(ticket);
   const matched = hasMatchedCategory(ticket);
+
+  const normalizedCategory = normalizeText(categoryName);
+  const normalizedIntake = normalizeText(intakeType);
+  const normalizedCategoryWithoutIssue = normalizeText(
+    categoryName.replace(/\s+issue$/i, "")
+  );
+
+  const showIntakeChip =
+    Boolean(intakeType) &&
+    normalizedIntake !== normalizedCategory &&
+    normalizedIntake !== normalizedCategoryWithoutIssue;
 
   return (
     <div style={{ display: "grid", gap: 6 }}>
@@ -393,8 +390,11 @@ function CategoryDisplay({ ticket, compact = false }) {
         <span className={matched ? "badge claimed" : "badge low"}>
           {categoryName}
         </span>
-        {intakeType ? (
-          <span className={badgeClass(intakeType.toLowerCase())}>{intakeType}</span>
+
+        {showIntakeChip ? (
+          <span className={badgeClass(intakeType.toLowerCase())}>
+            {intakeType}
+          </span>
         ) : null}
       </div>
 
@@ -402,12 +402,6 @@ function CategoryDisplay({ ticket, compact = false }) {
         <div className="muted" style={{ fontSize: 12, lineHeight: 1.35 }}>
           {compact ? reason : `Match: ${reason}`}
           {score > 0 ? ` • score ${score}` : ""}
-        </div>
-      ) : null}
-
-      {categorySlug && categorySlug !== categoryName ? (
-        <div className="muted" style={{ fontSize: 12, lineHeight: 1.35 }}>
-          {categorySlug}
         </div>
       ) : null}
     </div>
@@ -993,6 +987,8 @@ export default function TicketQueueTable({
         }
 
         .ticket-mobile-card.premium {
+          position: relative;
+          isolation: isolate;
           overflow: hidden;
           border-radius: 22px;
           padding: 14px;
@@ -1008,6 +1004,25 @@ export default function TicketQueueTable({
             0 0 0 1px rgba(255,255,255,0.02) inset;
         }
 
+        .ticket-mobile-card.premium::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          border-radius: inherit;
+          background: linear-gradient(
+            180deg,
+            rgba(255,255,255,0.04),
+            rgba(255,255,255,0)
+          );
+          z-index: 0;
+        }
+
+        .ticket-mobile-card.premium > * {
+          position: relative;
+          z-index: 1;
+        }
+
         .ticket-mobile-card.expanded {
           background:
             radial-gradient(circle at top right, rgba(99,213,255,0.1), transparent 38%),
@@ -1019,16 +1034,19 @@ export default function TicketQueueTable({
         }
 
         .ticket-mobile-toggle {
-          appearance: none;
-          -webkit-appearance: none;
+          appearance: none !important;
+          -webkit-appearance: none !important;
+          -moz-appearance: none !important;
           display: block;
           width: 100%;
-          background: transparent;
-          border: 0;
+          background: transparent !important;
+          border: 0 !important;
+          outline: none !important;
+          box-shadow: none !important;
           padding: 0;
           margin: 0;
           text-align: left;
-          color: inherit;
+          color: inherit !important;
           cursor: pointer;
         }
 
