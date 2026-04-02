@@ -175,6 +175,10 @@ function ProfileCard({
 }) {
   const [renameValue, setRenameValue] = useState(profile?.name || "");
 
+  useEffect(() => {
+    setRenameValue(profile?.name || "");
+  }, [profile?.name]);
+
   return (
     <div className={`profile-slot-card ${isActive ? "active" : ""}`}>
       <div className="settings-chip-row" style={{ marginBottom: 8 }}>
@@ -307,16 +311,46 @@ export default function DashboardSettingsPanel({
   useEffect(() => {
     if (!open) return undefined;
 
-    const prevOverflow = document.body.style.overflow;
-    const prevTouchAction = document.body.style.touchAction;
-    document.body.style.overflow = "hidden";
-    document.body.style.touchAction = "none";
+    const html = document.documentElement;
+    const body = document.body;
+
+    const prevHtmlOverflow = html.style.overflow;
+    const prevBodyOverflow = body.style.overflow;
+    const prevBodyOverscroll = body.style.overscrollBehavior;
+    const prevBodyPosition = body.style.position;
+    const prevBodyWidth = body.style.width;
+    const scrollY = window.scrollY;
+
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    body.style.overscrollBehavior = "none";
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
 
     return () => {
-      document.body.style.overflow = prevOverflow;
-      document.body.style.touchAction = prevTouchAction;
+      html.style.overflow = prevHtmlOverflow;
+      body.style.overflow = prevBodyOverflow;
+      body.style.overscrollBehavior = prevBodyOverscroll;
+      body.style.position = prevBodyPosition;
+      body.style.top = "";
+      body.style.width = prevBodyWidth;
+      window.scrollTo(0, scrollY);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        onClose?.();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
 
   if (!open) return null;
 
@@ -359,12 +393,12 @@ export default function DashboardSettingsPanel({
     <div
       role="dialog"
       aria-modal="true"
-      onClick={onClose}
       className="settings-overlay"
+      onClick={onClose}
     >
       <div
-        onClick={(e) => e.stopPropagation()}
         className="settings-sheet"
+        onClick={(e) => e.stopPropagation()}
       >
         <div className="settings-sheet-handle" />
 
@@ -646,14 +680,21 @@ export default function DashboardSettingsPanel({
             display: flex;
             align-items: flex-end;
             justify-content: center;
-            padding: 12px 10px calc(12px + env(safe-area-inset-bottom, 0px));
+            padding:
+              12px
+              10px
+              calc(20px + env(safe-area-inset-bottom, 0px) + 84px);
+            overscroll-behavior: contain;
           }
 
           .settings-sheet {
             width: 100%;
             max-width: 1080px;
-            max-height: 94vh;
+            max-height: min(92vh, 920px);
             overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+            touch-action: pan-y;
             border-radius: 28px;
             border: 1px solid rgba(255, 255, 255, 0.1);
             background:
@@ -1046,7 +1087,7 @@ export default function DashboardSettingsPanel({
             }
 
             .settings-sheet {
-              max-height: 95vh;
+              max-height: min(90vh, 900px);
               border-radius: 24px;
               padding: 12px;
             }
