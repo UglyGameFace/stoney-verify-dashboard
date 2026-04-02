@@ -41,7 +41,9 @@ function ToneSwatch({ label, value, onChange, helper }) {
         onChange={(e) => onChange(e.target.value)}
         className="settings-color-input"
       />
-      {helper ? <div className="muted settings-helper-copy">{helper}</div> : null}
+      {helper ? (
+        <div className="muted settings-helper-copy">{helper}</div>
+      ) : null}
     </div>
   );
 }
@@ -108,7 +110,9 @@ function MoveButtons({ area, items, onMove }) {
               <div className="settings-move-label">
                 {SECTION_LABELS[item] || item}
               </div>
-              <div className="muted settings-helper-copy">Position {index + 1}</div>
+              <div className="muted settings-helper-copy">
+                Position {index + 1}
+              </div>
             </div>
 
             <div className="settings-move-actions">
@@ -304,17 +308,25 @@ export default function DashboardSettingsPanel({
     const prevBodyOverflow = body.style.overflow;
     const prevHtmlOverscroll = html.style.overscrollBehavior;
     const prevBodyOverscroll = body.style.overscrollBehavior;
+    const prevSettingsFlag = body.dataset.settingsOpen || "";
 
     html.style.overflow = "hidden";
     body.style.overflow = "hidden";
     html.style.overscrollBehavior = "none";
     body.style.overscrollBehavior = "none";
+    body.dataset.settingsOpen = "true";
 
     return () => {
       html.style.overflow = prevHtmlOverflow;
       body.style.overflow = prevBodyOverflow;
       html.style.overscrollBehavior = prevHtmlOverscroll;
       body.style.overscrollBehavior = prevBodyOverscroll;
+
+      if (prevSettingsFlag) {
+        body.dataset.settingsOpen = prevSettingsFlag;
+      } else {
+        delete body.dataset.settingsOpen;
+      }
     };
   }, [open]);
 
@@ -372,6 +384,7 @@ export default function DashboardSettingsPanel({
     <div
       role="dialog"
       aria-modal="true"
+      aria-label="Dashboard personalization"
       className="settings-overlay"
       onClick={onClose}
     >
@@ -473,21 +486,18 @@ export default function DashboardSettingsPanel({
                 onChange={(value) => setThemeValue("accent", value)}
                 helper="Main green glow and primary dashboard energy."
               />
-
               <ToneSwatch
                 label="Accent 2"
                 value={theme.accent2 || "#3b82f6"}
                 onChange={(value) => setThemeValue("accent2", value)}
                 helper="Secondary neon balance for haze and highlights."
               />
-
               <ToneSwatch
                 label="Primary Text"
                 value={theme.textStrong || "#f8fafc"}
                 onChange={(value) => setThemeValue("textStrong", value)}
                 helper="High-contrast headline and card text."
               />
-
               <ToneSwatch
                 label="Muted Text"
                 value={theme.textMuted || "#b8c0cc"}
@@ -530,14 +540,12 @@ export default function DashboardSettingsPanel({
                 helper="Tighter spacing for more control on one screen."
                 onClick={() => setDensity("compact")}
               />
-
               <DensityPreview
                 active={preferences?.density === "comfortable"}
                 label="Comfortable"
                 helper="Balanced spacing for daily moderation use."
                 onClick={() => setDensity("comfortable")}
               />
-
               <DensityPreview
                 active={preferences?.density === "spacious"}
                 label="Spacious"
@@ -650,9 +658,7 @@ export default function DashboardSettingsPanel({
             position: fixed;
             inset: 0;
             z-index: 130;
-            background: rgba(0, 0, 0, 0.62);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
+            background: rgba(8, 12, 18, 0.82);
             display: flex;
             align-items: flex-end;
             justify-content: center;
@@ -670,23 +676,24 @@ export default function DashboardSettingsPanel({
             -webkit-overflow-scrolling: touch;
             overscroll-behavior: contain;
             touch-action: pan-y;
-            border-radius: 28px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            background:
-              radial-gradient(circle at top right, rgba(93, 255, 141, 0.08), transparent 28%),
-              radial-gradient(circle at bottom left, rgba(178, 109, 255, 0.08), transparent 26%),
-              linear-gradient(180deg, rgba(19, 32, 49, 0.98), rgba(9, 17, 26, 0.98));
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.42);
+            border-radius: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: linear-gradient(
+              180deg,
+              rgba(18, 27, 39, 0.98),
+              rgba(11, 18, 27, 0.98)
+            );
+            box-shadow: 0 14px 40px rgba(0, 0, 0, 0.34);
             color: var(--text-strong, #f8fafc);
             padding: 14px;
-            will-change: transform;
+            contain: layout paint;
           }
 
           .settings-sheet-handle {
             width: 52px;
             height: 5px;
             border-radius: 999px;
-            background: rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.16);
             margin: 0 auto 14px;
           }
 
@@ -748,11 +755,8 @@ export default function DashboardSettingsPanel({
 
           .settings-section-card {
             border: 1px solid rgba(255, 255, 255, 0.08);
-            background:
-              radial-gradient(circle at top right, rgba(93, 255, 141, 0.06), transparent 36%),
-              linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
-              rgba(255, 255, 255, 0.02);
-            border-radius: 22px;
+            background: rgba(255, 255, 255, 0.025);
+            border-radius: 20px;
             padding: 16px;
           }
 
@@ -773,16 +777,14 @@ export default function DashboardSettingsPanel({
 
           .profile-slot-card {
             border: 1px solid rgba(255, 255, 255, 0.08);
-            background:
-              radial-gradient(circle at top right, rgba(178, 109, 255, 0.06), transparent 36%),
-              rgba(255, 255, 255, 0.03);
+            background: rgba(255, 255, 255, 0.03);
             border-radius: 18px;
             padding: 14px;
           }
 
           .profile-slot-card.active {
             border-color: rgba(93, 255, 141, 0.22);
-            box-shadow: 0 0 22px rgba(93, 255, 141, 0.08);
+            box-shadow: 0 0 0 1px rgba(93, 255, 141, 0.08);
           }
 
           .profile-slot-title {
@@ -836,10 +838,7 @@ export default function DashboardSettingsPanel({
 
           .settings-preview-card {
             border: 1px solid rgba(255, 255, 255, 0.08);
-            background:
-              radial-gradient(circle at top right, rgba(93, 255, 141, 0.08), transparent 34%),
-              radial-gradient(circle at bottom left, rgba(178, 109, 255, 0.08), transparent 30%),
-              rgba(255, 255, 255, 0.03);
+            background: rgba(255, 255, 255, 0.03);
             border-radius: 20px;
             padding: 16px;
           }
@@ -874,9 +873,7 @@ export default function DashboardSettingsPanel({
             appearance: none;
             -webkit-appearance: none;
             border: 1px solid rgba(255, 255, 255, 0.08);
-            background:
-              radial-gradient(circle at top right, rgba(99, 213, 255, 0.06), transparent 34%),
-              rgba(255, 255, 255, 0.03);
+            background: rgba(255, 255, 255, 0.03);
             border-radius: 18px;
             padding: 14px;
             text-align: left;
@@ -891,7 +888,7 @@ export default function DashboardSettingsPanel({
           .density-preview:hover,
           .density-preview.active {
             border-color: rgba(93, 255, 141, 0.2);
-            box-shadow: 0 0 18px rgba(93, 255, 141, 0.08);
+            box-shadow: 0 0 0 1px rgba(93, 255, 141, 0.08);
             transform: translateY(-1px);
           }
 
@@ -932,9 +929,7 @@ export default function DashboardSettingsPanel({
             width: 100%;
             min-height: 64px;
             border: 1px solid rgba(255, 255, 255, 0.08);
-            background:
-              radial-gradient(circle at top right, rgba(93, 255, 141, 0.05), transparent 34%),
-              rgba(255, 255, 255, 0.025);
+            background: rgba(255, 255, 255, 0.025);
             color: var(--text-strong, #f8fafc);
             border-radius: 18px;
             padding: 12px 14px;
@@ -953,7 +948,7 @@ export default function DashboardSettingsPanel({
           .settings-pill.active,
           .settings-pill:hover {
             border-color: rgba(93, 255, 141, 0.18);
-            box-shadow: 0 0 16px rgba(93, 255, 141, 0.08);
+            box-shadow: 0 0 0 1px rgba(93, 255, 141, 0.08);
             transform: translateY(-1px);
           }
 
@@ -1015,9 +1010,7 @@ export default function DashboardSettingsPanel({
 
           .settings-accordion {
             border: 1px solid rgba(255, 255, 255, 0.08);
-            background:
-              radial-gradient(circle at top right, rgba(99, 213, 255, 0.04), transparent 34%),
-              rgba(255, 255, 255, 0.02);
+            background: rgba(255, 255, 255, 0.02);
             border-radius: 20px;
             overflow: hidden;
           }
@@ -1064,7 +1057,7 @@ export default function DashboardSettingsPanel({
 
             .settings-sheet {
               max-height: min(90vh, 900px);
-              border-radius: 24px;
+              border-radius: 22px;
               padding: 12px;
             }
 
