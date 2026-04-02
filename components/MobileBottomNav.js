@@ -1,5 +1,7 @@
 "use client";
 
+const DESKTOP_LAYOUT_MIN_WIDTH = 1024;
+
 const TAB_META = {
   home: {
     label: "Home",
@@ -50,42 +52,91 @@ const TAB_META = {
   },
 };
 
+function normalizeText(value) {
+  return String(value || "").trim();
+}
+
 function getTabMeta(tab) {
-  const key = String(tab || "").trim().toLowerCase();
+  const key = normalizeText(tab).toLowerCase();
   return TAB_META[key] || { label: key || "Tab", icon: null };
+}
+
+function getActionLabel(action) {
+  return normalizeText(action?.label) || "Action";
 }
 
 export default function MobileBottomNav({
   activeTab,
   onChange,
   tabs = [],
+  title = "",
+  extraActions = [],
 }) {
-  const visibleTabs = Array.isArray(tabs) ? tabs.filter(Boolean).slice(0, 4) : [];
+  const visibleTabs = Array.isArray(tabs)
+    ? tabs.filter(Boolean).slice(0, 5)
+    : [];
 
-  if (!visibleTabs.length) return null;
+  const visibleActions = Array.isArray(extraActions)
+    ? extraActions.filter((action) => typeof action?.onClick === "function")
+    : [];
+
+  if (!visibleTabs.length && !visibleActions.length) return null;
 
   return (
     <>
       <nav className="sv-mobile-nav-wrap" aria-label="Mobile navigation">
-        <div className="sv-mobile-nav-shell">
-          {visibleTabs.map((tab) => {
-            const meta = getTabMeta(tab);
-            const active = activeTab === tab;
+        {visibleActions.length ? (
+          <div className="sv-mobile-command-shell">
+            {title ? (
+              <div className="sv-mobile-command-title">{title}</div>
+            ) : null}
 
-            return (
-              <button
-                key={tab}
-                type="button"
-                className={`sv-mobile-nav-item ${active ? "active" : ""}`}
-                onClick={() => onChange?.(tab)}
-                aria-current={active ? "page" : undefined}
-              >
-                <span className="sv-mobile-nav-icon">{meta.icon}</span>
-                <span className="sv-mobile-nav-text">{meta.label}</span>
-              </button>
-            );
-          })}
-        </div>
+            <div className="sv-mobile-command-grid">
+              {visibleActions.map((action) => (
+                <button
+                  key={action.key || getActionLabel(action)}
+                  type="button"
+                  className="sv-mobile-command-item"
+                  onClick={action.onClick}
+                  disabled={Boolean(action.disabled)}
+                  title={getActionLabel(action)}
+                >
+                  {action.icon ? (
+                    <span className="sv-mobile-command-emoji" aria-hidden="true">
+                      {action.icon}
+                    </span>
+                  ) : null}
+                  <span className="sv-mobile-command-label">
+                    {getActionLabel(action)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {visibleTabs.length ? (
+          <div className="sv-mobile-nav-shell">
+            {visibleTabs.map((tab) => {
+              const meta = getTabMeta(tab);
+              const active = activeTab === tab;
+
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  className={`sv-mobile-nav-item ${active ? "active" : ""}`}
+                  onClick={() => onChange?.(tab)}
+                  aria-current={active ? "page" : undefined}
+                  title={meta.label}
+                >
+                  <span className="sv-mobile-nav-icon">{meta.icon}</span>
+                  <span className="sv-mobile-nav-text">{meta.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
       </nav>
 
       <style jsx>{`
@@ -96,17 +147,16 @@ export default function MobileBottomNav({
           bottom: calc(10px + env(safe-area-inset-bottom, 0px));
           z-index: 9999;
           width: min(calc(100vw - 18px), 430px);
+          display: grid;
+          gap: 8px;
           pointer-events: none;
         }
 
+        .sv-mobile-command-shell,
         .sv-mobile-nav-shell {
           pointer-events: auto;
-          display: grid;
-          grid-template-columns: repeat(${visibleTabs.length}, minmax(0, 1fr));
-          align-items: stretch;
-          gap: 8px;
+          box-sizing: border-box;
           width: 100%;
-          padding: 7px;
           border-radius: 18px;
           background: rgba(7, 12, 22, 0.9);
           border: 1px solid rgba(255, 255, 255, 0.08);
@@ -115,7 +165,82 @@ export default function MobileBottomNav({
           box-shadow:
             0 10px 28px rgba(0, 0, 0, 0.34),
             inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        }
+
+        .sv-mobile-command-shell {
+          padding: 8px;
+        }
+
+        .sv-mobile-command-title {
+          padding: 2px 4px 8px;
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: 0.02em;
+          color: rgba(255, 255, 255, 0.7);
+        }
+
+        .sv-mobile-command-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+        }
+
+        .sv-mobile-command-item {
+          all: unset;
           box-sizing: border-box;
+          min-width: 0;
+          min-height: 48px;
+          border-radius: 14px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 10px 12px;
+          cursor: pointer;
+          user-select: none;
+          -webkit-tap-highlight-color: transparent;
+          color: rgba(255, 255, 255, 0.86);
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          transition:
+            transform 140ms ease,
+            background 160ms ease,
+            border-color 160ms ease,
+            color 160ms ease,
+            box-shadow 160ms ease,
+            opacity 160ms ease;
+          text-align: center;
+        }
+
+        .sv-mobile-command-item:active {
+          transform: scale(0.985);
+        }
+
+        .sv-mobile-command-item:disabled {
+          opacity: 0.55;
+          cursor: default;
+        }
+
+        .sv-mobile-command-emoji {
+          font-size: 14px;
+          line-height: 1;
+          flex: 0 0 auto;
+        }
+
+        .sv-mobile-command-label {
+          min-width: 0;
+          font-size: 11px;
+          font-weight: 800;
+          line-height: 1.15;
+          overflow-wrap: anywhere;
+        }
+
+        .sv-mobile-nav-shell {
+          display: grid;
+          grid-template-columns: repeat(${visibleTabs.length || 1}, minmax(0, 1fr));
+          align-items: stretch;
+          gap: 8px;
+          padding: 7px;
         }
 
         .sv-mobile-nav-item {
@@ -184,20 +309,33 @@ export default function MobileBottomNav({
 
         .sv-mobile-nav-text {
           display: block;
+          min-width: 0;
           font-size: 11px;
           font-weight: 800;
           line-height: 1;
           letter-spacing: 0.01em;
           white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 100%;
         }
 
         @media (max-width: 380px) {
           .sv-mobile-nav-wrap {
             width: min(calc(100vw - 14px), 420px);
+            gap: 6px;
+          }
+
+          .sv-mobile-command-shell {
+            padding: 6px;
+          }
+
+          .sv-mobile-command-grid,
+          .sv-mobile-nav-shell {
+            gap: 6px;
           }
 
           .sv-mobile-nav-shell {
-            gap: 6px;
             padding: 6px;
           }
 
@@ -205,12 +343,13 @@ export default function MobileBottomNav({
             height: 62px;
           }
 
-          .sv-mobile-nav-text {
+          .sv-mobile-nav-text,
+          .sv-mobile-command-label {
             font-size: 10px;
           }
         }
 
-        @media (min-width: 1024px) {
+        @media (min-width: ${DESKTOP_LAYOUT_MIN_WIDTH}px) {
           .sv-mobile-nav-wrap {
             display: none;
           }
