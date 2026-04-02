@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { timeAgo } from "@/lib/format";
 import TicketControls from "./dashboard/TicketControls";
 import CreateTicketButton from "./dashboard/CreateTicketButton";
@@ -131,12 +131,74 @@ function getSummaryStats(tickets) {
     total: tickets.length,
     open: countByStatus(tickets, "open"),
     claimed: countByStatus(tickets, "claimed"),
+    closed: countByStatus(tickets, "closed"),
+    deleted: countByStatus(tickets, "deleted"),
     urgent: countByPriority(tickets, "urgent"),
     high: countByPriority(tickets, "high"),
     missingChannel: tickets.filter((ticket) => hasMissingChannel(ticket)).length,
     ghosts: tickets.filter((ticket) => isGhost(ticket)).length,
     matched: countMatchedCategories(tickets),
     verificationLike: countVerificationLike(tickets),
+  };
+}
+
+function getQueueHeading(tickets, explicitMode) {
+  const rows = Array.isArray(tickets) ? tickets : [];
+  const statuses = [...new Set(rows.map((ticket) => getStatus(ticket)).filter(Boolean))];
+  const activeOnly =
+    statuses.length > 0 &&
+    statuses.every((status) => status === "open" || status === "claimed");
+
+  if (explicitMode === "active" || (!explicitMode && activeOnly)) {
+    return {
+      title: "Active Ticket Queue",
+      subtitle: "Live active tickets only — open and claimed work ready for staff action",
+    };
+  }
+
+  if (explicitMode === "open_only") {
+    return {
+      title: "Open Ticket Queue",
+      subtitle: "Showing only open tickets that still need staff action",
+    };
+  }
+
+  if (explicitMode === "claimed") {
+    return {
+      title: "Claimed Ticket Queue",
+      subtitle: "Showing claimed tickets currently being handled by staff",
+    };
+  }
+
+  if (explicitMode === "closed") {
+    return {
+      title: "Closed Ticket History",
+      subtitle: "Closed tickets remain visible here so staff can review and reopen when needed",
+    };
+  }
+
+  if (explicitMode === "deleted") {
+    return {
+      title: "Deleted Ticket History",
+      subtitle: "Deleted ticket records remain visible here for audit and historical review",
+    };
+  }
+
+  if (explicitMode === "all") {
+    return {
+      title: "Ticket History & Queue",
+      subtitle: "Showing active and historical tickets together for review, auditing, and reopen workflows",
+    };
+  }
+
+  const label =
+    statuses.length === 0
+      ? "No ticket records"
+      : statuses.map((status) => status.charAt(0).toUpperCase() + status.slice(1)).join(", ");
+
+  return {
+    title: "Filtered Ticket View",
+    subtitle: `Showing the current filtered ticket set: ${label}`,
   };
 }
 
@@ -312,9 +374,6 @@ function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
         border: missingChannel
           ? "1px solid rgba(248,113,113,0.28)"
           : undefined,
-        boxShadow: missingChannel
-          ? "0 0 0 1px rgba(248,113,113,0.08)"
-          : undefined,
       }}
     >
       <button
@@ -333,7 +392,7 @@ function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
           }}
         >
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ marginBottom: 6 }}>
+            <div style={{ marginBottom: 8 }}>
               <TicketHeaderBadges ticket={ticket} />
             </div>
 
@@ -349,15 +408,17 @@ function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
           </div>
         </div>
 
-        <div style={{ marginBottom: 12 }}>
+        <div className="queue-category-wrap">
           <CategoryDisplay ticket={ticket} compact />
         </div>
 
-        <div className="row" style={{ justifyContent: "space-between", gap: 12 }}>
+        <div className="queue-card-footer-row">
           <div className="muted" style={{ fontSize: 12 }}>
-            {expanded ? "Hide actions" : "Open actions"}
+            {expanded ? "Hide tools" : "Open tools"}
           </div>
-          <div className="badge open">{expanded ? "Expanded" : "Quick View"}</div>
+          <div className={`badge ${expanded ? "claimed" : "open"}`}>
+            {expanded ? "Expanded" : "Quick View"}
+          </div>
         </div>
       </button>
 
@@ -436,8 +497,13 @@ export default function TicketQueueTable({
   onRefresh = async () => {},
   createTicketUserId = null,
   createTicketTargetName = "",
+  queueMode = "",
 }) {
   const stats = useMemo(() => getSummaryStats(tickets), [tickets]);
+  const heading = useMemo(
+    () => getQueueHeading(tickets, queueMode),
+    [tickets, queueMode]
+  );
   const [expandedDesktopId, setExpandedDesktopId] = useState(null);
 
   function toggleDesktopTicket(ticketId) {
@@ -445,7 +511,7 @@ export default function TicketQueueTable({
   }
 
   return (
-    <div className="card" id="tickets">
+    <div className="card queue-shell" id="tickets">
       <div
         className="row"
         style={{
@@ -457,9 +523,9 @@ export default function TicketQueueTable({
         }}
       >
         <div style={{ minWidth: 0 }}>
-          <h2 style={{ margin: 0 }}>Active Ticket Queue</h2>
+          <h2 style={{ margin: 0 }}>{heading.title}</h2>
           <div className="muted" style={{ marginTop: 6 }}>
-            Live active tickets only — open and claimed work ready for staff action
+            {heading.subtitle}
           </div>
         </div>
 
@@ -473,7 +539,7 @@ export default function TicketQueueTable({
           }}
         >
           <div className="muted" style={{ fontSize: 14 }}>
-            {tickets.length} active ticket{tickets.length === 1 ? "" : "s"}
+            {tickets.length} ticket{tickets.length === 1 ? "" : "s"}
           </div>
 
           {createTicketUserId ? (
@@ -495,6 +561,8 @@ export default function TicketQueueTable({
         <SummaryChip label="Total" value={stats.total} />
         <SummaryChip label="Open" value={stats.open} tone="open" />
         <SummaryChip label="Claimed" value={stats.claimed} tone="claimed" />
+        <SummaryChip label="Closed" value={stats.closed} />
+        <SummaryChip label="Deleted" value={stats.deleted} />
         <SummaryChip label="Urgent" value={stats.urgent} tone="danger" />
         <SummaryChip label="High" value={stats.high} tone="warn" />
         <SummaryChip
@@ -521,7 +589,7 @@ export default function TicketQueueTable({
 
       {!tickets.length ? (
         <div className="empty-state">
-          No active tickets match the current filters.
+          No tickets match the current filters.
         </div>
       ) : null}
 
@@ -563,9 +631,8 @@ export default function TicketQueueTable({
                     const isExpanded = expandedDesktopId === ticket.id;
 
                     return (
-                      <>
+                      <React.Fragment key={ticket.id}>
                         <tr
-                          key={ticket.id}
                           style={
                             missingChannel
                               ? { background: "rgba(248,113,113,0.04)" }
@@ -678,7 +745,7 @@ export default function TicketQueueTable({
                         </tr>
 
                         {isExpanded ? (
-                          <tr key={`${ticket.id}-expanded`}>
+                          <tr>
                             <td
                               colSpan={8}
                               style={{
@@ -697,7 +764,7 @@ export default function TicketQueueTable({
                             </td>
                           </tr>
                         ) : null}
-                      </>
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
@@ -708,6 +775,14 @@ export default function TicketQueueTable({
       ) : null}
 
       <style jsx>{`
+        .queue-shell {
+          background:
+            radial-gradient(circle at top right, rgba(93, 255, 141, 0.08), transparent 26%),
+            radial-gradient(circle at bottom left, rgba(99, 213, 255, 0.06), transparent 22%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
+            linear-gradient(180deg, rgba(14, 25, 35, 0.96), rgba(7, 13, 21, 0.96));
+        }
+
         .queue-mobile-stack {
           display: grid;
           gap: 12px;
@@ -721,32 +796,43 @@ export default function TicketQueueTable({
 
         .queue-summary-chip {
           border: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(255, 255, 255, 0.025);
+          background:
+            radial-gradient(circle at top right, rgba(255,255,255,0.04), transparent 45%),
+            rgba(255, 255, 255, 0.025);
           border-radius: 16px;
           padding: 12px;
           display: grid;
           gap: 6px;
           min-width: 0;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
         }
 
         .queue-summary-chip.open {
           border-color: rgba(96, 165, 250, 0.2);
-          background: rgba(96, 165, 250, 0.08);
+          background:
+            radial-gradient(circle at top right, rgba(96,165,250,0.12), transparent 48%),
+            rgba(96, 165, 250, 0.08);
         }
 
         .queue-summary-chip.claimed {
           border-color: rgba(74, 222, 128, 0.2);
-          background: rgba(74, 222, 128, 0.08);
+          background:
+            radial-gradient(circle at top right, rgba(74,222,128,0.12), transparent 48%),
+            rgba(74, 222, 128, 0.08);
         }
 
         .queue-summary-chip.warn {
           border-color: rgba(251, 191, 36, 0.2);
-          background: rgba(251, 191, 36, 0.08);
+          background:
+            radial-gradient(circle at top right, rgba(251,191,36,0.12), transparent 48%),
+            rgba(251, 191, 36, 0.08);
         }
 
         .queue-summary-chip.danger {
           border-color: rgba(248, 113, 113, 0.24);
-          background: rgba(248, 113, 113, 0.08);
+          background:
+            radial-gradient(circle at top right, rgba(248,113,113,0.12), transparent 48%),
+            rgba(248, 113, 113, 0.08);
         }
 
         .queue-summary-chip-label {
@@ -765,16 +851,25 @@ export default function TicketQueueTable({
         .ticket-mobile-card.premium {
           border-radius: 22px;
           padding: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.08);
           background:
-            radial-gradient(circle at top right, rgba(93,255,141,0.06), transparent 38%),
+            radial-gradient(circle at top right, rgba(93,255,141,0.08), transparent 36%),
+            radial-gradient(circle at bottom left, rgba(99,213,255,0.06), transparent 28%),
             linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)),
-            rgba(255,255,255,0.025);
+            linear-gradient(180deg, rgba(17, 28, 39, 0.96), rgba(9, 16, 24, 0.96));
+          box-shadow:
+            0 14px 30px rgba(0,0,0,0.24),
+            0 0 0 1px rgba(255,255,255,0.02) inset;
         }
 
         .ticket-mobile-card.expanded {
           background:
-            radial-gradient(circle at top right, rgba(99,213,255,0.08), transparent 38%),
-            rgba(99,213,255,0.05);
+            radial-gradient(circle at top right, rgba(99,213,255,0.1), transparent 38%),
+            radial-gradient(circle at bottom left, rgba(93,255,141,0.08), transparent 28%),
+            linear-gradient(180deg, rgba(19, 33, 46, 0.98), rgba(10, 17, 26, 0.98));
+          box-shadow:
+            0 16px 34px rgba(0,0,0,0.28),
+            0 0 0 1px rgba(99,213,255,0.08) inset;
         }
 
         .ticket-mobile-toggle {
@@ -813,6 +908,23 @@ export default function TicketQueueTable({
           text-align: right;
         }
 
+        .queue-category-wrap {
+          margin-bottom: 12px;
+          padding: 10px 12px;
+          border-radius: 16px;
+          border: 1px solid rgba(255,255,255,0.06);
+          background:
+            radial-gradient(circle at top right, rgba(255,255,255,0.04), transparent 42%),
+            rgba(255,255,255,0.02);
+        }
+
+        .queue-card-footer-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+
         .ticket-desktop-expanded {
           padding: 16px;
           background:
@@ -833,7 +945,7 @@ export default function TicketQueueTable({
 
         @media (min-width: 1200px) {
           .queue-summary-grid {
-            grid-template-columns: repeat(9, minmax(0, 1fr));
+            grid-template-columns: repeat(11, minmax(0, 1fr));
           }
         }
       `}</style>
