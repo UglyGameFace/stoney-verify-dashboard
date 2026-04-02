@@ -35,7 +35,7 @@ const MOBILE_TABS = ["home", "tickets", "members", "categories"];
 const STALE_VISIBLE_REFRESH_MS = 45_000;
 const BACKUP_REFRESH_INTERVAL_MS = 90_000;
 const RESUME_PENDING_REFRESH_CHECK_MS = 1500;
-const MOBILE_NAV_RESERVED_PX = 168;
+const MOBILE_NAV_RESERVED_PX = 108;
 const REALTIME_DEBOUNCE_MS = 1250;
 const DESKTOP_LAYOUT_MIN_WIDTH = 1024;
 
@@ -1213,36 +1213,8 @@ export default function DashboardClient({
     setSelectedCategoryFilter(null);
   }, []);
 
-  const openSettingsFromMobile = useCallback(() => {
-    setSettingsOpen(true);
-  }, []);
-
   const mobileExtraActions = useMemo(
     () => [
-      {
-        key: "settings",
-        label: "Personalize UI",
-        icon: "🎨",
-        onClick: openSettingsFromMobile,
-      },
-      {
-        key: "refresh",
-        label: "Refresh Now",
-        icon: "⚡",
-        onClick: () =>
-          refresh({ force: true, reason: "mobile-command-refresh" }),
-      },
-      {
-        key: "reconcile-preview",
-        label: isMaintaining ? "Working..." : "Preview Reconcile",
-        icon: "🧪",
-        onClick: () =>
-          handleReconcileTickets({
-            includeOpenWithMissingChannel: true,
-            includeTranscriptBackfill: true,
-            dryRun: true,
-          }),
-      },
       {
         key: "warns",
         label: "Open Warns",
@@ -1262,13 +1234,7 @@ export default function DashboardClient({
         onClick: () => jumpToPanel("fraud"),
       },
     ],
-    [
-      openSettingsFromMobile,
-      refresh,
-      handleReconcileTickets,
-      jumpToPanel,
-      isMaintaining,
-    ]
+    [jumpToPanel]
   );
 
   const homeSections = {
@@ -1942,7 +1908,8 @@ export default function DashboardClient({
               activeTab={activeTab}
               onChange={setActiveTab}
               tabs={MOBILE_TABS}
-              title="Quick staff actions"
+              title="Staff jumps"
+              actionButtonLabel="Actions"
               extraActions={mobileExtraActions}
             />
           </>
