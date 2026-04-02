@@ -37,6 +37,7 @@ const BACKUP_REFRESH_INTERVAL_MS = 90_000;
 const RESUME_PENDING_REFRESH_CHECK_MS = 1500;
 const MOBILE_NAV_RESERVED_PX = 168;
 const REALTIME_DEBOUNCE_MS = 1250;
+const DESKTOP_LAYOUT_MIN_WIDTH = 1024;
 
 const LEGACY_CATEGORY_ALIASES = {
   verification: [
@@ -647,6 +648,32 @@ function DesktopTabBar({ activeTab, onChange }) {
   );
 }
 
+function useIsDesktopLayout(minWidth = DESKTOP_LAYOUT_MIN_WIDTH) {
+  const getValue = () => {
+    if (typeof window === "undefined") return false;
+    return window.innerWidth >= minWidth;
+  };
+
+  const [isDesktop, setIsDesktop] = useState(getValue);
+
+  useEffect(() => {
+    function update() {
+      setIsDesktop(getValue());
+    }
+
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
+  }, [minWidth]);
+
+  return isDesktop;
+}
+
 export default function DashboardClient({
   initialData,
   staffName,
@@ -677,6 +704,8 @@ export default function DashboardClient({
     roles: false,
     staff: false,
   });
+
+  const isDesktopLayout = useIsDesktopLayout();
 
   const refreshTimer = useRef(null);
   const refreshInFlightRef = useRef(false);
@@ -1509,6 +1538,69 @@ export default function DashboardClient({
     />
   );
 
+  const commonRefreshCard = (
+    <div
+      className="card dashboard-refresh-card"
+      style={{ marginBottom: 16, padding: 12 }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div className="muted" style={{ fontSize: 13 }}>
+          Last successful refresh: {lastRefreshLabel}
+          {isModalPaused ? " • refresh paused while profile is open" : ""}
+        </div>
+
+        <div
+          className="dashboard-refresh-actions"
+          style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+        >
+          <button
+            type="button"
+            className="button ghost"
+            style={{ width: "auto", minWidth: 120 }}
+            onClick={() => setSettingsOpen(true)}
+          >
+            Personalize UI
+          </button>
+
+          <button
+            type="button"
+            className="button ghost"
+            style={{ width: "auto", minWidth: 120 }}
+            onClick={() =>
+              refresh({ force: true, reason: "manual-header-refresh" })
+            }
+          >
+            Refresh Now
+          </button>
+
+          <button
+            type="button"
+            className="button ghost"
+            style={{ width: "auto", minWidth: 140 }}
+            disabled={isMaintaining}
+            onClick={() =>
+              handleReconcileTickets({
+                includeOpenWithMissingChannel: true,
+                includeTranscriptBackfill: true,
+                dryRun: true,
+              })
+            }
+          >
+            {isMaintaining ? "Working..." : "Preview Reconcile"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <>
       <Topbar />
@@ -1516,359 +1608,332 @@ export default function DashboardClient({
       <div
         className="dashboard-page-shell"
         style={{
-          paddingBottom: `calc(${MOBILE_NAV_RESERVED_PX}px + env(safe-area-inset-bottom, 0px))`,
+          paddingBottom: isDesktopLayout
+            ? 32
+            : `calc(${MOBILE_NAV_RESERVED_PX}px + env(safe-area-inset-bottom, 0px))`,
         }}
       >
-        <div className="desktop-only-nav">
-          <DesktopTabBar activeTab={activeTab} onChange={setActiveTab} />
-        </div>
-
-        <div
-          className="card dashboard-refresh-card"
-          style={{ marginBottom: 16, padding: 12 }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <div className="muted" style={{ fontSize: 13 }}>
-              Last successful refresh: {lastRefreshLabel}
-              {isModalPaused ? " • refresh paused while profile is open" : ""}
+        {isDesktopLayout ? (
+          <>
+            <div className="desktop-only-nav">
+              <DesktopTabBar activeTab={activeTab} onChange={setActiveTab} />
             </div>
 
-            <div
-              className="dashboard-refresh-actions"
-              style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-            >
-              <button
-                type="button"
-                className="button ghost"
-                style={{ width: "auto", minWidth: 120 }}
-                onClick={() => setSettingsOpen(true)}
-              >
-                Personalize UI
-              </button>
+            {commonRefreshCard}
 
-              <button
-                type="button"
-                className="button ghost"
-                style={{ width: "auto", minWidth: 120 }}
-                onClick={() =>
-                  refresh({ force: true, reason: "manual-header-refresh" })
-                }
-              >
-                Refresh Now
-              </button>
-
-              <button
-                type="button"
-                className="button ghost"
-                style={{ width: "auto", minWidth: 140 }}
-                disabled={isMaintaining}
-                onClick={() =>
-                  handleReconcileTickets({
-                    includeOpenWithMissingChannel: true,
-                    includeTranscriptBackfill: true,
-                    dryRun: true,
-                  })
-                }
-              >
-                {isMaintaining ? "Working..." : "Preview Reconcile"}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {error ? (
-          <div className="error-banner" style={{ marginBottom: 16 }}>
-            {error}
-          </div>
-        ) : null}
-
-        {maintenanceError ? (
-          <div className="error-banner" style={{ marginBottom: 16 }}>
-            {maintenanceError}
-          </div>
-        ) : null}
-
-        {maintenanceMessage ? (
-          <div className="info-banner" style={{ marginBottom: 16 }}>
-            {maintenanceMessage}
-          </div>
-        ) : null}
-
-        {isRefreshing ? (
-          <div className="info-banner" style={{ marginBottom: 16 }}>
-            Refreshing dashboard…
-          </div>
-        ) : null}
-
-        <DesktopDashboardView
-          activeTab={activeTab}
-          counts={counts}
-          safeEvents={safeEvents}
-          safeWarns={safeWarns}
-          safeRaids={safeRaids}
-          safeFraud={safeFraud}
-          safeCategories={desktopCategorySection}
-          safeRecentJoins={safeRecentJoins}
-          safeMembers={safeMembers}
-          safeMetrics={safeMetrics}
-          safeRoles={safeRoles}
-          intelligence={intelligence}
-          expandedPanels={expandedPanels}
-          togglePanel={togglePanel}
-          jumpToTickets={jumpToTickets}
-          jumpToPanel={jumpToPanel}
-          refresh={refresh}
-          currentStaffId={currentStaffId}
-          homeLayout={homeLayout}
-          membersLayout={membersLayout}
-          sectionVisibility={sectionVisibility}
-          homeSections={homeSections}
-          membersSections={membersSections}
-          filteredTickets={
-            <TicketQueueTable
-              tickets={filteredTickets}
-              currentStaffId={currentStaffId}
-              onRefresh={() =>
-                refresh({ force: true, reason: "ticket-controls" })
-              }
-            />
-          }
-          search={search}
-          setSearch={setSearch}
-          statusFilter={statusFilter}
-          setStatusFilter={setStatusFilter}
-          priorityFilter={priorityFilter}
-          setPriorityFilter={setPriorityFilter}
-          sortBy={sortBy}
-          setSortBy={setSortBy}
-          handleReconcileTickets={handleReconcileTickets}
-          handlePreviewPurge={handlePreviewPurge}
-          handlePurgeStale={handlePurgeStale}
-          isMaintaining={isMaintaining}
-          density={density}
-        />
-
-        <section className={`mobile-tab-panel ${activeTab === "home" ? "active" : ""}`}>
-          <div className="dashboard-home-grid">
-            {homeLayout
-              .filter((key) => sectionVisibility[key] !== false)
-              .map((key) => (
-                <div key={`home-${key}`}>{homeSections[key] || null}</div>
-              ))}
-          </div>
-        </section>
-
-        <section className={`mobile-tab-panel ${activeTab === "tickets" ? "active" : ""}`}>
-          <div className="card">
-            <div
-              className="row"
-              style={{
-                justifyContent: "space-between",
-                alignItems: "flex-start",
-                gap: 12,
-                flexWrap: "wrap",
-                marginBottom: 14,
-              }}
-            >
-              <div>
-                <h2 style={{ margin: 0 }}>Ticket Queue</h2>
-                <div className="muted" style={{ marginTop: 6 }}>
-                  Live moderation queue with repair, transcript, and filtering controls
-                </div>
-              </div>
-
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  className="button ghost"
-                  style={{ width: "auto", minWidth: 120 }}
-                  onClick={clearTicketFilters}
-                >
-                  Clear Filters
-                </button>
-
-                <button
-                  type="button"
-                  className="button ghost"
-                  style={{ width: "auto", minWidth: 120 }}
-                  onClick={() =>
-                    refresh({ force: true, reason: "manual-ticket-refresh" })
-                  }
-                >
-                  Refresh Queue
-                </button>
-
-                <button
-                  type="button"
-                  className="button ghost"
-                  style={{ width: "auto", minWidth: 140 }}
-                  disabled={isMaintaining}
-                  onClick={() =>
-                    handleReconcileTickets({
-                      includeOpenWithMissingChannel: true,
-                      includeTranscriptBackfill: true,
-                      dryRun: false,
-                    })
-                  }
-                >
-                  {isMaintaining ? "Working..." : "Reconcile Tickets"}
-                </button>
-
-                <button
-                  type="button"
-                  className="button ghost"
-                  style={{ width: "auto", minWidth: 140 }}
-                  disabled={isMaintaining}
-                  onClick={handlePreviewPurge}
-                >
-                  {isMaintaining ? "Working..." : "Preview Purge"}
-                </button>
-
-                <button
-                  type="button"
-                  className="button danger"
-                  style={{ width: "auto", minWidth: 140 }}
-                  disabled={isMaintaining}
-                  onClick={handlePurgeStale}
-                >
-                  {isMaintaining ? "Working..." : "Purge Stale"}
-                </button>
-              </div>
-            </div>
-
-            {selectedCategoryFilter ? (
-              <div className="info-banner" style={{ marginBottom: 14 }}>
-                Filtering tickets by category:{" "}
-                <strong>
-                  {selectedCategoryFilter?.name ||
-                    selectedCategoryFilter?.slug ||
-                    "Selected Category"}
-                </strong>
+            {error ? (
+              <div className="error-banner" style={{ marginBottom: 16 }}>
+                {error}
               </div>
             ) : null}
 
-            <div
-              className="muted"
-              style={{
-                marginBottom: 14,
-                fontSize: 12,
-                lineHeight: 1.5,
-              }}
-            >
-              Reconcile repairs stale ticket rows that no longer reflect Discord truth.
-              Purge removes dead closed or deleted rows that no longer have a usable live channel.
-            </div>
+            {maintenanceError ? (
+              <div className="error-banner" style={{ marginBottom: 16 }}>
+                {maintenanceError}
+              </div>
+            ) : null}
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                gap: 10,
-                marginBottom: 14,
-              }}
-            >
-              <input
-                className="input"
-                placeholder="Search tickets, categories, intake types..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
+            {maintenanceMessage ? (
+              <div className="info-banner" style={{ marginBottom: 16 }}>
+                {maintenanceMessage}
+              </div>
+            ) : null}
 
-              <select
-                className="input"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-              >
-                <option value="active">Active (Open + Claimed)</option>
-                <option value="all">All statuses</option>
-                <option value="open_only">Open Only</option>
-                <option value="claimed">Claimed Only</option>
-                <option value="closed">Closed</option>
-                <option value="deleted">Deleted</option>
-              </select>
+            {isRefreshing ? (
+              <div className="info-banner" style={{ marginBottom: 16 }}>
+                Refreshing dashboard…
+              </div>
+            ) : null}
 
-              <select
-                className="input"
-                value={priorityFilter}
-                onChange={(e) => setPriorityFilter(e.target.value)}
-              >
-                <option value="all">All priorities</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="urgent">Urgent</option>
-              </select>
+            <DesktopDashboardView
+              activeTab={activeTab}
+              counts={counts}
+              safeEvents={safeEvents}
+              safeWarns={safeWarns}
+              safeRaids={safeRaids}
+              safeFraud={safeFraud}
+              safeCategories={desktopCategorySection}
+              safeRecentJoins={safeRecentJoins}
+              safeMembers={safeMembers}
+              safeMetrics={safeMetrics}
+              safeRoles={safeRoles}
+              intelligence={intelligence}
+              expandedPanels={expandedPanels}
+              togglePanel={togglePanel}
+              jumpToTickets={jumpToTickets}
+              jumpToPanel={jumpToPanel}
+              refresh={refresh}
+              currentStaffId={currentStaffId}
+              homeLayout={homeLayout}
+              membersLayout={membersLayout}
+              sectionVisibility={sectionVisibility}
+              homeSections={homeSections}
+              membersSections={membersSections}
+              filteredTickets={
+                <TicketQueueTable
+                  tickets={filteredTickets}
+                  currentStaffId={currentStaffId}
+                  onRefresh={() =>
+                    refresh({ force: true, reason: "ticket-controls" })
+                  }
+                />
+              }
+              search={search}
+              setSearch={setSearch}
+              statusFilter={statusFilter}
+              setStatusFilter={setStatusFilter}
+              priorityFilter={priorityFilter}
+              setPriorityFilter={setPriorityFilter}
+              sortBy={sortBy}
+              setSortBy={setSortBy}
+              handleReconcileTickets={handleReconcileTickets}
+              handlePreviewPurge={handlePreviewPurge}
+              handlePurgeStale={handlePurgeStale}
+              isMaintaining={isMaintaining}
+              density={density}
+            />
+          </>
+        ) : (
+          <>
+            {commonRefreshCard}
 
-              <select
-                className="input"
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-              >
-                <option value="priority_desc">Priority Desc</option>
-                <option value="priority_asc">Priority Asc</option>
-                <option value="updated_desc">Updated Desc</option>
-                <option value="updated_asc">Updated Asc</option>
-                <option value="created_desc">Created Desc</option>
-                <option value="created_asc">Created Asc</option>
-              </select>
-            </div>
+            {error ? (
+              <div className="error-banner" style={{ marginBottom: 16 }}>
+                {error}
+              </div>
+            ) : null}
 
-            <div className="profile-scroll-safe-zone">
-              <TicketQueueTable
-                tickets={filteredTickets}
-                currentStaffId={currentStaffId}
-                onRefresh={() =>
-                  refresh({ force: true, reason: "ticket-controls" })
-                }
-              />
-            </div>
-          </div>
-        </section>
+            {maintenanceError ? (
+              <div className="error-banner" style={{ marginBottom: 16 }}>
+                {maintenanceError}
+              </div>
+            ) : null}
 
-        <section className={`mobile-tab-panel ${activeTab === "members" ? "active" : ""}`}>
-          <div className="dashboard-members-grid">
-            {[...membersLayout]
-              .filter((key, index, arr) => arr.indexOf(key) === index)
-              .filter((key) => sectionVisibility[key] !== false)
-              .map((key) => (
-                <div key={`members-${key}`}>{membersSections[key] || null}</div>
-              ))}
-          </div>
-        </section>
+            {maintenanceMessage ? (
+              <div className="info-banner" style={{ marginBottom: 16 }}>
+                {maintenanceMessage}
+              </div>
+            ) : null}
 
-        <section className={`mobile-tab-panel ${activeTab === "categories" ? "active" : ""}`}>
-          {sectionVisibility.categories !== false ? (
-            <div className="profile-scroll-safe-zone">
-              <CategoryManager
-                categories={safeCategories}
-                tickets={safeTickets}
-                onRefresh={() => refresh({ force: true, reason: "categories" })}
-                onFindTicketsByCategory={handleFindTicketsByCategory}
-              />
-            </div>
-          ) : (
-            <div className="empty-state">
-              Categories is hidden in your personalization settings.
-            </div>
-          )}
-        </section>
+            {isRefreshing ? (
+              <div className="info-banner" style={{ marginBottom: 16 }}>
+                Refreshing dashboard…
+              </div>
+            ) : null}
+
+            <section className={`mobile-tab-panel ${activeTab === "home" ? "active" : ""}`}>
+              <div className="dashboard-home-grid">
+                {homeLayout
+                  .filter((key) => sectionVisibility[key] !== false)
+                  .map((key) => (
+                    <div key={`home-${key}`}>{homeSections[key] || null}</div>
+                  ))}
+              </div>
+            </section>
+
+            <section className={`mobile-tab-panel ${activeTab === "tickets" ? "active" : ""}`}>
+              <div className="card">
+                <div
+                  className="row"
+                  style={{
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    gap: 12,
+                    flexWrap: "wrap",
+                    marginBottom: 14,
+                  }}
+                >
+                  <div>
+                    <h2 style={{ margin: 0 }}>Ticket Queue</h2>
+                    <div className="muted" style={{ marginTop: 6 }}>
+                      Live moderation queue with repair, transcript, and filtering controls
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="button ghost"
+                      style={{ width: "auto", minWidth: 120 }}
+                      onClick={clearTicketFilters}
+                    >
+                      Clear Filters
+                    </button>
+
+                    <button
+                      type="button"
+                      className="button ghost"
+                      style={{ width: "auto", minWidth: 120 }}
+                      onClick={() =>
+                        refresh({ force: true, reason: "manual-ticket-refresh" })
+                      }
+                    >
+                      Refresh Queue
+                    </button>
+
+                    <button
+                      type="button"
+                      className="button ghost"
+                      style={{ width: "auto", minWidth: 140 }}
+                      disabled={isMaintaining}
+                      onClick={() =>
+                        handleReconcileTickets({
+                          includeOpenWithMissingChannel: true,
+                          includeTranscriptBackfill: true,
+                          dryRun: false,
+                        })
+                      }
+                    >
+                      {isMaintaining ? "Working..." : "Reconcile Tickets"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="button ghost"
+                      style={{ width: "auto", minWidth: 140 }}
+                      disabled={isMaintaining}
+                      onClick={handlePreviewPurge}
+                    >
+                      {isMaintaining ? "Working..." : "Preview Purge"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="button danger"
+                      style={{ width: "auto", minWidth: 140 }}
+                      disabled={isMaintaining}
+                      onClick={handlePurgeStale}
+                    >
+                      {isMaintaining ? "Working..." : "Purge Stale"}
+                    </button>
+                  </div>
+                </div>
+
+                {selectedCategoryFilter ? (
+                  <div className="info-banner" style={{ marginBottom: 14 }}>
+                    Filtering tickets by category:{" "}
+                    <strong>
+                      {selectedCategoryFilter?.name ||
+                        selectedCategoryFilter?.slug ||
+                        "Selected Category"}
+                    </strong>
+                  </div>
+                ) : null}
+
+                <div
+                  className="muted"
+                  style={{
+                    marginBottom: 14,
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  Reconcile repairs stale ticket rows that no longer reflect Discord truth.
+                  Purge removes dead closed or deleted rows that no longer have a usable live channel.
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: 10,
+                    marginBottom: 14,
+                  }}
+                >
+                  <input
+                    className="input"
+                    placeholder="Search tickets, categories, intake types..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+
+                  <select
+                    className="input"
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                  >
+                    <option value="active">Active (Open + Claimed)</option>
+                    <option value="all">All statuses</option>
+                    <option value="open_only">Open Only</option>
+                    <option value="claimed">Claimed Only</option>
+                    <option value="closed">Closed</option>
+                    <option value="deleted">Deleted</option>
+                  </select>
+
+                  <select
+                    className="input"
+                    value={priorityFilter}
+                    onChange={(e) => setPriorityFilter(e.target.value)}
+                  >
+                    <option value="all">All priorities</option>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="urgent">Urgent</option>
+                  </select>
+
+                  <select
+                    className="input"
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                  >
+                    <option value="priority_desc">Priority Desc</option>
+                    <option value="priority_asc">Priority Asc</option>
+                    <option value="updated_desc">Updated Desc</option>
+                    <option value="updated_asc">Updated Asc</option>
+                    <option value="created_desc">Created Desc</option>
+                    <option value="created_asc">Created Asc</option>
+                  </select>
+                </div>
+
+                <div className="profile-scroll-safe-zone">
+                  <TicketQueueTable
+                    tickets={filteredTickets}
+                    currentStaffId={currentStaffId}
+                    onRefresh={() =>
+                      refresh({ force: true, reason: "ticket-controls" })
+                    }
+                  />
+                </div>
+              </div>
+            </section>
+
+            <section className={`mobile-tab-panel ${activeTab === "members" ? "active" : ""}`}>
+              <div className="dashboard-members-grid">
+                {[...membersLayout]
+                  .filter((key, index, arr) => arr.indexOf(key) === index)
+                  .filter((key) => sectionVisibility[key] !== false)
+                  .map((key) => (
+                    <div key={`members-${key}`}>{membersSections[key] || null}</div>
+                  ))}
+              </div>
+            </section>
+
+            <section className={`mobile-tab-panel ${activeTab === "categories" ? "active" : ""}`}>
+              {sectionVisibility.categories !== false ? (
+                <div className="profile-scroll-safe-zone">
+                  <CategoryManager
+                    categories={safeCategories}
+                    tickets={safeTickets}
+                    onRefresh={() => refresh({ force: true, reason: "categories" })}
+                    onFindTicketsByCategory={handleFindTicketsByCategory}
+                  />
+                </div>
+              ) : (
+                <div className="empty-state">
+                  Categories is hidden in your personalization settings.
+                </div>
+              )}
+            </section>
+
+            <MobileBottomNav
+              activeTab={activeTab}
+              onChange={setActiveTab}
+              tabs={MOBILE_TABS}
+            />
+          </>
+        )}
       </div>
-
-      <MobileBottomNav
-        activeTab={activeTab}
-        onChange={setActiveTab}
-        tabs={MOBILE_TABS}
-        title="Staff Command Menu"
-        extraActions={mobileExtraActions}
-      />
 
       <DashboardSettingsPanel
         open={settingsOpen}
@@ -1895,7 +1960,7 @@ export default function DashboardClient({
         }
 
         .desktop-only-nav {
-          display: none;
+          display: block;
         }
 
         .dashboard-home-grid,
@@ -2060,10 +2125,6 @@ export default function DashboardClient({
         }
 
         @media (min-width: 1024px) {
-          .desktop-only-nav {
-            display: block;
-          }
-
           .dashboard-home-grid,
           .dashboard-members-grid {
             gap: ${density === "compact"
@@ -2082,13 +2143,11 @@ export default function DashboardClient({
           .dashboard-members-grid :global(.compact-panel:nth-child(5)) {
             grid-column: span 1;
           }
+        }
 
-          .mobile-tab-panel {
-            display: none !important;
-          }
-
-          .dashboard-page-shell {
-            padding-bottom: 32px !important;
+        @media (max-width: 1023px) {
+          .desktop-only-nav {
+            display: none;
           }
         }
 
@@ -2104,10 +2163,6 @@ export default function DashboardClient({
           .dashboard-refresh-actions :global(button) {
             flex: 1 1 0;
             min-width: 0 !important;
-          }
-
-          .dashboard-page-shell {
-            padding-bottom: calc(${MOBILE_NAV_RESERVED_PX}px + env(safe-area-inset-bottom, 0px));
           }
 
           .dashboard-home-grid,
