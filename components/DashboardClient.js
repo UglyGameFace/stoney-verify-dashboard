@@ -679,6 +679,41 @@ function useIsDesktopLayout(minWidth = DESKTOP_LAYOUT_MIN_WIDTH) {
   return isDesktop;
 }
 
+function ticketDedupKey(ticket) {
+  return (
+    String(ticket?.id || "").trim() ||
+    String(ticket?.channel_id || ticket?.discord_thread_id || "").trim() ||
+    [
+      String(ticket?.user_id || "").trim(),
+      String(ticket?.category_id || "").trim(),
+      String(ticket?.matched_category_id || "").trim(),
+      String(ticket?.category || "").trim(),
+      String(ticket?.status || "").trim(),
+      String(ticket?.created_at || "").trim(),
+    ].join("::")
+  );
+}
+
+function mergeUniqueTickets(...ticketSets) {
+  const merged = [];
+  const seen = new Set();
+
+  for (const set of ticketSets) {
+    for (const ticket of safeArray(set)) {
+      const key = ticketDedupKey(ticket);
+      if (!key) {
+        merged.push(ticket);
+        continue;
+      }
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(ticket);
+    }
+  }
+
+  return merged;
+}
+
 export default function DashboardClient({
   initialData,
   staffName,
@@ -1067,41 +1102,65 @@ export default function DashboardClient({
     const activeRows = safeArray(data?.activeTickets);
     const closedRows = safeArray(data?.closedTickets);
 
-    if (allRows.length) return allRows;
-
-    const merged = [...activeRows, ...closedRows];
-    const seen = new Set();
-
-    return merged.filter((ticket) => {
-      const key =
-        String(ticket?.id || "").trim() ||
-        `${String(ticket?.channel_id || ticket?.discord_thread_id || "")}:${String(ticket?.user_id || "")}:${String(ticket?.status || "")}`;
-
-      if (!key) return true;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    const merged = mergeUniqueTickets(allRows, activeRows, closedRows);
+    return sortTickets(merged, "updated_desc");
   }, [data?.tickets, data?.activeTickets, data?.closedTickets]);
 
   const safeActiveTickets = useMemo(() => {
     const activeRows = safeArray(data?.activeTickets);
-    if (activeRows.length) return activeRows;
-    return safeTickets.filter((ticket) => isActiveTicketStatus(ticket?.status));
+    if (activeRows.length) {
+      return sortTickets(
+        mergeUniqueTickets(activeRows),
+        "priority_desc"
+      );
+    }
+
+    return sortTickets(
+      safeTickets.filter((ticket) => isActiveTicketStatus(ticket?.status)),
+      "priority_desc"
+    );
   }, [data?.activeTickets, safeTickets]);
+
+  const safeClosedTickets = useMemo(() => {
+    const closedRows = safeArray(data?.closedTickets);
+    if (closedRows.length) {
+      return sortTickets(
+        mergeUniqueTickets(closedRows),
+        "updated_desc"
+      );
+    }
+
+    return sortTickets(
+      safeTickets.filter((ticket) => {
+        const status = String(ticket?.status || "").toLowerCase();
+        return status === "closed" || status === "deleted";
+      }),
+      "updated_desc"
+    );
+  }, [data?.closedTickets, safeTickets]);
 
   const safeWarns = safeArray(data?.warns);
   const safeRaids = safeArray(data?.raids);
   const safeFraud = safeArray(data?.fraud || data?.fraudFlagsList);
 
   const intelligence = useMemo(
-    () => buildModeratorIntelligence(data),
-    [data]
+    () => buildModeratorIntelligence({
+      ...data,
+      tickets: safeTickets,
+    }),
+    [data, safeTickets]
   );
 
   const filteredTickets = useMemo(() => {
-    const baseRows = statusFilter === "active" ? safeActiveTickets : safeTickets;
-    let rows = [...baseRows];
+    let rows = [...safeTickets];
+
+    if (statusFilter === "active") {
+      rows = [...safeActiveTickets];
+    } else if (statusFilter === "closed" || statusFilter === "deleted") {
+      rows = safeClosedTickets.filter((ticket) =>
+        statusMatchesFilter(ticket, statusFilter)
+      );
+    }
 
     if (selectedCategoryFilter) {
       rows = rows.filter((ticket) =>
@@ -1126,13 +1185,14 @@ export default function DashboardClient({
           t.channel_id,
           t.discord_thread_id,
           t.closed_reason,
+          t.channel_name,
         ]
           .filter(Boolean)
           .some((v) => String(v).toLowerCase().includes(q))
       );
     }
 
-    if (statusFilter !== "all" && statusFilter !== "active") {
+    if (statusFilter !== "all" && statusFilter !== "active" && statusFilter !== "closed" && statusFilter !== "deleted") {
       rows = rows.filter((t) => statusMatchesFilter(t, statusFilter));
     }
 
@@ -1146,6 +1206,7 @@ export default function DashboardClient({
   }, [
     safeTickets,
     safeActiveTickets,
+    safeClosedTickets,
     selectedCategoryFilter,
     search,
     statusFilter,
