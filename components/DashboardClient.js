@@ -1061,10 +1061,35 @@ export default function DashboardClient({
   const safeCategories = safeArray(data?.categories);
   const safeRecentJoins = safeArray(data?.recentJoins);
   const safeMembers = data?.guildMembers || data?.members || [];
-  const safeTickets = safeArray(data?.tickets);
-  const safeActiveTickets = safeArray(data?.activeTickets).length
-    ? safeArray(data?.activeTickets)
-    : safeTickets.filter((ticket) => isActiveTicketStatus(ticket?.status));
+
+  const safeTickets = useMemo(() => {
+    const allRows = safeArray(data?.tickets);
+    const activeRows = safeArray(data?.activeTickets);
+    const closedRows = safeArray(data?.closedTickets);
+
+    if (allRows.length) return allRows;
+
+    const merged = [...activeRows, ...closedRows];
+    const seen = new Set();
+
+    return merged.filter((ticket) => {
+      const key =
+        String(ticket?.id || "").trim() ||
+        `${String(ticket?.channel_id || ticket?.discord_thread_id || "")}:${String(ticket?.user_id || "")}:${String(ticket?.status || "")}`;
+
+      if (!key) return true;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [data?.tickets, data?.activeTickets, data?.closedTickets]);
+
+  const safeActiveTickets = useMemo(() => {
+    const activeRows = safeArray(data?.activeTickets);
+    if (activeRows.length) return activeRows;
+    return safeTickets.filter((ticket) => isActiveTicketStatus(ticket?.status));
+  }, [data?.activeTickets, safeTickets]);
+
   const safeWarns = safeArray(data?.warns);
   const safeRaids = safeArray(data?.raids);
   const safeFraud = safeArray(data?.fraud || data?.fraudFlagsList);
