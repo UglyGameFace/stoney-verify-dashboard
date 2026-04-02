@@ -113,6 +113,19 @@ export async function queueCreateTicket(input: {
   requestedBy?: string | null;
   parentCategoryId?: string | null;
   staffRoleIds?: string[] | null;
+  entryMethod?: string | null;
+  verificationSource?: string | null;
+  sourceTicketId?: string | null;
+  verificationTicketId?: string | null;
+  invitedBy?: string | null;
+  invitedByName?: string | null;
+  inviteCode?: string | null;
+  vouchedBy?: string | null;
+  vouchedByName?: string | null;
+  approvedBy?: string | null;
+  approvedByName?: string | null;
+  entryReason?: string | null;
+  approvalReason?: string | null;
 }) {
   return insertCommand(
     "create_ticket",
@@ -125,6 +138,19 @@ export async function queueCreateTicket(input: {
       allow_duplicate: Boolean(input.allowDuplicate),
       parent_category_id: input.parentCategoryId ?? null,
       staff_role_ids: input.staffRoleIds ?? null,
+      entry_method: input.entryMethod ?? null,
+      verification_source: input.verificationSource ?? null,
+      source_ticket_id: input.sourceTicketId ?? null,
+      verification_ticket_id: input.verificationTicketId ?? null,
+      invited_by: input.invitedBy ?? null,
+      invited_by_name: input.invitedByName ?? null,
+      invite_code: input.inviteCode ?? null,
+      vouched_by: input.vouchedBy ?? null,
+      vouched_by_name: input.vouchedByName ?? null,
+      approved_by: input.approvedBy ?? null,
+      approved_by_name: input.approvedByName ?? null,
+      entry_reason: input.entryReason ?? null,
+      approval_reason: input.approvalReason ?? null,
     },
     input.requestedBy
   );
