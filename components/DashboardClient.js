@@ -242,6 +242,11 @@ function statusMatchesFilter(ticket, filterValue) {
   return status === filterValue;
 }
 
+function isActiveTicketStatus(status) {
+  const value = String(status || "").trim().toLowerCase();
+  return value === "open" || value === "claimed";
+}
+
 function getSeverityColor(level) {
   const value = String(level || "").toLowerCase();
 
@@ -1057,6 +1062,9 @@ export default function DashboardClient({
   const safeRecentJoins = safeArray(data?.recentJoins);
   const safeMembers = data?.guildMembers || data?.members || [];
   const safeTickets = safeArray(data?.tickets);
+  const safeActiveTickets = safeArray(data?.activeTickets).length
+    ? safeArray(data?.activeTickets)
+    : safeTickets.filter((ticket) => isActiveTicketStatus(ticket?.status));
   const safeWarns = safeArray(data?.warns);
   const safeRaids = safeArray(data?.raids);
   const safeFraud = safeArray(data?.fraud || data?.fraudFlagsList);
@@ -1067,7 +1075,8 @@ export default function DashboardClient({
   );
 
   const filteredTickets = useMemo(() => {
-    let rows = [...safeTickets];
+    const baseRows = statusFilter === "active" ? safeActiveTickets : safeTickets;
+    let rows = [...baseRows];
 
     if (selectedCategoryFilter) {
       rows = rows.filter((ticket) =>
@@ -1098,7 +1107,7 @@ export default function DashboardClient({
       );
     }
 
-    if (statusFilter !== "all") {
+    if (statusFilter !== "all" && statusFilter !== "active") {
       rows = rows.filter((t) => statusMatchesFilter(t, statusFilter));
     }
 
@@ -1111,6 +1120,7 @@ export default function DashboardClient({
     return sortTickets(rows, sortBy);
   }, [
     safeTickets,
+    safeActiveTickets,
     selectedCategoryFilter,
     search,
     statusFilter,
@@ -1930,6 +1940,8 @@ export default function DashboardClient({
               activeTab={activeTab}
               onChange={setActiveTab}
               tabs={MOBILE_TABS}
+              title="Quick staff actions"
+              extraActions={mobileExtraActions}
             />
           </>
         )}
