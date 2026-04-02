@@ -1683,6 +1683,7 @@ export default function DashboardClient({
                 <TicketQueueTable
                   tickets={filteredTickets}
                   currentStaffId={currentStaffId}
+                  queueMode={statusFilter}
                   onRefresh={() =>
                     refresh({ force: true, reason: "ticket-controls" })
                   }
@@ -1900,6 +1901,7 @@ export default function DashboardClient({
                   <TicketQueueTable
                     tickets={filteredTickets}
                     currentStaffId={currentStaffId}
+                    queueMode={statusFilter}
                     onRefresh={() =>
                       refresh({ force: true, reason: "ticket-controls" })
                     }
