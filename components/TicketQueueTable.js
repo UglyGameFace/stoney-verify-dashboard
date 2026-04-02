@@ -6,8 +6,20 @@ import { timeAgo } from "@/lib/format";
 import TicketControls from "./dashboard/TicketControls";
 import CreateTicketButton from "./dashboard/CreateTicketButton";
 
+const PLACEHOLDER_CATEGORY_VALUES = new Set([
+  "",
+  "uncategorized",
+  "unknown",
+  "none",
+  "null",
+  "undefined",
+  "no-categories",
+  "no categories",
+  "general",
+]);
+
 function badgeClass(value) {
-  const v = String(value || "").toLowerCase();
+  const v = String(value || "").toLowerCase().trim();
 
   if (v === "open") return "badge open";
   if (v === "closed") return "badge closed";
@@ -25,6 +37,7 @@ function badgeClass(value) {
   if (v === "partnership") return "badge low";
   if (v === "question") return "badge";
   if (v === "custom") return "badge";
+  if (v === "support") return "badge low";
 
   return "badge";
 }
@@ -32,6 +45,21 @@ function badgeClass(value) {
 function safeText(value, fallback = "—") {
   const text = String(value ?? "").trim();
   return text || fallback;
+}
+
+function normalizeText(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function titleize(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  return raw
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
 function getChannelId(ticket) {
@@ -55,7 +83,7 @@ function getTicketTitle(ticket) {
 }
 
 function getStatus(ticket) {
-  return String(ticket?.status || "unknown").toLowerCase();
+  return String(ticket?.status || "unknown").toLowerCase().trim();
 }
 
 function isGhost(ticket) {
@@ -66,28 +94,140 @@ function hasMissingChannel(ticket) {
   return !getChannelId(ticket);
 }
 
+function isPlaceholderCategory(value) {
+  return PLACEHOLDER_CATEGORY_VALUES.has(normalizeText(value));
+}
+
+function normalizeIntakeType(value) {
+  const v = normalizeText(value);
+
+  if (!v) return "";
+  if (v === "verification_issue") return "verification";
+  if (v === "verification issue") return "verification";
+  if (v === "verify_issue") return "verification";
+  if (v === "support") return "support";
+  if (v === "general support") return "support";
+  if (v === "report_issue") return "report";
+  if (v === "report issue") return "report";
+
+  return v;
+}
+
+function getDisplayIntakeLabel(value) {
+  const intake = normalizeIntakeType(value);
+  return intake ? titleize(intake) : "";
+}
+
+function deriveFallbackCategoryFromTicket(ticket) {
+  const raw = [
+    ticket?.category,
+    ticket?.raw_category,
+    ticket?.matched_category_slug,
+    ticket?.matched_intake_type,
+  ]
+    .map((v) => normalizeText(v))
+    .filter(Boolean);
+
+  for (const value of raw) {
+    if (isPlaceholderCategory(value)) continue;
+
+    if (
+      value === "verification_issue" ||
+      value === "verification issue" ||
+      value === "verify_issue" ||
+      value === "verification"
+    ) {
+      return "Verification Issue";
+    }
+
+    if (value === "support" || value === "general support") {
+      return "Support";
+    }
+
+    if (value === "report" || value === "report_issue" || value === "report issue") {
+      return "Report";
+    }
+
+    if (value === "appeal") return "Appeal";
+    if (value === "partnership") return "Partnership";
+    if (value === "question") return "Question";
+
+    return titleize(value);
+  }
+
+  const title = normalizeText(ticket?.title);
+  if (title.includes("verification")) return "Verification Issue";
+  if (title.includes("appeal")) return "Appeal";
+  if (title.includes("report")) return "Report";
+  if (title.includes("support")) return "Support";
+  if (title.includes("partner")) return "Partnership";
+  if (title.includes("question")) return "Question";
+
+  return "Support";
+}
+
 function getDisplayedCategoryName(ticket) {
-  return (
-    String(ticket?.matched_category_name || "").trim() ||
-    String(ticket?.category || "").trim() ||
-    "Uncategorized"
-  );
+  const matchedName = String(ticket?.matched_category_name || "").trim();
+  const matchedSlug = String(ticket?.matched_category_slug || "").trim();
+  const rawCategory = String(ticket?.category || "").trim();
+  const rawAlt = String(ticket?.raw_category || "").trim();
+
+  if (matchedName && !isPlaceholderCategory(matchedName)) {
+    return titleize(matchedName);
+  }
+
+  if (matchedSlug && !isPlaceholderCategory(matchedSlug)) {
+    return titleize(matchedSlug);
+  }
+
+  if (rawCategory && !isPlaceholderCategory(rawCategory)) {
+    return deriveFallbackCategoryFromTicket({ ...ticket, category: rawCategory });
+  }
+
+  if (rawAlt && !isPlaceholderCategory(rawAlt)) {
+    return deriveFallbackCategoryFromTicket({ ...ticket, raw_category: rawAlt });
+  }
+
+  return deriveFallbackCategoryFromTicket(ticket);
 }
 
 function getDisplayedCategorySlug(ticket) {
-  return (
-    String(ticket?.matched_category_slug || "").trim() ||
-    String(ticket?.category || "").trim() ||
-    ""
-  );
+  const values = [
+    ticket?.matched_category_slug,
+    ticket?.matched_category_name,
+    ticket?.raw_category,
+    ticket?.category,
+  ]
+    .map((v) => String(v || "").trim())
+    .filter(Boolean);
+
+  for (const value of values) {
+    if (!isPlaceholderCategory(value)) {
+      return titleize(value);
+    }
+  }
+
+  return "";
 }
 
 function getDisplayedIntakeType(ticket) {
-  return String(ticket?.matched_intake_type || "").trim() || "";
+  const intake = getDisplayIntakeLabel(
+    ticket?.matched_intake_type || ticket?.category || ticket?.raw_category || ""
+  );
+
+  if (intake === "Verification Issue") return "Verification";
+  return intake;
 }
 
 function getCategoryReason(ticket) {
-  return String(ticket?.matched_category_reason || "").trim() || "";
+  const reason = String(ticket?.matched_category_reason || "").trim();
+  if (!reason) return "";
+
+  const lowered = normalizeText(reason);
+  if (lowered === "no-categories") return "";
+  if (lowered === "no categories") return "";
+
+  return reason;
 }
 
 function getCategoryScore(ticket) {
@@ -96,9 +236,12 @@ function getCategoryScore(ticket) {
 }
 
 function hasMatchedCategory(ticket) {
+  const matchedName = String(ticket?.matched_category_name || "").trim();
+  const matchedSlug = String(ticket?.matched_category_slug || "").trim();
+
   return Boolean(
-    String(ticket?.matched_category_name || "").trim() ||
-      String(ticket?.matched_category_slug || "").trim()
+    (matchedName && !isPlaceholderCategory(matchedName)) ||
+      (matchedSlug && !isPlaceholderCategory(matchedSlug))
   );
 }
 
@@ -247,11 +390,11 @@ function CategoryDisplay({ ticket, compact = false }) {
           alignItems: "center",
         }}
       >
-        <span className={matched ? "badge claimed" : "badge"}>
+        <span className={matched ? "badge claimed" : "badge low"}>
           {categoryName}
         </span>
         {intakeType ? (
-          <span className={badgeClass(intakeType)}>{intakeType}</span>
+          <span className={badgeClass(intakeType.toLowerCase())}>{intakeType}</span>
         ) : null}
       </div>
 
@@ -781,6 +924,7 @@ export default function TicketQueueTable({
             radial-gradient(circle at bottom left, rgba(99, 213, 255, 0.06), transparent 22%),
             linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
             linear-gradient(180deg, rgba(14, 25, 35, 0.96), rgba(7, 13, 21, 0.96));
+          overflow: hidden;
         }
 
         .queue-mobile-stack {
@@ -849,8 +993,10 @@ export default function TicketQueueTable({
         }
 
         .ticket-mobile-card.premium {
+          overflow: hidden;
           border-radius: 22px;
           padding: 14px;
+          color: var(--text-strong, #f8fafc);
           border: 1px solid rgba(255, 255, 255, 0.08);
           background:
             radial-gradient(circle at top right, rgba(93,255,141,0.08), transparent 36%),
@@ -875,6 +1021,7 @@ export default function TicketQueueTable({
         .ticket-mobile-toggle {
           appearance: none;
           -webkit-appearance: none;
+          display: block;
           width: 100%;
           background: transparent;
           border: 0;
@@ -937,9 +1084,27 @@ export default function TicketQueueTable({
           gap: 0;
         }
 
+        .ticket-mobile-list {
+          display: block;
+        }
+
+        .ticket-desktop-table {
+          display: none;
+        }
+
         @media (min-width: 768px) {
           .queue-summary-grid {
             grid-template-columns: repeat(4, minmax(0, 1fr));
+          }
+        }
+
+        @media (min-width: 1024px) {
+          .ticket-mobile-list {
+            display: none;
+          }
+
+          .ticket-desktop-table {
+            display: block;
           }
         }
 
