@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
+
 const DESKTOP_LAYOUT_MIN_WIDTH = 1024;
 
 const TAB_META = {
@@ -41,12 +43,18 @@ const TAB_META = {
       </svg>
     ),
   },
-  account: {
-    label: "Account",
+  actions: {
+    label: "Actions",
     icon: (
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Z" />
-        <path d="M5 20a7 7 0 0 1 14 0" />
+        <path d="M12 3v6" />
+        <path d="M12 15v6" />
+        <path d="M3 12h6" />
+        <path d="M15 12h6" />
+        <path d="m5.64 5.64 4.24 4.24" />
+        <path d="m14.12 14.12 4.24 4.24" />
+        <path d="m18.36 5.64-4.24 4.24" />
+        <path d="m9.88 14.12-4.24 4.24" />
       </svg>
     ),
   },
@@ -71,75 +79,273 @@ export default function MobileBottomNav({
   tabs = [],
   title = "",
   extraActions = [],
+  actionButtonLabel = "Actions",
 }) {
-  const visibleTabs = Array.isArray(tabs)
-    ? tabs.filter(Boolean).slice(0, 5)
-    : [];
+  const [actionsOpen, setActionsOpen] = useState(false);
 
-  const visibleActions = Array.isArray(extraActions)
-    ? extraActions.filter((action) => typeof action?.onClick === "function")
-    : [];
+  const visibleActions = useMemo(
+    () =>
+      Array.isArray(extraActions)
+        ? extraActions.filter((action) => typeof action?.onClick === "function")
+        : [],
+    [extraActions]
+  );
+
+  const visibleTabs = useMemo(() => {
+    const rawTabs = Array.isArray(tabs) ? tabs.filter(Boolean) : [];
+    const maxTabs = visibleActions.length ? 4 : 5;
+    return rawTabs.slice(0, maxTabs);
+  }, [tabs, visibleActions.length]);
+
+  useEffect(() => {
+    setActionsOpen(false);
+  }, [activeTab]);
+
+  useEffect(() => {
+    function onKeyDown(event) {
+      if (event.key === "Escape") {
+        setActionsOpen(false);
+      }
+    }
+
+    if (actionsOpen) {
+      window.addEventListener("keydown", onKeyDown);
+    }
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [actionsOpen]);
 
   if (!visibleTabs.length && !visibleActions.length) return null;
 
   return (
     <>
-      <nav className="sv-mobile-nav-wrap" aria-label="Mobile navigation">
-        {visibleActions.length ? (
-          <div className="sv-mobile-command-shell">
-            {title ? (
-              <div className="sv-mobile-command-title">{title}</div>
-            ) : null}
+      {actionsOpen ? (
+        <div
+          className="sv-mobile-actions-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={title || "Staff actions"}
+          onClick={() => setActionsOpen(false)}
+        >
+          <div
+            className="sv-mobile-actions-sheet"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sv-mobile-actions-handle" />
 
-            <div className="sv-mobile-command-grid">
+            <div className="sv-mobile-actions-header">
+              <div>
+                <div className="sv-mobile-actions-title">
+                  {title || "Staff actions"}
+                </div>
+                <div className="sv-mobile-actions-subtitle">
+                  Fast jumps and command shortcuts
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="sv-mobile-actions-close"
+                onClick={() => setActionsOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="sv-mobile-actions-grid">
               {visibleActions.map((action) => (
                 <button
                   key={action.key || getActionLabel(action)}
                   type="button"
-                  className="sv-mobile-command-item"
-                  onClick={action.onClick}
+                  className="sv-mobile-actions-item"
+                  onClick={() => {
+                    try {
+                      action.onClick?.();
+                    } finally {
+                      setActionsOpen(false);
+                    }
+                  }}
                   disabled={Boolean(action.disabled)}
                   title={getActionLabel(action)}
                 >
                   {action.icon ? (
-                    <span className="sv-mobile-command-emoji" aria-hidden="true">
+                    <span className="sv-mobile-actions-emoji" aria-hidden="true">
                       {action.icon}
                     </span>
                   ) : null}
-                  <span className="sv-mobile-command-label">
+                  <span className="sv-mobile-actions-label">
                     {getActionLabel(action)}
                   </span>
                 </button>
               ))}
             </div>
           </div>
-        ) : null}
+        </div>
+      ) : null}
 
-        {visibleTabs.length ? (
-          <div className="sv-mobile-nav-shell">
-            {visibleTabs.map((tab) => {
-              const meta = getTabMeta(tab);
-              const active = activeTab === tab;
+      <nav className="sv-mobile-nav-wrap" aria-label="Mobile navigation">
+        <div className="sv-mobile-nav-shell">
+          {visibleTabs.map((tab) => {
+            const meta = getTabMeta(tab);
+            const active = activeTab === tab;
 
-              return (
-                <button
-                  key={tab}
-                  type="button"
-                  className={`sv-mobile-nav-item ${active ? "active" : ""}`}
-                  onClick={() => onChange?.(tab)}
-                  aria-current={active ? "page" : undefined}
-                  title={meta.label}
-                >
-                  <span className="sv-mobile-nav-icon">{meta.icon}</span>
-                  <span className="sv-mobile-nav-text">{meta.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
+            return (
+              <button
+                key={tab}
+                type="button"
+                className={`sv-mobile-nav-item ${active ? "active" : ""}`}
+                onClick={() => onChange?.(tab)}
+                aria-current={active ? "page" : undefined}
+                title={meta.label}
+              >
+                <span className="sv-mobile-nav-icon">{meta.icon}</span>
+                <span className="sv-mobile-nav-text">{meta.label}</span>
+              </button>
+            );
+          })}
+
+          {visibleActions.length ? (
+            <button
+              type="button"
+              className={`sv-mobile-nav-item ${actionsOpen ? "active" : ""}`}
+              onClick={() => setActionsOpen((prev) => !prev)}
+              aria-expanded={actionsOpen}
+              title={actionButtonLabel}
+            >
+              <span className="sv-mobile-nav-icon">
+                {TAB_META.actions.icon}
+              </span>
+              <span className="sv-mobile-nav-text">{actionButtonLabel}</span>
+            </button>
+          ) : null}
+        </div>
       </nav>
 
       <style jsx>{`
+        .sv-mobile-actions-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 10000;
+          background: rgba(2, 6, 23, 0.6);
+          backdrop-filter: blur(8px);
+          -webkit-backdrop-filter: blur(8px);
+          display: flex;
+          align-items: flex-end;
+          justify-content: center;
+          padding: 12px;
+        }
+
+        .sv-mobile-actions-sheet {
+          width: min(calc(100vw - 16px), 430px);
+          border-radius: 22px;
+          background: rgba(7, 12, 22, 0.96);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          box-shadow:
+            0 24px 80px rgba(0, 0, 0, 0.42),
+            inset 0 1px 0 rgba(255, 255, 255, 0.04);
+          padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+        }
+
+        .sv-mobile-actions-handle {
+          width: 54px;
+          height: 6px;
+          border-radius: 999px;
+          margin: 0 auto 14px;
+          background: rgba(255, 255, 255, 0.16);
+        }
+
+        .sv-mobile-actions-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 12px;
+          margin-bottom: 14px;
+        }
+
+        .sv-mobile-actions-title {
+          font-size: 18px;
+          font-weight: 900;
+          color: rgba(255, 255, 255, 0.96);
+        }
+
+        .sv-mobile-actions-subtitle {
+          margin-top: 4px;
+          font-size: 12px;
+          line-height: 1.4;
+          color: rgba(255, 255, 255, 0.68);
+        }
+
+        .sv-mobile-actions-close {
+          all: unset;
+          box-sizing: border-box;
+          min-height: 40px;
+          padding: 0 14px;
+          border-radius: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          background: rgba(255, 255, 255, 0.03);
+          color: rgba(255, 255, 255, 0.9);
+          font-size: 12px;
+          font-weight: 800;
+          cursor: pointer;
+          user-select: none;
+        }
+
+        .sv-mobile-actions-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .sv-mobile-actions-item {
+          all: unset;
+          box-sizing: border-box;
+          min-height: 56px;
+          border-radius: 16px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 12px;
+          cursor: pointer;
+          user-select: none;
+          -webkit-tap-highlight-color: transparent;
+          text-align: center;
+          color: rgba(255, 255, 255, 0.9);
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          transition:
+            transform 140ms ease,
+            background 160ms ease,
+            border-color 160ms ease,
+            color 160ms ease,
+            opacity 160ms ease;
+        }
+
+        .sv-mobile-actions-item:active {
+          transform: scale(0.985);
+        }
+
+        .sv-mobile-actions-item:disabled {
+          opacity: 0.55;
+          cursor: default;
+        }
+
+        .sv-mobile-actions-emoji {
+          font-size: 16px;
+          line-height: 1;
+          flex: 0 0 auto;
+        }
+
+        .sv-mobile-actions-label {
+          min-width: 0;
+          font-size: 12px;
+          font-weight: 800;
+          line-height: 1.15;
+          overflow-wrap: anywhere;
+        }
+
         .sv-mobile-nav-wrap {
           position: fixed;
           left: 50%;
@@ -147,12 +353,9 @@ export default function MobileBottomNav({
           bottom: calc(10px + env(safe-area-inset-bottom, 0px));
           z-index: 9999;
           width: min(calc(100vw - 18px), 430px);
-          display: grid;
-          gap: 8px;
           pointer-events: none;
         }
 
-        .sv-mobile-command-shell,
         .sv-mobile-nav-shell {
           pointer-events: auto;
           box-sizing: border-box;
@@ -165,79 +368,8 @@ export default function MobileBottomNav({
           box-shadow:
             0 10px 28px rgba(0, 0, 0, 0.34),
             inset 0 1px 0 rgba(255, 255, 255, 0.04);
-        }
-
-        .sv-mobile-command-shell {
-          padding: 8px;
-        }
-
-        .sv-mobile-command-title {
-          padding: 2px 4px 8px;
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: 0.02em;
-          color: rgba(255, 255, 255, 0.7);
-        }
-
-        .sv-mobile-command-grid {
           display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 8px;
-        }
-
-        .sv-mobile-command-item {
-          all: unset;
-          box-sizing: border-box;
-          min-width: 0;
-          min-height: 48px;
-          border-radius: 14px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          padding: 10px 12px;
-          cursor: pointer;
-          user-select: none;
-          -webkit-tap-highlight-color: transparent;
-          color: rgba(255, 255, 255, 0.86);
-          background: rgba(255, 255, 255, 0.03);
-          border: 1px solid rgba(255, 255, 255, 0.06);
-          transition:
-            transform 140ms ease,
-            background 160ms ease,
-            border-color 160ms ease,
-            color 160ms ease,
-            box-shadow 160ms ease,
-            opacity 160ms ease;
-          text-align: center;
-        }
-
-        .sv-mobile-command-item:active {
-          transform: scale(0.985);
-        }
-
-        .sv-mobile-command-item:disabled {
-          opacity: 0.55;
-          cursor: default;
-        }
-
-        .sv-mobile-command-emoji {
-          font-size: 14px;
-          line-height: 1;
-          flex: 0 0 auto;
-        }
-
-        .sv-mobile-command-label {
-          min-width: 0;
-          font-size: 11px;
-          font-weight: 800;
-          line-height: 1.15;
-          overflow-wrap: anywhere;
-        }
-
-        .sv-mobile-nav-shell {
-          display: grid;
-          grid-template-columns: repeat(${visibleTabs.length || 1}, minmax(0, 1fr));
+          grid-template-columns: repeat(${visibleTabs.length + (visibleActions.length ? 1 : 0) || 1}, minmax(0, 1fr));
           align-items: stretch;
           gap: 8px;
           padding: 7px;
@@ -323,19 +455,10 @@ export default function MobileBottomNav({
         @media (max-width: 380px) {
           .sv-mobile-nav-wrap {
             width: min(calc(100vw - 14px), 420px);
-            gap: 6px;
-          }
-
-          .sv-mobile-command-shell {
-            padding: 6px;
-          }
-
-          .sv-mobile-command-grid,
-          .sv-mobile-nav-shell {
-            gap: 6px;
           }
 
           .sv-mobile-nav-shell {
+            gap: 6px;
             padding: 6px;
           }
 
@@ -344,13 +467,18 @@ export default function MobileBottomNav({
           }
 
           .sv-mobile-nav-text,
-          .sv-mobile-command-label {
+          .sv-mobile-actions-label {
             font-size: 10px;
+          }
+
+          .sv-mobile-actions-grid {
+            gap: 8px;
           }
         }
 
         @media (min-width: ${DESKTOP_LAYOUT_MIN_WIDTH}px) {
-          .sv-mobile-nav-wrap {
+          .sv-mobile-nav-wrap,
+          .sv-mobile-actions-overlay {
             display: none;
           }
         }
