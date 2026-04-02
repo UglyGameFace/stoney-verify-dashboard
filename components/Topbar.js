@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import AuthStatus from "@/components/AuthStatus";
 
+const DESKTOP_LAYOUT_MIN_WIDTH = 1024;
+
 function getHeaderContent(session) {
   if (session?.isStaff) {
     return {
@@ -191,11 +193,13 @@ export default function Topbar() {
           align-items: center;
           gap: 10px;
           min-width: 0;
+          max-width: 100%;
         }
 
         .topbar-eyebrow {
           font-size: 13px;
           letter-spacing: 0.02em;
+          overflow-wrap: anywhere;
         }
 
         .orb {
@@ -235,6 +239,7 @@ export default function Topbar() {
           background: rgba(255, 255, 255, 0.04);
           backdrop-filter: blur(10px);
           -webkit-backdrop-filter: blur(10px);
+          flex-shrink: 0;
         }
 
         .topbar-badge.staff {
@@ -258,6 +263,7 @@ export default function Topbar() {
           font-weight: 950;
           color: var(--text-strong, #f8fafc);
           text-wrap: balance;
+          overflow-wrap: anywhere;
         }
 
         .topbar-description {
@@ -265,13 +271,27 @@ export default function Topbar() {
           max-width: 700px;
           line-height: 1.55;
           font-size: 14px;
+          overflow-wrap: anywhere;
         }
 
-        @media (min-width: 900px) {
+        @media (min-width: ${DESKTOP_LAYOUT_MIN_WIDTH}px) {
           .topbar-grid {
-            grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+            grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
             gap: 16px;
             align-items: center;
+          }
+
+          .topbar-auth-wrap {
+            align-self: stretch;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+          }
+        }
+
+        @media (max-width: ${DESKTOP_LAYOUT_MIN_WIDTH - 1}px) {
+          .topbar-auth-wrap {
+            order: 2;
           }
         }
 
