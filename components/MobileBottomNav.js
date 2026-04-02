@@ -97,6 +97,8 @@ export default function MobileBottomNav({
     return rawTabs.slice(0, maxTabs);
   }, [tabs, visibleActions.length]);
 
+  const totalNavItems = visibleTabs.length + (visibleActions.length ? 1 : 0);
+
   useEffect(() => {
     setActionsOpen(false);
   }, [activeTab]);
@@ -116,6 +118,17 @@ export default function MobileBottomNav({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [actionsOpen]);
+
+  useEffect(() => {
+    function onResize() {
+      if (window.innerWidth >= DESKTOP_LAYOUT_MIN_WIDTH) {
+        setActionsOpen(false);
+      }
+    }
+
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   if (!visibleTabs.length && !visibleActions.length) return null;
 
@@ -138,10 +151,10 @@ export default function MobileBottomNav({
             <div className="sv-mobile-actions-header">
               <div>
                 <div className="sv-mobile-actions-title">
-                  {title || "Staff actions"}
+                  {title || "Staff Actions"}
                 </div>
                 <div className="sv-mobile-actions-subtitle">
-                  Fast jumps and command shortcuts
+                  Fast jumps and moderation shortcuts
                 </div>
               </div>
 
@@ -175,6 +188,7 @@ export default function MobileBottomNav({
                       {action.icon}
                     </span>
                   ) : null}
+
                   <span className="sv-mobile-actions-label">
                     {getActionLabel(action)}
                   </span>
@@ -228,19 +242,27 @@ export default function MobileBottomNav({
           position: fixed;
           inset: 0;
           z-index: 10000;
-          background: rgba(2, 6, 23, 0.6);
-          backdrop-filter: blur(8px);
-          -webkit-backdrop-filter: blur(8px);
+          background: rgba(2, 6, 23, 0.64);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
           display: flex;
           align-items: flex-end;
           justify-content: center;
-          padding: 12px;
+          padding: 12px 10px
+            calc(12px + env(safe-area-inset-bottom, 0px) + 84px);
         }
 
         .sv-mobile-actions-sheet {
-          width: min(calc(100vw - 16px), 430px);
+          width: min(calc(100vw - 12px), 430px);
+          max-height: min(72vh, 520px);
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
+          overscroll-behavior: contain;
           border-radius: 22px;
-          background: rgba(7, 12, 22, 0.96);
+          background:
+            radial-gradient(circle at top right, rgba(93, 255, 141, 0.08), transparent 30%),
+            radial-gradient(circle at bottom left, rgba(99, 213, 255, 0.08), transparent 28%),
+            rgba(7, 12, 22, 0.97);
           border: 1px solid rgba(255, 255, 255, 0.08);
           box-shadow:
             0 24px 80px rgba(0, 0, 0, 0.42),
@@ -268,6 +290,7 @@ export default function MobileBottomNav({
           font-size: 18px;
           font-weight: 900;
           color: rgba(255, 255, 255, 0.96);
+          letter-spacing: -0.02em;
         }
 
         .sv-mobile-actions-subtitle {
@@ -301,7 +324,7 @@ export default function MobileBottomNav({
         .sv-mobile-actions-item {
           all: unset;
           box-sizing: border-box;
-          min-height: 56px;
+          min-height: 58px;
           border-radius: 16px;
           display: flex;
           align-items: center;
@@ -352,7 +375,7 @@ export default function MobileBottomNav({
           transform: translateX(-50%);
           bottom: calc(10px + env(safe-area-inset-bottom, 0px));
           z-index: 9999;
-          width: min(calc(100vw - 18px), 430px);
+          width: min(calc(100vw - 14px), 430px);
           pointer-events: none;
         }
 
@@ -360,8 +383,11 @@ export default function MobileBottomNav({
           pointer-events: auto;
           box-sizing: border-box;
           width: 100%;
-          border-radius: 18px;
-          background: rgba(7, 12, 22, 0.9);
+          border-radius: 20px;
+          background:
+            radial-gradient(circle at top right, rgba(93, 255, 141, 0.05), transparent 34%),
+            radial-gradient(circle at bottom left, rgba(99, 213, 255, 0.05), transparent 28%),
+            rgba(7, 12, 22, 0.92);
           border: 1px solid rgba(255, 255, 255, 0.08);
           backdrop-filter: blur(16px);
           -webkit-backdrop-filter: blur(16px);
@@ -369,7 +395,7 @@ export default function MobileBottomNav({
             0 10px 28px rgba(0, 0, 0, 0.34),
             inset 0 1px 0 rgba(255, 255, 255, 0.04);
           display: grid;
-          grid-template-columns: repeat(${visibleTabs.length + (visibleActions.length ? 1 : 0) || 1}, minmax(0, 1fr));
+          grid-template-columns: repeat(${totalNavItems || 1}, minmax(0, 1fr));
           align-items: stretch;
           gap: 8px;
           padding: 7px;
@@ -380,7 +406,7 @@ export default function MobileBottomNav({
           box-sizing: border-box;
           min-width: 0;
           height: 66px;
-          border-radius: 15px;
+          border-radius: 16px;
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -454,7 +480,7 @@ export default function MobileBottomNav({
 
         @media (max-width: 380px) {
           .sv-mobile-nav-wrap {
-            width: min(calc(100vw - 14px), 420px);
+            width: min(calc(100vw - 10px), 420px);
           }
 
           .sv-mobile-nav-shell {
@@ -464,6 +490,7 @@ export default function MobileBottomNav({
 
           .sv-mobile-nav-item {
             height: 62px;
+            border-radius: 15px;
           }
 
           .sv-mobile-nav-text,
