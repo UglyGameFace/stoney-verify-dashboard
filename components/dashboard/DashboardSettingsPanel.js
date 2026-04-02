@@ -41,9 +41,7 @@ function ToneSwatch({ label, value, onChange, helper }) {
         onChange={(e) => onChange(e.target.value)}
         className="settings-color-input"
       />
-      {helper ? (
-        <div className="muted settings-helper-copy">{helper}</div>
-      ) : null}
+      {helper ? <div className="muted settings-helper-copy">{helper}</div> : null}
     </div>
   );
 }
@@ -63,12 +61,7 @@ function VisibilityPill({ label, active, onToggle }) {
   );
 }
 
-function SectionVisibilityList({
-  title,
-  keys,
-  visibility,
-  onToggle,
-}) {
+function SectionVisibilityList({ title, keys, visibility, onToggle }) {
   return (
     <div className="settings-section-card">
       <div className="settings-section-heading">
@@ -115,9 +108,7 @@ function MoveButtons({ area, items, onMove }) {
               <div className="settings-move-label">
                 {SECTION_LABELS[item] || item}
               </div>
-              <div className="muted settings-helper-copy">
-                Position {index + 1}
-              </div>
+              <div className="muted settings-helper-copy">Position {index + 1}</div>
             </div>
 
             <div className="settings-move-actions">
@@ -243,12 +234,7 @@ function ProfileCard({
   );
 }
 
-function SettingsAccordion({
-  title,
-  chip,
-  defaultOpen = false,
-  children,
-}) {
+function SettingsAccordion({ title, chip, defaultOpen = false, children }) {
   const [open, setOpen] = useState(defaultOpen);
 
   return (
@@ -389,10 +375,7 @@ export default function DashboardSettingsPanel({
       className="settings-overlay"
       onClick={onClose}
     >
-      <div
-        className="settings-sheet"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="settings-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="settings-sheet-handle" />
 
         <div className="settings-head">
@@ -673,10 +656,7 @@ export default function DashboardSettingsPanel({
             display: flex;
             align-items: flex-end;
             justify-content: center;
-            padding:
-              12px
-              10px
-              calc(20px + env(safe-area-inset-bottom, 0px) + 84px);
+            padding: 12px 10px calc(20px + env(safe-area-inset-bottom, 0px) + 84px);
             overscroll-behavior: contain;
             touch-action: auto;
           }
