@@ -6,25 +6,45 @@ import AuthStatus from "@/components/AuthStatus";
 const DESKTOP_LAYOUT_MIN_WIDTH = 1024;
 
 function getHeaderContent(session) {
-  if (session?.isStaff) {
+  const member = session?.member || {};
+  const isStaff = Boolean(session?.isStaff);
+  const hasVerified = Boolean(
+    member?.has_verified_role || member?.has_secondary_verified_role
+  );
+  const hasUnverified = Boolean(
+    member?.has_unverified || member?.has_unverified_role
+  );
+
+  if (isStaff) {
     return {
       eyebrow: "Staff control room",
       title: "Stoney Verify",
       description:
-        "Verification, tickets, moderation, and live staff actions in one place.",
+        "Verification, tickets, moderation, member tracking, and live staff actions in one place.",
       badge: "Staff",
       tone: "staff",
       accent: "green-blue",
+      statusLine: "Live moderation tools enabled",
     };
   }
 
   return {
     eyebrow: "Member portal",
     title: "My Dashboard",
-    description: "Your verification status, support access, and current ticket.",
-    badge: "Member",
+    description:
+      "Your verification progress, support access, ticket updates, and member status in one place.",
+    badge: hasVerified
+      ? "Verified"
+      : hasUnverified
+        ? "Pending"
+        : "Member",
     tone: "member",
     accent: "green-purple",
+    statusLine: hasVerified
+      ? "Verified access detected"
+      : hasUnverified
+        ? "Pending verification detected"
+        : "Account session active",
   };
 }
 
@@ -38,25 +58,28 @@ export default function Topbar() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const controller = new AbortController();
     let mounted = true;
 
     async function loadSession() {
       try {
         const res = await fetch("/api/auth/me", {
           cache: "no-store",
+          signal: controller.signal,
         });
 
         const json = await res.json().catch(() => null);
 
         if (!mounted) return;
 
-        if (res.ok) {
-          setSession(json?.session || null);
+        if (res.ok && json?.session) {
+          setSession(json.session);
         } else {
           setSession(null);
         }
-      } catch {
+      } catch (err) {
         if (!mounted) return;
+        if (err?.name === "AbortError") return;
         setSession(null);
       } finally {
         if (mounted) {
@@ -69,11 +92,19 @@ export default function Topbar() {
 
     return () => {
       mounted = false;
+      controller.abort();
     };
   }, []);
 
   const content = useMemo(() => getHeaderContent(session), [session]);
   const orbClass = getOrbClass(content.accent);
+
+  const displayName =
+    session?.member?.display_name ||
+    session?.discordUser?.global_name ||
+    session?.discordUser?.username ||
+    session?.user?.username ||
+    "";
 
   return (
     <div
@@ -105,6 +136,20 @@ export default function Topbar() {
           <div className="muted topbar-description">
             {loading ? "Getting your dashboard ready..." : content.description}
           </div>
+
+          {!loading ? (
+            <div className="topbar-status-row">
+              <span className={`topbar-status-chip ${content.tone}`}>
+                {content.statusLine}
+              </span>
+
+              {displayName ? (
+                <span className="topbar-session-name">
+                  Signed in as <strong>{displayName}</strong>
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <div className="topbar-auth-wrap">
@@ -268,9 +313,48 @@ export default function Topbar() {
 
         .topbar-description {
           margin-top: 10px;
-          max-width: 700px;
+          max-width: 720px;
           line-height: 1.55;
           font-size: 14px;
+          overflow-wrap: anywhere;
+        }
+
+        .topbar-status-row {
+          margin-top: 12px;
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .topbar-status-chip {
+          display: inline-flex;
+          align-items: center;
+          min-height: 30px;
+          padding: 6px 12px;
+          border-radius: 999px;
+          font-size: 11px;
+          font-weight: 800;
+          line-height: 1;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          color: var(--text-strong, #f8fafc);
+          background: rgba(255, 255, 255, 0.04);
+        }
+
+        .topbar-status-chip.staff {
+          border-color: rgba(93, 255, 141, 0.2);
+          background: rgba(93, 255, 141, 0.12);
+        }
+
+        .topbar-status-chip.member {
+          border-color: rgba(178, 109, 255, 0.2);
+          background: rgba(178, 109, 255, 0.12);
+        }
+
+        .topbar-session-name {
+          font-size: 12px;
+          color: var(--text-muted, rgba(255, 255, 255, 0.72));
+          line-height: 1.35;
           overflow-wrap: anywhere;
         }
 
@@ -310,10 +394,10 @@ export default function Topbar() {
             line-height: 1.5;
           }
 
-          .topbar-badge {
+          .topbar-badge,
+          .topbar-status-chip {
             min-height: 30px;
             padding: 6px 11px;
-            font-size: 10px;
           }
         }
       `}</style>
