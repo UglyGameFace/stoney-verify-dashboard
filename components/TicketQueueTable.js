@@ -140,7 +140,7 @@ function getSummaryStats(tickets) {
   };
 }
 
-function summaryChip(label, value, tone = "default") {
+function SummaryChip({ label, value, tone = "default" }) {
   return (
     <div className={`queue-summary-chip ${tone}`}>
       <span className="queue-summary-chip-label">{label}</span>
@@ -149,7 +149,7 @@ function summaryChip(label, value, tone = "default") {
   );
 }
 
-function metaBlock(label, value, full = false) {
+function MetaBlock({ label, value, full = false }) {
   return (
     <div className={`ticket-mobile-meta-item ${full ? "full" : ""}`}>
       <span className="ticket-mobile-meta-label">{label}</span>
@@ -158,13 +158,11 @@ function metaBlock(label, value, full = false) {
   );
 }
 
-function desktopMiniField(label, value) {
+function MiniField({ label, value, full = false }) {
   return (
-    <div>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-        {label}
-      </div>
-      <div style={{ overflowWrap: "anywhere" }}>{value}</div>
+    <div className={`ticket-info-item ${full ? "full" : ""}`}>
+      <span className="ticket-info-label">{label}</span>
+      <span style={{ overflowWrap: "anywhere" }}>{value}</span>
     </div>
   );
 }
@@ -176,40 +174,6 @@ function CategoryDisplay({ ticket, compact = false }) {
   const reason = getCategoryReason(ticket);
   const score = getCategoryScore(ticket);
   const matched = hasMatchedCategory(ticket);
-
-  if (compact) {
-    return (
-      <div style={{ display: "grid", gap: 6 }}>
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            flexWrap: "wrap",
-            alignItems: "center",
-          }}
-        >
-          <span className={matched ? "badge claimed" : "badge"}>
-            {categoryName}
-          </span>
-          {intakeType ? (
-            <span className={badgeClass(intakeType)}>{intakeType}</span>
-          ) : null}
-        </div>
-
-        {reason ? (
-          <div className="muted" style={{ fontSize: 12, lineHeight: 1.35 }}>
-            {reason} {score > 0 ? `• score ${score}` : ""}
-          </div>
-        ) : null}
-
-        {categorySlug && categorySlug !== categoryName ? (
-          <div className="muted" style={{ fontSize: 12, lineHeight: 1.35 }}>
-            {categorySlug}
-          </div>
-        ) : null}
-      </div>
-    );
-  }
 
   return (
     <div style={{ display: "grid", gap: 6 }}>
@@ -231,7 +195,7 @@ function CategoryDisplay({ ticket, compact = false }) {
 
       {reason ? (
         <div className="muted" style={{ fontSize: 12, lineHeight: 1.35 }}>
-          Match: {reason}
+          {compact ? reason : `Match: ${reason}`}
           {score > 0 ? ` • score ${score}` : ""}
         </div>
       ) : null}
@@ -245,10 +209,98 @@ function CategoryDisplay({ ticket, compact = false }) {
   );
 }
 
+function TicketHeaderBadges({ ticket }) {
+  const status = getStatus(ticket);
+  const missingChannel = hasMissingChannel(ticket);
+  const ghost = isGhost(ticket);
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 8,
+        alignItems: "center",
+      }}
+    >
+      <span className={badgeClass(status)}>{safeText(ticket.status)}</span>
+      <span className={badgeClass(ticket.priority)}>
+        {safeText(ticket.priority)}
+      </span>
+      {ghost ? <span className="badge">Ghost</span> : null}
+      {missingChannel ? <span className="badge danger">Missing Channel</span> : null}
+    </div>
+  );
+}
+
+function TicketExpandedDetails({ ticket, currentStaffId, onRefresh }) {
+  const channelId = getChannelId(ticket);
+  const ghost = isGhost(ticket);
+
+  return (
+    <div className="ticket-expanded-shell">
+      <div className="ticket-info-grid" style={{ marginBottom: 14 }}>
+        <MiniField label="Category" value={getDisplayedCategoryName(ticket)} />
+        <MiniField
+          label="Intake Type"
+          value={getDisplayedIntakeType(ticket) || "—"}
+        />
+        <MiniField label="Claimed By" value={safeText(ticket.claimed_by)} />
+        <MiniField label="Channel ID" value={channelId || "Missing"} />
+        <MiniField label="User ID" value={safeText(ticket.user_id)} />
+        <MiniField
+          label="Updated"
+          value={timeAgo(ticket.updated_at || ticket.created_at)}
+        />
+        <MiniField label="Ghost" value={ghost ? "yes" : "no"} />
+        <MiniField
+          label="Match Reason"
+          value={getCategoryReason(ticket) || "—"}
+          full
+        />
+        {!!ticket.mod_suggestion ? (
+          <MiniField label="Suggestion" value={ticket.mod_suggestion} full />
+        ) : null}
+        {!!ticket.closed_reason ? (
+          <MiniField label="Closed Reason" value={ticket.closed_reason} full />
+        ) : null}
+      </div>
+
+      <div
+        className="row"
+        style={{
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          marginBottom: 14,
+          flexWrap: "wrap",
+        }}
+      >
+        <div className="muted" style={{ fontSize: 12 }}>
+          Full ticket view gives you the full conversation, reply flow, notes,
+          transcript links, and verification actions.
+        </div>
+
+        <Link
+          className="button ghost"
+          href={`/tickets/${ticket.id}`}
+          style={{ width: "auto", minWidth: 150 }}
+        >
+          Open Full Ticket
+        </Link>
+      </div>
+
+      <TicketControls
+        ticket={ticket}
+        currentStaffId={currentStaffId}
+        onChanged={onRefresh}
+      />
+    </div>
+  );
+}
+
 function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
   const [expanded, setExpanded] = useState(false);
-
-  const status = getStatus(ticket);
   const channelId = getChannelId(ticket);
   const missingChannel = hasMissingChannel(ticket);
   const ghost = isGhost(ticket);
@@ -281,25 +333,8 @@ function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
           }}
         >
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 8,
-                alignItems: "center",
-                marginBottom: 6,
-              }}
-            >
-              <span className={badgeClass(status)}>
-                {safeText(ticket.status)}
-              </span>
-              <span className={badgeClass(ticket.priority)}>
-                {safeText(ticket.priority)}
-              </span>
-              {ghost ? <span className="badge">Ghost</span> : null}
-              {missingChannel ? (
-                <span className="badge danger">Missing Channel</span>
-              ) : null}
+            <div style={{ marginBottom: 6 }}>
+              <TicketHeaderBadges ticket={ticket} />
             </div>
 
             <div className="queue-ticket-name">{getTicketUserLabel(ticket)}</div>
@@ -328,6 +363,37 @@ function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
 
       {expanded ? (
         <>
+          <div className="ticket-mobile-meta" style={{ marginTop: 12 }}>
+            <MetaBlock label="Category" value={getDisplayedCategoryName(ticket)} />
+            <MetaBlock
+              label="Intake Type"
+              value={getDisplayedIntakeType(ticket) || "—"}
+            />
+            <MetaBlock label="Claimed By" value={safeText(ticket.claimed_by)} />
+            <MetaBlock label="Priority" value={safeText(ticket.priority)} />
+            <MetaBlock label="Status" value={safeText(ticket.status)} />
+            <MetaBlock label="Channel" value={channelId || "Missing"} full />
+            <MetaBlock label="User ID" value={safeText(ticket.user_id)} full />
+            <MetaBlock label="Ghost" value={ghost ? "yes" : "no"} />
+            <MetaBlock
+              label="Updated"
+              value={timeAgo(ticket.updated_at || ticket.created_at)}
+            />
+            <MetaBlock
+              label="Match Reason"
+              value={getCategoryReason(ticket) || "—"}
+              full
+            />
+            <MetaBlock
+              label="Suggestion"
+              value={ticket.mod_suggestion || "—"}
+              full
+            />
+            {!!ticket.closed_reason ? (
+              <MetaBlock label="Closed Reason" value={ticket.closed_reason} full />
+            ) : null}
+          </div>
+
           <div
             className="row"
             style={{
@@ -340,7 +406,8 @@ function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
             }}
           >
             <div className="muted" style={{ fontSize: 12 }}>
-              Full ticket page gives you full conversation, reply flow, notes, and verification actions.
+              Full ticket page gives you full conversation, reply flow, notes,
+              and verification actions.
             </div>
 
             <Link
@@ -352,24 +419,6 @@ function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
             </Link>
           </div>
 
-          <div className="ticket-mobile-meta">
-            {metaBlock("Category", getDisplayedCategoryName(ticket))}
-            {metaBlock("Intake Type", getDisplayedIntakeType(ticket) || "—")}
-            {metaBlock("Claimed By", safeText(ticket.claimed_by))}
-            {metaBlock("Priority", safeText(ticket.priority))}
-            {metaBlock("Status", safeText(ticket.status))}
-            {metaBlock("Channel", channelId || "Missing", true)}
-            {metaBlock("User ID", safeText(ticket.user_id), true)}
-            {metaBlock("Ghost", ghost ? "yes" : "no")}
-            {metaBlock("Updated", timeAgo(ticket.updated_at || ticket.created_at))}
-            {metaBlock("Match Reason", getCategoryReason(ticket) || "—", true)}
-            {metaBlock("Suggestion", ticket.mod_suggestion || "—", true)}
-
-            {!!ticket.closed_reason
-              ? metaBlock("Closed Reason", ticket.closed_reason, true)
-              : null}
-          </div>
-
           <TicketControls
             ticket={ticket}
             currentStaffId={currentStaffId}
@@ -377,59 +426,6 @@ function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
           />
         </>
       ) : null}
-
-      <style jsx>{`
-        .ticket-mobile-card.premium {
-          border-radius: 22px;
-          padding: 14px;
-          background:
-            radial-gradient(circle at top right, rgba(93,255,141,0.06), transparent 38%),
-            linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)),
-            rgba(255,255,255,0.025);
-        }
-
-        .ticket-mobile-card.expanded {
-          background:
-            radial-gradient(circle at top right, rgba(99,213,255,0.08), transparent 38%),
-            rgba(99,213,255,0.05);
-        }
-
-        .ticket-mobile-toggle {
-          appearance: none;
-          -webkit-appearance: none;
-          width: 100%;
-          background: transparent;
-          border: 0;
-          padding: 0;
-          margin: 0;
-          text-align: left;
-          color: inherit;
-          cursor: pointer;
-        }
-
-        .queue-ticket-name {
-          font-weight: 900;
-          font-size: 16px;
-          overflow-wrap: anywhere;
-          line-height: 1.12;
-          color: var(--text-strong, #f8fafc);
-          letter-spacing: -0.02em;
-        }
-
-        .queue-ticket-subtitle {
-          margin-top: 6px;
-          font-size: 13px;
-          overflow-wrap: anywhere;
-          line-height: 1.35;
-        }
-
-        .queue-ticket-time {
-          font-size: 12px;
-          white-space: nowrap;
-          flex-shrink: 0;
-          text-align: right;
-        }
-      `}</style>
     </div>
   );
 }
@@ -442,6 +438,11 @@ export default function TicketQueueTable({
   createTicketTargetName = "",
 }) {
   const stats = useMemo(() => getSummaryStats(tickets), [tickets]);
+  const [expandedDesktopId, setExpandedDesktopId] = useState(null);
+
+  function toggleDesktopTicket(ticketId) {
+    setExpandedDesktopId((prev) => (prev === ticketId ? null : ticketId));
+  }
 
   return (
     <div className="card" id="tickets">
@@ -491,23 +492,31 @@ export default function TicketQueueTable({
       </div>
 
       <div className="queue-summary-grid" style={{ marginBottom: 14 }}>
-        {summaryChip("Total", stats.total)}
-        {summaryChip("Open", stats.open, "open")}
-        {summaryChip("Claimed", stats.claimed, "claimed")}
-        {summaryChip("Urgent", stats.urgent, "danger")}
-        {summaryChip("High", stats.high, "warn")}
-        {summaryChip("Matched", stats.matched, stats.matched ? "claimed" : "default")}
-        {summaryChip(
-          "Verification",
-          stats.verificationLike,
-          stats.verificationLike ? "open" : "default"
-        )}
-        {summaryChip(
-          "Missing Channel",
-          stats.missingChannel,
-          stats.missingChannel ? "danger" : "default"
-        )}
-        {summaryChip("Ghost", stats.ghosts, stats.ghosts ? "warn" : "default")}
+        <SummaryChip label="Total" value={stats.total} />
+        <SummaryChip label="Open" value={stats.open} tone="open" />
+        <SummaryChip label="Claimed" value={stats.claimed} tone="claimed" />
+        <SummaryChip label="Urgent" value={stats.urgent} tone="danger" />
+        <SummaryChip label="High" value={stats.high} tone="warn" />
+        <SummaryChip
+          label="Matched"
+          value={stats.matched}
+          tone={stats.matched ? "claimed" : "default"}
+        />
+        <SummaryChip
+          label="Verification"
+          value={stats.verificationLike}
+          tone={stats.verificationLike ? "open" : "default"}
+        />
+        <SummaryChip
+          label="Missing Channel"
+          value={stats.missingChannel}
+          tone={stats.missingChannel ? "danger" : "default"}
+        />
+        <SummaryChip
+          label="Ghost"
+          value={stats.ghosts}
+          tone={stats.ghosts ? "warn" : "default"}
+        />
       </div>
 
       {!tickets.length ? (
@@ -541,7 +550,7 @@ export default function TicketQueueTable({
                     <th>Claimed By</th>
                     <th>Channel</th>
                     <th>Updated</th>
-                    <th>Open</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
 
@@ -551,264 +560,148 @@ export default function TicketQueueTable({
                     const status = getStatus(ticket);
                     const missingChannel = hasMissingChannel(ticket);
                     const ghost = isGhost(ticket);
+                    const isExpanded = expandedDesktopId === ticket.id;
 
                     return (
-                      <tr
-                        key={ticket.id}
-                        style={
-                          missingChannel
-                            ? {
-                                background: "rgba(248,113,113,0.04)",
-                              }
-                            : undefined
-                        }
-                      >
-                        <td>
-                          <div
-                            style={{
-                              display: "flex",
-                              flexWrap: "wrap",
-                              gap: 8,
-                              marginBottom: 6,
-                              alignItems: "center",
-                            }}
-                          >
+                      <>
+                        <tr
+                          key={ticket.id}
+                          style={
+                            missingChannel
+                              ? { background: "rgba(248,113,113,0.04)" }
+                              : undefined
+                          }
+                        >
+                          <td>
+                            <div
+                              style={{
+                                display: "flex",
+                                flexWrap: "wrap",
+                                gap: 8,
+                                marginBottom: 6,
+                                alignItems: "center",
+                              }}
+                            >
+                              <span className={badgeClass(status)}>
+                                {safeText(ticket.status)}
+                              </span>
+                              <span className={badgeClass(ticket.priority)}>
+                                {safeText(ticket.priority)}
+                              </span>
+                              {ghost ? <span className="badge">Ghost</span> : null}
+                              {missingChannel ? (
+                                <span className="badge danger">Missing Channel</span>
+                              ) : null}
+                            </div>
+
+                            <div style={{ fontWeight: 800 }}>
+                              {getTicketUserLabel(ticket)}
+                            </div>
+
+                            <div
+                              className="muted"
+                              style={{
+                                fontSize: 13,
+                                marginTop: 4,
+                                whiteSpace: "normal",
+                                overflowWrap: "anywhere",
+                                lineHeight: 1.35,
+                              }}
+                            >
+                              {getTicketTitle(ticket)}
+                            </div>
+                          </td>
+
+                          <td style={{ whiteSpace: "normal", minWidth: 220 }}>
+                            <CategoryDisplay ticket={ticket} />
+                          </td>
+
+                          <td>
                             <span className={badgeClass(status)}>
                               {safeText(ticket.status)}
                             </span>
+                          </td>
+
+                          <td>
                             <span className={badgeClass(ticket.priority)}>
                               {safeText(ticket.priority)}
                             </span>
-                            {ghost ? <span className="badge">Ghost</span> : null}
-                            {missingChannel ? (
-                              <span className="badge danger">Missing Channel</span>
-                            ) : null}
-                          </div>
+                          </td>
 
-                          <div style={{ fontWeight: 800 }}>
-                            {getTicketUserLabel(ticket)}
-                          </div>
+                          <td style={{ whiteSpace: "normal" }}>
+                            {safeText(ticket.claimed_by)}
+                          </td>
 
-                          <div
-                            className="muted"
-                            style={{
-                              fontSize: 13,
-                              marginTop: 4,
-                              whiteSpace: "normal",
-                              overflowWrap: "anywhere",
-                              lineHeight: 1.35,
-                            }}
-                          >
-                            {getTicketTitle(ticket)}
-                          </div>
-                        </td>
+                          <td>
+                            <div
+                              style={{
+                                fontSize: 13,
+                                overflowWrap: "anywhere",
+                                whiteSpace: "normal",
+                                color: missingChannel ? "#fca5a5" : undefined,
+                                fontWeight: missingChannel ? 700 : undefined,
+                              }}
+                            >
+                              {channelId || "Missing"}
+                            </div>
+                          </td>
 
-                        <td style={{ whiteSpace: "normal", minWidth: 220 }}>
-                          <CategoryDisplay ticket={ticket} />
-                        </td>
+                          <td>{timeAgo(ticket.updated_at || ticket.created_at)}</td>
 
-                        <td>
-                          <span className={badgeClass(status)}>
-                            {safeText(ticket.status)}
-                          </span>
-                        </td>
+                          <td>
+                            <div
+                              style={{
+                                display: "flex",
+                                flexWrap: "wrap",
+                                gap: 8,
+                                alignItems: "center",
+                              }}
+                            >
+                              <button
+                                type="button"
+                                className="button ghost"
+                                style={{ width: "auto", minWidth: 118 }}
+                                onClick={() => toggleDesktopTicket(ticket.id)}
+                              >
+                                {isExpanded ? "Hide Tools" : "Open Tools"}
+                              </button>
 
-                        <td>
-                          <span className={badgeClass(ticket.priority)}>
-                            {safeText(ticket.priority)}
-                          </span>
-                        </td>
+                              <Link
+                                className="button ghost"
+                                href={`/tickets/${ticket.id}`}
+                                style={{ width: "auto", minWidth: 110 }}
+                              >
+                                Full Ticket
+                              </Link>
+                            </div>
+                          </td>
+                        </tr>
 
-                        <td style={{ whiteSpace: "normal" }}>
-                          {safeText(ticket.claimed_by)}
-                        </td>
-
-                        <td>
-                          <div
-                            style={{
-                              fontSize: 13,
-                              overflowWrap: "anywhere",
-                              whiteSpace: "normal",
-                              color: missingChannel ? "#fca5a5" : undefined,
-                              fontWeight: missingChannel ? 700 : undefined,
-                            }}
-                          >
-                            {channelId || "Missing"}
-                          </div>
-                        </td>
-
-                        <td>{timeAgo(ticket.updated_at || ticket.created_at)}</td>
-
-                        <td>
-                          <Link className="button ghost" href={`/tickets/${ticket.id}`}>
-                            Open
-                          </Link>
-                        </td>
-                      </tr>
+                        {isExpanded ? (
+                          <tr key={`${ticket.id}-expanded`}>
+                            <td
+                              colSpan={8}
+                              style={{
+                                whiteSpace: "normal",
+                                padding: 0,
+                                borderBottom: "1px solid rgba(255,255,255,0.06)",
+                              }}
+                            >
+                              <div className="ticket-desktop-expanded">
+                                <TicketExpandedDetails
+                                  ticket={ticket}
+                                  currentStaffId={currentStaffId}
+                                  onRefresh={onRefresh}
+                                />
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </>
                     );
                   })}
                 </tbody>
               </table>
-            </div>
-
-            <div style={{ marginTop: 16, display: "grid", gap: 14 }}>
-              {tickets.map((ticket) => {
-                const channelId = getChannelId(ticket);
-                const missingChannel = hasMissingChannel(ticket);
-                const ghost = isGhost(ticket);
-
-                return (
-                  <div
-                    key={`${ticket.id}-controls`}
-                    className="card"
-                    style={{
-                      padding: 16,
-                      borderRadius: 18,
-                      border: missingChannel
-                        ? "1px solid rgba(248,113,113,0.24)"
-                        : "1px solid rgba(255,255,255,0.08)",
-                      background: missingChannel
-                        ? "rgba(248,113,113,0.04)"
-                        : undefined,
-                    }}
-                  >
-                    <div
-                      className="row"
-                      style={{
-                        justifyContent: "space-between",
-                        alignItems: "flex-start",
-                        gap: 12,
-                        marginBottom: 12,
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: 8,
-                            flexWrap: "wrap",
-                            alignItems: "center",
-                            marginBottom: 8,
-                          }}
-                        >
-                          <span className={badgeClass(ticket.status)}>
-                            {safeText(ticket.status)}
-                          </span>
-                          <span className={badgeClass(ticket.priority)}>
-                            {safeText(ticket.priority)}
-                          </span>
-                          {ghost ? <span className="badge">Ghost</span> : null}
-                          {missingChannel ? (
-                            <span className="badge danger">Missing Channel</span>
-                          ) : null}
-                        </div>
-
-                        <div
-                          style={{
-                            fontWeight: 800,
-                            fontSize: 16,
-                            overflowWrap: "anywhere",
-                            lineHeight: 1.15,
-                          }}
-                        >
-                          {getTicketUserLabel(ticket)}
-                        </div>
-
-                        <div
-                          className="muted"
-                          style={{
-                            marginTop: 4,
-                            fontSize: 13,
-                            overflowWrap: "anywhere",
-                            lineHeight: 1.35,
-                          }}
-                        >
-                          {getTicketTitle(ticket)}
-                        </div>
-                      </div>
-
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: 8,
-                          flexWrap: "wrap",
-                          alignItems: "center",
-                        }}
-                      >
-                        <Link className="button ghost" href={`/tickets/${ticket.id}`}>
-                          Full Ticket
-                        </Link>
-                      </div>
-                    </div>
-
-                    <div style={{ marginBottom: 14 }}>
-                      <CategoryDisplay ticket={ticket} />
-                    </div>
-
-                    <div
-                      style={{
-                        display: "grid",
-                        gap: 10,
-                        gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                        marginBottom: 14,
-                      }}
-                    >
-                      {desktopMiniField("Category", getDisplayedCategoryName(ticket))}
-                      {desktopMiniField(
-                        "Intake Type",
-                        getDisplayedIntakeType(ticket) || "—"
-                      )}
-                      {desktopMiniField("Claimed By", safeText(ticket.claimed_by))}
-                      {desktopMiniField("Channel ID", channelId || "Missing")}
-                      {desktopMiniField("User ID", safeText(ticket.user_id))}
-                      {desktopMiniField(
-                        "Updated",
-                        timeAgo(ticket.updated_at || ticket.created_at)
-                      )}
-                      {desktopMiniField("Ghost", ghost ? "yes" : "no")}
-                      {desktopMiniField(
-                        "Match Reason",
-                        getCategoryReason(ticket) || "—"
-                      )}
-                    </div>
-
-                    {!!ticket.mod_suggestion ? (
-                      <div style={{ marginBottom: 14 }}>
-                        <div
-                          className="muted"
-                          style={{ fontSize: 12, marginBottom: 4 }}
-                        >
-                          Suggestion
-                        </div>
-                        <div style={{ overflowWrap: "anywhere" }}>
-                          {ticket.mod_suggestion}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {!!ticket.closed_reason ? (
-                      <div style={{ marginBottom: 14 }}>
-                        <div
-                          className="muted"
-                          style={{ fontSize: 12, marginBottom: 4 }}
-                        >
-                          Closed Reason
-                        </div>
-                        <div style={{ overflowWrap: "anywhere" }}>
-                          {ticket.closed_reason}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    <TicketControls
-                      ticket={ticket}
-                      currentStaffId={currentStaffId}
-                      onChanged={onRefresh}
-                    />
-                  </div>
-                );
-              })}
             </div>
           </div>
         </>
@@ -867,6 +760,69 @@ export default function TicketQueueTable({
           color: var(--text-strong);
           line-height: 1;
           overflow-wrap: anywhere;
+        }
+
+        .ticket-mobile-card.premium {
+          border-radius: 22px;
+          padding: 14px;
+          background:
+            radial-gradient(circle at top right, rgba(93,255,141,0.06), transparent 38%),
+            linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)),
+            rgba(255,255,255,0.025);
+        }
+
+        .ticket-mobile-card.expanded {
+          background:
+            radial-gradient(circle at top right, rgba(99,213,255,0.08), transparent 38%),
+            rgba(99,213,255,0.05);
+        }
+
+        .ticket-mobile-toggle {
+          appearance: none;
+          -webkit-appearance: none;
+          width: 100%;
+          background: transparent;
+          border: 0;
+          padding: 0;
+          margin: 0;
+          text-align: left;
+          color: inherit;
+          cursor: pointer;
+        }
+
+        .queue-ticket-name {
+          font-weight: 900;
+          font-size: 16px;
+          overflow-wrap: anywhere;
+          line-height: 1.12;
+          color: var(--text-strong, #f8fafc);
+          letter-spacing: -0.02em;
+        }
+
+        .queue-ticket-subtitle {
+          margin-top: 6px;
+          font-size: 13px;
+          overflow-wrap: anywhere;
+          line-height: 1.35;
+        }
+
+        .queue-ticket-time {
+          font-size: 12px;
+          white-space: nowrap;
+          flex-shrink: 0;
+          text-align: right;
+        }
+
+        .ticket-desktop-expanded {
+          padding: 16px;
+          background:
+            radial-gradient(circle at top right, rgba(99,213,255,0.06), transparent 38%),
+            rgba(255,255,255,0.02);
+        }
+
+        .ticket-expanded-shell {
+          display: grid;
+          gap: 0;
         }
 
         @media (min-width: 768px) {
