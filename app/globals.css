@@ -42,6 +42,7 @@
   --glow-green: 0 0 0 1px rgba(93, 255, 141, 0.08), 0 0 26px rgba(93, 255, 141, 0.14);
   --glow-blue: 0 0 0 1px rgba(99, 213, 255, 0.08), 0 0 24px rgba(99, 213, 255, 0.12);
   --glow-purple: 0 0 0 1px rgba(178, 109, 255, 0.08), 0 0 24px rgba(178, 109, 255, 0.12);
+  --glow-amber: 0 0 0 1px rgba(255, 211, 107, 0.08), 0 0 22px rgba(255, 211, 107, 0.1);
 
   --radius-xs: 12px;
   --radius-sm: 16px;
@@ -97,8 +98,8 @@ body::after {
   pointer-events: none;
   z-index: 0;
   border-radius: 999px;
-  filter: blur(80px);
-  opacity: 0.5;
+  filter: blur(84px);
+  opacity: 0.52;
 }
 
 body::before {
@@ -268,6 +269,20 @@ button:focus-visible,
   pointer-events: none;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0));
+  opacity: 0.55;
+}
+
+.card::after {
+  content: "";
+  position: absolute;
+  inset: auto -10% -20% auto;
+  width: 40%;
+  height: 60%;
+  pointer-events: none;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle, rgba(93, 255, 141, 0.08), transparent 68%);
+  filter: blur(34px);
   opacity: 0.55;
 }
 
@@ -479,7 +494,9 @@ button:focus-visible,
   overflow-x: auto;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.02);
+  background:
+    radial-gradient(circle at top right, rgba(93, 255, 141, 0.04), transparent 38%),
+    rgba(255, 255, 255, 0.02);
 }
 
 table {
@@ -714,14 +731,8 @@ tbody tr:hover {
   display: block;
 }
 
-.ticket-mobile-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
-  padding: 14px;
-  background:
-    radial-gradient(circle at top right, rgba(93, 255, 141, 0.06), transparent 42%),
-    rgba(255, 255, 255, 0.03);
-}
+/* intentionally no global .ticket-mobile-card styling here anymore
+   so TicketQueueTable can fully own its mobile card look */
 
 .ticket-mobile-meta {
   display: grid;
@@ -862,7 +873,8 @@ tbody tr:hover {
 
 .stoner-sidebar {
   background:
-    radial-gradient(circle at top, rgba(93, 255, 141, 0.12), transparent 30%),
+    radial-gradient(circle at top, rgba(93, 255, 141, 0.14), transparent 30%),
+    radial-gradient(circle at 80% 20%, rgba(99, 213, 255, 0.08), transparent 30%),
     rgba(9, 16, 24, 0.92);
 }
 
@@ -870,6 +882,7 @@ tbody tr:hover {
 .stoner-status-card {
   background:
     radial-gradient(circle at top right, rgba(93, 255, 141, 0.1), transparent 40%),
+    radial-gradient(circle at bottom left, rgba(99, 213, 255, 0.06), transparent 34%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02)),
     linear-gradient(180deg, rgba(15, 28, 40, 0.95), rgba(9, 17, 28, 0.95));
 }
@@ -877,7 +890,8 @@ tbody tr:hover {
 .stoner-banner {
   box-shadow:
     0 0 0 1px rgba(93, 255, 141, 0.08),
-    0 10px 26px rgba(0, 0, 0, 0.25);
+    0 10px 26px rgba(0, 0, 0, 0.25),
+    0 0 26px rgba(93, 255, 141, 0.08);
 }
 
 .mobile-tab-panel {
