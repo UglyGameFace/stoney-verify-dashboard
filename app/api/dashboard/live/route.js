@@ -101,7 +101,8 @@ function newestTicketTimestamp(ticket) {
     parseDateMs(ticket?.updated_at),
     parseDateMs(ticket?.created_at),
     parseDateMs(ticket?.closed_at),
-    parseDateMs(ticket?.deleted_at)
+    parseDateMs(ticket?.deleted_at),
+    parseDateMs(ticket?.reopened_at)
   );
 }
 
@@ -113,30 +114,32 @@ function ageMinutesFromTicket(ticket) {
 
 function shouldHideStaleClosedTicket(ticket) {
   const status = normalizeStatus(ticket?.status);
-  const missingChannel = !hasUsableChannel(ticket);
-
-  if (!missingChannel) return false;
   if (!isClosedLikeStatus(status)) return false;
 
-  return ageMinutesFromTicket(ticket) > 5;
+  const missingChannel = !hasUsableChannel(ticket);
+  const hasTranscript = hasTranscriptEvidence(ticket);
+
+  // Keep historical closed/deleted tickets visible.
+  // Only hide obviously broken transient duplicates that have neither
+  // a live channel nor transcript evidence and are very fresh.
+  if (!missingChannel) return false;
+  if (hasTranscript) return false;
+
+  return ageMinutesFromTicket(ticket) <= 10;
 }
 
 function shouldHideStaleOpenTicket(ticket) {
   const status = normalizeStatus(ticket?.status);
-
   if (!isOpenLikeStatus(status)) return false;
 
   const missingChannel = !hasUsableChannel(ticket);
   const hasTranscript = hasTranscriptEvidence(ticket);
   const ageMinutes = ageMinutesFromTicket(ticket);
 
-  if (missingChannel && ageMinutes > 5) {
-    return true;
-  }
-
-  if (hasTranscript && ageMinutes > 2) {
-    return true;
-  }
+  // Only hide clearly broken "open/claimed" rows that point to nothing
+  // and also already have transcript evidence or have been stale for a while.
+  if (missingChannel && hasTranscript) return true;
+  if (missingChannel && ageMinutes > 30) return true;
 
   return false;
 }
@@ -154,24 +157,19 @@ function ticketFreshnessScore(ticket) {
 
   if (hasUsableChannel(ticket)) score += 50;
   if (hasTranscriptEvidence(ticket)) score += 25;
-  if (status === "claimed") score += 20;
-  if (status === "open") score += 15;
-  if (status === "closed") score -= 10;
-  if (status === "deleted") score -= 20;
+  if (status === "claimed") score += 24;
+  if (status === "open") score += 18;
+  if (status === "closed") score += 8;
+  if (status === "deleted") score += 4;
 
   const ageMinutes = newest > 0 ? (now - newest) / 60000 : 999999;
   if (ageMinutes <= 30) score += 30;
   else if (ageMinutes <= 180) score += 15;
   else if (ageMinutes <= 1440) score += 5;
-  else if (ageMinutes > 2880) score -= 20;
+  else if (ageMinutes > 2880) score -= 8;
 
-  if (isOpenLikeStatus(status) && hasTranscriptEvidence(ticket)) {
-    score -= 40;
-  }
-
-  if (shouldHideStaleOpenTicket(ticket)) {
-    score -= 1000;
-  }
+  if (shouldHideStaleOpenTicket(ticket)) score -= 1000;
+  if (shouldHideStaleClosedTicket(ticket)) score -= 1000;
 
   return score;
 }
@@ -180,14 +178,40 @@ function canonicalTicketKey(ticket) {
   const channelId = normalizeString(ticket?.channel_id || ticket?.discord_thread_id);
   if (channelId) return `channel:${channelId}`;
 
+  const ticketNumber = normalizeString(ticket?.ticket_number);
+  if (ticketNumber) return `ticket_number:${ticketNumber}`;
+
   const userId = normalizeString(ticket?.user_id || ticket?.owner_id);
   const category = normalizeString(ticket?.category).toLowerCase();
   const username = normalizeString(ticket?.username).toLowerCase();
+  const title = normalizeString(ticket?.title).toLowerCase();
 
-  if (userId) return `user:${userId}:${category || "unknown"}`;
-  if (username) return `username:${username}:${category || "unknown"}`;
+  if (userId && category) return `user:${userId}:${category}`;
+  if (userId && title) return `user_title:${userId}:${title}`;
+  if (username && category) return `username:${username}:${category}`;
 
   return `row:${normalizeString(ticket?.id)}`;
+}
+
+function chooseBestTicketInGroup(group) {
+  const sorted = [...group].sort((a, b) => {
+    const scoreDiff = ticketFreshnessScore(b) - ticketFreshnessScore(a);
+    if (scoreDiff !== 0) return scoreDiff;
+
+    const statusA = normalizeStatus(a?.status);
+    const statusB = normalizeStatus(b?.status);
+
+    if (isOpenLikeStatus(statusA) !== isOpenLikeStatus(statusB)) {
+      return isOpenLikeStatus(statusB) ? 1 : -1;
+    }
+
+    const newestDiff = newestTicketTimestamp(b) - newestTicketTimestamp(a);
+    if (newestDiff !== 0) return newestDiff;
+
+    return String(b?.id || "").localeCompare(String(a?.id || ""));
+  });
+
+  return sorted[0] || null;
 }
 
 function canonicalizeTickets(rawTickets) {
@@ -206,36 +230,23 @@ function canonicalizeTickets(rawTickets) {
     grouped.get(key).push(ticket);
   }
 
-  const chosenIds = new Set();
+  const chosen = [];
 
   for (const [, group] of grouped.entries()) {
-    group.sort((a, b) => {
-      const statusA = normalizeStatus(a?.status);
-      const statusB = normalizeStatus(b?.status);
-
-      const scoreDiff = ticketFreshnessScore(b) - ticketFreshnessScore(a);
-      if (scoreDiff !== 0) return scoreDiff;
-
-      if (isOpenLikeStatus(statusA) !== isOpenLikeStatus(statusB)) {
-        return isOpenLikeStatus(statusB) ? 1 : -1;
-      }
-
-      return (
-        parseDateMs(b?.updated_at || b?.created_at) -
-        parseDateMs(a?.updated_at || a?.created_at)
-      );
-    });
-
-    chosenIds.add(String(group[0]?.id));
+    const best = chooseBestTicketInGroup(group);
+    if (best) chosen.push(best);
   }
 
-  return visibleBase
-    .filter((ticket) => chosenIds.has(String(ticket?.id)))
-    .sort(
-      (a, b) =>
-        parseDateMs(b?.updated_at || b?.created_at) -
-        parseDateMs(a?.updated_at || a?.created_at)
-    );
+  return chosen.sort((a, b) => {
+    const statusA = normalizeStatus(a?.status);
+    const statusB = normalizeStatus(b?.status);
+
+    if (isOpenLikeStatus(statusA) !== isOpenLikeStatus(statusB)) {
+      return isOpenLikeStatus(statusB) ? 1 : -1;
+    }
+
+    return newestTicketTimestamp(b) - newestTicketTimestamp(a);
+  });
 }
 
 function normalizeStaffKey(value) {
@@ -353,10 +364,8 @@ function buildMemberIdentityMaps(guildMembers) {
 
     for (const name of names) {
       const key = name.toLowerCase();
-      if (key && userId) {
-        if (!nameToId.has(key)) {
-          nameToId.set(key, userId);
-        }
+      if (key && userId && !nameToId.has(key)) {
+        nameToId.set(key, userId);
       }
     }
   }
@@ -587,11 +596,8 @@ function deriveMetricsFromTickets(tickets = [], existingMetrics = [], guildMembe
       const denied = /\b(deny|denied|reject|rejected|decline|declined|failed)\b/.test(reasonText);
 
       if (category.includes("verification")) {
-        if (denied) {
-          row.denials += 1;
-        } else {
-          row.approvals += 1;
-        }
+        if (denied) row.denials += 1;
+        else row.approvals += 1;
       }
     }
   }
@@ -1024,7 +1030,7 @@ function buildIntelligence({ counts, memberCounts, fraud, guildMembers }) {
       serverHealth:
         serverHealth === "Stable"
           ? "No major threshold is currently tripping the health score."
-          : `Health is elevated by ticket load, fraud signals, or raid activity.`,
+          : "Health is elevated by ticket load, fraud signals, or raid activity.",
       raidRiskReason: raidReason,
       fraudRiskReason: fraudReason,
       ticketPressureReason: ticketReason,
@@ -1156,7 +1162,7 @@ export async function GET(request) {
         .select("*")
         .eq("guild_id", guildId)
         .order("updated_at", { ascending: false })
-        .limit(300),
+        .limit(1000),
 
       supabase
         .from("audit_logs")
@@ -1371,9 +1377,11 @@ export async function GET(request) {
       return true;
     });
 
-    const closedTickets = canonicalTickets.filter((ticket) =>
-      isClosedLikeStatus(ticket?.status)
-    );
+    const closedTickets = canonicalTickets.filter((ticket) => {
+      if (!isClosedLikeStatus(ticket?.status)) return false;
+      if (shouldHideStaleClosedTicket(ticket)) return false;
+      return true;
+    });
 
     const events = buildTimeline(auditLogs, auditEvents, staffMessages, guildMembers);
 
@@ -1436,7 +1444,7 @@ export async function GET(request) {
       );
 
     const metrics = deriveMetricsFromTickets(
-      rawTickets,
+      canonicalTickets,
       metricsRes.data || [],
       guildMembers
     );
