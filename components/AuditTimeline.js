@@ -26,6 +26,193 @@ function getInitials(name) {
   return parts.map((p) => p[0]?.toUpperCase() || "").join("");
 }
 
+function prettyLabel(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function familyMeta(value) {
+  const family = normalizeText(value);
+
+  if (!family) {
+    return {
+      label: "",
+      description: "",
+      tone: "neutral",
+    };
+  }
+
+  if (family === "moderation") {
+    return {
+      label: "Moderation",
+      description: "Bans, kicks, warns, timeouts, and role actions.",
+      tone: "warn",
+    };
+  }
+
+  if (family === "ticket" || family === "tickets") {
+    return {
+      label: "Tickets",
+      description: "Ticket creation, claims, closes, reopen, reconcile, and queue actions.",
+      tone: "ok",
+    };
+  }
+
+  if (family === "member" || family === "members") {
+    return {
+      label: "Members",
+      description: "Joins, leaves, profile changes, and member state updates.",
+      tone: "info",
+    };
+  }
+
+  if (family === "voice") {
+    return {
+      label: "Voice",
+      description: "Voice moves, disconnects, mute/deafen actions, and VC workflow events.",
+      tone: "info",
+    };
+  }
+
+  if (family === "verification") {
+    return {
+      label: "Verification",
+      description: "Verification approvals, denials, queue actions, and role sync events.",
+      tone: "ok",
+    };
+  }
+
+  if (family === "system") {
+    return {
+      label: "System",
+      description: "Background jobs, sync passes, auto-repair, cleanup, and maintenance.",
+      tone: "neutral",
+    };
+  }
+
+  if (family === "audit_events") {
+    return {
+      label: "Audit Events",
+      description: "Legacy or normalized audit entries recorded by the dashboard/bot.",
+      tone: "neutral",
+    };
+  }
+
+  return {
+    label: prettyLabel(value),
+    description: "Grouped by event family so you can narrow the type of activity.",
+    tone: "neutral",
+  };
+}
+
+function sourceMeta(value) {
+  const source = normalizeText(value);
+
+  if (!source) {
+    return {
+      label: "",
+      description: "",
+      tone: "neutral",
+    };
+  }
+
+  if (source === "discord") {
+    return {
+      label: "Discord",
+      description: "Events that came from Discord-side actions or mirrored Discord changes.",
+      tone: "info",
+    };
+  }
+
+  if (source === "dashboard") {
+    return {
+      label: "Dashboard",
+      description: "Actions triggered directly from your web dashboard.",
+      tone: "accent",
+    };
+  }
+
+  if (source === "system") {
+    return {
+      label: "System",
+      description: "Internal maintenance, reconciliation, startup sync, and automated repair.",
+      tone: "neutral",
+    };
+  }
+
+  if (source === "ticket_message") {
+    return {
+      label: "Ticket Message",
+      description: "Activity that came from ticket-thread message context.",
+      tone: "ok",
+    };
+  }
+
+  if (source === "bot") {
+    return {
+      label: "Bot",
+      description: "Actions performed by bot logic, command handlers, or automations.",
+      tone: "accent",
+    };
+  }
+
+  if (source === "audit_events") {
+    return {
+      label: "Audit Events",
+      description: "Legacy audit-style source records.",
+      tone: "neutral",
+    };
+  }
+
+  return {
+    label: prettyLabel(value),
+    description: "Used to show where the event was recorded from.",
+    tone: "neutral",
+  };
+}
+
+function getToneColors(tone) {
+  if (tone === "warn") {
+    return {
+      bg: "rgba(255, 159, 67, 0.12)",
+      border: "rgba(255, 159, 67, 0.22)",
+      text: "#ffd7ab",
+    };
+  }
+
+  if (tone === "ok") {
+    return {
+      bg: "rgba(69, 212, 131, 0.12)",
+      border: "rgba(69, 212, 131, 0.22)",
+      text: "#d6ffe4",
+    };
+  }
+
+  if (tone === "info") {
+    return {
+      bg: "rgba(77, 171, 247, 0.12)",
+      border: "rgba(77, 171, 247, 0.22)",
+      text: "#d7efff",
+    };
+  }
+
+  if (tone === "accent") {
+    return {
+      bg: "rgba(177, 151, 252, 0.14)",
+      border: "rgba(177, 151, 252, 0.22)",
+      text: "#ece3ff",
+    };
+  }
+
+  return {
+    bg: "rgba(255,255,255,0.06)",
+    border: "rgba(255,255,255,0.10)",
+    text: "#d8e1ec",
+  };
+}
+
 function getEventAccent(event) {
   const type = normalizeText(event?.event_type);
   const family = normalizeText(event?.event_family);
@@ -65,7 +252,8 @@ function getEventAccent(event) {
     title.includes("approved") ||
     title.includes("verified") ||
     title.includes("created") ||
-    family === "ticket"
+    family === "ticket" ||
+    family === "verification"
   ) {
     return "#45d483";
   }
@@ -82,24 +270,11 @@ function getEventAccent(event) {
 }
 
 function sourceLabel(event) {
-  const source = normalizeText(event?.source);
-
-  if (source === "discord") return "Discord";
-  if (source === "dashboard") return "Dashboard";
-  if (source === "system") return "System";
-  if (source === "ticket_message") return "Ticket";
-  if (source === "bot") return "Bot";
-
-  return safeText(event?.source, "Timeline");
+  return sourceMeta(event?.source).label || safeText(event?.source, "Timeline");
 }
 
 function familyLabel(event) {
-  const family = normalizeText(event?.event_family);
-  if (!family) return "";
-
-  return family
-    .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, (m) => m.toUpperCase());
+  return familyMeta(event?.event_family).label || "";
 }
 
 function formatDateTime(value) {
@@ -148,10 +323,7 @@ function matchesFilter(event, filters) {
   if (type && normalizeText(event?.event_type) !== type) return false;
 
   if (actor) {
-    const actorBlob = [
-      event?.actor_name,
-      event?.actor_id,
-    ]
+    const actorBlob = [event?.actor_name, event?.actor_id]
       .filter(Boolean)
       .join(" ")
       .toLowerCase();
@@ -160,10 +332,7 @@ function matchesFilter(event, filters) {
   }
 
   if (target) {
-    const targetBlob = [
-      event?.target_name,
-      event?.target_user_id,
-    ]
+    const targetBlob = [event?.target_name, event?.target_user_id]
       .filter(Boolean)
       .join(" ")
       .toLowerCase();
@@ -215,6 +384,46 @@ function TimelineDetailRow({ label, value }) {
       >
         {value}
       </div>
+    </div>
+  );
+}
+
+function ActiveFilterChip({ label, onClear }) {
+  return (
+    <button
+      type="button"
+      onClick={onClear}
+      style={{
+        border: "1px solid rgba(255,255,255,0.1)",
+        background: "rgba(255,255,255,0.05)",
+        color: "var(--text-strong)",
+        borderRadius: 999,
+        padding: "8px 12px",
+        fontSize: 12,
+        fontWeight: 700,
+        cursor: "pointer",
+      }}
+    >
+      {label} ✕
+    </button>
+  );
+}
+
+function FilterExplainCard({ title, description, tone = "neutral" }) {
+  const colors = getToneColors(tone);
+
+  return (
+    <div
+      style={{
+        border: `1px solid ${colors.border}`,
+        background: colors.bg,
+        color: colors.text,
+        borderRadius: 14,
+        padding: 12,
+      }}
+    >
+      <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>{title}</div>
+      <div style={{ fontSize: 12, lineHeight: 1.5 }}>{description}</div>
     </div>
   );
 }
@@ -442,7 +651,7 @@ function TimelineCard({ event, expanded, onToggle }) {
             />
             <TimelineDetailRow
               label="Source"
-              value={safeText(event?.source, "")}
+              value={sourceLabel(event)}
             />
             <TimelineDetailRow
               label="Actor"
@@ -570,6 +779,17 @@ export default function AuditTimeline({ events = [] }) {
     setTarget("");
   }
 
+  const selectedFamilyMeta = familyMeta(family);
+  const selectedSourceMeta = sourceMeta(source);
+
+  const hasActiveFilters =
+    Boolean(query) ||
+    Boolean(actor) ||
+    Boolean(target) ||
+    Boolean(family) ||
+    Boolean(source) ||
+    Boolean(type);
+
   return (
     <div className="card" id="timeline">
       <div
@@ -597,7 +817,7 @@ export default function AuditTimeline({ events = [] }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
           gap: 10,
           marginBottom: 14,
         }}
@@ -628,10 +848,10 @@ export default function AuditTimeline({ events = [] }) {
           value={family}
           onChange={(e) => setFamily(e.target.value)}
         >
-          <option value="">All families</option>
+          <option value="">All families (what kind of event)</option>
           {familyOptions.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {familyMeta(option).label || option}
             </option>
           ))}
         </select>
@@ -641,10 +861,10 @@ export default function AuditTimeline({ events = [] }) {
           value={source}
           onChange={(e) => setSource(e.target.value)}
         >
-          <option value="">All sources</option>
+          <option value="">All sources (where it came from)</option>
           {sourceOptions.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {sourceMeta(option).label || option}
             </option>
           ))}
         </select>
@@ -654,14 +874,96 @@ export default function AuditTimeline({ events = [] }) {
           value={type}
           onChange={(e) => setType(e.target.value)}
         >
-          <option value="">All event types</option>
+          <option value="">All event types (exact action)</option>
           {typeOptions.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {prettyLabel(option)}
             </option>
           ))}
         </select>
       </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+          gap: 10,
+          marginBottom: 14,
+        }}
+      >
+        <FilterExplainCard
+          title="Families = event category"
+          description={
+            selectedFamilyMeta.label
+              ? `${selectedFamilyMeta.label}: ${selectedFamilyMeta.description}`
+              : "Use this to narrow by the kind of action: moderation, tickets, members, voice, verification, or system."
+          }
+          tone={selectedFamilyMeta.tone}
+        />
+
+        <FilterExplainCard
+          title="Sources = where it came from"
+          description={
+            selectedSourceMeta.label
+              ? `${selectedSourceMeta.label}: ${selectedSourceMeta.description}`
+              : "Use this to narrow by origin: Discord, dashboard, bot logic, ticket message context, or system maintenance."
+          }
+          tone={selectedSourceMeta.tone}
+        />
+      </div>
+
+      {hasActiveFilters ? (
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            marginBottom: 14,
+          }}
+        >
+          {query ? (
+            <ActiveFilterChip
+              label={`Search: ${query}`}
+              onClear={() => setQuery("")}
+            />
+          ) : null}
+
+          {actor ? (
+            <ActiveFilterChip
+              label={`Actor: ${actor}`}
+              onClear={() => setActor("")}
+            />
+          ) : null}
+
+          {target ? (
+            <ActiveFilterChip
+              label={`Target: ${target}`}
+              onClear={() => setTarget("")}
+            />
+          ) : null}
+
+          {family ? (
+            <ActiveFilterChip
+              label={`Family: ${familyMeta(family).label || family}`}
+              onClear={() => setFamily("")}
+            />
+          ) : null}
+
+          {source ? (
+            <ActiveFilterChip
+              label={`Source: ${sourceMeta(source).label || source}`}
+              onClear={() => setSource("")}
+            />
+          ) : null}
+
+          {type ? (
+            <ActiveFilterChip
+              label={`Type: ${prettyLabel(type)}`}
+              onClear={() => setType("")}
+            />
+          ) : null}
+        </div>
+      ) : null}
 
       <div
         style={{
