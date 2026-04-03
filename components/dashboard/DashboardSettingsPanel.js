@@ -31,6 +31,32 @@ function formatUpdatedAt(value) {
   }
 }
 
+function useCompactSettingsLayout(breakpoint = 900) {
+  const getValue = () => {
+    if (typeof window === "undefined") return false;
+    return window.innerWidth <= breakpoint;
+  };
+
+  const [isCompact, setIsCompact] = useState(getValue);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const update = () => setIsCompact(getValue());
+
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
+  }, [breakpoint]);
+
+  return isCompact;
+}
+
 function ToneSwatch({ label, value, onChange, helper }) {
   return (
     <div className="settings-lab-card">
@@ -41,9 +67,7 @@ function ToneSwatch({ label, value, onChange, helper }) {
         onChange={(e) => onChange(e.target.value)}
         className="settings-color-input"
       />
-      {helper ? (
-        <div className="muted settings-helper-copy">{helper}</div>
-      ) : null}
+      {helper ? <div className="muted settings-helper-copy">{helper}</div> : null}
     </div>
   );
 }
@@ -110,9 +134,7 @@ function MoveButtons({ area, items, onMove }) {
               <div className="settings-move-label">
                 {SECTION_LABELS[item] || item}
               </div>
-              <div className="muted settings-helper-copy">
-                Position {index + 1}
-              </div>
+              <div className="muted settings-helper-copy">Position {index + 1}</div>
             </div>
 
             <div className="settings-move-actions">
@@ -265,6 +287,254 @@ function SettingsAccordion({ title, chip, defaultOpen = false, children }) {
   );
 }
 
+function SettingsDesktopContent({
+  sortedProfiles,
+  activeProfileId,
+  lastUsedProfileId,
+  handleLoad,
+  handleSave,
+  handleRename,
+  handleDelete,
+  theme,
+  setThemeValue,
+  preferences,
+  setDensity,
+}) {
+  return (
+    <>
+      <div className="settings-section-card">
+        <div className="settings-section-heading">
+          <div>
+            <div className="settings-chip-row">
+              <span className="section-chip">Saved Looks</span>
+            </div>
+            <div className="settings-title-sm">Profile Slots</div>
+          </div>
+        </div>
+
+        <div className="settings-profile-grid">
+          {sortedProfiles.map((profile) => (
+            <ProfileCard
+              key={profile.id}
+              profile={profile}
+              isActive={profile.id === activeProfileId}
+              isLastUsed={profile.id === lastUsedProfileId}
+              onLoad={handleLoad}
+              onSave={handleSave}
+              onRename={handleRename}
+              onDelete={handleDelete}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="settings-section-card">
+        <div className="settings-section-heading">
+          <div>
+            <div className="settings-chip-row">
+              <span className="section-chip">Color Engine</span>
+            </div>
+            <div className="settings-title-sm">Neon Palette</div>
+          </div>
+        </div>
+
+        <div className="settings-theme-grid">
+          <ToneSwatch
+            label="Accent"
+            value={theme.accent || "#45d483"}
+            onChange={(value) => setThemeValue("accent", value)}
+            helper="Main green glow and primary dashboard energy."
+          />
+          <ToneSwatch
+            label="Accent 2"
+            value={theme.accent2 || "#3b82f6"}
+            onChange={(value) => setThemeValue("accent2", value)}
+            helper="Secondary neon balance for haze and highlights."
+          />
+          <ToneSwatch
+            label="Primary Text"
+            value={theme.textStrong || "#f8fafc"}
+            onChange={(value) => setThemeValue("textStrong", value)}
+            helper="High-contrast headline and card text."
+          />
+          <ToneSwatch
+            label="Muted Text"
+            value={theme.textMuted || "#b8c0cc"}
+            onChange={(value) => setThemeValue("textMuted", value)}
+            helper="Subtext, labels, and helper copy."
+          />
+        </div>
+
+        <div className="settings-preview-stage">
+          <div className="settings-preview-card">
+            <div className="settings-preview-title">Live Mood Preview</div>
+            <div className="settings-preview-sub">
+              This should feel like a smoky neon command room, not a default admin form.
+            </div>
+
+            <div className="settings-preview-chip-row">
+              <span className="badge low">Verified</span>
+              <span className="badge claimed">Claimed</span>
+              <span className="badge open">Open</span>
+              <span className="badge danger">High Risk</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="settings-section-card">
+        <div className="settings-section-heading">
+          <div>
+            <div className="settings-chip-row">
+              <span className="section-chip">Density</span>
+            </div>
+            <div className="settings-title-sm">Layout Feel</div>
+          </div>
+        </div>
+
+        <div className="settings-density-grid">
+          <DensityPreview
+            active={preferences?.density === "compact"}
+            label="Compact"
+            helper="Tighter spacing for more control on one screen."
+            onClick={() => setDensity("compact")}
+          />
+          <DensityPreview
+            active={preferences?.density === "comfortable"}
+            label="Comfortable"
+            helper="Balanced spacing for daily moderation use."
+            onClick={() => setDensity("comfortable")}
+          />
+          <DensityPreview
+            active={preferences?.density === "spacious"}
+            label="Spacious"
+            helper="More breathing room and stronger visual separation."
+            onClick={() => setDensity("spacious")}
+          />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function SettingsMobileContent({
+  sortedProfiles,
+  activeProfileId,
+  lastUsedProfileId,
+  handleLoad,
+  handleSave,
+  handleRename,
+  handleDelete,
+  theme,
+  setThemeValue,
+  preferences,
+  setDensity,
+  homeKeys,
+  membersKeys,
+  visibility,
+  toggleSectionVisibility,
+  moveSection,
+}) {
+  return (
+    <>
+      <SettingsAccordion title="Profile Slots" chip="Saved Looks" defaultOpen>
+        <div className="settings-profile-grid">
+          {sortedProfiles.map((profile) => (
+            <ProfileCard
+              key={profile.id}
+              profile={profile}
+              isActive={profile.id === activeProfileId}
+              isLastUsed={profile.id === lastUsedProfileId}
+              onLoad={handleLoad}
+              onSave={handleSave}
+              onRename={handleRename}
+              onDelete={handleDelete}
+            />
+          ))}
+        </div>
+      </SettingsAccordion>
+
+      <SettingsAccordion title="Neon Palette" chip="Color Engine">
+        <div className="settings-theme-grid">
+          <ToneSwatch
+            label="Accent"
+            value={theme.accent || "#45d483"}
+            onChange={(value) => setThemeValue("accent", value)}
+            helper="Main green glow and primary dashboard energy."
+          />
+          <ToneSwatch
+            label="Accent 2"
+            value={theme.accent2 || "#3b82f6"}
+            onChange={(value) => setThemeValue("accent2", value)}
+            helper="Secondary neon balance for haze and highlights."
+          />
+          <ToneSwatch
+            label="Primary Text"
+            value={theme.textStrong || "#f8fafc"}
+            onChange={(value) => setThemeValue("textStrong", value)}
+            helper="High-contrast headline and card text."
+          />
+          <ToneSwatch
+            label="Muted Text"
+            value={theme.textMuted || "#b8c0cc"}
+            onChange={(value) => setThemeValue("textMuted", value)}
+            helper="Subtext, labels, and helper copy."
+          />
+        </div>
+      </SettingsAccordion>
+
+      <SettingsAccordion title="Density" chip="Layout Feel" defaultOpen>
+        <div className="settings-density-grid">
+          <DensityPreview
+            active={preferences?.density === "compact"}
+            label="Compact"
+            helper="Tighter spacing for more control on one screen."
+            onClick={() => setDensity("compact")}
+          />
+          <DensityPreview
+            active={preferences?.density === "comfortable"}
+            label="Comfortable"
+            helper="Balanced spacing for daily moderation use."
+            onClick={() => setDensity("comfortable")}
+          />
+          <DensityPreview
+            active={preferences?.density === "spacious"}
+            label="Spacious"
+            helper="More breathing room and stronger visual separation."
+            onClick={() => setDensity("spacious")}
+          />
+        </div>
+      </SettingsAccordion>
+
+      <SettingsAccordion title="Home Visibility" chip="Visibility">
+        <SectionVisibilityList
+          title="Home Section Visibility"
+          keys={homeKeys}
+          visibility={visibility}
+          onToggle={toggleSectionVisibility}
+        />
+      </SettingsAccordion>
+
+      <SettingsAccordion title="Members Visibility" chip="Visibility">
+        <SectionVisibilityList
+          title="Members Section Visibility"
+          keys={membersKeys}
+          visibility={visibility}
+          onToggle={toggleSectionVisibility}
+        />
+      </SettingsAccordion>
+
+      <SettingsAccordion title="Home Layout Order" chip="Layout Order">
+        <MoveButtons area="home" items={homeKeys} onMove={moveSection} />
+      </SettingsAccordion>
+
+      <SettingsAccordion title="Members Layout Order" chip="Layout Order">
+        <MoveButtons area="members" items={membersKeys} onMove={moveSection} />
+      </SettingsAccordion>
+    </>
+  );
+}
+
 export default function DashboardSettingsPanel({
   open,
   onClose,
@@ -284,6 +554,7 @@ export default function DashboardSettingsPanel({
   deleteProfile,
 }) {
   const [message, setMessage] = useState("");
+  const isCompact = useCompactSettingsLayout(900);
 
   const homeKeys = preferences?.layout?.home || [];
   const membersKeys = preferences?.layout?.members || [];
@@ -301,26 +572,15 @@ export default function DashboardSettingsPanel({
   useEffect(() => {
     if (!open) return undefined;
 
-    const html = document.documentElement;
     const body = document.body;
-
-    const prevHtmlOverflow = html.style.overflow;
     const prevBodyOverflow = body.style.overflow;
-    const prevHtmlOverscroll = html.style.overscrollBehavior;
-    const prevBodyOverscroll = body.style.overscrollBehavior;
     const prevSettingsFlag = body.dataset.settingsOpen || "";
 
-    html.style.overflow = "hidden";
     body.style.overflow = "hidden";
-    html.style.overscrollBehavior = "none";
-    body.style.overscrollBehavior = "none";
     body.dataset.settingsOpen = "true";
 
     return () => {
-      html.style.overflow = prevHtmlOverflow;
       body.style.overflow = prevBodyOverflow;
-      html.style.overscrollBehavior = prevHtmlOverscroll;
-      body.style.overscrollBehavior = prevBodyOverscroll;
 
       if (prevSettingsFlag) {
         body.dataset.settingsOpen = prevSettingsFlag;
@@ -331,7 +591,7 @@ export default function DashboardSettingsPanel({
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) return undefined;
 
     function handleKeyDown(event) {
       if (event.key === "Escape") {
@@ -442,215 +702,41 @@ export default function DashboardSettingsPanel({
           </div>
         ) : null}
 
-        <div className="settings-desktop-stack">
-          <div className="settings-section-card">
-            <div className="settings-section-heading">
-              <div>
-                <div className="settings-chip-row">
-                  <span className="section-chip">Saved Looks</span>
-                </div>
-                <div className="settings-title-sm">Profile Slots</div>
-              </div>
-            </div>
-
-            <div className="settings-profile-grid">
-              {sortedProfiles.map((profile) => (
-                <ProfileCard
-                  key={profile.id}
-                  profile={profile}
-                  isActive={profile.id === activeProfileId}
-                  isLastUsed={profile.id === lastUsedProfileId}
-                  onLoad={handleLoad}
-                  onSave={handleSave}
-                  onRename={handleRename}
-                  onDelete={handleDelete}
-                />
-              ))}
-            </div>
-          </div>
-
-          <div className="settings-section-card">
-            <div className="settings-section-heading">
-              <div>
-                <div className="settings-chip-row">
-                  <span className="section-chip">Color Engine</span>
-                </div>
-                <div className="settings-title-sm">Neon Palette</div>
-              </div>
-            </div>
-
-            <div className="settings-theme-grid">
-              <ToneSwatch
-                label="Accent"
-                value={theme.accent || "#45d483"}
-                onChange={(value) => setThemeValue("accent", value)}
-                helper="Main green glow and primary dashboard energy."
-              />
-              <ToneSwatch
-                label="Accent 2"
-                value={theme.accent2 || "#3b82f6"}
-                onChange={(value) => setThemeValue("accent2", value)}
-                helper="Secondary neon balance for haze and highlights."
-              />
-              <ToneSwatch
-                label="Primary Text"
-                value={theme.textStrong || "#f8fafc"}
-                onChange={(value) => setThemeValue("textStrong", value)}
-                helper="High-contrast headline and card text."
-              />
-              <ToneSwatch
-                label="Muted Text"
-                value={theme.textMuted || "#b8c0cc"}
-                onChange={(value) => setThemeValue("textMuted", value)}
-                helper="Subtext, labels, and helper copy."
-              />
-            </div>
-
-            <div className="settings-preview-stage">
-              <div className="settings-preview-card">
-                <div className="settings-preview-title">Live Mood Preview</div>
-                <div className="settings-preview-sub">
-                  This should feel like a smoky neon command room, not a default admin form.
-                </div>
-
-                <div className="settings-preview-chip-row">
-                  <span className="badge low">Verified</span>
-                  <span className="badge claimed">Claimed</span>
-                  <span className="badge open">Open</span>
-                  <span className="badge danger">High Risk</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="settings-section-card">
-            <div className="settings-section-heading">
-              <div>
-                <div className="settings-chip-row">
-                  <span className="section-chip">Density</span>
-                </div>
-                <div className="settings-title-sm">Layout Feel</div>
-              </div>
-            </div>
-
-            <div className="settings-density-grid">
-              <DensityPreview
-                active={preferences?.density === "compact"}
-                label="Compact"
-                helper="Tighter spacing for more control on one screen."
-                onClick={() => setDensity("compact")}
-              />
-              <DensityPreview
-                active={preferences?.density === "comfortable"}
-                label="Comfortable"
-                helper="Balanced spacing for daily moderation use."
-                onClick={() => setDensity("comfortable")}
-              />
-              <DensityPreview
-                active={preferences?.density === "spacious"}
-                label="Spacious"
-                helper="More breathing room and stronger visual separation."
-                onClick={() => setDensity("spacious")}
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="settings-mobile-stack">
-          <SettingsAccordion title="Profile Slots" chip="Saved Looks" defaultOpen>
-            <div className="settings-profile-grid">
-              {sortedProfiles.map((profile) => (
-                <ProfileCard
-                  key={profile.id}
-                  profile={profile}
-                  isActive={profile.id === activeProfileId}
-                  isLastUsed={profile.id === lastUsedProfileId}
-                  onLoad={handleLoad}
-                  onSave={handleSave}
-                  onRename={handleRename}
-                  onDelete={handleDelete}
-                />
-              ))}
-            </div>
-          </SettingsAccordion>
-
-          <SettingsAccordion title="Neon Palette" chip="Color Engine">
-            <div className="settings-theme-grid">
-              <ToneSwatch
-                label="Accent"
-                value={theme.accent || "#45d483"}
-                onChange={(value) => setThemeValue("accent", value)}
-                helper="Main green glow and primary dashboard energy."
-              />
-              <ToneSwatch
-                label="Accent 2"
-                value={theme.accent2 || "#3b82f6"}
-                onChange={(value) => setThemeValue("accent2", value)}
-                helper="Secondary neon balance for haze and highlights."
-              />
-              <ToneSwatch
-                label="Primary Text"
-                value={theme.textStrong || "#f8fafc"}
-                onChange={(value) => setThemeValue("textStrong", value)}
-                helper="High-contrast headline and card text."
-              />
-              <ToneSwatch
-                label="Muted Text"
-                value={theme.textMuted || "#b8c0cc"}
-                onChange={(value) => setThemeValue("textMuted", value)}
-                helper="Subtext, labels, and helper copy."
-              />
-            </div>
-          </SettingsAccordion>
-
-          <SettingsAccordion title="Density" chip="Layout Feel" defaultOpen>
-            <div className="settings-density-grid">
-              <DensityPreview
-                active={preferences?.density === "compact"}
-                label="Compact"
-                helper="Tighter spacing for more control on one screen."
-                onClick={() => setDensity("compact")}
-              />
-              <DensityPreview
-                active={preferences?.density === "comfortable"}
-                label="Comfortable"
-                helper="Balanced spacing for daily moderation use."
-                onClick={() => setDensity("comfortable")}
-              />
-              <DensityPreview
-                active={preferences?.density === "spacious"}
-                label="Spacious"
-                helper="More breathing room and stronger visual separation."
-                onClick={() => setDensity("spacious")}
-              />
-            </div>
-          </SettingsAccordion>
-
-          <SettingsAccordion title="Home Visibility" chip="Visibility">
-            <SectionVisibilityList
-              title="Home Section Visibility"
-              keys={homeKeys}
+        <div className="settings-content-stack">
+          {isCompact ? (
+            <SettingsMobileContent
+              sortedProfiles={sortedProfiles}
+              activeProfileId={activeProfileId}
+              lastUsedProfileId={lastUsedProfileId}
+              handleLoad={handleLoad}
+              handleSave={handleSave}
+              handleRename={handleRename}
+              handleDelete={handleDelete}
+              theme={theme}
+              setThemeValue={setThemeValue}
+              preferences={preferences}
+              setDensity={setDensity}
+              homeKeys={homeKeys}
+              membersKeys={membersKeys}
               visibility={visibility}
-              onToggle={toggleSectionVisibility}
+              toggleSectionVisibility={toggleSectionVisibility}
+              moveSection={moveSection}
             />
-          </SettingsAccordion>
-
-          <SettingsAccordion title="Members Visibility" chip="Visibility">
-            <SectionVisibilityList
-              title="Members Section Visibility"
-              keys={membersKeys}
-              visibility={visibility}
-              onToggle={toggleSectionVisibility}
+          ) : (
+            <SettingsDesktopContent
+              sortedProfiles={sortedProfiles}
+              activeProfileId={activeProfileId}
+              lastUsedProfileId={lastUsedProfileId}
+              handleLoad={handleLoad}
+              handleSave={handleSave}
+              handleRename={handleRename}
+              handleDelete={handleDelete}
+              theme={theme}
+              setThemeValue={setThemeValue}
+              preferences={preferences}
+              setDensity={setDensity}
             />
-          </SettingsAccordion>
-
-          <SettingsAccordion title="Home Layout Order" chip="Layout Order">
-            <MoveButtons area="home" items={homeKeys} onMove={moveSection} />
-          </SettingsAccordion>
-
-          <SettingsAccordion title="Members Layout Order" chip="Layout Order">
-            <MoveButtons area="members" items={membersKeys} onMove={moveSection} />
-          </SettingsAccordion>
+          )}
         </div>
 
         <style jsx>{`
@@ -664,7 +750,6 @@ export default function DashboardSettingsPanel({
             justify-content: center;
             padding: 12px 10px calc(20px + env(safe-area-inset-bottom, 0px) + 84px);
             overscroll-behavior: contain;
-            touch-action: auto;
           }
 
           .settings-sheet {
@@ -675,7 +760,6 @@ export default function DashboardSettingsPanel({
             overflow-x: hidden;
             -webkit-overflow-scrolling: touch;
             overscroll-behavior: contain;
-            touch-action: pan-y;
             border-radius: 24px;
             border: 1px solid rgba(255, 255, 255, 0.08);
             background: linear-gradient(
@@ -686,7 +770,6 @@ export default function DashboardSettingsPanel({
             box-shadow: 0 14px 40px rgba(0, 0, 0, 0.34);
             color: var(--text-strong, #f8fafc);
             padding: 14px;
-            contain: layout paint;
           }
 
           .settings-sheet-handle {
@@ -744,13 +827,9 @@ export default function DashboardSettingsPanel({
             line-height: 1.45;
           }
 
-          .settings-desktop-stack {
+          .settings-content-stack {
             display: grid;
             gap: 14px;
-          }
-
-          .settings-mobile-stack {
-            display: none;
           }
 
           .settings-section-card {
@@ -1046,15 +1125,6 @@ export default function DashboardSettingsPanel({
           }
 
           @media (max-width: 900px) {
-            .settings-desktop-stack {
-              display: none;
-            }
-
-            .settings-mobile-stack {
-              display: grid;
-              gap: 12px;
-            }
-
             .settings-sheet {
               max-height: min(90vh, 900px);
               border-radius: 22px;
