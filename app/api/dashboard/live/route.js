@@ -119,9 +119,6 @@ function shouldHideStaleClosedTicket(ticket) {
   const missingChannel = !hasUsableChannel(ticket);
   const hasTranscript = hasTranscriptEvidence(ticket);
 
-  // Keep historical closed/deleted tickets visible.
-  // Only hide obviously broken transient duplicates that have neither
-  // a live channel nor transcript evidence and are very fresh.
   if (!missingChannel) return false;
   if (hasTranscript) return false;
 
@@ -136,8 +133,6 @@ function shouldHideStaleOpenTicket(ticket) {
   const hasTranscript = hasTranscriptEvidence(ticket);
   const ageMinutes = ageMinutesFromTicket(ticket);
 
-  // Only hide clearly broken "open/claimed" rows that point to nothing
-  // and also already have transcript evidence or have been stale for a while.
   if (missingChannel && hasTranscript) return true;
   if (missingChannel && ageMinutes > 30) return true;
 
@@ -618,15 +613,6 @@ function deriveMetricsFromTickets(tickets = [], existingMetrics = [], guildMembe
     });
 }
 
-function pickMessageContent(row) {
-  return (
-    normalizeString(row?.content) ||
-    normalizeString(row?.message_content) ||
-    normalizeString(row?.body) ||
-    ""
-  );
-}
-
 function mergeJoinWithMember(joinRow, memberRow) {
   return {
     ...(memberRow || {}),
@@ -729,137 +715,6 @@ function computeRoleMemberCount(role, members) {
       (roleName && names.includes(roleName))
     );
   }).length;
-}
-
-function prettifyAction(action) {
-  const raw = normalizeString(action);
-  if (!raw) return "Audit Log";
-
-  return raw
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (m) => m.toUpperCase());
-}
-
-function buildAuditDescription(row) {
-  const meta = row?.meta && typeof row.meta === "object" ? row.meta : {};
-  const pieces = [];
-
-  if (meta?.reason) pieces.push(`Reason: ${String(meta.reason)}`);
-  if (meta?.channel_id) pieces.push(`Channel: ${String(meta.channel_id)}`);
-  if (meta?.user_id) pieces.push(`User: ${String(meta.user_id)}`);
-  if (meta?.staff_id) pieces.push(`Staff: ${String(meta.staff_id)}`);
-  if (meta?.role_id) pieces.push(`Role: ${String(meta.role_id)}`);
-  if (meta?.command_id) pieces.push(`Command: ${String(meta.command_id)}`);
-
-  if (pieces.length) {
-    return pieces.join(" • ");
-  }
-
-  return row?.token
-    ? `Token: ${String(row.token)}`
-    : "Dashboard/bot audit log entry";
-}
-
-function mapAuditLogToTimeline(row) {
-  return {
-    id: `audit-log-${row?.id ?? Math.random()}`,
-    title: prettifyAction(row?.action),
-    description: truncateText(buildAuditDescription(row), 220),
-    event_type: "audit_log",
-    related_id: row?.staff_id || null,
-    created_at: row?.created_at || null,
-    actor_id: row?.staff_id || null,
-    meta: row?.meta || {},
-    source: "audit_logs",
-  };
-}
-
-function mapAuditEventToTimeline(row) {
-  return {
-    id: `audit-event-${row?.id ?? Math.random()}`,
-    title: row?.title || "Audit Event",
-    description: truncateText(row?.description || "", 220),
-    event_type: row?.event_type || "audit_event",
-    related_id: row?.related_id || null,
-    created_at: row?.created_at || null,
-    actor_id: null,
-    meta: {},
-    source: "audit_events",
-  };
-}
-
-function mapStaffMessageToTimeline(row) {
-  const content = pickMessageContent(row);
-  const attachments = safeArray(row?.attachments);
-  const embeds = safeArray(row?.embeds);
-
-  let description = truncateText(content, 220);
-  if (!description) {
-    if (attachments.length) description = `${attachments.length} attachment(s)`;
-    else if (embeds.length) description = `${embeds.length} embed(s)`;
-    else description = "Staff message";
-  }
-
-  return {
-    id: `staff-message-${row?.message_id || row?.id || Math.random()}`,
-    title: row?.display_name || row?.username || "Staff Message",
-    description,
-    event_type: "staff_message",
-    related_id: row?.channel_id || null,
-    created_at: row?.created_at || row?.timestamp || null,
-    actor_id: row?.author_id || row?.user_id || null,
-    meta: {
-      channel_id: row?.channel_id || null,
-      message_id: row?.message_id || null,
-      attachments,
-      embeds,
-      full_content: content,
-    },
-    source: "dashboard_staff_messages",
-    actor_name:
-      row?.display_name ||
-      row?.username ||
-      row?.author_name ||
-      row?.author_id ||
-      null,
-    actor_avatar_url: row?.avatar_url || row?.author_avatar_url || null,
-    channel_id: row?.channel_id || null,
-    message_id: row?.message_id || null,
-  };
-}
-
-function buildTimeline(auditLogs, auditEvents, staffMessages, guildMembers) {
-  const memberMap = new Map(
-    guildMembers.map((member) => [String(member.user_id), member])
-  );
-
-  return [
-    ...safeArray(auditLogs).map(mapAuditLogToTimeline),
-    ...safeArray(auditEvents).map(mapAuditEventToTimeline),
-    ...safeArray(staffMessages).map(mapStaffMessageToTimeline),
-  ]
-    .sort((a, b) => toTime(b.created_at) - toTime(a.created_at))
-    .slice(0, 100)
-    .map((event) => {
-      if (event.source === "dashboard_staff_messages") {
-        return event;
-      }
-
-      const actorId = normalizeString(event.actor_id);
-      const actor = actorId ? memberMap.get(actorId) : null;
-
-      return {
-        ...event,
-        actor_name:
-          actor?.display_name ||
-          actor?.nickname ||
-          actor?.username ||
-          (actorId ? actorId : null),
-        actor_avatar_url: actor?.avatar_url || null,
-      };
-    });
 }
 
 function mapWarn(row, guildMembers) {
@@ -1050,6 +905,131 @@ function buildSupportPayload({ roles, voiceChannels, debugInfo = null }) {
   };
 }
 
+function clampActivityLimit(value, fallback = 120, max = 500) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(Math.max(Math.floor(parsed), 1), max);
+}
+
+function mapActivityFeedEvent(row, guildMembers) {
+  const actorId = normalizeString(row?.actor_user_id);
+  const targetId = normalizeString(row?.target_user_id);
+
+  const actorMember = actorId
+    ? guildMembers.find((member) => String(member?.user_id) === actorId)
+    : null;
+
+  const targetMember = targetId
+    ? guildMembers.find((member) => String(member?.user_id) === targetId)
+    : null;
+
+  const title =
+    row?.title ||
+    row?.event_type ||
+    row?.event_family ||
+    "Activity Event";
+
+  const description =
+    truncateText(
+      row?.description ||
+        row?.reason ||
+        row?.title ||
+        row?.event_type ||
+        "",
+      220
+    ) || "Activity event";
+
+  return {
+    id: `activity-${row?.id || Math.random()}`,
+    activity_id: row?.id || null,
+    title,
+    description,
+    event_type: row?.event_type || "activity_event",
+    event_family: row?.event_family || "system",
+    related_id: row?.related_id || row?.ticket_id || row?.channel_id || null,
+    created_at: row?.created_at || null,
+    actor_id: actorId || null,
+    actor_name:
+      row?.actor_name ||
+      actorMember?.display_name ||
+      actorMember?.nickname ||
+      actorMember?.username ||
+      actorId ||
+      null,
+    actor_avatar_url: actorMember?.avatar_url || null,
+    target_user_id: targetId || null,
+    target_name:
+      row?.target_name ||
+      targetMember?.display_name ||
+      targetMember?.nickname ||
+      targetMember?.username ||
+      targetId ||
+      null,
+    target_avatar_url: targetMember?.avatar_url || null,
+    source: row?.source || "system",
+    channel_id: row?.channel_id || null,
+    channel_name: row?.channel_name || null,
+    ticket_id: row?.ticket_id || null,
+    ticket_message_id: row?.ticket_message_id || null,
+    related_table: row?.related_table || null,
+    reason: row?.reason || null,
+    meta: row?.metadata && typeof row.metadata === "object" ? row.metadata : {},
+    search_text: row?.search_text || "",
+  };
+}
+
+function buildTimeline(activityRows, guildMembers, limit = 120) {
+  return safeArray(activityRows)
+    .map((row) => mapActivityFeedEvent(row, guildMembers))
+    .sort((a, b) => toTime(b.created_at) - toTime(a.created_at))
+    .slice(0, limit);
+}
+
+async function loadActivityFeed({
+  supabase,
+  guildId,
+  activityQuery,
+  activityUserId,
+  activityActorId,
+  activityFamily,
+  activityType,
+  activitySource,
+  activityLimit,
+}) {
+  let query = supabase
+    .from("activity_feed_events")
+    .select("*")
+    .eq("guild_id", guildId)
+    .order("created_at", { ascending: false })
+    .limit(activityLimit);
+
+  if (activityUserId) {
+    query = query.eq("target_user_id", activityUserId);
+  }
+
+  if (activityActorId) {
+    query = query.eq("actor_user_id", activityActorId);
+  }
+
+  if (activityFamily) {
+    query = query.eq("event_family", activityFamily);
+  }
+
+  if (activityType) {
+    query = query.eq("event_type", activityType);
+  }
+
+  if (activitySource) {
+    query = query.eq("source", activitySource);
+  }
+
+  if (activityQuery) {
+    query = query.ilike("search_text", `%${activityQuery}%`);
+  }
+
+  return query;
+}
+
 export async function GET(request) {
   try {
     await requireStaffSessionForRoute();
@@ -1057,16 +1037,34 @@ export async function GET(request) {
     const supabase = createServerSupabase();
     const guildId = env.guildId || "";
     const url = new URL(request.url);
+
     const supportOnly =
       url.searchParams.get("support_only") === "1" ||
       url.searchParams.get("supportOnly") === "1" ||
       url.searchParams.get("mode") === "support";
+
+    const activityQuery = normalizeString(url.searchParams.get("activity_q"));
+    const activityUserId = normalizeString(url.searchParams.get("activity_user_id"));
+    const activityActorId = normalizeString(url.searchParams.get("activity_actor_id"));
+    const activityFamily = normalizeString(url.searchParams.get("activity_family"));
+    const activityType = normalizeString(url.searchParams.get("activity_type"));
+    const activitySource = normalizeString(url.searchParams.get("activity_source"));
+    const activityLimit = clampActivityLimit(url.searchParams.get("activity_limit"), 120, 500);
 
     if (debugEnabled()) {
       console.log("[dashboard/live] env.guildId =", guildId);
       console.log("[dashboard/live] DISCORD_GUILD_ID =", process.env.DISCORD_GUILD_ID || "");
       console.log("[dashboard/live] GUILD_ID =", process.env.GUILD_ID || "");
       console.log("[dashboard/live] supportOnly =", supportOnly);
+      console.log("[dashboard/live] activity filters =", {
+        activityQuery,
+        activityUserId,
+        activityActorId,
+        activityFamily,
+        activityType,
+        activitySource,
+        activityLimit,
+      });
     }
 
     if (!guildId) {
@@ -1134,9 +1132,7 @@ export async function GET(request) {
 
     const [
       ticketsRes,
-      auditLogsRes,
-      auditEventsRes,
-      staffMessagesRes,
+      activityFeedRes,
       rolesRes,
       metricsRes,
       categoriesRes,
@@ -1164,24 +1160,17 @@ export async function GET(request) {
         .order("updated_at", { ascending: false })
         .limit(1000),
 
-      supabase
-        .from("audit_logs")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(40),
-
-      supabase
-        .from("audit_events")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(40),
-
-      supabase
-        .from("dashboard_staff_messages")
-        .select("*")
-        .eq("guild_id", guildId)
-        .order("created_at", { ascending: false })
-        .limit(120),
+      loadActivityFeed({
+        supabase,
+        guildId,
+        activityQuery,
+        activityUserId,
+        activityActorId,
+        activityFamily,
+        activityType,
+        activitySource,
+        activityLimit,
+      }),
 
       supabase
         .from("guild_roles")
@@ -1322,9 +1311,7 @@ export async function GET(request) {
 
     const firstError =
       ticketsRes.error ||
-      auditLogsRes.error ||
-      auditEventsRes.error ||
-      staffMessagesRes.error ||
+      activityFeedRes.error ||
       rolesRes.error ||
       metricsRes.error ||
       categoriesRes.error ||
@@ -1362,14 +1349,12 @@ export async function GET(request) {
     );
     const canonicalTickets = canonicalizeTickets(rawTickets);
 
-    const auditLogs = safeArray(auditLogsRes.data);
-    const auditEvents = safeArray(auditEventsRes.data);
-    const staffMessages = safeArray(staffMessagesRes.data);
     const categories = categoryRows;
     const memberJoins = memberJoinsRes.data || [];
     const recentActiveMembers = safeArray(recentActiveMembersRes.data).map(mapGuildMember);
     const recentFormerMembers = safeArray(recentFormerMembersRes.data).map(mapGuildMember);
     const guildMembers = safeArray(allGuildMembersRes.data).map(mapGuildMember);
+    const activityFeedRows = safeArray(activityFeedRes.data || []);
 
     const activeTickets = canonicalTickets.filter((ticket) => {
       if (!isOpenLikeStatus(ticket?.status)) return false;
@@ -1383,7 +1368,7 @@ export async function GET(request) {
       return true;
     });
 
-    const events = buildTimeline(auditLogs, auditEvents, staffMessages, guildMembers);
+    const events = buildTimeline(activityFeedRows, guildMembers, activityLimit);
 
     const roles = safeArray(rolesRes.data).map((role) => ({
       ...role,
@@ -1482,9 +1467,7 @@ export async function GET(request) {
       console.log("[dashboard/live] active tickets found =", activeTickets.length);
       console.log("[dashboard/live] closed tickets found =", closedTickets.length);
       console.log("[dashboard/live] metrics found =", metrics.length);
-      console.log("[dashboard/live] auditLogs found =", auditLogs.length);
-      console.log("[dashboard/live] auditEvents found =", auditEvents.length);
-      console.log("[dashboard/live] staffMessages found =", staffMessages.length);
+      console.log("[dashboard/live] activity feed rows found =", activityFeedRows.length);
       console.log("[dashboard/live] merged timeline events =", events.length);
       console.log("[dashboard/live] warns found =", warns.length);
       console.log("[dashboard/live] raids found =", raids.length);
@@ -1502,6 +1485,17 @@ export async function GET(request) {
       activeTickets: sortTickets(activeTickets, "priority_desc"),
       closedTickets: sortTickets(closedTickets, "updated_desc"),
       events,
+      activityFeed: events,
+      activityFeedRaw: activityFeedRows,
+      activityFilters: {
+        q: activityQuery || "",
+        user_id: activityUserId || "",
+        actor_id: activityActorId || "",
+        family: activityFamily || "",
+        type: activityType || "",
+        source: activitySource || "",
+        limit: activityLimit,
+      },
       warns,
       raids,
       fraud,
@@ -1531,15 +1525,24 @@ export async function GET(request) {
             metricsCount: metrics.length,
             guildMembersCount: guildMembers.length,
             timelineCount: events.length,
+            activityFeedRowsCount: activityFeedRows.length,
             warnsCount: warns.length,
             raidsCount: raids.length,
             fraudCount: fraud.length,
-            staffMessagesCount: staffMessages.length,
             voiceChannelsCount: voiceChannels.length,
             voiceChannelsError: discordChannelsResult?.__discord_error || null,
             memberCounts,
             recentJoinsCount: recentJoins.length,
             memberJoinsCount: memberJoins.length,
+            activityFilters: {
+              activityQuery,
+              activityUserId,
+              activityActorId,
+              activityFamily,
+              activityType,
+              activitySource,
+              activityLimit,
+            },
           }
         : undefined,
     };
