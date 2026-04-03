@@ -43,7 +43,7 @@ const EFFECTS_MODES = {
 };
 
 // ============================================================================
-// Utility Functions
+// Utils
 // ============================================================================
 
 function safeArray(value) {
@@ -81,7 +81,7 @@ function themesEqual(a, b) {
 }
 
 // ============================================================================
-// Custom Hooks
+// Hooks
 // ============================================================================
 
 function useCompactSettingsLayout(breakpoint = 900) {
@@ -114,24 +114,37 @@ function useFlashMessage() {
 
   const flash = useCallback((text) => {
     setMessage(text);
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-    }
+    if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => setMessage(""), 2200);
   }, []);
 
   useEffect(() => {
     return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
+      if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
 
   return [message, flash];
 }
 
-function useFocusTrap(open, onEscape, panelRef) {
+function usePreventBodyScroll(open) {
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const originalOverflow = document.body.style.overflow;
+    const originalTouchAction = document.body.style.touchAction;
+
+    document.body.style.overflow = "hidden";
+    document.body.style.touchAction = "none";
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.body.style.touchAction = originalTouchAction;
+    };
+  }, [open]);
+}
+
+function useModalKeyboard(open, onClose, panelRef) {
   const previousFocusRef = useRef(null);
 
   useEffect(() => {
@@ -149,9 +162,9 @@ function useFocusTrap(open, onEscape, panelRef) {
     }
 
     const handleKeyDown = (e) => {
-      if (e.key === "Escape" && onEscape) {
+      if (e.key === "Escape") {
         e.preventDefault();
-        onEscape();
+        onClose?.();
         return;
       }
 
@@ -187,6 +200,7 @@ function useFocusTrap(open, onEscape, panelRef) {
     };
 
     window.addEventListener("keydown", handleKeyDown);
+
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       if (
@@ -196,42 +210,45 @@ function useFocusTrap(open, onEscape, panelRef) {
         previousFocusRef.current.focus();
       }
     };
-  }, [open, onEscape, panelRef]);
-}
-
-function usePreventBodyScroll(open) {
-  useEffect(() => {
-    if (!open) return undefined;
-
-    const originalOverflow = document.body.style.overflow;
-    const originalTouchAction = document.body.style.touchAction;
-
-    document.body.style.overflow = "hidden";
-    document.body.style.touchAction = "none";
-
-    return () => {
-      document.body.style.overflow = originalOverflow;
-      document.body.style.touchAction = originalTouchAction;
-    };
-  }, [open]);
+  }, [open, onClose, panelRef]);
 }
 
 // ============================================================================
-// Subcomponents
+// Components
 // ============================================================================
 
 function ToneSwatch({ label, value, onChange, helper }) {
+  const inputRef = useRef(null);
+
   return (
     <div className="settings-lab-card">
       <div className="ticket-info-label">{label}</div>
+
       <input
+        ref={inputRef}
         type="color"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="settings-color-input"
-        aria-label={`Choose ${label} color`}
+        className="settings-color-input-hidden"
+        tabIndex={-1}
+        aria-hidden="true"
       />
-      <div className="settings-color-readout">{String(value || "").toUpperCase()}</div>
+
+      <button
+        type="button"
+        className="settings-color-trigger"
+        onClick={() => inputRef.current?.click()}
+        aria-label={`Choose ${label} color`}
+      >
+        <span
+          className="settings-color-preview"
+          style={{ background: value }}
+        />
+        <span className="settings-color-trigger-text">
+          {String(value || "").toUpperCase()}
+        </span>
+      </button>
+
       {helper ? <div className="muted settings-helper-copy">{helper}</div> : null}
     </div>
   );
@@ -385,9 +402,8 @@ function ProfileCard({
   }, [profile.name]);
 
   const handleRename = () => {
-    if (String(renameValue || "").trim()) {
-      onRename(profile.id, String(renameValue || "").trim());
-    }
+    const next = String(renameValue || "").trim();
+    if (next) onRename(profile.id, next);
   };
 
   const handleSave = () => {
@@ -627,7 +643,7 @@ function DraftThemePanel({
 }
 
 // ============================================================================
-// Main Component
+// Main
 // ============================================================================
 
 export default function DashboardSettingsPanel({
@@ -690,7 +706,7 @@ export default function DashboardSettingsPanel({
   }, [open, preferences?.theme]);
 
   usePreventBodyScroll(open);
-  useFocusTrap(open, onClose, panelRef);
+  useModalKeyboard(open, onClose, panelRef);
 
   const noopToggleSectionVisibility = useCallback(() => {}, []);
   const noopMoveSection = useCallback(() => {}, []);
@@ -877,9 +893,7 @@ export default function DashboardSettingsPanel({
                             ? "Balanced spacing for daily moderation use."
                             : "More breathing room and stronger visual separation."
                       }
-                      onClick={() =>
-                        (setDensity || noopSetDensity)(density)
-                      }
+                      onClick={() => (setDensity || noopSetDensity)(density)}
                     />
                   ))}
                 </div>
@@ -979,9 +993,7 @@ export default function DashboardSettingsPanel({
                             ? "Balanced spacing for daily moderation use."
                             : "More breathing room and stronger visual separation."
                       }
-                      onClick={() =>
-                        (setDensity || noopSetDensity)(density)
-                      }
+                      onClick={() => (setDensity || noopSetDensity)(density)}
                     />
                   ))}
                 </div>
@@ -1182,18 +1194,40 @@ export default function DashboardSettingsPanel({
             padding: 14px;
           }
 
-          .settings-color-input {
-            margin-top: 12px;
-            width: 100%;
-            height: 52px;
-            border-radius: 14px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            background: transparent;
-            padding: 0;
+          .settings-color-input-hidden {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+            width: 0;
+            height: 0;
           }
 
-          .settings-color-readout {
-            margin-top: 8px;
+          .settings-color-trigger {
+            margin-top: 12px;
+            width: 100%;
+            min-height: 56px;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.03);
+            padding: 10px 12px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--text-strong, #f8fafc);
+            cursor: pointer;
+            text-align: left;
+          }
+
+          .settings-color-preview {
+            width: 34px;
+            height: 34px;
+            min-width: 34px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+          }
+
+          .settings-color-trigger-text {
             font-size: 12px;
             font-weight: 800;
             letter-spacing: 0.04em;
