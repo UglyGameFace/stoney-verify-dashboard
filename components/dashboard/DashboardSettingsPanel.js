@@ -18,6 +18,14 @@ const SECTION_LABELS = {
   categories: "Categories",
 };
 
+const DEFAULT_THEME = {
+  accent: "#45d483",
+  accent2: "#3b82f6",
+  textStrong: "#f8fafc",
+  textMuted: "#b8c0cc",
+  effectsMode: "full",
+};
+
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -29,6 +37,29 @@ function formatUpdatedAt(value) {
   } catch {
     return "Never saved";
   }
+}
+
+function normalizeTheme(theme) {
+  return {
+    ...DEFAULT_THEME,
+    ...(theme || {}),
+    effectsMode:
+      theme?.effectsMode === "reduced" || theme?.effectsMode === "minimal"
+        ? theme.effectsMode
+        : "full",
+  };
+}
+
+function themesEqual(a, b) {
+  const left = normalizeTheme(a);
+  const right = normalizeTheme(b);
+  return (
+    left.accent === right.accent &&
+    left.accent2 === right.accent2 &&
+    left.textStrong === right.textStrong &&
+    left.textMuted === right.textMuted &&
+    left.effectsMode === right.effectsMode
+  );
 }
 
 function useCompactSettingsLayout(breakpoint = 900) {
@@ -67,6 +98,12 @@ function ToneSwatch({ label, value, onChange, helper }) {
         onChange={(e) => onChange(e.target.value)}
         className="settings-color-input"
       />
+      <div
+        className="settings-color-readout"
+        style={{ color: "var(--text-strong, #f8fafc)" }}
+      >
+        {String(value || "").toUpperCase()}
+      </div>
       {helper ? <div className="muted settings-helper-copy">{helper}</div> : null}
     </div>
   );
@@ -171,6 +208,24 @@ function DensityPreview({ active, label, helper, onClick }) {
       onClick={onClick}
     >
       <div className="density-preview-bars">
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className="density-preview-title">{label}</div>
+      <div className="muted settings-helper-copy">{helper}</div>
+    </button>
+  );
+}
+
+function EffectsModeCard({ active, label, helper, onClick }) {
+  return (
+    <button
+      type="button"
+      className={`density-preview ${active ? "active" : ""}`}
+      onClick={onClick}
+    >
+      <div className="density-preview-bars effects-bars">
         <span />
         <span />
         <span />
@@ -287,19 +342,165 @@ function SettingsAccordion({ title, chip, defaultOpen = false, children }) {
   );
 }
 
-function SettingsDesktopContent({
-  sortedProfiles,
-  activeProfileId,
-  lastUsedProfileId,
-  handleLoad,
-  handleSave,
-  handleRename,
-  handleDelete,
-  theme,
-  setThemeValue,
-  preferences,
-  setDensity,
+function DraftThemePanel({
+  draftTheme,
+  baselineTheme,
+  setDraftThemeValue,
+  applyDraftTheme,
+  resetDraftTheme,
+  hasDraftChanges,
 }) {
+  return (
+    <div className="settings-section-card">
+      <div className="settings-section-heading">
+        <div>
+          <div className="settings-chip-row">
+            <span className="section-chip">Color Engine</span>
+            {hasDraftChanges ? <span className="badge medium">Draft Changes</span> : null}
+          </div>
+          <div className="settings-title-sm">Neon Palette</div>
+        </div>
+
+        <div className="settings-head-actions">
+          <button
+            type="button"
+            className="button ghost"
+            style={{ width: "auto", minWidth: 96 }}
+            disabled={!hasDraftChanges}
+            onClick={resetDraftTheme}
+          >
+            Reset
+          </button>
+
+          <button
+            type="button"
+            className="button"
+            style={{ width: "auto", minWidth: 96 }}
+            disabled={!hasDraftChanges}
+            onClick={applyDraftTheme}
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+
+      <div className="settings-theme-grid">
+        <ToneSwatch
+          label="Accent"
+          value={draftTheme.accent}
+          onChange={(value) => setDraftThemeValue("accent", value)}
+          helper="Main green glow and primary dashboard energy."
+        />
+        <ToneSwatch
+          label="Accent 2"
+          value={draftTheme.accent2}
+          onChange={(value) => setDraftThemeValue("accent2", value)}
+          helper="Secondary neon balance for haze and highlights."
+        />
+        <ToneSwatch
+          label="Primary Text"
+          value={draftTheme.textStrong}
+          onChange={(value) => setDraftThemeValue("textStrong", value)}
+          helper="High-contrast headline and card text."
+        />
+        <ToneSwatch
+          label="Muted Text"
+          value={draftTheme.textMuted}
+          onChange={(value) => setDraftThemeValue("textMuted", value)}
+          helper="Subtext, labels, and helper copy."
+        />
+      </div>
+
+      <div className="settings-effects-wrap">
+        <div className="settings-title-sm" style={{ fontSize: 16, marginBottom: 10 }}>
+          Effects Mode
+        </div>
+
+        <div className="settings-density-grid">
+          <EffectsModeCard
+            active={draftTheme.effectsMode === "full"}
+            label="Full"
+            helper="Maximum glow, blur, and visual atmosphere."
+            onClick={() => setDraftThemeValue("effectsMode", "full")}
+          />
+          <EffectsModeCard
+            active={draftTheme.effectsMode === "reduced"}
+            label="Reduced"
+            helper="Less extra glow and softer visual effects for cheaper devices."
+            onClick={() => setDraftThemeValue("effectsMode", "reduced")}
+          />
+          <EffectsModeCard
+            active={draftTheme.effectsMode === "minimal"}
+            label="Minimal"
+            helper="Lowest visual overhead. Best for weak phones or laggy browsers."
+            onClick={() => setDraftThemeValue("effectsMode", "minimal")}
+          />
+        </div>
+      </div>
+
+      <div
+        className={`settings-preview-stage effects-${draftTheme.effectsMode || "full"}`}
+      >
+        <div className="settings-preview-card">
+          <div className="settings-preview-title">Live Mood Preview</div>
+          <div className="settings-preview-sub">
+            Draft preview only. Colors and effects apply when you press <strong>Apply</strong>.
+          </div>
+
+          <div className="settings-preview-chip-row">
+            <span className="badge low">Verified</span>
+            <span className="badge claimed">Claimed</span>
+            <span className="badge open">Open</span>
+            <span className="badge danger">High Risk</span>
+          </div>
+
+          <div className="settings-preview-swatch-grid">
+            <div className="settings-preview-swatch">
+              <span>Accent</span>
+              <code>{draftTheme.accent}</code>
+            </div>
+            <div className="settings-preview-swatch">
+              <span>Accent 2</span>
+              <code>{draftTheme.accent2}</code>
+            </div>
+            <div className="settings-preview-swatch">
+              <span>Primary Text</span>
+              <code>{draftTheme.textStrong}</code>
+            </div>
+            <div className="settings-preview-swatch">
+              <span>Muted Text</span>
+              <code>{draftTheme.textMuted}</code>
+            </div>
+          </div>
+
+          <div className="muted settings-helper-copy" style={{ marginTop: 12 }}>
+            Current applied effects mode: <strong>{baselineTheme.effectsMode || "full"}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsDesktopContent(props) {
+  const {
+    sortedProfiles,
+    activeProfileId,
+    lastUsedProfileId,
+    handleLoad,
+    handleSave,
+    handleRename,
+    handleDelete,
+    draftTheme,
+    baselineTheme,
+    setDraftThemeValue,
+    applyDraftTheme,
+    resetDraftTheme,
+    hasDraftChanges,
+    preferences,
+    setDensity,
+  } = props;
+
   return (
     <>
       <div className="settings-section-card">
@@ -328,59 +529,14 @@ function SettingsDesktopContent({
         </div>
       </div>
 
-      <div className="settings-section-card">
-        <div className="settings-section-heading">
-          <div>
-            <div className="settings-chip-row">
-              <span className="section-chip">Color Engine</span>
-            </div>
-            <div className="settings-title-sm">Neon Palette</div>
-          </div>
-        </div>
-
-        <div className="settings-theme-grid">
-          <ToneSwatch
-            label="Accent"
-            value={theme.accent || "#45d483"}
-            onChange={(value) => setThemeValue("accent", value)}
-            helper="Main green glow and primary dashboard energy."
-          />
-          <ToneSwatch
-            label="Accent 2"
-            value={theme.accent2 || "#3b82f6"}
-            onChange={(value) => setThemeValue("accent2", value)}
-            helper="Secondary neon balance for haze and highlights."
-          />
-          <ToneSwatch
-            label="Primary Text"
-            value={theme.textStrong || "#f8fafc"}
-            onChange={(value) => setThemeValue("textStrong", value)}
-            helper="High-contrast headline and card text."
-          />
-          <ToneSwatch
-            label="Muted Text"
-            value={theme.textMuted || "#b8c0cc"}
-            onChange={(value) => setThemeValue("textMuted", value)}
-            helper="Subtext, labels, and helper copy."
-          />
-        </div>
-
-        <div className="settings-preview-stage">
-          <div className="settings-preview-card">
-            <div className="settings-preview-title">Live Mood Preview</div>
-            <div className="settings-preview-sub">
-              This should feel like a smoky neon command room, not a default admin form.
-            </div>
-
-            <div className="settings-preview-chip-row">
-              <span className="badge low">Verified</span>
-              <span className="badge claimed">Claimed</span>
-              <span className="badge open">Open</span>
-              <span className="badge danger">High Risk</span>
-            </div>
-          </div>
-        </div>
-      </div>
+      <DraftThemePanel
+        draftTheme={draftTheme}
+        baselineTheme={baselineTheme}
+        setDraftThemeValue={setDraftThemeValue}
+        applyDraftTheme={applyDraftTheme}
+        resetDraftTheme={resetDraftTheme}
+        hasDraftChanges={hasDraftChanges}
+      />
 
       <div className="settings-section-card">
         <div className="settings-section-heading">
@@ -417,24 +573,30 @@ function SettingsDesktopContent({
   );
 }
 
-function SettingsMobileContent({
-  sortedProfiles,
-  activeProfileId,
-  lastUsedProfileId,
-  handleLoad,
-  handleSave,
-  handleRename,
-  handleDelete,
-  theme,
-  setThemeValue,
-  preferences,
-  setDensity,
-  homeKeys,
-  membersKeys,
-  visibility,
-  toggleSectionVisibility,
-  moveSection,
-}) {
+function SettingsMobileContent(props) {
+  const {
+    sortedProfiles,
+    activeProfileId,
+    lastUsedProfileId,
+    handleLoad,
+    handleSave,
+    handleRename,
+    handleDelete,
+    draftTheme,
+    baselineTheme,
+    setDraftThemeValue,
+    applyDraftTheme,
+    resetDraftTheme,
+    hasDraftChanges,
+    preferences,
+    setDensity,
+    homeKeys,
+    membersKeys,
+    visibility,
+    toggleSectionVisibility,
+    moveSection,
+  } = props;
+
   return (
     <>
       <SettingsAccordion title="Profile Slots" chip="Saved Looks" defaultOpen>
@@ -454,33 +616,15 @@ function SettingsMobileContent({
         </div>
       </SettingsAccordion>
 
-      <SettingsAccordion title="Neon Palette" chip="Color Engine">
-        <div className="settings-theme-grid">
-          <ToneSwatch
-            label="Accent"
-            value={theme.accent || "#45d483"}
-            onChange={(value) => setThemeValue("accent", value)}
-            helper="Main green glow and primary dashboard energy."
-          />
-          <ToneSwatch
-            label="Accent 2"
-            value={theme.accent2 || "#3b82f6"}
-            onChange={(value) => setThemeValue("accent2", value)}
-            helper="Secondary neon balance for haze and highlights."
-          />
-          <ToneSwatch
-            label="Primary Text"
-            value={theme.textStrong || "#f8fafc"}
-            onChange={(value) => setThemeValue("textStrong", value)}
-            helper="High-contrast headline and card text."
-          />
-          <ToneSwatch
-            label="Muted Text"
-            value={theme.textMuted || "#b8c0cc"}
-            onChange={(value) => setThemeValue("textMuted", value)}
-            helper="Subtext, labels, and helper copy."
-          />
-        </div>
+      <SettingsAccordion title="Neon Palette + Effects" chip="Color Engine" defaultOpen>
+        <DraftThemePanel
+          draftTheme={draftTheme}
+          baselineTheme={baselineTheme}
+          setDraftThemeValue={setDraftThemeValue}
+          applyDraftTheme={applyDraftTheme}
+          resetDraftTheme={resetDraftTheme}
+          hasDraftChanges={hasDraftChanges}
+        />
       </SettingsAccordion>
 
       <SettingsAccordion title="Density" chip="Layout Feel" defaultOpen>
@@ -559,7 +703,12 @@ export default function DashboardSettingsPanel({
   const homeKeys = preferences?.layout?.home || [];
   const membersKeys = preferences?.layout?.members || [];
   const visibility = preferences?.sectionVisibility || {};
-  const theme = preferences?.theme || {};
+  const baselineTheme = useMemo(
+    () => normalizeTheme(preferences?.theme),
+    [preferences?.theme]
+  );
+
+  const [draftTheme, setDraftTheme] = useState(baselineTheme);
 
   const sortedProfiles = useMemo(
     () =>
@@ -568,6 +717,16 @@ export default function DashboardSettingsPanel({
         .sort((a, b) => Number(a.slot || 0) - Number(b.slot || 0)),
     [profiles]
   );
+
+  const hasDraftChanges = useMemo(
+    () => !themesEqual(draftTheme, baselineTheme),
+    [draftTheme, baselineTheme]
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    setDraftTheme(normalizeTheme(preferences?.theme));
+  }, [open, preferences?.theme]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -615,6 +774,28 @@ export default function DashboardSettingsPanel({
     }
   }
 
+  function setDraftThemeValue(key, value) {
+    setDraftTheme((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  }
+
+  function applyDraftTheme() {
+    const next = normalizeTheme(draftTheme);
+    setThemeValue?.("accent", next.accent);
+    setThemeValue?.("accent2", next.accent2);
+    setThemeValue?.("textStrong", next.textStrong);
+    setThemeValue?.("textMuted", next.textMuted);
+    setThemeValue?.("effectsMode", next.effectsMode);
+    flashMessage("Theme draft applied.");
+  }
+
+  function resetDraftTheme() {
+    setDraftTheme(normalizeTheme(preferences?.theme));
+    flashMessage("Draft reset to current applied theme.");
+  }
+
   function handleRename(profileId, nextName) {
     const ok = renameProfile?.(profileId, nextName);
     flashMessage(ok ? "Profile renamed." : "Enter a valid profile name.");
@@ -627,6 +808,9 @@ export default function DashboardSettingsPanel({
 
   function handleLoad(profileId) {
     const ok = loadProfile?.(profileId);
+    if (ok) {
+      setDraftTheme(normalizeTheme(preferences?.theme));
+    }
     flashMessage(ok ? "Profile loaded." : "Unable to load profile.");
   }
 
@@ -638,6 +822,11 @@ export default function DashboardSettingsPanel({
   function handleQuickSave() {
     const ok = saveActiveProfile?.();
     flashMessage(ok ? "Active profile saved." : "Unable to save active profile.");
+  }
+
+  function handleResetCurrent() {
+    resetPreferences?.();
+    flashMessage("Current preferences reset.");
   }
 
   return (
@@ -656,13 +845,14 @@ export default function DashboardSettingsPanel({
             <div className="settings-chip-row" style={{ marginBottom: 10 }}>
               <span className="section-chip">420 Theme Lab</span>
               <span className="badge claimed">Customization Studio</span>
+              {hasDraftChanges ? <span className="badge medium">Unsaved Draft</span> : null}
             </div>
 
             <div className="settings-title-lg">Dashboard Personalization</div>
 
             <div className="muted settings-head-copy">
-              Make the command center yours — better theme control, cleaner mobile
-              flow, stronger one-hand use, and saved layouts for different staff moods.
+              Cleaner opening behavior, lower device strain, draft-based theme editing,
+              and smoother control over how heavy the visuals feel on weaker phones.
             </div>
           </div>
 
@@ -680,7 +870,7 @@ export default function DashboardSettingsPanel({
               type="button"
               className="button ghost"
               style={{ width: "auto", minWidth: 124 }}
-              onClick={resetPreferences}
+              onClick={handleResetCurrent}
             >
               Reset Current
             </button>
@@ -712,8 +902,12 @@ export default function DashboardSettingsPanel({
               handleSave={handleSave}
               handleRename={handleRename}
               handleDelete={handleDelete}
-              theme={theme}
-              setThemeValue={setThemeValue}
+              draftTheme={draftTheme}
+              baselineTheme={baselineTheme}
+              setDraftThemeValue={setDraftThemeValue}
+              applyDraftTheme={applyDraftTheme}
+              resetDraftTheme={resetDraftTheme}
+              hasDraftChanges={hasDraftChanges}
               preferences={preferences}
               setDensity={setDensity}
               homeKeys={homeKeys}
@@ -731,12 +925,37 @@ export default function DashboardSettingsPanel({
               handleSave={handleSave}
               handleRename={handleRename}
               handleDelete={handleDelete}
-              theme={theme}
-              setThemeValue={setThemeValue}
+              draftTheme={draftTheme}
+              baselineTheme={baselineTheme}
+              setDraftThemeValue={setDraftThemeValue}
+              applyDraftTheme={applyDraftTheme}
+              resetDraftTheme={resetDraftTheme}
+              hasDraftChanges={hasDraftChanges}
               preferences={preferences}
               setDensity={setDensity}
             />
           )}
+
+          {!isCompact ? (
+            <>
+              <SectionVisibilityList
+                title="Home Section Visibility"
+                keys={homeKeys}
+                visibility={visibility}
+                onToggle={toggleSectionVisibility}
+              />
+
+              <SectionVisibilityList
+                title="Members Section Visibility"
+                keys={membersKeys}
+                visibility={visibility}
+                onToggle={toggleSectionVisibility}
+              />
+
+              <MoveButtons area="home" items={homeKeys} onMove={moveSection} />
+              <MoveButtons area="members" items={membersKeys} onMove={moveSection} />
+            </>
+          ) : null}
         </div>
 
         <style jsx>{`
@@ -746,16 +965,19 @@ export default function DashboardSettingsPanel({
             z-index: 130;
             background: rgba(8, 12, 18, 0.82);
             display: flex;
-            align-items: flex-end;
+            align-items: center;
             justify-content: center;
-            padding: 12px 10px calc(20px + env(safe-area-inset-bottom, 0px) + 84px);
+            padding:
+              max(16px, env(safe-area-inset-top, 0px))
+              12px
+              max(16px, env(safe-area-inset-bottom, 0px));
             overscroll-behavior: contain;
           }
 
           .settings-sheet {
             width: 100%;
             max-width: 1080px;
-            max-height: min(92vh, 920px);
+            max-height: min(90vh, 920px);
             overflow-y: auto;
             overflow-x: hidden;
             -webkit-overflow-scrolling: touch;
@@ -764,12 +986,13 @@ export default function DashboardSettingsPanel({
             border: 1px solid rgba(255, 255, 255, 0.08);
             background: linear-gradient(
               180deg,
-              rgba(18, 27, 39, 0.98),
-              rgba(11, 18, 27, 0.98)
+              rgba(18, 27, 39, 0.985),
+              rgba(11, 18, 27, 0.985)
             );
             box-shadow: 0 14px 40px rgba(0, 0, 0, 0.34);
             color: var(--text-strong, #f8fafc);
             padding: 14px;
+            backdrop-filter: blur(10px);
           }
 
           .settings-sheet-handle {
@@ -911,15 +1134,40 @@ export default function DashboardSettingsPanel({
             padding: 0;
           }
 
+          .settings-color-readout {
+            margin-top: 8px;
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+          }
+
+          .settings-effects-wrap {
+            margin-top: 16px;
+          }
+
           .settings-preview-stage {
             margin-top: 14px;
           }
 
           .settings-preview-card {
             border: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(255, 255, 255, 0.03);
+            background:
+              radial-gradient(circle at top left, rgba(69, 212, 131, 0.12), transparent 42%),
+              radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), transparent 42%),
+              rgba(255, 255, 255, 0.03);
             border-radius: 20px;
             padding: 16px;
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+          }
+
+          .effects-reduced .settings-preview-card {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+            background: rgba(255, 255, 255, 0.03);
+          }
+
+          .effects-minimal .settings-preview-card {
+            box-shadow: none;
+            background: rgba(255, 255, 255, 0.02);
           }
 
           .settings-preview-title {
@@ -940,6 +1188,33 @@ export default function DashboardSettingsPanel({
             gap: 8px;
             flex-wrap: wrap;
             margin-top: 12px;
+          }
+
+          .settings-preview-swatch-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 10px;
+            margin-top: 14px;
+          }
+
+          .settings-preview-swatch {
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.025);
+            border-radius: 14px;
+            padding: 10px 12px;
+            display: grid;
+            gap: 4px;
+          }
+
+          .settings-preview-swatch span {
+            font-size: 12px;
+            color: var(--text-muted, rgba(255,255,255,0.72));
+          }
+
+          .settings-preview-swatch code {
+            font-size: 12px;
+            font-weight: 800;
+            color: var(--text-strong, #f8fafc);
           }
 
           .settings-density-grid {
@@ -986,6 +1261,14 @@ export default function DashboardSettingsPanel({
               rgba(93, 255, 141, 0.7),
               rgba(99, 213, 255, 0.7)
             );
+          }
+
+          .effects-bars span:nth-child(2) {
+            width: 86%;
+          }
+
+          .effects-bars span:nth-child(3) {
+            width: 72%;
           }
 
           .density-preview-title {
@@ -1125,10 +1408,22 @@ export default function DashboardSettingsPanel({
           }
 
           @media (max-width: 900px) {
+            .settings-overlay {
+              align-items: stretch;
+              justify-content: stretch;
+              padding:
+                max(10px, env(safe-area-inset-top, 0px))
+                8px
+                max(10px, env(safe-area-inset-bottom, 0px));
+            }
+
             .settings-sheet {
-              max-height: min(90vh, 900px);
+              max-width: none;
+              max-height: none;
+              height: 100%;
               border-radius: 22px;
               padding: 12px;
+              backdrop-filter: none;
             }
 
             .settings-title-lg {
@@ -1138,7 +1433,8 @@ export default function DashboardSettingsPanel({
             .settings-profile-grid,
             .settings-theme-grid,
             .settings-density-grid,
-            .settings-pill-grid {
+            .settings-pill-grid,
+            .settings-preview-swatch-grid {
               grid-template-columns: 1fr;
             }
 
