@@ -1028,7 +1028,7 @@ export default function DashboardSettingsPanel({
           )}
         </div>
 
-        <style jsx>{`
+        <style jsx global>{`
           .settings-overlay {
             position: fixed;
             inset: 0;
@@ -1052,13 +1052,18 @@ export default function DashboardSettingsPanel({
             overflow-x: hidden;
             -webkit-overflow-scrolling: touch;
             border-radius: 24px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background: linear-gradient(
-              180deg,
-              rgba(18, 27, 39, 0.985),
-              rgba(11, 18, 27, 0.985)
-            );
-            box-shadow: 0 14px 40px rgba(0, 0, 0, 0.34);
+            border: 1px solid rgba(90, 255, 180, 0.12);
+            background:
+              radial-gradient(circle at top left, rgba(69, 212, 131, 0.08), transparent 28%),
+              radial-gradient(circle at top right, rgba(59, 130, 246, 0.08), transparent 30%),
+              linear-gradient(
+                180deg,
+                rgba(10, 18, 30, 0.985),
+                rgba(6, 12, 22, 0.985)
+              );
+            box-shadow:
+              0 14px 40px rgba(0, 0, 0, 0.34),
+              0 0 0 1px rgba(69, 212, 131, 0.04) inset;
             color: var(--text-strong, #f8fafc);
             padding: 14px;
             backdrop-filter: blur(10px);
@@ -1093,6 +1098,7 @@ export default function DashboardSettingsPanel({
             font-size: 28px;
             line-height: 1.02;
             letter-spacing: -0.04em;
+            color: var(--text-strong, #f8fafc);
           }
 
           .settings-title-sm {
@@ -1100,6 +1106,7 @@ export default function DashboardSettingsPanel({
             font-size: 18px;
             line-height: 1.08;
             letter-spacing: -0.02em;
+            color: var(--text-strong, #f8fafc);
           }
 
           .settings-head-copy {
@@ -1107,6 +1114,7 @@ export default function DashboardSettingsPanel({
             font-size: 14px;
             line-height: 1.55;
             max-width: 860px;
+            color: var(--text-muted, #b8c0cc);
           }
 
           .settings-chip-row {
@@ -1115,9 +1123,11 @@ export default function DashboardSettingsPanel({
             flex-wrap: wrap;
           }
 
-          .settings-helper-copy {
+          .settings-helper-copy,
+          .muted {
             font-size: 12px;
             line-height: 1.45;
+            color: var(--text-muted, #b8c0cc);
           }
 
           .settings-content-stack {
@@ -1194,6 +1204,13 @@ export default function DashboardSettingsPanel({
             padding: 14px;
           }
 
+          .ticket-info-label {
+            color: var(--text-muted, #b8c0cc);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+          }
+
           .settings-color-input-hidden {
             position: absolute;
             opacity: 0;
@@ -1231,6 +1248,7 @@ export default function DashboardSettingsPanel({
             font-size: 12px;
             font-weight: 800;
             letter-spacing: 0.04em;
+            color: var(--text-strong, #f8fafc);
           }
 
           .settings-effects-wrap {
@@ -1266,6 +1284,7 @@ export default function DashboardSettingsPanel({
             font-weight: 900;
             font-size: 18px;
             letter-spacing: -0.02em;
+            color: var(--text-strong, #f8fafc);
           }
 
           .settings-preview-sub {
@@ -1410,6 +1429,7 @@ export default function DashboardSettingsPanel({
             overflow-wrap: anywhere;
             font-weight: 800;
             line-height: 1.2;
+            color: var(--text-strong, #f8fafc);
           }
 
           .settings-pill-badge {
@@ -1423,7 +1443,7 @@ export default function DashboardSettingsPanel({
             font-weight: 800;
             border: 1px solid rgba(255, 255, 255, 0.1);
             background: rgba(255, 255, 255, 0.06);
-            color: var(--text);
+            color: var(--text-strong, #f8fafc);
             white-space: nowrap;
           }
 
@@ -1490,10 +1510,133 @@ export default function DashboardSettingsPanel({
             font-size: 22px;
             line-height: 1;
             transition: transform 0.16s ease;
+            color: var(--text-strong, #f8fafc);
           }
 
           .settings-accordion-chevron.open {
             transform: rotate(180deg);
+          }
+
+          .button,
+          .button.ghost,
+          .button.danger {
+            appearance: none;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-strong, #f8fafc);
+            border-radius: 16px;
+            padding: 10px 14px;
+            font-weight: 800;
+            cursor: pointer;
+            min-height: 44px;
+          }
+
+          .button:hover,
+          .button.ghost:hover,
+          .button.danger:hover {
+            border-color: rgba(93, 255, 141, 0.18);
+          }
+
+          .button:disabled,
+          .button.ghost:disabled,
+          .button.danger:disabled,
+          .density-preview:disabled,
+          .settings-pill:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+          }
+
+          .button.danger {
+            background: rgba(170, 55, 80, 0.22);
+            border-color: rgba(220, 90, 120, 0.22);
+          }
+
+          .input {
+            appearance: none;
+            width: 100%;
+            min-height: 46px;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.03);
+            color: var(--text-strong, #f8fafc);
+            padding: 0 14px;
+            outline: none;
+          }
+
+          .input::placeholder {
+            color: rgba(184, 192, 204, 0.7);
+          }
+
+          .input:focus {
+            border-color: rgba(93, 255, 141, 0.2);
+            box-shadow: 0 0 0 1px rgba(93, 255, 141, 0.08);
+          }
+
+          .badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 24px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.02em;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-strong, #f8fafc);
+            background: rgba(255, 255, 255, 0.05);
+          }
+
+          .badge.claimed {
+            background: rgba(69, 212, 131, 0.14);
+            border-color: rgba(69, 212, 131, 0.2);
+          }
+
+          .badge.low {
+            background: rgba(59, 130, 246, 0.14);
+            border-color: rgba(59, 130, 246, 0.2);
+          }
+
+          .badge.medium {
+            background: rgba(255, 196, 94, 0.14);
+            border-color: rgba(255, 196, 94, 0.2);
+          }
+
+          .badge.open {
+            background: rgba(82, 167, 255, 0.14);
+            border-color: rgba(82, 167, 255, 0.2);
+          }
+
+          .badge.danger {
+            background: rgba(214, 84, 113, 0.18);
+            border-color: rgba(214, 84, 113, 0.22);
+          }
+
+          .section-chip {
+            display: inline-flex;
+            align-items: center;
+            min-height: 24px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 800;
+            color: #e9fff3;
+            background: rgba(69, 212, 131, 0.12);
+            border: 1px solid rgba(69, 212, 131, 0.18);
+          }
+
+          .info-banner {
+            border: 1px solid rgba(69, 212, 131, 0.18);
+            background: rgba(69, 212, 131, 0.1);
+            color: #ebfff3;
+            padding: 12px 14px;
+            border-radius: 14px;
+            font-weight: 700;
+          }
+
+          .space {
+            display: grid;
+            gap: 10px;
           }
 
           @media (max-width: 900px) {
