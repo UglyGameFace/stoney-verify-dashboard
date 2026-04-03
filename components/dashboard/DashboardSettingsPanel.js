@@ -2,10 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-// ============================================================================
-// Constants
-// ============================================================================
-
 const SECTION_LABELS = {
   intelligence: "Moderator Intelligence",
   stats: "Stat Cards",
@@ -42,10 +38,6 @@ const EFFECTS_MODES = {
   minimal: "Minimal",
 };
 
-// ============================================================================
-// Utils
-// ============================================================================
-
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -80,9 +72,43 @@ function themesEqual(a, b) {
   );
 }
 
-// ============================================================================
-// Hooks
-// ============================================================================
+function preserveScrollPosition(fn) {
+  if (typeof window === "undefined") {
+    fn();
+    return;
+  }
+
+  const root = document.scrollingElement || document.documentElement;
+  const pageX = window.scrollX;
+  const pageY = window.scrollY;
+  const activeEl = document.activeElement;
+
+  fn();
+
+  requestAnimationFrame(() => {
+    if (root) {
+      root.scrollTop = pageY;
+      root.scrollLeft = pageX;
+    }
+    window.scrollTo(pageX, pageY);
+
+    if (
+      activeEl &&
+      typeof activeEl.focus === "function" &&
+      document.contains(activeEl)
+    ) {
+      try {
+        activeEl.focus({ preventScroll: true });
+      } catch {
+        try {
+          activeEl.focus();
+        } catch {
+          // ignore
+        }
+      }
+    }
+  });
+}
 
 function useCompactSettingsLayout(breakpoint = 900) {
   const [isCompact, setIsCompact] = useState(() => {
@@ -131,17 +157,36 @@ function usePreventBodyScroll(open) {
   useEffect(() => {
     if (!open) return undefined;
 
-    const originalOverflow = document.body.style.overflow;
-    const originalTouchAction = document.body.style.touchAction;
+    const html = document.documentElement;
+    const body = document.body;
 
-    document.body.style.overflow = "hidden";
-    document.body.style.touchAction = "none";
+    const prevHtmlOverflow = html.style.overflow;
+    const prevBodyOverflow = body.style.overflow;
+    const prevBodyTouchAction = body.style.touchAction;
+
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    body.style.touchAction = "none";
 
     return () => {
-      document.body.style.overflow = originalOverflow;
-      document.body.style.touchAction = originalTouchAction;
+      html.style.overflow = prevHtmlOverflow;
+      body.style.overflow = prevBodyOverflow;
+      body.style.touchAction = prevBodyTouchAction;
     };
   }, [open]);
+}
+
+function focusWithoutScroll(node) {
+  if (!node || typeof node.focus !== "function") return;
+  try {
+    node.focus({ preventScroll: true });
+  } catch {
+    try {
+      node.focus();
+    } catch {
+      // ignore
+    }
+  }
 }
 
 function useModalKeyboard(open, onClose, panelRef) {
@@ -153,13 +198,11 @@ function useModalKeyboard(open, onClose, panelRef) {
     previousFocusRef.current = document.activeElement;
 
     const panel = panelRef?.current;
-    const focusable = panel?.querySelector(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    );
 
-    if (focusable && typeof focusable.focus === "function") {
-      focusable.focus();
-    }
+    requestAnimationFrame(() => {
+      if (!panel) return;
+      focusWithoutScroll(panel);
+    });
 
     const handleKeyDown = (e) => {
       if (e.key === "Escape") {
@@ -189,13 +232,11 @@ function useModalKeyboard(open, onClose, panelRef) {
       if (e.shiftKey) {
         if (active === first || !panel.contains(active)) {
           e.preventDefault();
-          last.focus();
+          focusWithoutScroll(last);
         }
-      } else {
-        if (active === last) {
-          e.preventDefault();
-          first.focus();
-        }
+      } else if (active === last) {
+        e.preventDefault();
+        focusWithoutScroll(first);
       }
     };
 
@@ -203,19 +244,17 @@ function useModalKeyboard(open, onClose, panelRef) {
 
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
+
       if (
         previousFocusRef.current &&
-        typeof previousFocusRef.current.focus === "function"
+        typeof previousFocusRef.current.focus === "function" &&
+        document.contains(previousFocusRef.current)
       ) {
-        previousFocusRef.current.focus();
+        focusWithoutScroll(previousFocusRef.current);
       }
     };
   }, [open, onClose, panelRef]);
 }
-
-// ============================================================================
-// Components
-// ============================================================================
 
 function ToneSwatch({ label, value, onChange, helper }) {
   const inputRef = useRef(null);
@@ -237,6 +276,7 @@ function ToneSwatch({ label, value, onChange, helper }) {
       <button
         type="button"
         className="settings-color-trigger"
+        onMouseDown={(e) => e.preventDefault()}
         onClick={() => inputRef.current?.click()}
         aria-label={`Choose ${label} color`}
       >
@@ -259,6 +299,7 @@ function VisibilityPill({ label, active, onToggle }) {
     <button
       type="button"
       className={`settings-pill ${active ? "active" : ""}`}
+      onMouseDown={(e) => e.preventDefault()}
       onClick={onToggle}
       aria-pressed={active}
     >
@@ -325,6 +366,7 @@ function MoveButtons({ area, items, onMove }) {
                 type="button"
                 className="button ghost settings-mini-btn"
                 disabled={index === 0}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onMove(area, index, index - 1)}
                 aria-label="Move up"
               >
@@ -335,6 +377,7 @@ function MoveButtons({ area, items, onMove }) {
                 type="button"
                 className="button ghost settings-mini-btn"
                 disabled={index === items.length - 1}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onMove(area, index, index + 1)}
                 aria-label="Move down"
               >
@@ -353,6 +396,7 @@ function DensityPreview({ active, label, helper, onClick }) {
     <button
       type="button"
       className={`density-preview ${active ? "active" : ""}`}
+      onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
       aria-pressed={active}
     >
@@ -372,6 +416,7 @@ function EffectsModeCard({ active, label, helper, onClick }) {
     <button
       type="button"
       className={`density-preview ${active ? "active" : ""}`}
+      onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
       aria-pressed={active}
     >
@@ -440,6 +485,7 @@ function ProfileCard({
           type="button"
           className="button ghost"
           style={{ width: "auto", minWidth: 96 }}
+          onMouseDown={(e) => e.preventDefault()}
           onClick={handleRename}
         >
           Rename
@@ -451,6 +497,7 @@ function ProfileCard({
           type="button"
           className={isActive ? "button" : "button ghost"}
           style={{ width: "auto", minWidth: 96 }}
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => onLoad(profile.id)}
         >
           Load
@@ -460,6 +507,7 @@ function ProfileCard({
           type="button"
           className="button ghost"
           style={{ width: "auto", minWidth: 118 }}
+          onMouseDown={(e) => e.preventDefault()}
           onClick={handleSave}
         >
           Save Current
@@ -469,6 +517,7 @@ function ProfileCard({
           type="button"
           className="button danger"
           style={{ width: "auto", minWidth: 96 }}
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => onDelete(profile.id)}
         >
           Clear
@@ -486,6 +535,7 @@ function SettingsAccordion({ title, chip, defaultOpen = false, children }) {
       <button
         type="button"
         className="settings-accordion-head"
+        onMouseDown={(e) => e.preventDefault()}
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
       >
@@ -531,6 +581,7 @@ function DraftThemePanel({
             className="button ghost"
             style={{ width: "auto", minWidth: 96 }}
             disabled={!hasDraftChanges}
+            onMouseDown={(e) => e.preventDefault()}
             onClick={resetDraftTheme}
           >
             Reset
@@ -541,6 +592,7 @@ function DraftThemePanel({
             className="button"
             style={{ width: "auto", minWidth: 96 }}
             disabled={!hasDraftChanges}
+            onMouseDown={(e) => e.preventDefault()}
             onClick={applyDraftTheme}
           >
             Apply
@@ -642,10 +694,6 @@ function DraftThemePanel({
   );
 }
 
-// ============================================================================
-// Main
-// ============================================================================
-
 export default function DashboardSettingsPanel({
   open,
   onClose,
@@ -667,6 +715,7 @@ export default function DashboardSettingsPanel({
   const [message, flashMessage] = useFlashMessage();
   const isCompact = useCompactSettingsLayout(900);
   const panelRef = useRef(null);
+  const scrollRef = useRef(0);
 
   const homeKeys = useMemo(
     () => safeArray(preferences?.layout?.home),
@@ -705,6 +754,37 @@ export default function DashboardSettingsPanel({
     }
   }, [open, preferences?.theme]);
 
+  useEffect(() => {
+    if (!open) return undefined;
+    const panel = panelRef.current;
+    if (!panel) return undefined;
+
+    const onScroll = () => {
+      scrollRef.current = panel.scrollTop;
+    };
+
+    panel.addEventListener("scroll", onScroll, { passive: true });
+    return () => panel.removeEventListener("scroll", onScroll);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+
+    requestAnimationFrame(() => {
+      panel.scrollTop = scrollRef.current || 0;
+    });
+  }, [
+    open,
+    draftTheme,
+    preferences?.density,
+    preferences?.layout?.home,
+    preferences?.layout?.members,
+    preferences?.sectionVisibility,
+    profiles,
+  ]);
+
   usePreventBodyScroll(open);
   useModalKeyboard(open, onClose, panelRef);
 
@@ -713,70 +793,120 @@ export default function DashboardSettingsPanel({
   const noopSetDensity = useCallback(() => {}, []);
 
   const setDraftThemeValue = useCallback((key, value) => {
-    setDraftTheme((prev) => ({ ...prev, [key]: value }));
+    preserveScrollPosition(() => {
+      setDraftTheme((prev) => ({ ...prev, [key]: value }));
+    });
   }, []);
 
   const applyDraftTheme = useCallback(() => {
     const next = normalizeTheme(draftTheme);
-    if (setThemeValue) {
-      setThemeValue("accent", next.accent);
-      setThemeValue("accent2", next.accent2);
-      setThemeValue("textStrong", next.textStrong);
-      setThemeValue("textMuted", next.textMuted);
-      setThemeValue("effectsMode", next.effectsMode);
-    }
+
+    preserveScrollPosition(() => {
+      if (setThemeValue) {
+        setThemeValue("accent", next.accent);
+        setThemeValue("accent2", next.accent2);
+        setThemeValue("textStrong", next.textStrong);
+        setThemeValue("textMuted", next.textMuted);
+        setThemeValue("effectsMode", next.effectsMode);
+      }
+    });
+
     flashMessage("Theme draft applied.");
   }, [draftTheme, setThemeValue, flashMessage]);
 
   const resetDraftTheme = useCallback(() => {
-    setDraftTheme(normalizeTheme(preferences?.theme));
+    preserveScrollPosition(() => {
+      setDraftTheme(normalizeTheme(preferences?.theme));
+    });
     flashMessage("Draft reset to current applied theme.");
   }, [preferences?.theme, flashMessage]);
 
   const handleRename = useCallback(
     (profileId, nextName) => {
-      const ok = renameProfile?.(profileId, nextName);
-      flashMessage(ok ? "Profile renamed." : "Enter a valid profile name.");
+      preserveScrollPosition(() => {
+        const ok = renameProfile?.(profileId, nextName);
+        flashMessage(ok ? "Profile renamed." : "Enter a valid profile name.");
+      });
     },
     [renameProfile, flashMessage]
   );
 
   const handleSave = useCallback(
     (profileId, nextName) => {
-      const ok = saveProfile?.(profileId, nextName);
-      flashMessage(ok ? "Profile saved." : "Unable to save profile.");
+      preserveScrollPosition(() => {
+        const ok = saveProfile?.(profileId, nextName);
+        flashMessage(ok ? "Profile saved." : "Unable to save profile.");
+      });
     },
     [saveProfile, flashMessage]
   );
 
   const handleLoad = useCallback(
     (profileId) => {
-      const ok = loadProfile?.(profileId);
-      if (ok) {
-        setDraftTheme(normalizeTheme(preferences?.theme));
-      }
-      flashMessage(ok ? "Profile loaded." : "Unable to load profile.");
+      const target = sortedProfiles.find((profile) => profile.id === profileId) || null;
+
+      preserveScrollPosition(() => {
+        const ok = loadProfile?.(profileId);
+        if (ok && target?.preferences?.theme) {
+          setDraftTheme(normalizeTheme(target.preferences.theme));
+        }
+        flashMessage(ok ? "Profile loaded." : "Unable to load profile.");
+      });
     },
-    [loadProfile, preferences?.theme, flashMessage]
+    [loadProfile, sortedProfiles, flashMessage]
   );
 
   const handleDelete = useCallback(
     (profileId) => {
-      const ok = deleteProfile?.(profileId);
-      flashMessage(ok ? "Profile cleared." : "Unable to clear profile.");
+      preserveScrollPosition(() => {
+        const ok = deleteProfile?.(profileId);
+        flashMessage(ok ? "Profile cleared." : "Unable to clear profile.");
+      });
     },
     [deleteProfile, flashMessage]
   );
 
   const handleQuickSave = useCallback(() => {
-    const ok = saveActiveProfile?.();
-    flashMessage(ok ? "Active profile saved." : "Unable to save active profile.");
+    preserveScrollPosition(() => {
+      const ok = saveActiveProfile?.();
+      flashMessage(ok ? "Active profile saved." : "Unable to save active profile.");
+    });
   }, [saveActiveProfile, flashMessage]);
 
   const handleResetCurrent = useCallback(() => {
-    resetPreferences?.();
+    preserveScrollPosition(() => {
+      resetPreferences?.();
+    });
     flashMessage("Current preferences reset.");
   }, [resetPreferences, flashMessage]);
+
+  const handleDensityChange = useCallback(
+    (density) => {
+      preserveScrollPosition(() => {
+        (setDensity || noopSetDensity)(density);
+      });
+      flashMessage(`Layout feel set to ${String(density)}.`);
+    },
+    [setDensity, noopSetDensity, flashMessage]
+  );
+
+  const handleToggleVisibility = useCallback(
+    (key) => {
+      preserveScrollPosition(() => {
+        (toggleSectionVisibility || noopToggleSectionVisibility)(key);
+      });
+    },
+    [toggleSectionVisibility, noopToggleSectionVisibility]
+  );
+
+  const handleMoveSection = useCallback(
+    (area, from, to) => {
+      preserveScrollPosition(() => {
+        (moveSection || noopMoveSection)(area, from, to);
+      });
+    },
+    [moveSection, noopMoveSection]
+  );
 
   if (!open) return null;
 
@@ -817,6 +947,7 @@ export default function DashboardSettingsPanel({
               type="button"
               className="button ghost"
               style={{ width: "auto", minWidth: 132 }}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={handleQuickSave}
             >
               Save Active
@@ -826,6 +957,7 @@ export default function DashboardSettingsPanel({
               type="button"
               className="button ghost"
               style={{ width: "auto", minWidth: 124 }}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={handleResetCurrent}
             >
               Reset Current
@@ -835,6 +967,7 @@ export default function DashboardSettingsPanel({
               type="button"
               className="button ghost"
               style={{ width: "auto", minWidth: 110 }}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={onClose}
             >
               Close
@@ -893,7 +1026,7 @@ export default function DashboardSettingsPanel({
                             ? "Balanced spacing for daily moderation use."
                             : "More breathing room and stronger visual separation."
                       }
-                      onClick={() => (setDensity || noopSetDensity)(density)}
+                      onClick={() => handleDensityChange(density)}
                     />
                   ))}
                 </div>
@@ -904,7 +1037,7 @@ export default function DashboardSettingsPanel({
                   title="Home Section Visibility"
                   keys={homeKeys}
                   visibility={visibility}
-                  onToggle={toggleSectionVisibility || noopToggleSectionVisibility}
+                  onToggle={handleToggleVisibility}
                 />
               </SettingsAccordion>
 
@@ -913,7 +1046,7 @@ export default function DashboardSettingsPanel({
                   title="Members Section Visibility"
                   keys={membersKeys}
                   visibility={visibility}
-                  onToggle={toggleSectionVisibility || noopToggleSectionVisibility}
+                  onToggle={handleToggleVisibility}
                 />
               </SettingsAccordion>
 
@@ -921,7 +1054,7 @@ export default function DashboardSettingsPanel({
                 <MoveButtons
                   area="home"
                   items={homeKeys}
-                  onMove={moveSection || noopMoveSection}
+                  onMove={handleMoveSection}
                 />
               </SettingsAccordion>
 
@@ -929,7 +1062,7 @@ export default function DashboardSettingsPanel({
                 <MoveButtons
                   area="members"
                   items={membersKeys}
-                  onMove={moveSection || noopMoveSection}
+                  onMove={handleMoveSection}
                 />
               </SettingsAccordion>
             </>
@@ -993,7 +1126,7 @@ export default function DashboardSettingsPanel({
                             ? "Balanced spacing for daily moderation use."
                             : "More breathing room and stronger visual separation."
                       }
-                      onClick={() => (setDensity || noopSetDensity)(density)}
+                      onClick={() => handleDensityChange(density)}
                     />
                   ))}
                 </div>
@@ -1003,26 +1136,26 @@ export default function DashboardSettingsPanel({
                 title="Home Section Visibility"
                 keys={homeKeys}
                 visibility={visibility}
-                onToggle={toggleSectionVisibility || noopToggleSectionVisibility}
+                onToggle={handleToggleVisibility}
               />
 
               <SectionVisibilityList
                 title="Members Section Visibility"
                 keys={membersKeys}
                 visibility={visibility}
-                onToggle={toggleSectionVisibility || noopToggleSectionVisibility}
+                onToggle={handleToggleVisibility}
               />
 
               <MoveButtons
                 area="home"
                 items={homeKeys}
-                onMove={moveSection || noopMoveSection}
+                onMove={handleMoveSection}
               />
 
               <MoveButtons
                 area="members"
                 items={membersKeys}
-                onMove={moveSection || noopMoveSection}
+                onMove={handleMoveSection}
               />
             </>
           )}
@@ -1068,6 +1201,7 @@ export default function DashboardSettingsPanel({
             padding: 14px;
             backdrop-filter: blur(10px);
             outline: none;
+            scroll-behavior: auto;
           }
 
           .settings-sheet-handle {
@@ -1268,16 +1402,19 @@ export default function DashboardSettingsPanel({
             border-radius: 20px;
             padding: 16px;
             box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+            transition: box-shadow 0.18s ease, background 0.18s ease, filter 0.18s ease;
           }
 
           .effects-reduced .settings-preview-card {
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
             background: rgba(255, 255, 255, 0.03);
+            filter: saturate(0.94);
           }
 
           .effects-minimal .settings-preview-card {
             box-shadow: none;
             background: rgba(255, 255, 255, 0.02);
+            filter: saturate(0.88);
           }
 
           .settings-preview-title {
