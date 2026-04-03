@@ -906,7 +906,8 @@ function buildSupportPayload({ roles, voiceChannels, debugInfo = null }) {
   };
 }
 
-function clampActivityLimit(value, fallback = 120, max = 500) {
+// NOTE: Bumping the max and default limit drastically to support pulling back the missing historical events
+function clampActivityLimit(value, fallback = 500, max = 5000) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
   return Math.min(Math.max(Math.floor(parsed), 1), max);
@@ -1173,7 +1174,7 @@ function mapActivityFeedEvent(row, guildMembers, memberMaps) {
   };
 }
 
-function buildTimeline(activityRows, guildMembers, limit = 120) {
+function buildTimeline(activityRows, guildMembers, limit = 500) {
   const memberMaps = buildMemberIdentityMaps(guildMembers);
 
   return safeArray(activityRows)
@@ -1266,7 +1267,8 @@ export async function GET(request) {
     const activityFamily = normalizeString(url.searchParams.get("activity_family"));
     const activityType = normalizeString(url.searchParams.get("activity_type"));
     const activitySource = normalizeString(url.searchParams.get("activity_source"));
-    const activityLimit = clampActivityLimit(url.searchParams.get("activity_limit"), 120, 500);
+    // Defaulting to 500 up to 5000 to solve the missing historical events requirement natively here
+    const activityLimit = clampActivityLimit(url.searchParams.get("activity_limit"), 500, 5000);
 
     if (debugEnabled()) {
       console.log("[dashboard/live] env.guildId =", guildId);
@@ -1452,6 +1454,7 @@ export async function GET(request) {
         .order("updated_at", { ascending: false })
         .limit(250),
 
+      // Counts still need to look at last 24h
       supabase
         .from("warns")
         .select("*", { count: "exact", head: true })
@@ -1499,21 +1502,20 @@ export async function GET(request) {
         .eq("is_bot", false)
         .eq("has_staff_role", true),
 
+      // Removed `.gte("created_at", last24hIso)` directly from rows to pull missing historical events & bumped limit
       supabase
         .from("warns")
         .select("*")
         .eq("guild_id", guildId)
-        .gte("created_at", last24hIso)
         .order("created_at", { ascending: false })
-        .limit(25),
+        .limit(100),
 
       supabase
         .from("raid_events")
         .select("*")
         .eq("guild_id", guildId)
-        .gte("created_at", last24hIso)
         .order("created_at", { ascending: false })
-        .limit(25),
+        .limit(100),
 
       supabase
         .from("verification_flags")
@@ -1521,7 +1523,7 @@ export async function GET(request) {
         .eq("guild_id", guildId)
         .eq("flagged", true)
         .order("created_at", { ascending: false })
-        .limit(25),
+        .limit(100),
 
       discordApi(`/guilds/${guildId}/channels`).catch((error) => ({
         __discord_error: error?.message || "Failed to load Discord channels.",
@@ -1575,7 +1577,10 @@ export async function GET(request) {
     const guildMembers = safeArray(allGuildMembersRes.data).map(mapGuildMember);
     const activityFeedRows = safeArray(activityFeedRes.data || []);
 
-    const pendingVerificationMembers = safeArray(pendingVerificationRowsRes.data || [])
+    // Expose Exact Raw rows (so you aren't fighting missing members due to mapping/filtering assumptions)
+    const pendingVerificationMembersRaw = safeArray(pendingVerificationRowsRes.data || []);
+
+    const pendingVerificationMembers = pendingVerificationMembersRaw
       .map(mapGuildMember)
       .filter(isPendingVerificationMember)
       .sort(
@@ -1739,6 +1744,7 @@ export async function GET(request) {
       memberRows,
       memberCounts,
       pendingVerificationMembers,
+      pendingVerificationMembersRaw, // Exposes the exact db member row for 1:1 mapping on the FE
       counts,
       intelligence,
       voiceChannels,
