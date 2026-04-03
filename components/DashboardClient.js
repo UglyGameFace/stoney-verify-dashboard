@@ -450,6 +450,7 @@ function DashboardSection({
           alignItems: "center",
           justifyContent: "space-between",
           gap: 12,
+          flexWrap: "wrap",
           cursor: onToggle ? "pointer" : "default",
         }}
       >
@@ -676,7 +677,7 @@ function DesktopTabBar({ activeTab, onChange }) {
             type="button"
             className={active ? "button" : "button ghost"}
             style={{ width: "auto", minWidth: 110 }}
-            onClick={() => onChange(tab)}
+            onClick={() => onChange(tab, { preserveScroll: true })}
           >
             {tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
@@ -747,6 +748,13 @@ function mergeUniqueTickets(...ticketSets) {
   return merged;
 }
 
+function getEffectsModeClass(mode) {
+  const value = String(mode || "").trim().toLowerCase();
+  if (value === "minimal") return "effects-minimal";
+  if (value === "reduced") return "effects-reduced";
+  return "effects-full";
+}
+
 export default function DashboardClient({
   initialData,
   staffName,
@@ -791,6 +799,15 @@ export default function DashboardClient({
   const raidsSectionRef = useRef(null);
   const fraudSectionRef = useRef(null);
 
+  const tabScrollMemoryRef = useRef({
+    home: 0,
+    tickets: 0,
+    members: 0,
+    categories: 0,
+  });
+
+  const activeTabRef = useRef("home");
+
   const {
     preferences,
     profiles,
@@ -813,6 +830,72 @@ export default function DashboardClient({
     [initialData, staffName]
   );
 
+  const shouldPauseRefresh = useCallback(() => {
+    return settingsOpen || isBlockingModalOpen();
+  }, [settingsOpen]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+
+    if (settingsOpen) {
+      document.body.dataset.settingsOpen = "true";
+    } else {
+      delete document.body.dataset.settingsOpen;
+    }
+
+    return () => {
+      delete document.body.dataset.settingsOpen;
+    };
+  }, [settingsOpen]);
+
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  const rememberCurrentScroll = useCallback(() => {
+    if (typeof window === "undefined") return;
+    tabScrollMemoryRef.current[activeTabRef.current] = window.scrollY || 0;
+  }, []);
+
+  const restoreTabScroll = useCallback((tabKey, fallbackTop = 0) => {
+    if (typeof window === "undefined") return;
+    const nextY = Number(tabScrollMemoryRef.current?.[tabKey] ?? fallbackTop);
+    window.scrollTo({
+      top: Number.isFinite(nextY) ? nextY : 0,
+      behavior: "auto",
+    });
+  }, []);
+
+  const handleTabChange = useCallback((nextTab, options = {}) => {
+    const {
+      preserveScroll = true,
+      resetToTop = false,
+    } = options;
+
+    if (!nextTab || nextTab === activeTabRef.current) return;
+
+    if (typeof window !== "undefined") {
+      tabScrollMemoryRef.current[activeTabRef.current] = window.scrollY || 0;
+    }
+
+    setActiveTab(nextTab);
+
+    if (typeof window !== "undefined") {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (resetToTop) {
+            window.scrollTo({ top: 0, behavior: "smooth" });
+            return;
+          }
+
+          if (preserveScroll) {
+            restoreTabScroll(nextTab, 0);
+          }
+        });
+      });
+    }
+  }, [restoreTabScroll]);
+
   const togglePanel = useCallback((name) => {
     setExpandedPanels((prev) => ({
       ...prev,
@@ -834,15 +917,15 @@ export default function DashboardClient({
       reason = "manual",
     } = {}) => {
       const now = Date.now();
-      const modalOpenNow = isBlockingModalOpen();
+      const pauseNow = shouldPauseRefresh();
 
-      if (modalOpenNow) {
+      if (pauseNow) {
         setIsModalPaused(true);
       } else {
         setIsModalPaused(false);
       }
 
-      if (!force && (refreshInFlightRef.current || modalOpenNow)) {
+      if (!force && (refreshInFlightRef.current || pauseNow)) {
         pendingRefreshReasonRef.current = reason;
         return;
       }
@@ -882,14 +965,14 @@ export default function DashboardClient({
         if (!silent) setIsRefreshing(false);
       }
     },
-    []
+    [shouldPauseRefresh]
   );
 
   const maybeRefreshIfStale = useCallback(
     async (reason) => {
-      const modalOpen = isBlockingModalOpen();
+      const pauseNow = shouldPauseRefresh();
 
-      if (modalOpen) {
+      if (pauseNow) {
         pendingRefreshReasonRef.current = reason;
         setIsModalPaused(true);
         return;
@@ -902,7 +985,7 @@ export default function DashboardClient({
         await refresh({ silent: true, force: false, reason });
       }
     },
-    [refresh]
+    [refresh, shouldPauseRefresh]
   );
 
   const handleReconcileTickets = useCallback(
@@ -1001,15 +1084,15 @@ export default function DashboardClient({
     function scheduleRefresh(reason, force = false) {
       clearTimeout(refreshTimer.current);
       refreshTimer.current = setTimeout(() => {
-        const modalOpen = isBlockingModalOpen();
+        const pauseNow = shouldPauseRefresh();
 
-        if (modalOpen && !force) {
+        if (pauseNow && !force) {
           pendingRefreshReasonRef.current = reason;
           setIsModalPaused(true);
           return;
         }
 
-        if (!modalOpen) {
+        if (!pauseNow) {
           setIsModalPaused(false);
         }
 
@@ -1032,9 +1115,9 @@ export default function DashboardClient({
     }
 
     function handleOnline() {
-      const modalOpen = isBlockingModalOpen();
+      const pauseNow = shouldPauseRefresh();
 
-      if (modalOpen) {
+      if (pauseNow) {
         pendingRefreshReasonRef.current = "online";
         setIsModalPaused(true);
         return;
@@ -1080,8 +1163,8 @@ export default function DashboardClient({
       if (!pendingReason) return;
       if (refreshInFlightRef.current) return;
 
-      const modalOpen = isBlockingModalOpen();
-      if (modalOpen) {
+      const pauseNow = shouldPauseRefresh();
+      if (pauseNow) {
         setIsModalPaused(true);
         return;
       }
@@ -1114,16 +1197,19 @@ export default function DashboardClient({
         supabase.removeChannel(channel);
       }
     };
-  }, [initialData, maybeRefreshIfStale, refresh]);
+  }, [initialData, maybeRefreshIfStale, refresh, shouldPauseRefresh]);
 
   useEffect(() => {
     if (settingsOpen) {
-      setIsModalPaused(false);
+      rememberCurrentScroll();
+      setIsModalPaused(true);
       if (pendingRefreshReasonRef.current === "settings-open") {
         pendingRefreshReasonRef.current = "";
       }
+    } else if (!shouldPauseRefresh()) {
+      setIsModalPaused(false);
     }
-  }, [settingsOpen]);
+  }, [settingsOpen, shouldPauseRefresh, rememberCurrentScroll]);
 
   const counts = data?.counts || {
     openTickets: 0,
@@ -1132,7 +1218,7 @@ export default function DashboardClient({
     fraudFlags: 0,
   };
 
-  const safeEvents = safeArray(data?.events);
+  const safeEvents = safeArray(data?.events || data?.activityFeed);
   const safeRoles = safeArray(data?.roles);
   const safeMetrics = safeArray(data?.metrics);
   const safeCategories = safeArray(data?.categories);
@@ -1234,7 +1320,12 @@ export default function DashboardClient({
       );
     }
 
-    if (statusFilter !== "all" && statusFilter !== "active" && statusFilter !== "closed" && statusFilter !== "deleted") {
+    if (
+      statusFilter !== "all" &&
+      statusFilter !== "active" &&
+      statusFilter !== "closed" &&
+      statusFilter !== "deleted"
+    ) {
       rows = rows.filter((t) => statusMatchesFilter(t, statusFilter));
     }
 
@@ -1267,25 +1358,19 @@ export default function DashboardClient({
 
   const jumpToTickets = useCallback(
     ({ status = "active", priority = "all", query = "" } = {}) => {
-      setActiveTab("tickets");
       setStatusFilter(status);
       setPriorityFilter(priority);
       setSelectedCategoryFilter(null);
       if (typeof query === "string") setSearch(query);
-
-      if (typeof window !== "undefined") {
-        requestAnimationFrame(() => {
-          window.scrollTo({ top: 0, behavior: "smooth" });
-        });
-      }
+      handleTabChange("tickets", { resetToTop: true });
     },
-    []
+    [handleTabChange]
   );
 
   const jumpToPanel = useCallback(
     (panelName) => {
-      setActiveTab("home");
       openOnlyPanel(panelName);
+      handleTabChange("home", { preserveScroll: true });
 
       const refMap = {
         warns: warnsSectionRef,
@@ -1303,14 +1388,12 @@ export default function DashboardClient({
                 behavior: "smooth",
                 block: "start",
               });
-            } else {
-              window.scrollTo({ top: 0, behavior: "smooth" });
             }
           });
         });
       }
     },
-    [openOnlyPanel]
+    [handleTabChange, openOnlyPanel]
   );
 
   const lastRefreshLabel = timeAgo(lastRefreshAtRef.current);
@@ -1319,20 +1402,16 @@ export default function DashboardClient({
   const homeLayout = preferences?.layout?.home || [];
   const membersLayout = preferences?.layout?.members || [];
   const density = preferences?.density || "comfortable";
+  const theme = preferences?.theme || {};
+  const effectsMode = theme?.effectsMode || "full";
 
   const handleFindTicketsByCategory = useCallback((category) => {
-    setActiveTab("tickets");
     setSelectedCategoryFilter(category || null);
     setSearch("");
     setStatusFilter("active");
     setPriorityFilter("all");
-
-    if (typeof window !== "undefined") {
-      requestAnimationFrame(() => {
-        window.scrollTo({ top: 0, behavior: "smooth" });
-      });
-    }
-  }, []);
+    handleTabChange("tickets", { resetToTop: true });
+  }, [handleTabChange]);
 
   const clearTicketFilters = useCallback(() => {
     setSearch("");
@@ -1414,7 +1493,7 @@ export default function DashboardClient({
     activity: (
       <DashboardSection
         title="Activity Feed"
-        subtitle={`${safeEvents.length} recent audit events loaded`}
+        subtitle={`${safeEvents.length} recent activity records loaded`}
         expanded={expandedPanels.activity}
         onToggle={() => togglePanel("activity")}
       >
@@ -1669,7 +1748,10 @@ export default function DashboardClient({
             type="button"
             className="button ghost"
             style={{ width: "auto", minWidth: 120 }}
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => {
+              rememberCurrentScroll();
+              setSettingsOpen(true);
+            }}
           >
             Personalize UI
           </button>
@@ -1705,13 +1787,21 @@ export default function DashboardClient({
     </div>
   );
 
+  const themeVars = {
+    "--accent": theme?.accent || "#45d483",
+    "--accent2": theme?.accent2 || "#3b82f6",
+    "--text-strong": theme?.textStrong || "#f8fafc",
+    "--text-muted": theme?.textMuted || "#b8c0cc",
+  };
+
   return (
     <>
       <Topbar />
 
       <div
-        className="dashboard-page-shell"
+        className={`dashboard-page-shell ${getEffectsModeClass(effectsMode)} density-${density}`}
         style={{
+          ...themeVars,
           paddingBottom: isDesktopLayout
             ? 32
             : `calc(${MOBILE_NAV_RESERVED_PX}px + env(safe-area-inset-bottom, 0px))`,
@@ -1720,7 +1810,7 @@ export default function DashboardClient({
         {isDesktopLayout ? (
           <>
             <div className="desktop-only-nav">
-              <DesktopTabBar activeTab={activeTab} onChange={setActiveTab} />
+              <DesktopTabBar activeTab={activeTab} onChange={handleTabChange} />
             </div>
 
             {commonRefreshCard}
@@ -2034,7 +2124,7 @@ export default function DashboardClient({
 
             <MobileBottomNav
               activeTab={activeTab}
-              onChange={setActiveTab}
+              onChange={(tab) => handleTabChange(tab, { preserveScroll: true })}
               tabs={MOBILE_TABS}
               title="Staff jumps"
               actionButtonLabel="Actions"
@@ -2046,7 +2136,14 @@ export default function DashboardClient({
 
       <DashboardSettingsPanel
         open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => {
+          setSettingsOpen(false);
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              restoreTabScroll(activeTabRef.current, 0);
+            });
+          });
+        }}
         preferences={preferences}
         profiles={profiles}
         activeProfileId={activeProfileId}
@@ -2066,6 +2163,38 @@ export default function DashboardClient({
       <style jsx>{`
         .dashboard-page-shell {
           position: relative;
+          min-height: 100vh;
+        }
+
+        .dashboard-page-shell.effects-reduced :global(.card),
+        .dashboard-page-shell.effects-reduced :global(.button),
+        .dashboard-page-shell.effects-reduced :global(.input) {
+          backdrop-filter: none !important;
+          filter: none !important;
+        }
+
+        .dashboard-page-shell.effects-minimal :global(.card),
+        .dashboard-page-shell.effects-minimal :global(.button),
+        .dashboard-page-shell.effects-minimal :global(.input) {
+          backdrop-filter: none !important;
+          filter: none !important;
+          box-shadow: none !important;
+          text-shadow: none !important;
+        }
+
+        .dashboard-page-shell.density-compact .dashboard-home-grid,
+        .dashboard-page-shell.density-compact .dashboard-members-grid {
+          gap: 12px;
+        }
+
+        .dashboard-page-shell.density-comfortable .dashboard-home-grid,
+        .dashboard-page-shell.density-comfortable .dashboard-members-grid {
+          gap: 16px;
+        }
+
+        .dashboard-page-shell.density-spacious .dashboard-home-grid,
+        .dashboard-page-shell.density-spacious .dashboard-members-grid {
+          gap: 22px;
         }
 
         .desktop-only-nav {
@@ -2075,11 +2204,6 @@ export default function DashboardClient({
         .dashboard-home-grid,
         .dashboard-members-grid {
           display: grid;
-          gap: ${density === "compact"
-            ? "12px"
-            : density === "spacious"
-              ? "22px"
-              : "16px"};
           align-items: start;
           overflow: visible;
         }
@@ -2104,108 +2228,32 @@ export default function DashboardClient({
 
         .mobile-tab-panel.active {
           display: block;
-          overflow: visible;
-        }
-
-        .metrics-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: ${density === "compact"
-            ? "10px"
-            : density === "spacious"
-              ? "16px"
-              : "12px"};
         }
 
         .intelligence-grid {
           display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: ${density === "compact"
-            ? "10px"
-            : density === "spacious"
-              ? "16px"
-              : "12px"};
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 10px;
           margin-bottom: 14px;
-          align-items: stretch;
         }
 
         .intel-tile {
-          border-radius: 18px;
-          padding: ${density === "compact"
-            ? "12px"
-            : density === "spacious"
-              ? "18px"
-              : "14px"};
+          border-radius: 14px;
+          padding: 12px;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.07);
           display: grid;
-          gap: 8px;
-          border: 1px solid var(--panel-border, rgba(255,255,255,0.08));
-          background: var(--panel-bg-soft, rgba(255,255,255,0.02));
-          min-width: 0;
-          overflow: hidden;
-        }
-
-        .intel-tile.ok {
-          border-color: color-mix(
-            in srgb,
-            var(--tone-success, #4ade80) 22%,
-            transparent
-          );
-          background: color-mix(
-            in srgb,
-            var(--tone-success, #4ade80) 10%,
-            transparent
-          );
-        }
-
-        .intel-tile.warn {
-          border-color: color-mix(
-            in srgb,
-            var(--tone-warn, #fbbf24) 22%,
-            transparent
-          );
-          background: color-mix(
-            in srgb,
-            var(--tone-warn, #fbbf24) 10%,
-            transparent
-          );
-        }
-
-        .intel-tile.danger {
-          border-color: color-mix(
-            in srgb,
-            var(--tone-danger, #f87171) 22%,
-            transparent
-          );
-          background: color-mix(
-            in srgb,
-            var(--tone-danger, #f87171) 10%,
-            transparent
-          );
-        }
-
-        .intel-value {
-          font-size: clamp(20px, 5vw, 28px);
-          line-height: 1.05;
-          overflow-wrap: anywhere;
-          word-break: break-word;
+          gap: 6px;
         }
 
         .detail-grid-3 {
           display: grid;
-          grid-template-columns: 1fr;
-          gap: ${density === "compact"
-            ? "10px"
-            : density === "spacious"
-              ? "16px"
-              : "12px"};
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: 12px;
         }
 
         .compact-detail-card {
-          padding: ${density === "compact"
-            ? "12px"
-            : density === "spacious"
-              ? "18px"
-              : "14px"};
+          padding: 14px;
         }
 
         .detail-card-title {
@@ -2214,69 +2262,21 @@ export default function DashboardClient({
         }
 
         .detail-list {
+          display: grid;
+          gap: 6px;
           font-size: 13px;
-          line-height: 1.6;
-          overflow-wrap: anywhere;
-        }
-
-        @media (min-width: 768px) {
-          .metrics-grid {
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-          }
-
-          .intelligence-grid {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-          }
-
-          .detail-grid-3 {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-          }
+          line-height: 1.45;
         }
 
         @media (min-width: 1024px) {
-          .dashboard-home-grid,
-          .dashboard-members-grid {
-            gap: ${density === "compact"
-              ? "14px"
-              : density === "spacious"
-                ? "24px"
-                : "18px"};
-          }
-
-          .dashboard-members-grid {
-            grid-template-columns: 1.2fr 1.2fr;
-          }
-
-          .dashboard-members-grid :global(.compact-panel:nth-child(3)),
-          .dashboard-members-grid :global(.compact-panel:nth-child(4)),
-          .dashboard-members-grid :global(.compact-panel:nth-child(5)) {
-            grid-column: span 1;
+          .mobile-tab-panel {
+            display: none !important;
           }
         }
 
         @media (max-width: 1023px) {
           .desktop-only-nav {
             display: none;
-          }
-        }
-
-        @media (max-width: 640px) {
-          .intelligence-grid {
-            grid-template-columns: 1fr;
-          }
-
-          .dashboard-refresh-actions {
-            width: 100%;
-          }
-
-          .dashboard-refresh-actions :global(button) {
-            flex: 1 1 0;
-            min-width: 0 !important;
-          }
-
-          .dashboard-home-grid,
-          .dashboard-members-grid {
-            padding-bottom: 8px;
           }
         }
       `}</style>
