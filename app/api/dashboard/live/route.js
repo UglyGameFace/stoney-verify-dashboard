@@ -688,6 +688,7 @@ function mapGuildMember(row) {
     has_cosmetic_only: Boolean(row?.has_cosmetic_only),
     role_state: row?.role_state || "unknown",
     role_state_reason: row?.role_state_reason || "",
+    data_health: row?.data_health || "unknown",
     joined_at: row?.joined_at || null,
     synced_at: row?.synced_at || null,
     updated_at: row?.updated_at || null,
@@ -911,17 +912,195 @@ function clampActivityLimit(value, fallback = 120, max = 500) {
   return Math.min(Math.max(Math.floor(parsed), 1), max);
 }
 
-function mapActivityFeedEvent(row, guildMembers) {
-  const actorId = normalizeString(row?.actor_user_id);
-  const targetId = normalizeString(row?.target_user_id);
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text = normalizeString(value);
+    if (text) return text;
+  }
+  return "";
+}
 
-  const actorMember = actorId
-    ? guildMembers.find((member) => String(member?.user_id) === actorId)
-    : null;
+function getSafeMeta(row) {
+  return row?.metadata && typeof row.metadata === "object"
+    ? row.metadata
+    : row?.meta && typeof row.meta === "object"
+      ? row.meta
+      : {};
+}
 
-  const targetMember = targetId
-    ? guildMembers.find((member) => String(member?.user_id) === targetId)
-    : null;
+function resolveMemberByIdOrName({ guildMembers, memberMaps, idCandidates = [], nameCandidates = [] }) {
+  for (const candidate of idCandidates) {
+    const id = normalizeString(candidate);
+    if (!id) continue;
+    const member = memberMaps.byId.get(id);
+    if (member) {
+      return {
+        member,
+        id,
+        resolvedBy: "id",
+      };
+    }
+  }
+
+  for (const candidate of nameCandidates) {
+    const name = normalizeString(candidate);
+    if (!name) continue;
+    const matchedId = memberMaps.nameToId.get(name.toLowerCase());
+    if (matchedId) {
+      const member = memberMaps.byId.get(matchedId);
+      if (member) {
+        return {
+          member,
+          id: matchedId,
+          resolvedBy: "name",
+        };
+      }
+    }
+  }
+
+  return {
+    member: null,
+    id: "",
+    resolvedBy: "",
+  };
+}
+
+function mapActivityFeedEvent(row, guildMembers, memberMaps) {
+  const meta = getSafeMeta(row);
+
+  const actorIdCandidates = [
+    row?.actor_user_id,
+    row?.actor_id,
+    row?.staff_id,
+    row?.requested_by,
+    row?.performed_by,
+    meta?.actor_user_id,
+    meta?.actor_id,
+    meta?.staff_id,
+    meta?.requested_by,
+    meta?.performed_by,
+    meta?.closed_by,
+    meta?.claimed_by,
+    meta?.assigned_to,
+  ];
+
+  const actorNameCandidates = [
+    row?.actor_name,
+    row?.actor_display,
+    row?.staff_name,
+    row?.requested_by_name,
+    row?.performed_by_name,
+    meta?.actor_name,
+    meta?.actor_display,
+    meta?.staff_name,
+    meta?.staff_display,
+    meta?.requested_by_name,
+    meta?.performed_by_name,
+    meta?.closed_by_name,
+    meta?.claimed_by_name,
+    meta?.assigned_to_name,
+  ];
+
+  const targetIdCandidates = [
+    row?.target_user_id,
+    row?.user_id,
+    row?.member_id,
+    row?.owner_id,
+    meta?.target_user_id,
+    meta?.user_id,
+    meta?.member_id,
+    meta?.owner_id,
+    meta?.requester_id,
+  ];
+
+  const targetNameCandidates = [
+    row?.target_name,
+    row?.username,
+    row?.member_name,
+    row?.owner_name,
+    meta?.target_name,
+    meta?.username,
+    meta?.member_name,
+    meta?.owner_name,
+    meta?.requester_display_name,
+    meta?.requester_username,
+  ];
+
+  const actorResolved = resolveMemberByIdOrName({
+    guildMembers,
+    memberMaps,
+    idCandidates: actorIdCandidates,
+    nameCandidates: actorNameCandidates,
+  });
+
+  const targetResolved = resolveMemberByIdOrName({
+    guildMembers,
+    memberMaps,
+    idCandidates: targetIdCandidates,
+    nameCandidates: targetNameCandidates,
+  });
+
+  const actorId = firstNonEmpty(
+    actorResolved?.member?.user_id,
+    actorResolved?.id,
+    row?.actor_user_id,
+    row?.actor_id,
+    row?.staff_id,
+    row?.requested_by,
+    row?.performed_by,
+    meta?.actor_user_id,
+    meta?.actor_id,
+    meta?.staff_id,
+    meta?.requested_by,
+    meta?.performed_by
+  );
+
+  const actorName = firstNonEmpty(
+    row?.actor_name,
+    row?.actor_display,
+    row?.staff_name,
+    row?.requested_by_name,
+    row?.performed_by_name,
+    meta?.actor_name,
+    meta?.actor_display,
+    meta?.staff_name,
+    meta?.staff_display,
+    meta?.requested_by_name,
+    meta?.performed_by_name,
+    actorResolved?.member?.display_name,
+    actorResolved?.member?.nickname,
+    actorResolved?.member?.username
+  );
+
+  const targetId = firstNonEmpty(
+    targetResolved?.member?.user_id,
+    targetResolved?.id,
+    row?.target_user_id,
+    row?.user_id,
+    row?.member_id,
+    row?.owner_id,
+    meta?.target_user_id,
+    meta?.user_id,
+    meta?.member_id,
+    meta?.owner_id,
+    meta?.requester_id
+  );
+
+  const targetName = firstNonEmpty(
+    row?.target_name,
+    row?.username,
+    row?.member_name,
+    row?.owner_name,
+    meta?.target_name,
+    meta?.username,
+    meta?.member_name,
+    meta?.owner_name,
+    meta?.requester_display_name,
+    meta?.requester_username,
+    targetResolved?.member?.display_name,
+    targetResolved?.member?.nickname,
+    targetResolved?.member?.username
+  );
 
   const title =
     row?.title ||
@@ -933,54 +1112,72 @@ function mapActivityFeedEvent(row, guildMembers) {
     truncateText(
       row?.description ||
         row?.reason ||
+        meta?.reason ||
         row?.title ||
         row?.event_type ||
         "",
       220
     ) || "Activity event";
 
+  const eventType = firstNonEmpty(row?.event_type, meta?.event_type, "activity_event");
+  const eventFamily = firstNonEmpty(row?.event_family, meta?.event_family, "system");
+  const source = firstNonEmpty(row?.source, meta?.source, "system");
+
+  const searchText = [
+    row?.search_text,
+    row?.title,
+    row?.description,
+    row?.reason,
+    eventType,
+    eventFamily,
+    source,
+    actorName,
+    actorId,
+    targetName,
+    targetId,
+    row?.channel_name,
+    row?.channel_id,
+    row?.ticket_id,
+    row?.ticket_message_id,
+    row?.related_id,
+    row?.related_table,
+    JSON.stringify(meta || {}),
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return {
     id: `activity-${row?.id || Math.random()}`,
     activity_id: row?.id || null,
     title,
     description,
-    event_type: row?.event_type || "activity_event",
-    event_family: row?.event_family || "system",
+    event_type: eventType,
+    event_family: eventFamily,
     related_id: row?.related_id || row?.ticket_id || row?.channel_id || null,
     created_at: row?.created_at || null,
     actor_id: actorId || null,
-    actor_name:
-      row?.actor_name ||
-      actorMember?.display_name ||
-      actorMember?.nickname ||
-      actorMember?.username ||
-      actorId ||
-      null,
-    actor_avatar_url: actorMember?.avatar_url || null,
+    actor_name: actorName || null,
+    actor_avatar_url: actorResolved?.member?.avatar_url || null,
     target_user_id: targetId || null,
-    target_name:
-      row?.target_name ||
-      targetMember?.display_name ||
-      targetMember?.nickname ||
-      targetMember?.username ||
-      targetId ||
-      null,
-    target_avatar_url: targetMember?.avatar_url || null,
-    source: row?.source || "system",
-    channel_id: row?.channel_id || null,
-    channel_name: row?.channel_name || null,
-    ticket_id: row?.ticket_id || null,
-    ticket_message_id: row?.ticket_message_id || null,
-    related_table: row?.related_table || null,
-    reason: row?.reason || null,
-    meta: row?.metadata && typeof row.metadata === "object" ? row.metadata : {},
-    search_text: row?.search_text || "",
+    target_name: targetName || null,
+    target_avatar_url: targetResolved?.member?.avatar_url || null,
+    source,
+    channel_id: row?.channel_id || meta?.channel_id || null,
+    channel_name: row?.channel_name || meta?.channel_name || null,
+    ticket_id: row?.ticket_id || meta?.ticket_id || null,
+    ticket_message_id: row?.ticket_message_id || meta?.ticket_message_id || null,
+    related_table: row?.related_table || meta?.related_table || null,
+    reason: row?.reason || meta?.reason || null,
+    meta,
+    search_text: searchText,
   };
 }
 
 function buildTimeline(activityRows, guildMembers, limit = 120) {
+  const memberMaps = buildMemberIdentityMaps(guildMembers);
+
   return safeArray(activityRows)
-    .map((row) => mapActivityFeedEvent(row, guildMembers))
+    .map((row) => mapActivityFeedEvent(row, guildMembers, memberMaps))
     .sort((a, b) => toTime(b.created_at) - toTime(a.created_at))
     .slice(0, limit);
 }
@@ -1028,6 +1225,26 @@ async function loadActivityFeed({
   }
 
   return query;
+}
+
+function isPendingVerificationMember(row) {
+  const member = mapGuildMember(row);
+  if (!member) return false;
+  if (member.in_guild === false) return false;
+  if (member.is_bot) return false;
+  if (member.has_staff_role) return false;
+  if (member.has_verified_role) return false;
+  if (!member.has_unverified) return false;
+
+  const health = normalizeString(member?.data_health || "ok").toLowerCase();
+  if (health === "left_guild") return false;
+
+  const roleState = normalizeString(member?.role_state || "").toLowerCase();
+  if (roleState && roleState !== "unverified_only" && roleState !== "missing_verified_role" && roleState !== "unknown") {
+    return false;
+  }
+
+  return true;
 }
 
 export async function GET(request) {
@@ -1140,12 +1357,12 @@ export async function GET(request) {
       recentActiveMembersRes,
       recentFormerMembersRes,
       allGuildMembersRes,
+      pendingVerificationRowsRes,
       warnsTodayRes,
       raidAlertsRes,
       fraudFlagsRes,
       activeMembersCountRes,
       formerMembersCountRes,
-      pendingVerificationCountRes,
       verifiedMembersCountRes,
       staffMembersCountRes,
       warnsRowsRes,
@@ -1224,6 +1441,18 @@ export async function GET(request) {
         .limit(2000),
 
       supabase
+        .from("guild_members")
+        .select("*")
+        .eq("guild_id", guildId)
+        .eq("in_guild", true)
+        .eq("is_bot", false)
+        .eq("has_staff_role", false)
+        .eq("has_verified_role", false)
+        .eq("has_unverified", true)
+        .order("updated_at", { ascending: false })
+        .limit(250),
+
+      supabase
         .from("warns")
         .select("*", { count: "exact", head: true })
         .eq("guild_id", guildId)
@@ -1253,16 +1482,6 @@ export async function GET(request) {
         .select("*", { count: "exact", head: true })
         .eq("guild_id", guildId)
         .eq("in_guild", false),
-
-      supabase
-        .from("guild_members")
-        .select("*", { count: "exact", head: true })
-        .eq("guild_id", guildId)
-        .eq("in_guild", true)
-        .eq("is_bot", false)
-        .eq("has_staff_role", false)
-        .eq("has_verified_role", false)
-        .eq("has_unverified", true),
 
       supabase
         .from("guild_members")
@@ -1319,12 +1538,12 @@ export async function GET(request) {
       recentActiveMembersRes.error ||
       recentFormerMembersRes.error ||
       allGuildMembersRes.error ||
+      pendingVerificationRowsRes.error ||
       warnsTodayRes.error ||
       raidAlertsRes.error ||
       fraudFlagsRes.error ||
       activeMembersCountRes.error ||
       formerMembersCountRes.error ||
-      pendingVerificationCountRes.error ||
       verifiedMembersCountRes.error ||
       staffMembersCountRes.error ||
       warnsRowsRes.error ||
@@ -1355,6 +1574,15 @@ export async function GET(request) {
     const recentFormerMembers = safeArray(recentFormerMembersRes.data).map(mapGuildMember);
     const guildMembers = safeArray(allGuildMembersRes.data).map(mapGuildMember);
     const activityFeedRows = safeArray(activityFeedRes.data || []);
+
+    const pendingVerificationMembers = safeArray(pendingVerificationRowsRes.data || [])
+      .map(mapGuildMember)
+      .filter(isPendingVerificationMember)
+      .sort(
+        (a, b) =>
+          toTime(b.updated_at || b.last_seen_at || b.joined_at) -
+          toTime(a.updated_at || a.last_seen_at || a.joined_at)
+      );
 
     const activeTickets = canonicalTickets.filter((ticket) => {
       if (!isOpenLikeStatus(ticket?.status)) return false;
@@ -1441,7 +1669,7 @@ export async function GET(request) {
       tracked: (activeMembersCountRes.count || 0) + (formerMembersCountRes.count || 0),
       active: activeMembersCountRes.count || 0,
       former: formerMembersCountRes.count || 0,
-      pendingVerification: pendingVerificationCountRes.count || 0,
+      pendingVerification: pendingVerificationMembers.length,
       verified: verifiedMembersCountRes.count || 0,
       staff: staffMembersCountRes.count || 0,
     };
@@ -1473,7 +1701,7 @@ export async function GET(request) {
       console.log("[dashboard/live] raids found =", raids.length);
       console.log("[dashboard/live] fraud found =", fraud.length);
       console.log("[dashboard/live] guildMembers found =", guildMembers.length);
-      console.log("[dashboard/live] pendingVerificationCount =", pendingVerificationCountRes.count || 0);
+      console.log("[dashboard/live] pendingVerificationMembers =", pendingVerificationMembers.length);
       console.log("[dashboard/live] voiceChannels found =", voiceChannels.length);
       if (discordChannelsResult?.__discord_error) {
         console.warn("[dashboard/live] voice channel fetch warning =", discordChannelsResult.__discord_error);
@@ -1510,6 +1738,7 @@ export async function GET(request) {
       members: guildMembers,
       memberRows,
       memberCounts,
+      pendingVerificationMembers,
       counts,
       intelligence,
       voiceChannels,
@@ -1532,6 +1761,7 @@ export async function GET(request) {
             voiceChannelsCount: voiceChannels.length,
             voiceChannelsError: discordChannelsResult?.__discord_error || null,
             memberCounts,
+            pendingVerificationMembers,
             recentJoinsCount: recentJoins.length,
             memberJoinsCount: memberJoins.length,
             activityFilters: {
