@@ -1,6 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+// ============================================================================
+// Constants
+// ============================================================================
 
 const SECTION_LABELS = {
   intelligence: "Moderator Intelligence",
@@ -25,6 +29,22 @@ const DEFAULT_THEME = {
   textMuted: "#b8c0cc",
   effectsMode: "full",
 };
+
+const DENSITY_OPTIONS = {
+  compact: "Compact",
+  comfortable: "Comfortable",
+  spacious: "Spacious",
+};
+
+const EFFECTS_MODES = {
+  full: "Full",
+  reduced: "Reduced",
+  minimal: "Minimal",
+};
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
@@ -51,31 +71,31 @@ function normalizeTheme(theme) {
 }
 
 function themesEqual(a, b) {
-  const left = normalizeTheme(a);
-  const right = normalizeTheme(b);
   return (
-    left.accent === right.accent &&
-    left.accent2 === right.accent2 &&
-    left.textStrong === right.textStrong &&
-    left.textMuted === right.textMuted &&
-    left.effectsMode === right.effectsMode
+    a.accent === b.accent &&
+    a.accent2 === b.accent2 &&
+    a.textStrong === b.textStrong &&
+    a.textMuted === b.textMuted &&
+    a.effectsMode === b.effectsMode
   );
 }
 
+// ============================================================================
+// Custom Hooks
+// ============================================================================
+
 function useCompactSettingsLayout(breakpoint = 900) {
-  const getValue = () => {
+  const [isCompact, setIsCompact] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.innerWidth <= breakpoint;
-  };
-
-  const [isCompact, setIsCompact] = useState(getValue);
+  });
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
 
-    const update = () => setIsCompact(getValue());
-
+    const update = () => setIsCompact(window.innerWidth <= breakpoint);
     update();
+
     window.addEventListener("resize", update);
     window.addEventListener("orientationchange", update);
 
@@ -88,22 +108,130 @@ function useCompactSettingsLayout(breakpoint = 900) {
   return isCompact;
 }
 
+function useFlashMessage() {
+  const [message, setMessage] = useState("");
+  const timerRef = useRef(null);
+
+  const flash = useCallback((text) => {
+    setMessage(text);
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+    timerRef.current = setTimeout(() => setMessage(""), 2200);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
+
+  return [message, flash];
+}
+
+function useFocusTrap(open, onEscape, panelRef) {
+  const previousFocusRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    previousFocusRef.current = document.activeElement;
+
+    const panel = panelRef?.current;
+    const focusable = panel?.querySelector(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+
+    if (focusable && typeof focusable.focus === "function") {
+      focusable.focus();
+    }
+
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape" && onEscape) {
+        e.preventDefault();
+        onEscape();
+        return;
+      }
+
+      if (e.key !== "Tab" || !panel) return;
+
+      const nodes = Array.from(
+        panel.querySelectorAll(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter(
+        (el) =>
+          !el.hasAttribute("disabled") &&
+          el.getAttribute("aria-hidden") !== "true"
+      );
+
+      if (!nodes.length) return;
+
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      const active = document.activeElement;
+
+      if (e.shiftKey) {
+        if (active === first || !panel.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      if (
+        previousFocusRef.current &&
+        typeof previousFocusRef.current.focus === "function"
+      ) {
+        previousFocusRef.current.focus();
+      }
+    };
+  }, [open, onEscape, panelRef]);
+}
+
+function usePreventBodyScroll(open) {
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const originalOverflow = document.body.style.overflow;
+    const originalTouchAction = document.body.style.touchAction;
+
+    document.body.style.overflow = "hidden";
+    document.body.style.touchAction = "none";
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.body.style.touchAction = originalTouchAction;
+    };
+  }, [open]);
+}
+
+// ============================================================================
+// Subcomponents
+// ============================================================================
+
 function ToneSwatch({ label, value, onChange, helper }) {
   return (
     <div className="settings-lab-card">
       <div className="ticket-info-label">{label}</div>
       <input
         type="color"
-        value={value || "#45d483"}
+        value={value}
         onChange={(e) => onChange(e.target.value)}
         className="settings-color-input"
+        aria-label={`Choose ${label} color`}
       />
-      <div
-        className="settings-color-readout"
-        style={{ color: "var(--text-strong, #f8fafc)" }}
-      >
-        {String(value || "").toUpperCase()}
-      </div>
+      <div className="settings-color-readout">{String(value || "").toUpperCase()}</div>
       {helper ? <div className="muted settings-helper-copy">{helper}</div> : null}
     </div>
   );
@@ -115,6 +243,7 @@ function VisibilityPill({ label, active, onToggle }) {
       type="button"
       className={`settings-pill ${active ? "active" : ""}`}
       onClick={onToggle}
+      aria-pressed={active}
     >
       <span className="settings-pill-label">{label}</span>
       <span className={`settings-pill-badge ${active ? "active" : ""}`}>
@@ -141,7 +270,7 @@ function SectionVisibilityList({ title, keys, visibility, onToggle }) {
           <VisibilityPill
             key={key}
             label={SECTION_LABELS[key] || key}
-            active={Boolean(visibility?.[key])}
+            active={!!visibility[key]}
             onToggle={() => onToggle(key)}
           />
         ))}
@@ -180,6 +309,7 @@ function MoveButtons({ area, items, onMove }) {
                 className="button ghost settings-mini-btn"
                 disabled={index === 0}
                 onClick={() => onMove(area, index, index - 1)}
+                aria-label="Move up"
               >
                 ↑
               </button>
@@ -189,6 +319,7 @@ function MoveButtons({ area, items, onMove }) {
                 className="button ghost settings-mini-btn"
                 disabled={index === items.length - 1}
                 onClick={() => onMove(area, index, index + 1)}
+                aria-label="Move down"
               >
                 ↓
               </button>
@@ -206,6 +337,7 @@ function DensityPreview({ active, label, helper, onClick }) {
       type="button"
       className={`density-preview ${active ? "active" : ""}`}
       onClick={onClick}
+      aria-pressed={active}
     >
       <div className="density-preview-bars">
         <span />
@@ -224,6 +356,7 @@ function EffectsModeCard({ active, label, helper, onClick }) {
       type="button"
       className={`density-preview ${active ? "active" : ""}`}
       onClick={onClick}
+      aria-pressed={active}
     >
       <div className="density-preview-bars effects-bars">
         <span />
@@ -245,11 +378,21 @@ function ProfileCard({
   onRename,
   onDelete,
 }) {
-  const [renameValue, setRenameValue] = useState(profile?.name || "");
+  const [renameValue, setRenameValue] = useState(profile.name || "");
 
   useEffect(() => {
-    setRenameValue(profile?.name || "");
-  }, [profile?.name]);
+    setRenameValue(profile.name || "");
+  }, [profile.name]);
+
+  const handleRename = () => {
+    if (String(renameValue || "").trim()) {
+      onRename(profile.id, String(renameValue || "").trim());
+    }
+  };
+
+  const handleSave = () => {
+    onSave(profile.id, String(renameValue || "").trim());
+  };
 
   return (
     <div className={`profile-slot-card ${isActive ? "active" : ""}`}>
@@ -270,14 +413,18 @@ function ProfileCard({
           className="input"
           value={renameValue}
           onChange={(e) => setRenameValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleRename();
+          }}
           placeholder={`Profile ${profile.slot}`}
+          aria-label="Profile name"
         />
 
         <button
           type="button"
           className="button ghost"
           style={{ width: "auto", minWidth: 96 }}
-          onClick={() => onRename(profile.id, renameValue)}
+          onClick={handleRename}
         >
           Rename
         </button>
@@ -297,7 +444,7 @@ function ProfileCard({
           type="button"
           className="button ghost"
           style={{ width: "auto", minWidth: 118 }}
-          onClick={() => onSave(profile.id, renameValue)}
+          onClick={handleSave}
         >
           Save Current
         </button>
@@ -324,6 +471,7 @@ function SettingsAccordion({ title, chip, defaultOpen = false, children }) {
         type="button"
         className="settings-accordion-head"
         onClick={() => setOpen((prev) => !prev)}
+        aria-expanded={open}
       >
         <div>
           <div className="settings-chip-row">
@@ -417,34 +565,30 @@ function DraftThemePanel({
         </div>
 
         <div className="settings-density-grid">
-          <EffectsModeCard
-            active={draftTheme.effectsMode === "full"}
-            label="Full"
-            helper="Maximum glow, blur, and visual atmosphere."
-            onClick={() => setDraftThemeValue("effectsMode", "full")}
-          />
-          <EffectsModeCard
-            active={draftTheme.effectsMode === "reduced"}
-            label="Reduced"
-            helper="Less extra glow and softer visual effects for cheaper devices."
-            onClick={() => setDraftThemeValue("effectsMode", "reduced")}
-          />
-          <EffectsModeCard
-            active={draftTheme.effectsMode === "minimal"}
-            label="Minimal"
-            helper="Lowest visual overhead. Best for weak phones or laggy browsers."
-            onClick={() => setDraftThemeValue("effectsMode", "minimal")}
-          />
+          {Object.entries(EFFECTS_MODES).map(([mode, label]) => (
+            <EffectsModeCard
+              key={mode}
+              active={draftTheme.effectsMode === mode}
+              label={label}
+              helper={
+                mode === "full"
+                  ? "Maximum glow, blur, and visual atmosphere."
+                  : mode === "reduced"
+                    ? "Less extra glow and softer visual effects for cheaper devices."
+                    : "Lowest visual overhead. Best for weak phones or laggy browsers."
+              }
+              onClick={() => setDraftThemeValue("effectsMode", mode)}
+            />
+          ))}
         </div>
       </div>
 
-      <div
-        className={`settings-preview-stage effects-${draftTheme.effectsMode || "full"}`}
-      >
+      <div className={`settings-preview-stage effects-${draftTheme.effectsMode}`}>
         <div className="settings-preview-card">
           <div className="settings-preview-title">Live Mood Preview</div>
           <div className="settings-preview-sub">
-            Draft preview only. Colors and effects apply when you press <strong>Apply</strong>.
+            Draft preview only. Colors and effects apply when you press{" "}
+            <strong>Apply</strong>.
           </div>
 
           <div className="settings-preview-chip-row">
@@ -474,7 +618,7 @@ function DraftThemePanel({
           </div>
 
           <div className="muted settings-helper-copy" style={{ marginTop: 12 }}>
-            Current applied effects mode: <strong>{baselineTheme.effectsMode || "full"}</strong>
+            Current applied effects mode: <strong>{baselineTheme.effectsMode}</strong>
           </div>
         </div>
       </div>
@@ -482,202 +626,9 @@ function DraftThemePanel({
   );
 }
 
-function SettingsDesktopContent(props) {
-  const {
-    sortedProfiles,
-    activeProfileId,
-    lastUsedProfileId,
-    handleLoad,
-    handleSave,
-    handleRename,
-    handleDelete,
-    draftTheme,
-    baselineTheme,
-    setDraftThemeValue,
-    applyDraftTheme,
-    resetDraftTheme,
-    hasDraftChanges,
-    preferences,
-    setDensity,
-  } = props;
-
-  return (
-    <>
-      <div className="settings-section-card">
-        <div className="settings-section-heading">
-          <div>
-            <div className="settings-chip-row">
-              <span className="section-chip">Saved Looks</span>
-            </div>
-            <div className="settings-title-sm">Profile Slots</div>
-          </div>
-        </div>
-
-        <div className="settings-profile-grid">
-          {sortedProfiles.map((profile) => (
-            <ProfileCard
-              key={profile.id}
-              profile={profile}
-              isActive={profile.id === activeProfileId}
-              isLastUsed={profile.id === lastUsedProfileId}
-              onLoad={handleLoad}
-              onSave={handleSave}
-              onRename={handleRename}
-              onDelete={handleDelete}
-            />
-          ))}
-        </div>
-      </div>
-
-      <DraftThemePanel
-        draftTheme={draftTheme}
-        baselineTheme={baselineTheme}
-        setDraftThemeValue={setDraftThemeValue}
-        applyDraftTheme={applyDraftTheme}
-        resetDraftTheme={resetDraftTheme}
-        hasDraftChanges={hasDraftChanges}
-      />
-
-      <div className="settings-section-card">
-        <div className="settings-section-heading">
-          <div>
-            <div className="settings-chip-row">
-              <span className="section-chip">Density</span>
-            </div>
-            <div className="settings-title-sm">Layout Feel</div>
-          </div>
-        </div>
-
-        <div className="settings-density-grid">
-          <DensityPreview
-            active={preferences?.density === "compact"}
-            label="Compact"
-            helper="Tighter spacing for more control on one screen."
-            onClick={() => setDensity("compact")}
-          />
-          <DensityPreview
-            active={preferences?.density === "comfortable"}
-            label="Comfortable"
-            helper="Balanced spacing for daily moderation use."
-            onClick={() => setDensity("comfortable")}
-          />
-          <DensityPreview
-            active={preferences?.density === "spacious"}
-            label="Spacious"
-            helper="More breathing room and stronger visual separation."
-            onClick={() => setDensity("spacious")}
-          />
-        </div>
-      </div>
-    </>
-  );
-}
-
-function SettingsMobileContent(props) {
-  const {
-    sortedProfiles,
-    activeProfileId,
-    lastUsedProfileId,
-    handleLoad,
-    handleSave,
-    handleRename,
-    handleDelete,
-    draftTheme,
-    baselineTheme,
-    setDraftThemeValue,
-    applyDraftTheme,
-    resetDraftTheme,
-    hasDraftChanges,
-    preferences,
-    setDensity,
-    homeKeys,
-    membersKeys,
-    visibility,
-    toggleSectionVisibility,
-    moveSection,
-  } = props;
-
-  return (
-    <>
-      <SettingsAccordion title="Profile Slots" chip="Saved Looks" defaultOpen>
-        <div className="settings-profile-grid">
-          {sortedProfiles.map((profile) => (
-            <ProfileCard
-              key={profile.id}
-              profile={profile}
-              isActive={profile.id === activeProfileId}
-              isLastUsed={profile.id === lastUsedProfileId}
-              onLoad={handleLoad}
-              onSave={handleSave}
-              onRename={handleRename}
-              onDelete={handleDelete}
-            />
-          ))}
-        </div>
-      </SettingsAccordion>
-
-      <SettingsAccordion title="Neon Palette + Effects" chip="Color Engine" defaultOpen>
-        <DraftThemePanel
-          draftTheme={draftTheme}
-          baselineTheme={baselineTheme}
-          setDraftThemeValue={setDraftThemeValue}
-          applyDraftTheme={applyDraftTheme}
-          resetDraftTheme={resetDraftTheme}
-          hasDraftChanges={hasDraftChanges}
-        />
-      </SettingsAccordion>
-
-      <SettingsAccordion title="Density" chip="Layout Feel" defaultOpen>
-        <div className="settings-density-grid">
-          <DensityPreview
-            active={preferences?.density === "compact"}
-            label="Compact"
-            helper="Tighter spacing for more control on one screen."
-            onClick={() => setDensity("compact")}
-          />
-          <DensityPreview
-            active={preferences?.density === "comfortable"}
-            label="Comfortable"
-            helper="Balanced spacing for daily moderation use."
-            onClick={() => setDensity("comfortable")}
-          />
-          <DensityPreview
-            active={preferences?.density === "spacious"}
-            label="Spacious"
-            helper="More breathing room and stronger visual separation."
-            onClick={() => setDensity("spacious")}
-          />
-        </div>
-      </SettingsAccordion>
-
-      <SettingsAccordion title="Home Visibility" chip="Visibility">
-        <SectionVisibilityList
-          title="Home Section Visibility"
-          keys={homeKeys}
-          visibility={visibility}
-          onToggle={toggleSectionVisibility}
-        />
-      </SettingsAccordion>
-
-      <SettingsAccordion title="Members Visibility" chip="Visibility">
-        <SectionVisibilityList
-          title="Members Section Visibility"
-          keys={membersKeys}
-          visibility={visibility}
-          onToggle={toggleSectionVisibility}
-        />
-      </SettingsAccordion>
-
-      <SettingsAccordion title="Home Layout Order" chip="Layout Order">
-        <MoveButtons area="home" items={homeKeys} onMove={moveSection} />
-      </SettingsAccordion>
-
-      <SettingsAccordion title="Members Layout Order" chip="Layout Order">
-        <MoveButtons area="members" items={membersKeys} onMove={moveSection} />
-      </SettingsAccordion>
-    </>
-  );
-}
+// ============================================================================
+// Main Component
+// ============================================================================
 
 export default function DashboardSettingsPanel({
   open,
@@ -697,12 +648,23 @@ export default function DashboardSettingsPanel({
   renameProfile,
   deleteProfile,
 }) {
-  const [message, setMessage] = useState("");
+  const [message, flashMessage] = useFlashMessage();
   const isCompact = useCompactSettingsLayout(900);
+  const panelRef = useRef(null);
 
-  const homeKeys = preferences?.layout?.home || [];
-  const membersKeys = preferences?.layout?.members || [];
-  const visibility = preferences?.sectionVisibility || {};
+  const homeKeys = useMemo(
+    () => safeArray(preferences?.layout?.home),
+    [preferences?.layout?.home]
+  );
+  const membersKeys = useMemo(
+    () => safeArray(preferences?.layout?.members),
+    [preferences?.layout?.members]
+  );
+  const visibility = useMemo(
+    () => preferences?.sectionVisibility || {},
+    [preferences?.sectionVisibility]
+  );
+
   const baselineTheme = useMemo(
     () => normalizeTheme(preferences?.theme),
     [preferences?.theme]
@@ -710,13 +672,11 @@ export default function DashboardSettingsPanel({
 
   const [draftTheme, setDraftTheme] = useState(baselineTheme);
 
-  const sortedProfiles = useMemo(
-    () =>
-      safeArray(profiles)
-        .slice()
-        .sort((a, b) => Number(a.slot || 0) - Number(b.slot || 0)),
-    [profiles]
-  );
+  const sortedProfiles = useMemo(() => {
+    return [...safeArray(profiles)]
+      .filter(Boolean)
+      .sort((a, b) => (a.slot || 0) - (b.slot || 0));
+  }, [profiles]);
 
   const hasDraftChanges = useMemo(
     () => !themesEqual(draftTheme, baselineTheme),
@@ -724,110 +684,85 @@ export default function DashboardSettingsPanel({
   );
 
   useEffect(() => {
-    if (!open) return;
-    setDraftTheme(normalizeTheme(preferences?.theme));
-  }, [open, preferences?.theme]);
-
-  useEffect(() => {
-    if (!open) return undefined;
-
-    const body = document.body;
-    const prevBodyOverflow = body.style.overflow;
-    const prevSettingsFlag = body.dataset.settingsOpen || "";
-
-    body.style.overflow = "hidden";
-    body.dataset.settingsOpen = "true";
-
-    return () => {
-      body.style.overflow = prevBodyOverflow;
-
-      if (prevSettingsFlag) {
-        body.dataset.settingsOpen = prevSettingsFlag;
-      } else {
-        delete body.dataset.settingsOpen;
-      }
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return undefined;
-
-    function handleKeyDown(event) {
-      if (event.key === "Escape") {
-        onClose?.();
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
-  function flashMessage(text) {
-    setMessage(text);
-    if (typeof window !== "undefined") {
-      window.clearTimeout(window.__dashboardSettingsMsgTimer);
-      window.__dashboardSettingsMsgTimer = window.setTimeout(() => {
-        setMessage("");
-      }, 2200);
-    }
-  }
-
-  function setDraftThemeValue(key, value) {
-    setDraftTheme((prev) => ({
-      ...prev,
-      [key]: value,
-    }));
-  }
-
-  function applyDraftTheme() {
-    const next = normalizeTheme(draftTheme);
-    setThemeValue?.("accent", next.accent);
-    setThemeValue?.("accent2", next.accent2);
-    setThemeValue?.("textStrong", next.textStrong);
-    setThemeValue?.("textMuted", next.textMuted);
-    setThemeValue?.("effectsMode", next.effectsMode);
-    flashMessage("Theme draft applied.");
-  }
-
-  function resetDraftTheme() {
-    setDraftTheme(normalizeTheme(preferences?.theme));
-    flashMessage("Draft reset to current applied theme.");
-  }
-
-  function handleRename(profileId, nextName) {
-    const ok = renameProfile?.(profileId, nextName);
-    flashMessage(ok ? "Profile renamed." : "Enter a valid profile name.");
-  }
-
-  function handleSave(profileId, nextName) {
-    const ok = saveProfile?.(profileId, nextName);
-    flashMessage(ok ? "Profile saved." : "Unable to save profile.");
-  }
-
-  function handleLoad(profileId) {
-    const ok = loadProfile?.(profileId);
-    if (ok) {
+    if (open) {
       setDraftTheme(normalizeTheme(preferences?.theme));
     }
-    flashMessage(ok ? "Profile loaded." : "Unable to load profile.");
-  }
+  }, [open, preferences?.theme]);
 
-  function handleDelete(profileId) {
-    const ok = deleteProfile?.(profileId);
-    flashMessage(ok ? "Profile cleared." : "Unable to clear profile.");
-  }
+  usePreventBodyScroll(open);
+  useFocusTrap(open, onClose, panelRef);
 
-  function handleQuickSave() {
+  const noopToggleSectionVisibility = useCallback(() => {}, []);
+  const noopMoveSection = useCallback(() => {}, []);
+  const noopSetDensity = useCallback(() => {}, []);
+
+  const setDraftThemeValue = useCallback((key, value) => {
+    setDraftTheme((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
+  const applyDraftTheme = useCallback(() => {
+    const next = normalizeTheme(draftTheme);
+    if (setThemeValue) {
+      setThemeValue("accent", next.accent);
+      setThemeValue("accent2", next.accent2);
+      setThemeValue("textStrong", next.textStrong);
+      setThemeValue("textMuted", next.textMuted);
+      setThemeValue("effectsMode", next.effectsMode);
+    }
+    flashMessage("Theme draft applied.");
+  }, [draftTheme, setThemeValue, flashMessage]);
+
+  const resetDraftTheme = useCallback(() => {
+    setDraftTheme(normalizeTheme(preferences?.theme));
+    flashMessage("Draft reset to current applied theme.");
+  }, [preferences?.theme, flashMessage]);
+
+  const handleRename = useCallback(
+    (profileId, nextName) => {
+      const ok = renameProfile?.(profileId, nextName);
+      flashMessage(ok ? "Profile renamed." : "Enter a valid profile name.");
+    },
+    [renameProfile, flashMessage]
+  );
+
+  const handleSave = useCallback(
+    (profileId, nextName) => {
+      const ok = saveProfile?.(profileId, nextName);
+      flashMessage(ok ? "Profile saved." : "Unable to save profile.");
+    },
+    [saveProfile, flashMessage]
+  );
+
+  const handleLoad = useCallback(
+    (profileId) => {
+      const ok = loadProfile?.(profileId);
+      if (ok) {
+        setDraftTheme(normalizeTheme(preferences?.theme));
+      }
+      flashMessage(ok ? "Profile loaded." : "Unable to load profile.");
+    },
+    [loadProfile, preferences?.theme, flashMessage]
+  );
+
+  const handleDelete = useCallback(
+    (profileId) => {
+      const ok = deleteProfile?.(profileId);
+      flashMessage(ok ? "Profile cleared." : "Unable to clear profile.");
+    },
+    [deleteProfile, flashMessage]
+  );
+
+  const handleQuickSave = useCallback(() => {
     const ok = saveActiveProfile?.();
     flashMessage(ok ? "Active profile saved." : "Unable to save active profile.");
-  }
+  }, [saveActiveProfile, flashMessage]);
 
-  function handleResetCurrent() {
+  const handleResetCurrent = useCallback(() => {
     resetPreferences?.();
     flashMessage("Current preferences reset.");
-  }
+  }, [resetPreferences, flashMessage]);
+
+  if (!open) return null;
 
   return (
     <div
@@ -837,7 +772,12 @@ export default function DashboardSettingsPanel({
       className="settings-overlay"
       onClick={onClose}
     >
-      <div className="settings-sheet" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={panelRef}
+        className="settings-sheet"
+        onClick={(e) => e.stopPropagation()}
+        tabIndex={-1}
+      >
         <div className="settings-sheet-handle" />
 
         <div className="settings-head">
@@ -887,75 +827,193 @@ export default function DashboardSettingsPanel({
         </div>
 
         {message ? (
-          <div className="info-banner" style={{ marginBottom: 14 }}>
+          <div className="info-banner" style={{ marginBottom: 14 }} role="status">
             {message}
           </div>
         ) : null}
 
         <div className="settings-content-stack">
           {isCompact ? (
-            <SettingsMobileContent
-              sortedProfiles={sortedProfiles}
-              activeProfileId={activeProfileId}
-              lastUsedProfileId={lastUsedProfileId}
-              handleLoad={handleLoad}
-              handleSave={handleSave}
-              handleRename={handleRename}
-              handleDelete={handleDelete}
-              draftTheme={draftTheme}
-              baselineTheme={baselineTheme}
-              setDraftThemeValue={setDraftThemeValue}
-              applyDraftTheme={applyDraftTheme}
-              resetDraftTheme={resetDraftTheme}
-              hasDraftChanges={hasDraftChanges}
-              preferences={preferences}
-              setDensity={setDensity}
-              homeKeys={homeKeys}
-              membersKeys={membersKeys}
-              visibility={visibility}
-              toggleSectionVisibility={toggleSectionVisibility}
-              moveSection={moveSection}
-            />
-          ) : (
-            <SettingsDesktopContent
-              sortedProfiles={sortedProfiles}
-              activeProfileId={activeProfileId}
-              lastUsedProfileId={lastUsedProfileId}
-              handleLoad={handleLoad}
-              handleSave={handleSave}
-              handleRename={handleRename}
-              handleDelete={handleDelete}
-              draftTheme={draftTheme}
-              baselineTheme={baselineTheme}
-              setDraftThemeValue={setDraftThemeValue}
-              applyDraftTheme={applyDraftTheme}
-              resetDraftTheme={resetDraftTheme}
-              hasDraftChanges={hasDraftChanges}
-              preferences={preferences}
-              setDensity={setDensity}
-            />
-          )}
-
-          {!isCompact ? (
             <>
+              <SettingsAccordion title="Profile Slots" chip="Saved Looks" defaultOpen>
+                <div className="settings-profile-grid">
+                  {sortedProfiles.map((profile) => (
+                    <ProfileCard
+                      key={profile.id}
+                      profile={profile}
+                      isActive={profile.id === activeProfileId}
+                      isLastUsed={profile.id === lastUsedProfileId}
+                      onLoad={handleLoad}
+                      onSave={handleSave}
+                      onRename={handleRename}
+                      onDelete={handleDelete}
+                    />
+                  ))}
+                </div>
+              </SettingsAccordion>
+
+              <SettingsAccordion title="Neon Palette + Effects" chip="Color Engine" defaultOpen>
+                <DraftThemePanel
+                  draftTheme={draftTheme}
+                  baselineTheme={baselineTheme}
+                  setDraftThemeValue={setDraftThemeValue}
+                  applyDraftTheme={applyDraftTheme}
+                  resetDraftTheme={resetDraftTheme}
+                  hasDraftChanges={hasDraftChanges}
+                />
+              </SettingsAccordion>
+
+              <SettingsAccordion title="Density" chip="Layout Feel" defaultOpen>
+                <div className="settings-density-grid">
+                  {Object.entries(DENSITY_OPTIONS).map(([density, label]) => (
+                    <DensityPreview
+                      key={density}
+                      active={preferences?.density === density}
+                      label={label}
+                      helper={
+                        density === "compact"
+                          ? "Tighter spacing for more control on one screen."
+                          : density === "comfortable"
+                            ? "Balanced spacing for daily moderation use."
+                            : "More breathing room and stronger visual separation."
+                      }
+                      onClick={() =>
+                        (setDensity || noopSetDensity)(density)
+                      }
+                    />
+                  ))}
+                </div>
+              </SettingsAccordion>
+
+              <SettingsAccordion title="Home Visibility" chip="Visibility">
+                <SectionVisibilityList
+                  title="Home Section Visibility"
+                  keys={homeKeys}
+                  visibility={visibility}
+                  onToggle={toggleSectionVisibility || noopToggleSectionVisibility}
+                />
+              </SettingsAccordion>
+
+              <SettingsAccordion title="Members Visibility" chip="Visibility">
+                <SectionVisibilityList
+                  title="Members Section Visibility"
+                  keys={membersKeys}
+                  visibility={visibility}
+                  onToggle={toggleSectionVisibility || noopToggleSectionVisibility}
+                />
+              </SettingsAccordion>
+
+              <SettingsAccordion title="Home Layout Order" chip="Layout Order">
+                <MoveButtons
+                  area="home"
+                  items={homeKeys}
+                  onMove={moveSection || noopMoveSection}
+                />
+              </SettingsAccordion>
+
+              <SettingsAccordion title="Members Layout Order" chip="Layout Order">
+                <MoveButtons
+                  area="members"
+                  items={membersKeys}
+                  onMove={moveSection || noopMoveSection}
+                />
+              </SettingsAccordion>
+            </>
+          ) : (
+            <>
+              <div className="settings-section-card">
+                <div className="settings-section-heading">
+                  <div>
+                    <div className="settings-chip-row">
+                      <span className="section-chip">Saved Looks</span>
+                    </div>
+                    <div className="settings-title-sm">Profile Slots</div>
+                  </div>
+                </div>
+
+                <div className="settings-profile-grid">
+                  {sortedProfiles.map((profile) => (
+                    <ProfileCard
+                      key={profile.id}
+                      profile={profile}
+                      isActive={profile.id === activeProfileId}
+                      isLastUsed={profile.id === lastUsedProfileId}
+                      onLoad={handleLoad}
+                      onSave={handleSave}
+                      onRename={handleRename}
+                      onDelete={handleDelete}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <DraftThemePanel
+                draftTheme={draftTheme}
+                baselineTheme={baselineTheme}
+                setDraftThemeValue={setDraftThemeValue}
+                applyDraftTheme={applyDraftTheme}
+                resetDraftTheme={resetDraftTheme}
+                hasDraftChanges={hasDraftChanges}
+              />
+
+              <div className="settings-section-card">
+                <div className="settings-section-heading">
+                  <div>
+                    <div className="settings-chip-row">
+                      <span className="section-chip">Density</span>
+                    </div>
+                    <div className="settings-title-sm">Layout Feel</div>
+                  </div>
+                </div>
+
+                <div className="settings-density-grid">
+                  {Object.entries(DENSITY_OPTIONS).map(([density, label]) => (
+                    <DensityPreview
+                      key={density}
+                      active={preferences?.density === density}
+                      label={label}
+                      helper={
+                        density === "compact"
+                          ? "Tighter spacing for more control on one screen."
+                          : density === "comfortable"
+                            ? "Balanced spacing for daily moderation use."
+                            : "More breathing room and stronger visual separation."
+                      }
+                      onClick={() =>
+                        (setDensity || noopSetDensity)(density)
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+
               <SectionVisibilityList
                 title="Home Section Visibility"
                 keys={homeKeys}
                 visibility={visibility}
-                onToggle={toggleSectionVisibility}
+                onToggle={toggleSectionVisibility || noopToggleSectionVisibility}
               />
 
               <SectionVisibilityList
                 title="Members Section Visibility"
                 keys={membersKeys}
                 visibility={visibility}
-                onToggle={toggleSectionVisibility}
+                onToggle={toggleSectionVisibility || noopToggleSectionVisibility}
               />
 
-              <MoveButtons area="home" items={homeKeys} onMove={moveSection} />
-              <MoveButtons area="members" items={membersKeys} onMove={moveSection} />
+              <MoveButtons
+                area="home"
+                items={homeKeys}
+                onMove={moveSection || noopMoveSection}
+              />
+
+              <MoveButtons
+                area="members"
+                items={membersKeys}
+                onMove={moveSection || noopMoveSection}
+              />
             </>
-          ) : null}
+          )}
         </div>
 
         <style jsx>{`
@@ -981,7 +1039,6 @@ export default function DashboardSettingsPanel({
             overflow-y: auto;
             overflow-x: hidden;
             -webkit-overflow-scrolling: touch;
-            overscroll-behavior: contain;
             border-radius: 24px;
             border: 1px solid rgba(255, 255, 255, 0.08);
             background: linear-gradient(
@@ -993,6 +1050,7 @@ export default function DashboardSettingsPanel({
             color: var(--text-strong, #f8fafc);
             padding: 14px;
             backdrop-filter: blur(10px);
+            outline: none;
           }
 
           .settings-sheet-handle {
@@ -1208,7 +1266,7 @@ export default function DashboardSettingsPanel({
 
           .settings-preview-swatch span {
             font-size: 12px;
-            color: var(--text-muted, rgba(255,255,255,0.72));
+            color: var(--text-muted, rgba(255, 255, 255, 0.72));
           }
 
           .settings-preview-swatch code {
@@ -1225,7 +1283,6 @@ export default function DashboardSettingsPanel({
 
           .density-preview {
             appearance: none;
-            -webkit-appearance: none;
             border: 1px solid rgba(255, 255, 255, 0.08);
             background: rgba(255, 255, 255, 0.03);
             border-radius: 18px;
@@ -1287,7 +1344,6 @@ export default function DashboardSettingsPanel({
 
           .settings-pill {
             appearance: none;
-            -webkit-appearance: none;
             width: 100%;
             min-height: 64px;
             border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1379,7 +1435,6 @@ export default function DashboardSettingsPanel({
 
           .settings-accordion-head {
             appearance: none;
-            -webkit-appearance: none;
             width: 100%;
             border: 0;
             background: transparent;
