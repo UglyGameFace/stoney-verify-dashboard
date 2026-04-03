@@ -269,9 +269,42 @@ function getPanelToneClass(level) {
 function isBlockingModalOpen() {
   if (typeof document === "undefined") return false;
 
+  if (
+    document.body?.dataset?.settingsOpen === "true" ||
+    document.querySelector(".settings-overlay")
+  ) {
+    const dialogs = Array.from(
+      document.querySelectorAll('[role="dialog"][aria-modal="true"]')
+    );
+
+    return dialogs.some((dialog) => {
+      if (!(dialog instanceof HTMLElement)) return false;
+      if (dialog.closest(".settings-overlay")) return false;
+      if (
+        String(dialog.getAttribute("aria-label") || "").trim().toLowerCase() ===
+        "dashboard personalization"
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }
+
   return Boolean(
     document.querySelector(".member-modal-backdrop") ||
-      document.querySelector('[role="dialog"][aria-modal="true"]')
+      Array.from(
+        document.querySelectorAll('[role="dialog"][aria-modal="true"]')
+      ).some((dialog) => {
+        if (!(dialog instanceof HTMLElement)) return false;
+        if (dialog.closest(".settings-overlay")) return false;
+        if (
+          String(dialog.getAttribute("aria-label") || "").trim().toLowerCase() ===
+          "dashboard personalization"
+        ) {
+          return false;
+        }
+        return true;
+      })
   );
 }
 
@@ -1083,6 +1116,15 @@ export default function DashboardClient({
     };
   }, [initialData, maybeRefreshIfStale, refresh]);
 
+  useEffect(() => {
+    if (settingsOpen) {
+      setIsModalPaused(false);
+      if (pendingRefreshReasonRef.current === "settings-open") {
+        pendingRefreshReasonRef.current = "";
+      }
+    }
+  }, [settingsOpen]);
+
   const counts = data?.counts || {
     openTickets: 0,
     warnsToday: 0,
@@ -1616,7 +1658,7 @@ export default function DashboardClient({
       >
         <div className="muted" style={{ fontSize: 13 }}>
           Last successful refresh: {lastRefreshLabel}
-          {isModalPaused ? " • refresh paused while profile is open" : ""}
+          {isModalPaused ? " • refresh paused while another modal is open" : ""}
         </div>
 
         <div
