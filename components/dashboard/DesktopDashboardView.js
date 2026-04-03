@@ -539,6 +539,40 @@ export default function DesktopDashboardView({
     (key) => sectionVisibility[key] !== false
   );
 
+  function homeItemClass(key, index) {
+    const order = index + 1;
+
+    if (key === "intelligence") return "desktop-home-item-full";
+    if (key === "stats") return "desktop-home-item-half";
+    if (key === "quickActions") return "desktop-home-item-half";
+    if (key === "activity") return "desktop-home-item-wide";
+    if (key === "warns") return "desktop-home-item-third";
+    if (key === "raids") return "desktop-home-item-third";
+    if (key === "fraud") return "desktop-home-item-third";
+
+    if (order === 1) return "desktop-home-item-full";
+    if (order === 2 || order === 3) return "desktop-home-item-half";
+    if (order === 4) return "desktop-home-item-wide";
+
+    return "desktop-home-item-third";
+  }
+
+  function membersItemClass(key, index) {
+    const order = index + 1;
+
+    if (key === "memberSnapshot") return "desktop-members-item-full";
+    if (key === "freshEntrants") return "desktop-members-item-half";
+    if (key === "staffMetrics") return "desktop-members-item-half";
+    if (key === "roleHierarchy") return "desktop-members-item-half";
+    if (key === "memberSearch") return "desktop-members-item-full";
+
+    if (order === 1) return "desktop-members-item-half";
+    if (order === 2) return "desktop-members-item-half";
+    if (order === 3) return "desktop-members-item-full";
+
+    return "desktop-members-item-half";
+  }
+
   return (
     <div className="desktop-dashboard-shell">
       {activeTab === "home" ? (
@@ -554,7 +588,7 @@ export default function DesktopDashboardView({
             {visibleHomeKeys.map((key, index) => (
               <div
                 key={`desktop-home-${key}`}
-                className={`desktop-grid-item desktop-home-item desktop-home-item-${index + 1}`}
+                className={`desktop-grid-item ${homeItemClass(key, index)}`}
               >
                 {homeSections[key] || null}
               </div>
@@ -628,7 +662,7 @@ export default function DesktopDashboardView({
               {visibleMembersKeys.map((key, index) => (
                 <div
                   key={`desktop-members-${key}`}
-                  className={`desktop-grid-item desktop-members-item desktop-members-item-${index + 1}`}
+                  className={`desktop-grid-item ${membersItemClass(key, index)}`}
                 >
                   {membersSections[key] || null}
                 </div>
@@ -683,24 +717,6 @@ export default function DesktopDashboardView({
             align-items: start;
           }
 
-          .desktop-home-item-1 {
-            grid-column: span 12;
-          }
-
-          .desktop-home-item-2,
-          .desktop-home-item-3 {
-            grid-column: span 6;
-          }
-
-          .desktop-home-item-4,
-          .desktop-home-item-5,
-          .desktop-home-item-6,
-          .desktop-home-item-7,
-          .desktop-home-item-8,
-          .desktop-home-item-9 {
-            grid-column: span 6;
-          }
-
           .desktop-members-grid {
             display: grid;
             grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -708,44 +724,40 @@ export default function DesktopDashboardView({
             align-items: start;
           }
 
-          .desktop-members-item-1,
-          .desktop-members-item-2 {
-            grid-column: span 6;
+          .desktop-grid-item {
+            min-width: 0;
           }
 
-          .desktop-members-item-3 {
+          .desktop-home-item-full {
             grid-column: span 12;
           }
 
-          .desktop-members-item-4,
-          .desktop-members-item-5,
-          .desktop-members-item-6 {
+          .desktop-home-item-half {
             grid-column: span 6;
           }
 
-          .desktop-grid-item {
-            min-width: 0;
+          .desktop-home-item-wide {
+            grid-column: span 8;
+          }
+
+          .desktop-home-item-third {
+            grid-column: span 4;
+          }
+
+          .desktop-members-item-full {
+            grid-column: span 12;
+          }
+
+          .desktop-members-item-half {
+            grid-column: span 6;
           }
         }
 
         @media (min-width: 1024px) and (max-width: 1399px) {
-          .desktop-home-item-2,
-          .desktop-home-item-3,
-          .desktop-home-item-4,
-          .desktop-home-item-5,
-          .desktop-home-item-6,
-          .desktop-home-item-7,
-          .desktop-home-item-8,
-          .desktop-home-item-9 {
-            grid-column: span 12;
-          }
-
-          .desktop-members-item-1,
-          .desktop-members-item-2,
-          .desktop-members-item-3,
-          .desktop-members-item-4,
-          .desktop-members-item-5,
-          .desktop-members-item-6 {
+          .desktop-home-item-half,
+          .desktop-home-item-wide,
+          .desktop-home-item-third,
+          .desktop-members-item-half {
             grid-column: span 12;
           }
         }
