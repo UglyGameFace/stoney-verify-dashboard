@@ -1,685 +1,101 @@
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useState,
-  useCallback,
-  useRef,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { getBrowserSupabase } from "@/lib/supabase-browser";
-import { sortTickets } from "@/lib/priority";
-import {
-  reconcileTicketsAction,
-  purgeStaleTicketsAction,
-} from "@/lib/dashboardActions";
-import { useDashboardPreferences } from "@/lib/useDashboardPreferences";
+// ============================================================================
+// Constants
+// ============================================================================
 
-import Topbar from "@/components/Topbar";
-import StatCard from "@/components/StatCard";
-import QuickActions from "@/components/QuickActions";
-import AuditTimeline from "@/components/AuditTimeline";
-import RoleHierarchyCard from "@/components/RoleHierarchyCard";
-import StaffMetricsCard from "@/components/StaffMetricsCard";
-import MemberSearchCard from "@/components/MemberSearchCard";
-import TicketQueueTable from "@/components/TicketQueueTable";
-import CategoryManager from "@/components/CategoryManager";
-import MobileBottomNav from "@/components/MobileBottomNav";
-import RecentJoinsCard from "@/components/RecentJoinsCard";
-import MemberSnapshot from "@/components/dashboard/MemberSnapshot";
-import DashboardSettingsPanel from "@/components/dashboard/DashboardSettingsPanel";
-import DesktopDashboardView from "@/components/dashboard/DesktopDashboardView";
-
-const MOBILE_TABS = ["home", "tickets", "members", "categories"];
-const STALE_VISIBLE_REFRESH_MS = 45_000;
-const BACKUP_REFRESH_INTERVAL_MS = 90_000;
-const RESUME_PENDING_REFRESH_CHECK_MS = 1500;
-const MOBILE_NAV_RESERVED_PX = 108;
-const REALTIME_DEBOUNCE_MS = 1250;
-const DESKTOP_LAYOUT_MIN_WIDTH = 1024;
-
-const LEGACY_CATEGORY_ALIASES = {
-  verification: [
-    "verification_issue",
-    "verification issue",
-    "verify_issue",
-    "verify issue",
-    "verification",
-    "verify",
-  ],
-  appeal: ["appeal", "appeals", "ban appeal", "timeout appeal"],
-  report: [
-    "report",
-    "report_issue",
-    "report issue",
-    "incident",
-    "report incident",
-    "report / incident",
-  ],
-  partnership: ["partnership", "partner", "collab", "collaboration"],
-  question: ["question", "questions"],
-  general: ["general", "general support", "support", "help"],
-  custom: [],
+const SECTION_LABELS = {
+  intelligence: "Moderator Intelligence",
+  stats: "Stat Cards",
+  quickActions: "Quick Actions",
+  activity: "Activity Feed",
+  warns: "Warn Intelligence",
+  raids: "Raid Intelligence",
+  fraud: "Fraud Intelligence",
+  freshEntrants: "Fresh Entrants",
+  memberSnapshot: "Member Snapshot",
+  staffMetrics: "Staff Metrics",
+  roleHierarchy: "Role Hierarchy",
+  memberSearch: "Member Search",
+  categories: "Categories",
 };
 
-function normalizeText(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+const DEFAULT_THEME = {
+  accent: "#45d483",
+  accent2: "#3b82f6",
+  textStrong: "#f8fafc",
+  textMuted: "#b8c0cc",
+  effectsMode: "full",
+};
 
-function getLegacyAliasesForCategory(category) {
-  const keys = [
-    normalizeText(category?.slug),
-    normalizeText(category?.intake_type),
-    normalizeText(category?.name),
-  ];
+const DENSITY_OPTIONS = {
+  compact: "Compact",
+  comfortable: "Comfortable",
+  spacious: "Spacious",
+};
 
-  const out = new Set();
+const EFFECTS_MODES = {
+  full: "Full",
+  reduced: "Reduced",
+  minimal: "Minimal",
+};
 
-  for (const key of keys) {
-    const aliases = LEGACY_CATEGORY_ALIASES[key] || [];
-    for (const alias of aliases) out.add(normalizeText(alias));
-  }
-
-  return [...out];
-}
-
-function ticketMatchesSelectedCategory(ticket, selectedCategory) {
-  if (!selectedCategory) return true;
-
-  const selectedId = String(selectedCategory?.id || "").trim();
-  const selectedSlug = normalizeText(selectedCategory?.slug);
-  const selectedName = normalizeText(selectedCategory?.name);
-  const selectedIntake = normalizeText(selectedCategory?.intake_type);
-  const selectedKeywords = Array.isArray(selectedCategory?.match_keywords)
-    ? selectedCategory.match_keywords.map((k) => normalizeText(k))
-    : [];
-  const legacyAliases = getLegacyAliasesForCategory(selectedCategory);
-
-  const ticketCategoryId = String(ticket?.category_id || "").trim();
-  const ticketMatchedCategoryId = String(ticket?.matched_category_id || "").trim();
-
-  if (
-    selectedId &&
-    (ticketCategoryId === selectedId || ticketMatchedCategoryId === selectedId)
-  ) {
-    return true;
-  }
-
-  const ticketValues = [
-    ticket?.category,
-    ticket?.raw_category,
-    ticket?.matched_category_name,
-    ticket?.matched_category_slug,
-    ticket?.matched_intake_type,
-    ticket?.title,
-    ticket?.initial_message,
-    ticket?.mod_suggestion,
-    ticket?.closed_reason,
-    ticket?.channel_name,
-  ]
-    .filter(Boolean)
-    .map((v) => normalizeText(v));
-
-  const needles = [
-    selectedSlug,
-    selectedName,
-    selectedIntake,
-    ...selectedKeywords,
-    ...legacyAliases,
-  ].filter(Boolean);
-
-  return needles.some((needle) =>
-    ticketValues.some((value) => value === needle || value.includes(needle))
-  );
-}
-
-function formatTime(value) {
-  if (!value) return "—";
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
-    return "—";
-  }
-}
-
-function timeAgo(value) {
-  if (!value) return "—";
-  try {
-    const ms = new Date(value).getTime();
-    if (!Number.isFinite(ms)) return "—";
-
-    const diff = Date.now() - ms;
-    const seconds = Math.floor(diff / 1000);
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-
-    if (seconds < 15) return "just now";
-    if (minutes < 1) return `${seconds}s ago`;
-    if (minutes < 60) return `${minutes}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    return `${days}d ago`;
-  } catch {
-    return "—";
-  }
-}
+// ============================================================================
+// Utils
+// ============================================================================
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function safeText(value, fallback = "—") {
-  const text = String(value ?? "").trim();
-  return text || fallback;
-}
-
-function getStaffUserId(initialData, staffName) {
-  const possible =
-    initialData?.staffUserId ||
-    initialData?.staff_user_id ||
-    initialData?.viewer?.user_id ||
-    initialData?.viewer?.id ||
-    initialData?.auth?.user_id ||
-    initialData?.auth?.id ||
-    null;
-
-  if (possible) return String(possible);
-
-  const metrics = Array.isArray(initialData?.metrics)
-    ? initialData.metrics
-    : [];
-
-  const matchedMetric = metrics.find((m) => {
-    const metricName = String(m?.staff_name || "")
-      .trim()
-      .toLowerCase();
-
-    return (
-      metricName &&
-      metricName === String(staffName || "").trim().toLowerCase()
-    );
-  });
-
-  if (matchedMetric?.staff_id) {
-    return String(matchedMetric.staff_id);
+function formatUpdatedAt(value) {
+  if (!value) return "Never saved";
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return "Never saved";
   }
-
-  return null;
 }
 
-function getMemberDisplay(member) {
-  return (
-    member?.display_name ||
-    member?.nickname ||
-    member?.username ||
-    member?.user_id ||
-    "Unknown Member"
-  );
-}
-
-function getTicketStatusCount(tickets, status) {
-  return safeArray(tickets).filter(
-    (t) => String(t?.status || "").toLowerCase() === status
-  ).length;
-}
-
-function statusMatchesFilter(ticket, filterValue) {
-  const status = String(ticket?.status || "").toLowerCase();
-
-  if (filterValue === "all") return true;
-  if (filterValue === "active") return status === "open" || status === "claimed";
-  if (filterValue === "open_only") return status === "open";
-  if (filterValue === "claimed") return status === "claimed";
-  if (filterValue === "closed") return status === "closed";
-  if (filterValue === "deleted") return status === "deleted";
-
-  return status === filterValue;
-}
-
-function isActiveTicketStatus(status) {
-  const value = String(status || "").trim().toLowerCase();
-  return value === "open" || value === "claimed";
-}
-
-function getSeverityColor(level) {
-  const value = String(level || "").toLowerCase();
-
-  if (value.includes("critical") || value.includes("high")) {
-    return "var(--tone-danger, #f87171)";
-  }
-  if (value.includes("moderate") || value.includes("medium")) {
-    return "var(--tone-warn, #fbbf24)";
-  }
-  return "var(--tone-success, #4ade80)";
-}
-
-function getPanelToneClass(level) {
-  const value = String(level || "").toLowerCase();
-  if (value.includes("critical") || value.includes("high")) return "danger";
-  if (value.includes("moderate") || value.includes("medium")) return "warn";
-  return "ok";
-}
-
-function isBlockingModalOpen() {
-  if (typeof document === "undefined") return false;
-
-  const dialogs = Array.from(
-    document.querySelectorAll('[role="dialog"][aria-modal="true"]')
-  );
-
-  return dialogs.some((dialog) => {
-    if (!(dialog instanceof HTMLElement)) return false;
-    if (dialog.closest(".settings-overlay")) return false;
-
-    const label = String(dialog.getAttribute("aria-label") || "")
-      .trim()
-      .toLowerCase();
-
-    if (label === "dashboard personalization") return false;
-
-    return true;
-  });
-}
-
-function buildModeratorIntelligence(data) {
-  const counts = data?.counts || {};
-  const tickets = safeArray(data?.tickets);
-  const members = safeArray(data?.guildMembers || data?.members);
-  const pendingVerification = Number(data?.memberCounts?.pendingVerification || 0);
-  const verifiedMembers = Number(data?.memberCounts?.verified || 0);
-  const formerMembers = Number(data?.memberCounts?.former || 0);
-  const activeMembers = Number(data?.memberCounts?.active || 0);
-
-  const openTickets = Number(counts?.openTickets || 0);
-  const warnsToday = Number(counts?.warnsToday || 0);
-  const raidAlerts = Number(counts?.raidAlerts || 0);
-  const fraudFlags = Number(counts?.fraudFlags || 0);
-  const claimedTickets = getTicketStatusCount(tickets, "claimed");
-
-  const serverHealth = data?.intelligence?.serverHealth || (
-    fraudFlags >= 8 || raidAlerts >= 4 || openTickets >= 24
-      ? "Critical"
-      : fraudFlags >= 4 || raidAlerts >= 2 || openTickets >= 14
-        ? "Elevated"
-        : "Stable"
-  );
-
-  const raidRisk = data?.intelligence?.raidRisk || (
-    raidAlerts >= 3 ? "High" : raidAlerts >= 1 ? "Moderate" : "Low"
-  );
-
-  const fraudRisk = data?.intelligence?.fraudRisk || (
-    fraudFlags >= 5
-      ? "High"
-      : fraudFlags >= 1 || pendingVerification >= 12
-        ? "Moderate"
-        : "Low"
-  );
-
-  const ticketPressure = data?.intelligence?.ticketPressure || (
-    openTickets >= 14 || claimedTickets >= 8
-      ? "High"
-      : openTickets >= 6 || claimedTickets >= 4
-        ? "Moderate"
-        : "Low"
-  );
-
-  const verificationPressure = data?.intelligence?.verificationPressure || (
-    pendingVerification >= 16
-      ? "High"
-      : pendingVerification >= 8
-        ? "Moderate"
-        : "Low"
-  );
-
-  const verifiedRate =
-    Number.isFinite(Number(data?.intelligence?.verifiedRate))
-      ? Number(data.intelligence.verifiedRate)
-      : activeMembers > 0
-        ? Math.round((verifiedMembers / activeMembers) * 100)
-        : 0;
-
-  const summaryItems = [
-    { key: "health", label: "Server Health", value: serverHealth, tone: serverHealth },
-    { key: "raid", label: "Raid Risk", value: raidRisk, tone: raidRisk },
-    { key: "fraud", label: "Fraud Risk", value: fraudRisk, tone: fraudRisk },
-    { key: "tickets", label: "Ticket Pressure", value: ticketPressure, tone: ticketPressure },
-    {
-      key: "verification",
-      label: "Verification Queue",
-      value: `${pendingVerification} pending`,
-      tone: verificationPressure,
-    },
-    {
-      key: "verified-rate",
-      label: "Verified Rate",
-      value: `${verifiedRate}%`,
-      tone:
-        verifiedRate >= 80
-          ? "Low"
-          : verifiedRate >= 60
-            ? "Moderate"
-            : "High",
-    },
-  ];
-
+function normalizeTheme(theme) {
   return {
-    serverHealth,
-    raidRisk,
-    fraudRisk,
-    ticketPressure,
-    verificationPressure,
-    openTickets,
-    warnsToday,
-    raidAlerts,
-    fraudFlags,
-    pendingVerification,
-    verifiedMembers,
-    formerMembers,
-    activeMembers,
-    claimedTickets,
-    summaryItems,
-    reasons: {
-      serverHealth:
-        data?.intelligence?.reasons?.serverHealth ||
-        "No major threshold is currently tripping the health score.",
-      raidRiskReason:
-        data?.intelligence?.reasons?.raidRiskReason ||
-        "No recent raid alert threshold was crossed.",
-      fraudRiskReason:
-        data?.intelligence?.reasons?.fraudRiskReason ||
-        "No active fraud flags are currently driving the score.",
-      ticketPressureReason:
-        data?.intelligence?.reasons?.ticketPressureReason ||
-        "Ticket load is within normal range.",
-      verificationPressureReason:
-        data?.intelligence?.reasons?.verificationPressureReason ||
-        "Verification queue is under control.",
-    },
-    flaggedMembers: members
-      .filter((m) => String(m?.role_state || "").toLowerCase().includes("conflict"))
-      .slice(0, 8),
+    ...DEFAULT_THEME,
+    ...(theme || {}),
+    effectsMode:
+      theme?.effectsMode === "reduced" || theme?.effectsMode === "minimal"
+        ? theme.effectsMode
+        : "full",
   };
 }
 
-function DashboardSection({
-  title,
-  subtitle,
-  expanded,
-  onToggle,
-  children,
-  actions = null,
-  defaultOpen = false,
-}) {
-  const isOpen = expanded ?? defaultOpen;
-
+function themesEqual(a, b) {
   return (
-    <div className="card compact-panel dashboard-section-shell">
-      <div
-        className="panel-header"
-        onClick={onToggle}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          flexWrap: "wrap",
-          cursor: onToggle ? "pointer" : "default",
-        }}
-      >
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 800, color: "var(--text-strong)" }}>
-            {title}
-          </div>
-
-          {subtitle ? (
-            <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
-              {subtitle}
-            </div>
-          ) : null}
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            flexShrink: 0,
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {actions}
-          {onToggle ? (
-            <span className="badge">{isOpen ? "Hide" : "Show"}</span>
-          ) : null}
-        </div>
-      </div>
-
-      {isOpen ? (
-        <div className="dashboard-section-body" style={{ marginTop: 14 }}>
-          {children}
-        </div>
-      ) : null}
-    </div>
+    a.accent === b.accent &&
+    a.accent2 === b.accent2 &&
+    a.textStrong === b.textStrong &&
+    a.textMuted === b.textMuted &&
+    a.effectsMode === b.effectsMode
   );
 }
 
-function ClickableStatCard({ title, value, onClick, subtitle }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        background: "transparent",
-        border: "none",
-        padding: 0,
-        width: "100%",
-        textAlign: "left",
-        cursor: "pointer",
-      }}
-    >
-      <StatCard title={title} value={value} />
-      {subtitle ? (
-        <div
-          className="muted"
-          style={{
-            marginTop: 8,
-            fontSize: 12,
-            textAlign: "center",
-          }}
-        >
-          {subtitle}
-        </div>
-      ) : null}
-    </button>
-  );
-}
+// ============================================================================
+// Hooks
+// ============================================================================
 
-function IntelligencePanel({
-  intelligence,
-  expanded,
-  onToggle,
-  onJumpToTickets,
-  onJumpToWarns,
-  onJumpToRaids,
-  onJumpToFraud,
-}) {
-  return (
-    <DashboardSection
-      title="Moderator Intelligence"
-      subtitle="Live risk summary, moderation load, and verification pressure"
-      expanded={expanded}
-      onToggle={onToggle}
-      defaultOpen
-    >
-      <div className="intelligence-grid">
-        {intelligence.summaryItems.map((item) => (
-          <div
-            key={item.key}
-            className={`intel-tile ${getPanelToneClass(item.tone)}`}
-          >
-            <span className="ticket-info-label">{item.label}</span>
-            <span
-              className="intel-value"
-              style={{
-                fontWeight: 800,
-                color: getSeverityColor(item.tone),
-              }}
-            >
-              {item.value}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 10,
-          marginBottom: 14,
-        }}
-      >
-        <button
-          type="button"
-          className="button"
-          style={{ width: "auto", minWidth: 150 }}
-          onClick={onJumpToTickets}
-        >
-          Open Ticket Queue
-        </button>
-
-        <button
-          type="button"
-          className="button ghost"
-          style={{ width: "auto", minWidth: 130 }}
-          onClick={onJumpToWarns}
-        >
-          Review Warns
-        </button>
-
-        <button
-          type="button"
-          className="button ghost"
-          style={{ width: "auto", minWidth: 130 }}
-          onClick={onJumpToRaids}
-        >
-          Review Raids
-        </button>
-
-        <button
-          type="button"
-          className="button ghost"
-          style={{ width: "auto", minWidth: 130 }}
-          onClick={onJumpToFraud}
-        >
-          Review Fraud
-        </button>
-      </div>
-
-      <div className="detail-grid-3">
-        <div className="card compact-detail-card">
-          <div className="detail-card-title">Immediate Signals</div>
-          <div className="muted detail-list">
-            <div>Open Tickets: {intelligence.openTickets}</div>
-            <div>Claimed Tickets: {intelligence.claimedTickets}</div>
-            <div>Warns Today: {intelligence.warnsToday}</div>
-            <div>Raid Alerts: {intelligence.raidAlerts}</div>
-            <div>Fraud Flags: {intelligence.fraudFlags}</div>
-          </div>
-        </div>
-
-        <div className="card compact-detail-card">
-          <div className="detail-card-title">Why The Current Scores</div>
-          <div className="muted detail-list">
-            <div><strong>Fraud:</strong> {safeText(intelligence.reasons.fraudRiskReason)}</div>
-            <div><strong>Tickets:</strong> {safeText(intelligence.reasons.ticketPressureReason)}</div>
-            <div><strong>Verification:</strong> {safeText(intelligence.reasons.verificationPressureReason)}</div>
-            <div><strong>Raid:</strong> {safeText(intelligence.reasons.raidRiskReason)}</div>
-          </div>
-        </div>
-
-        <div className="card compact-detail-card">
-          <div className="detail-card-title">Conflict Watch</div>
-
-          {intelligence.flaggedMembers.length ? (
-            <div className="muted detail-list">
-              {intelligence.flaggedMembers.map((member) => (
-                <div key={member.user_id}>
-                  {getMemberDisplay(member)} — {safeText(member.role_state)}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="muted detail-list">
-              No role conflicts are present in the current dataset.
-            </div>
-          )}
-        </div>
-      </div>
-    </DashboardSection>
-  );
-}
-
-function SimpleFeedPanel({ rows, emptyMessage, renderRow }) {
-  if (!rows.length) {
-    return <div className="empty-state">{emptyMessage}</div>;
-  }
-
-  return <div className="space">{rows.map(renderRow)}</div>;
-}
-
-function DesktopTabBar({ activeTab, onChange }) {
-  return (
-    <div
-      className="card"
-      style={{
-        padding: 12,
-        marginBottom: 16,
-        display: "flex",
-        gap: 10,
-        flexWrap: "wrap",
-      }}
-    >
-      {MOBILE_TABS.map((tab) => {
-        const active = activeTab === tab;
-
-        return (
-          <button
-            key={tab}
-            type="button"
-            className={active ? "button" : "button ghost"}
-            style={{ width: "auto", minWidth: 110 }}
-            onClick={() => onChange(tab)}
-          >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function useIsDesktopLayout(minWidth = DESKTOP_LAYOUT_MIN_WIDTH) {
-  const getValue = () => {
+function useCompactSettingsLayout(breakpoint = 900) {
+  const [isCompact, setIsCompact] = useState(() => {
     if (typeof window === "undefined") return false;
-    return window.innerWidth >= minWidth;
-  };
-
-  const [isDesktop, setIsDesktop] = useState(getValue);
+    return window.innerWidth <= breakpoint;
+  });
 
   useEffect(() => {
-    function update() {
-      setIsDesktop(getValue());
-    }
+    if (typeof window === "undefined") return undefined;
 
+    const update = () => setIsCompact(window.innerWidth <= breakpoint);
     update();
+
     window.addEventListener("resize", update);
     window.addEventListener("orientationchange", update);
 
@@ -687,1599 +103,1601 @@ function useIsDesktopLayout(minWidth = DESKTOP_LAYOUT_MIN_WIDTH) {
       window.removeEventListener("resize", update);
       window.removeEventListener("orientationchange", update);
     };
-  }, [minWidth]);
+  }, [breakpoint]);
 
-  return isDesktop;
+  return isCompact;
 }
 
-function ticketDedupKey(ticket) {
-  return (
-    String(ticket?.id || "").trim() ||
-    String(ticket?.channel_id || ticket?.discord_thread_id || "").trim() ||
-    [
-      String(ticket?.user_id || "").trim(),
-      String(ticket?.category_id || "").trim(),
-      String(ticket?.matched_category_id || "").trim(),
-      String(ticket?.category || "").trim(),
-      String(ticket?.status || "").trim(),
-      String(ticket?.created_at || "").trim(),
-    ].join("::")
-  );
-}
+function useFlashMessage() {
+  const [message, setMessage] = useState("");
+  const timerRef = useRef(null);
 
-function mergeUniqueTickets(...ticketSets) {
-  const merged = [];
-  const seen = new Set();
-
-  for (const set of ticketSets) {
-    for (const ticket of safeArray(set)) {
-      const key = ticketDedupKey(ticket);
-      if (!key) {
-        merged.push(ticket);
-        continue;
-      }
-      if (seen.has(key)) continue;
-      seen.add(key);
-      merged.push(ticket);
-    }
-  }
-
-  return merged;
-}
-
-export default function DashboardClient({
-  initialData,
-  staffName,
-}) {
-  const [data, setData] = useState(initialData);
-  const [error, setError] = useState("");
-  const [maintenanceMessage, setMaintenanceMessage] = useState("");
-  const [maintenanceError, setMaintenanceError] = useState("");
-  const [isMaintaining, setIsMaintaining] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [isModalPaused, setIsModalPaused] = useState(false);
-
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("active");
-  const [priorityFilter, setPriorityFilter] = useState("all");
-  const [sortBy, setSortBy] = useState("priority_desc");
-  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState("home");
-  const [expandedPanels, setExpandedPanels] = useState({
-    intelligence: true,
-    activity: true,
-    warns: false,
-    raids: false,
-    fraud: false,
-    joins: true,
-    members: true,
-    roles: false,
-    staff: false,
-  });
-
-  const isDesktopLayout = useIsDesktopLayout();
-
-  const refreshTimer = useRef(null);
-  const refreshInFlightRef = useRef(false);
-  const pendingRefreshReasonRef = useRef("");
-  const lastRefreshAtRef = useRef(Date.now());
-  const backupIntervalRef = useRef(null);
-  const resumeIntervalRef = useRef(null);
-
-  const warnsSectionRef = useRef(null);
-  const raidsSectionRef = useRef(null);
-  const fraudSectionRef = useRef(null);
-
-  const {
-    preferences,
-    profiles,
-    activeProfileId,
-    lastUsedProfileId,
-    setThemeValue,
-    setDensity,
-    toggleSectionVisibility,
-    moveSection,
-    resetPreferences,
-    saveProfile,
-    saveActiveProfile,
-    loadProfile,
-    renameProfile,
-    deleteProfile,
-  } = useDashboardPreferences();
-
-  const currentStaffId = useMemo(
-    () => getStaffUserId(initialData, staffName),
-    [initialData, staffName]
-  );
-
-  const shouldPauseRefresh = useCallback(() => {
-    return settingsOpen || isBlockingModalOpen();
-  }, [settingsOpen]);
+  const flash = useCallback((text) => {
+    setMessage(text);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setMessage(""), 2200);
+  }, []);
 
   useEffect(() => {
-    if (typeof document === "undefined") return undefined;
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
 
-    if (settingsOpen) {
-      document.body.dataset.settingsOpen = "true";
-    } else {
-      delete document.body.dataset.settingsOpen;
-    }
+  return [message, flash];
+}
+
+function usePreventBodyScroll(open) {
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const originalOverflow = document.body.style.overflow;
+    const originalTouchAction = document.body.style.touchAction;
+
+    document.body.style.overflow = "hidden";
+    document.body.style.touchAction = "none";
 
     return () => {
-      delete document.body.dataset.settingsOpen;
+      document.body.style.overflow = originalOverflow;
+      document.body.style.touchAction = originalTouchAction;
     };
-  }, [settingsOpen]);
+  }, [open]);
+}
 
-  const togglePanel = useCallback((name) => {
-    setExpandedPanels((prev) => ({
-      ...prev,
-      [name]: !prev[name],
-    }));
-  }, []);
-
-  const openOnlyPanel = useCallback((name) => {
-    setExpandedPanels((prev) => ({
-      ...prev,
-      [name]: true,
-    }));
-  }, []);
-
-  const refresh = useCallback(
-    async ({
-      silent = false,
-      force = false,
-      reason = "manual",
-    } = {}) => {
-      const now = Date.now();
-      const pauseNow = shouldPauseRefresh();
-
-      if (pauseNow) {
-        setIsModalPaused(true);
-      } else {
-        setIsModalPaused(false);
-      }
-
-      if (!force && (refreshInFlightRef.current || pauseNow)) {
-        pendingRefreshReasonRef.current = reason;
-        return;
-      }
-
-      refreshInFlightRef.current = true;
-
-      if (!silent) setIsRefreshing(true);
-
-      try {
-        const res = await fetch(
-          `/api/dashboard/live?_ts=${now}&reason=${encodeURIComponent(reason)}`,
-          {
-            method: "GET",
-            cache: "no-store",
-            headers: {
-              "Cache-Control": "no-store, max-age=0",
-              Pragma: "no-cache",
-            },
-          }
-        );
-
-        const json = await res.json().catch(() => null);
-
-        if (!res.ok) {
-          throw new Error(json?.error || "Failed to refresh dashboard.");
-        }
-
-        setData(json);
-        setError("");
-        lastRefreshAtRef.current = Date.now();
-        pendingRefreshReasonRef.current = "";
-        setIsModalPaused(false);
-      } catch (err) {
-        setError(err?.message || "Failed to refresh dashboard.");
-      } finally {
-        refreshInFlightRef.current = false;
-        if (!silent) setIsRefreshing(false);
-      }
-    },
-    [shouldPauseRefresh]
-  );
-
-  const maybeRefreshIfStale = useCallback(
-    async (reason) => {
-      const pauseNow = shouldPauseRefresh();
-
-      if (pauseNow) {
-        pendingRefreshReasonRef.current = reason;
-        setIsModalPaused(true);
-        return;
-      }
-
-      setIsModalPaused(false);
-
-      const age = Date.now() - lastRefreshAtRef.current;
-      if (age >= STALE_VISIBLE_REFRESH_MS) {
-        await refresh({ silent: true, force: false, reason });
-      }
-    },
-    [refresh, shouldPauseRefresh]
-  );
-
-  const handleReconcileTickets = useCallback(
-    async ({
-      includeOpenWithMissingChannel = true,
-      includeTranscriptBackfill = true,
-      dryRun = false,
-    } = {}) => {
-      setIsMaintaining(true);
-      setMaintenanceError("");
-      setMaintenanceMessage("");
-
-      try {
-        const result = await reconcileTicketsAction({
-          requestedBy: currentStaffId,
-          staffId: currentStaffId,
-          includeOpenWithMissingChannel,
-          includeTranscriptBackfill,
-          dryRun,
-        });
-
-        setMaintenanceMessage(
-          dryRun
-            ? `Reconcile preview finished. Scanned ${Number(result?.scanned || 0)} tickets and found ${safeArray(result?.tickets).length} candidate row(s).`
-            : `Reconcile finished. Scanned ${Number(result?.scanned || 0)} tickets, updated ${Number(result?.updated || 0)}, and hid ${Number(result?.hidden || 0)} stale candidate row(s).`
-        );
-
-        await refresh({ silent: true, force: true, reason: "reconcile" });
-      } catch (err) {
-        setMaintenanceError(
-          err?.message || "Failed to reconcile tickets."
-        );
-      } finally {
-        setIsMaintaining(false);
-      }
-    },
-    [currentStaffId, refresh]
-  );
-
-  const handlePreviewPurge = useCallback(async () => {
-    setIsMaintaining(true);
-    setMaintenanceError("");
-    setMaintenanceMessage("");
-
-    try {
-      const result = await purgeStaleTicketsAction({
-        requestedBy: currentStaffId,
-        staffId: currentStaffId,
-        dryRun: true,
-        olderThanMinutes: 5,
-      });
-
-      setMaintenanceMessage(
-        `Purge preview finished. Scanned ${Number(result?.scanned || 0)} tickets and found ${safeArray(result?.candidates).length} stale candidate row(s).`
-      );
-    } catch (err) {
-      setMaintenanceError(
-        err?.message || "Failed to preview stale purge."
-      );
-    } finally {
-      setIsMaintaining(false);
-    }
-  }, [currentStaffId]);
-
-  const handlePurgeStale = useCallback(async () => {
-    setIsMaintaining(true);
-    setMaintenanceError("");
-    setMaintenanceMessage("");
-
-    try {
-      const result = await purgeStaleTicketsAction({
-        requestedBy: currentStaffId,
-        staffId: currentStaffId,
-        dryRun: false,
-        olderThanMinutes: 5,
-      });
-
-      setMaintenanceMessage(
-        `Purge finished. Scanned ${Number(result?.scanned || 0)} tickets and removed ${Number(result?.removed || 0)} stale row(s).`
-      );
-
-      await refresh({ silent: true, force: true, reason: "purge-stale" });
-    } catch (err) {
-      setMaintenanceError(
-        err?.message || "Failed to purge stale tickets."
-      );
-    } finally {
-      setIsMaintaining(false);
-    }
-  }, [currentStaffId, refresh]);
+function useModalKeyboard(open, onClose, panelRef) {
+  const previousFocusRef = useRef(null);
 
   useEffect(() => {
-    let supabase;
-    let channel;
+    if (!open) return undefined;
 
-    function scheduleRefresh(reason, force = false) {
-      clearTimeout(refreshTimer.current);
-      refreshTimer.current = setTimeout(() => {
-        const pauseNow = shouldPauseRefresh();
+    previousFocusRef.current = document.activeElement;
 
-        if (pauseNow && !force) {
-          pendingRefreshReasonRef.current = reason;
-          setIsModalPaused(true);
-          return;
-        }
+    const panel = panelRef?.current;
+    const focusable = panel?.querySelector(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
 
-        if (!pauseNow) {
-          setIsModalPaused(false);
-        }
-
-        refresh({ silent: true, force, reason });
-      }, REALTIME_DEBOUNCE_MS);
+    if (focusable && typeof focusable.focus === "function") {
+      focusable.focus();
     }
 
-    function handleRealtimeChange() {
-      scheduleRefresh("realtime");
-    }
-
-    function handleWindowFocus() {
-      maybeRefreshIfStale("focus");
-    }
-
-    function handleVisibilityChange() {
-      if (document.visibilityState === "visible") {
-        maybeRefreshIfStale("visible");
-      }
-    }
-
-    function handleOnline() {
-      const pauseNow = shouldPauseRefresh();
-
-      if (pauseNow) {
-        pendingRefreshReasonRef.current = "online";
-        setIsModalPaused(true);
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose?.();
         return;
       }
 
-      setIsModalPaused(false);
-      refresh({ silent: true, force: true, reason: "online" });
-    }
+      if (e.key !== "Tab" || !panel) return;
 
-    if (!initialData) {
-      refresh({ silent: true, force: true, reason: "mount-no-data" });
-    } else {
-      lastRefreshAtRef.current = Date.now();
-    }
-
-    try {
-      supabase = getBrowserSupabase();
-
-      channel = supabase
-        .channel("dashboard-live")
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public" },
-          handleRealtimeChange
+      const nodes = Array.from(
+        panel.querySelectorAll(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
         )
-        .subscribe();
-    } catch (err) {
-      setError(err?.message || "Realtime client unavailable.");
-    }
+      ).filter(
+        (el) =>
+          !el.hasAttribute("disabled") &&
+          el.getAttribute("aria-hidden") !== "true"
+      );
 
-    window.addEventListener("focus", handleWindowFocus);
-    window.addEventListener("online", handleOnline);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+      if (!nodes.length) return;
 
-    backupIntervalRef.current = setInterval(() => {
-      if (document.visibilityState === "visible") {
-        maybeRefreshIfStale("backup-interval");
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      const active = document.activeElement;
+
+      if (e.shiftKey) {
+        if (active === first || !panel.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (active === last) {
+          e.preventDefault();
+          first.focus();
+        }
       }
-    }, BACKUP_REFRESH_INTERVAL_MS);
+    };
 
-    resumeIntervalRef.current = setInterval(() => {
-      const pendingReason = pendingRefreshReasonRef.current;
-      if (!pendingReason) return;
-      if (refreshInFlightRef.current) return;
-
-      const pauseNow = shouldPauseRefresh();
-      if (pauseNow) {
-        setIsModalPaused(true);
-        return;
-      }
-
-      setIsModalPaused(false);
-      pendingRefreshReasonRef.current = "";
-      refresh({
-        silent: true,
-        force: true,
-        reason: `${pendingReason}-resume`,
-      });
-    }, RESUME_PENDING_REFRESH_CHECK_MS);
+    window.addEventListener("keydown", handleKeyDown);
 
     return () => {
-      clearTimeout(refreshTimer.current);
-
-      if (backupIntervalRef.current) {
-        clearInterval(backupIntervalRef.current);
-      }
-
-      if (resumeIntervalRef.current) {
-        clearInterval(resumeIntervalRef.current);
-      }
-
-      window.removeEventListener("focus", handleWindowFocus);
-      window.removeEventListener("online", handleOnline);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-
-      if (supabase && channel) {
-        supabase.removeChannel(channel);
+      window.removeEventListener("keydown", handleKeyDown);
+      if (
+        previousFocusRef.current &&
+        typeof previousFocusRef.current.focus === "function"
+      ) {
+        previousFocusRef.current.focus();
       }
     };
-  }, [initialData, maybeRefreshIfStale, refresh, shouldPauseRefresh]);
+  }, [open, onClose, panelRef]);
+}
+
+// ============================================================================
+// Components
+// ============================================================================
+
+function ToneSwatch({ label, value, onChange, helper }) {
+  const inputRef = useRef(null);
+
+  return (
+    <div className="settings-lab-card">
+      <div className="ticket-info-label">{label}</div>
+
+      <input
+        ref={inputRef}
+        type="color"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="settings-color-input-hidden"
+        tabIndex={-1}
+        aria-hidden="true"
+      />
+
+      <button
+        type="button"
+        className="settings-color-trigger"
+        onClick={() => inputRef.current?.click()}
+        aria-label={`Choose ${label} color`}
+      >
+        <span
+          className="settings-color-preview"
+          style={{ background: value }}
+        />
+        <span className="settings-color-trigger-text">
+          {String(value || "").toUpperCase()}
+        </span>
+      </button>
+
+      {helper ? <div className="muted settings-helper-copy">{helper}</div> : null}
+    </div>
+  );
+}
+
+function VisibilityPill({ label, active, onToggle }) {
+  return (
+    <button
+      type="button"
+      className={`settings-pill ${active ? "active" : ""}`}
+      onClick={onToggle}
+      aria-pressed={active}
+    >
+      <span className="settings-pill-label">{label}</span>
+      <span className={`settings-pill-badge ${active ? "active" : ""}`}>
+        {active ? "Shown" : "Hidden"}
+      </span>
+    </button>
+  );
+}
+
+function SectionVisibilityList({ title, keys, visibility, onToggle }) {
+  return (
+    <div className="settings-section-card">
+      <div className="settings-section-heading">
+        <div>
+          <div className="settings-chip-row">
+            <span className="section-chip">Visibility</span>
+          </div>
+          <div className="settings-title-sm">{title}</div>
+        </div>
+      </div>
+
+      <div className="settings-pill-grid">
+        {keys.map((key) => (
+          <VisibilityPill
+            key={key}
+            label={SECTION_LABELS[key] || key}
+            active={!!visibility[key]}
+            onToggle={() => onToggle(key)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MoveButtons({ area, items, onMove }) {
+  return (
+    <div className="settings-section-card">
+      <div className="settings-section-heading">
+        <div>
+          <div className="settings-chip-row">
+            <span className="section-chip">Layout Order</span>
+          </div>
+          <div className="settings-title-sm">
+            {area === "home" ? "Home Layout Order" : "Members Layout Order"}
+          </div>
+        </div>
+      </div>
+
+      <div className="space">
+        {items.map((item, index) => (
+          <div key={`${area}-${item}`} className="settings-move-card">
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div className="settings-move-label">
+                {SECTION_LABELS[item] || item}
+              </div>
+              <div className="muted settings-helper-copy">Position {index + 1}</div>
+            </div>
+
+            <div className="settings-move-actions">
+              <button
+                type="button"
+                className="button ghost settings-mini-btn"
+                disabled={index === 0}
+                onClick={() => onMove(area, index, index - 1)}
+                aria-label="Move up"
+              >
+                ↑
+              </button>
+
+              <button
+                type="button"
+                className="button ghost settings-mini-btn"
+                disabled={index === items.length - 1}
+                onClick={() => onMove(area, index, index + 1)}
+                aria-label="Move down"
+              >
+                ↓
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DensityPreview({ active, label, helper, onClick }) {
+  return (
+    <button
+      type="button"
+      className={`density-preview ${active ? "active" : ""}`}
+      onClick={onClick}
+      aria-pressed={active}
+    >
+      <div className="density-preview-bars">
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className="density-preview-title">{label}</div>
+      <div className="muted settings-helper-copy">{helper}</div>
+    </button>
+  );
+}
+
+function EffectsModeCard({ active, label, helper, onClick }) {
+  return (
+    <button
+      type="button"
+      className={`density-preview ${active ? "active" : ""}`}
+      onClick={onClick}
+      aria-pressed={active}
+    >
+      <div className="density-preview-bars effects-bars">
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className="density-preview-title">{label}</div>
+      <div className="muted settings-helper-copy">{helper}</div>
+    </button>
+  );
+}
+
+function ProfileCard({
+  profile,
+  isActive,
+  isLastUsed,
+  onLoad,
+  onSave,
+  onRename,
+  onDelete,
+}) {
+  const [renameValue, setRenameValue] = useState(profile.name || "");
 
   useEffect(() => {
-    if (settingsOpen) {
-      setIsModalPaused(true);
-      if (pendingRefreshReasonRef.current === "settings-open") {
-        pendingRefreshReasonRef.current = "";
-      }
-    } else if (!shouldPauseRefresh()) {
-      setIsModalPaused(false);
-    }
-  }, [settingsOpen, shouldPauseRefresh]);
+    setRenameValue(profile.name || "");
+  }, [profile.name]);
 
-  const counts = data?.counts || {
-    openTickets: 0,
-    warnsToday: 0,
-    raidAlerts: 0,
-    fraudFlags: 0,
+  const handleRename = () => {
+    const next = String(renameValue || "").trim();
+    if (next) onRename(profile.id, next);
   };
 
-  const safeEvents = safeArray(data?.events);
-  const safeRoles = safeArray(data?.roles);
-  const safeMetrics = safeArray(data?.metrics);
-  const safeCategories = safeArray(data?.categories);
-  const safeRecentJoins = safeArray(data?.recentJoins);
-  const safeMembers = data?.guildMembers || data?.members || [];
+  const handleSave = () => {
+    onSave(profile.id, String(renameValue || "").trim());
+  };
 
-  const safeTickets = useMemo(() => {
-    const allRows = safeArray(data?.tickets);
-    const activeRows = safeArray(data?.activeTickets);
-    const closedRows = safeArray(data?.closedTickets);
-
-    const merged = mergeUniqueTickets(allRows, activeRows, closedRows);
-    return sortTickets(merged, "updated_desc");
-  }, [data?.tickets, data?.activeTickets, data?.closedTickets]);
-
-  const safeActiveTickets = useMemo(() => {
-    const activeRows = safeArray(data?.activeTickets);
-    if (activeRows.length) {
-      return sortTickets(
-        mergeUniqueTickets(activeRows),
-        "priority_desc"
-      );
-    }
-
-    return sortTickets(
-      safeTickets.filter((ticket) => isActiveTicketStatus(ticket?.status)),
-      "priority_desc"
-    );
-  }, [data?.activeTickets, safeTickets]);
-
-  const safeClosedTickets = useMemo(() => {
-    const closedRows = safeArray(data?.closedTickets);
-    if (closedRows.length) {
-      return sortTickets(
-        mergeUniqueTickets(closedRows),
-        "updated_desc"
-      );
-    }
-
-    return sortTickets(
-      safeTickets.filter((ticket) => {
-        const status = String(ticket?.status || "").toLowerCase();
-        return status === "closed" || status === "deleted";
-      }),
-      "updated_desc"
-    );
-  }, [data?.closedTickets, safeTickets]);
-
-  const safeWarns = safeArray(data?.warns);
-  const safeRaids = safeArray(data?.raids);
-  const safeFraud = safeArray(data?.fraud || data?.fraudFlagsList);
-
-  const intelligence = useMemo(
-    () => buildModeratorIntelligence({
-      ...data,
-      tickets: safeTickets,
-    }),
-    [data, safeTickets]
-  );
-
-  const filteredTickets = useMemo(() => {
-    let rows = [...safeTickets];
-
-    if (statusFilter === "active") {
-      rows = [...safeActiveTickets];
-    } else if (statusFilter === "closed" || statusFilter === "deleted") {
-      rows = safeClosedTickets.filter((ticket) =>
-        statusMatchesFilter(ticket, statusFilter)
-      );
-    }
-
-    if (selectedCategoryFilter) {
-      rows = rows.filter((ticket) =>
-        ticketMatchesSelectedCategory(ticket, selectedCategoryFilter)
-      );
-    }
-
-    if (search.trim()) {
-      const q = search.toLowerCase();
-
-      rows = rows.filter((t) =>
-        [
-          t.username,
-          t.user_id,
-          t.title,
-          t.category,
-          t.raw_category,
-          t.matched_category_name,
-          t.matched_category_slug,
-          t.matched_intake_type,
-          t.claimed_by,
-          t.channel_id,
-          t.discord_thread_id,
-          t.closed_reason,
-          t.channel_name,
-        ]
-          .filter(Boolean)
-          .some((v) => String(v).toLowerCase().includes(q))
-      );
-    }
-
-    if (statusFilter !== "all" && statusFilter !== "active" && statusFilter !== "closed" && statusFilter !== "deleted") {
-      rows = rows.filter((t) => statusMatchesFilter(t, statusFilter));
-    }
-
-    if (priorityFilter !== "all") {
-      rows = rows.filter(
-        (t) => String(t.priority || "").toLowerCase() === priorityFilter
-      );
-    }
-
-    return sortTickets(rows, sortBy);
-  }, [
-    safeTickets,
-    safeActiveTickets,
-    safeClosedTickets,
-    selectedCategoryFilter,
-    search,
-    statusFilter,
-    priorityFilter,
-    sortBy,
-  ]);
-
-  const homeSummary = useMemo(() => {
-    return {
-      recentEvents: safeEvents.slice(0, 5),
-      recentWarns: safeWarns.slice(0, 8),
-      recentRaids: safeRaids.slice(0, 8),
-      recentFraud: safeFraud.slice(0, 8),
-    };
-  }, [safeEvents, safeWarns, safeRaids, safeFraud]);
-
-  const jumpToTickets = useCallback(
-    ({ status = "active", priority = "all", query = "" } = {}) => {
-      setActiveTab("tickets");
-      setStatusFilter(status);
-      setPriorityFilter(priority);
-      setSelectedCategoryFilter(null);
-      if (typeof query === "string") setSearch(query);
-
-      if (typeof window !== "undefined") {
-        requestAnimationFrame(() => {
-          window.scrollTo({ top: 0, behavior: "smooth" });
-        });
-      }
-    },
-    []
-  );
-
-  const jumpToPanel = useCallback(
-    (panelName) => {
-      setActiveTab("home");
-      openOnlyPanel(panelName);
-
-      const refMap = {
-        warns: warnsSectionRef,
-        raids: raidsSectionRef,
-        fraud: fraudSectionRef,
-      };
-
-      const targetRef = refMap[panelName];
-
-      if (typeof window !== "undefined") {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if (targetRef?.current) {
-              targetRef.current.scrollIntoView({
-                behavior: "smooth",
-                block: "start",
-              });
-            } else {
-              window.scrollTo({ top: 0, behavior: "smooth" });
-            }
-          });
-        });
-      }
-    },
-    [openOnlyPanel]
-  );
-
-  const lastRefreshLabel = timeAgo(lastRefreshAtRef.current);
-
-  const sectionVisibility = preferences?.sectionVisibility || {};
-  const homeLayout = preferences?.layout?.home || [];
-  const membersLayout = preferences?.layout?.members || [];
-  const density = preferences?.density || "comfortable";
-
-  const handleFindTicketsByCategory = useCallback((category) => {
-    setActiveTab("tickets");
-    setSelectedCategoryFilter(category || null);
-    setSearch("");
-    setStatusFilter("active");
-    setPriorityFilter("all");
-
-    if (typeof window !== "undefined") {
-      requestAnimationFrame(() => {
-        window.scrollTo({ top: 0, behavior: "smooth" });
-      });
-    }
-  }, []);
-
-  const clearTicketFilters = useCallback(() => {
-    setSearch("");
-    setStatusFilter("active");
-    setPriorityFilter("all");
-    setSelectedCategoryFilter(null);
-  }, []);
-
-  const mobileExtraActions = useMemo(
-    () => [
-      {
-        key: "warns",
-        label: "Open Warns",
-        icon: "⚠️",
-        onClick: () => jumpToPanel("warns"),
-      },
-      {
-        key: "raids",
-        label: "Open Raids",
-        icon: "🚨",
-        onClick: () => jumpToPanel("raids"),
-      },
-      {
-        key: "fraud",
-        label: "Open Fraud",
-        icon: "🕵️",
-        onClick: () => jumpToPanel("fraud"),
-      },
-    ],
-    [jumpToPanel]
-  );
-
-  const homeSections = {
-    intelligence: (
-      <IntelligencePanel
-        intelligence={intelligence}
-        expanded={expandedPanels.intelligence}
-        onToggle={() => togglePanel("intelligence")}
-        onJumpToTickets={() => jumpToTickets({ status: "active" })}
-        onJumpToWarns={() => jumpToPanel("warns")}
-        onJumpToRaids={() => jumpToPanel("raids")}
-        onJumpToFraud={() => jumpToPanel("fraud")}
-      />
-    ),
-    stats: (
-      <div className="metrics-grid">
-        <ClickableStatCard
-          title="Open Tickets"
-          value={counts.openTickets}
-          subtitle="Tap to open queue"
-          onClick={() => jumpToTickets({ status: "active" })}
-        />
-        <ClickableStatCard
-          title="Warns Today"
-          value={counts.warnsToday}
-          subtitle="Tap to review warnings"
-          onClick={() => jumpToPanel("warns")}
-        />
-        <ClickableStatCard
-          title="Raid Alerts"
-          value={counts.raidAlerts}
-          subtitle="Tap to review raids"
-          onClick={() => jumpToPanel("raids")}
-        />
-        <ClickableStatCard
-          title="Fraud Flags"
-          value={counts.fraudFlags}
-          subtitle="Tap to review fraud"
-          onClick={() => jumpToPanel("fraud")}
-        />
+  return (
+    <div className={`profile-slot-card ${isActive ? "active" : ""}`}>
+      <div className="settings-chip-row" style={{ marginBottom: 8 }}>
+        <span className="section-chip">Slot {profile.slot}</span>
+        {isActive ? <span className="badge claimed">Active</span> : null}
+        {isLastUsed ? <span className="badge low">Last Used</span> : null}
+        {profile.isEmpty ? <span className="badge medium">Empty</span> : null}
       </div>
-    ),
-    quickActions: (
-      <QuickActions
-        onRefresh={() => refresh({ force: true, reason: "quick-actions" })}
-        currentStaffId={currentStaffId}
-      />
-    ),
-    activity: (
-      <DashboardSection
-        title="Activity Feed"
-        subtitle={`${safeEvents.length} recent audit events loaded`}
-        expanded={expandedPanels.activity}
-        onToggle={() => togglePanel("activity")}
+
+      <div className="profile-slot-title">{profile.name}</div>
+      <div className="muted settings-helper-copy" style={{ marginTop: 6 }}>
+        {formatUpdatedAt(profile.updatedAt)}
+      </div>
+
+      <div className="settings-profile-rename-row">
+        <input
+          className="input"
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleRename();
+          }}
+          placeholder={`Profile ${profile.slot}`}
+          aria-label="Profile name"
+        />
+
+        <button
+          type="button"
+          className="button ghost"
+          style={{ width: "auto", minWidth: 96 }}
+          onClick={handleRename}
+        >
+          Rename
+        </button>
+      </div>
+
+      <div className="settings-profile-action-row">
+        <button
+          type="button"
+          className={isActive ? "button" : "button ghost"}
+          style={{ width: "auto", minWidth: 96 }}
+          onClick={() => onLoad(profile.id)}
+        >
+          Load
+        </button>
+
+        <button
+          type="button"
+          className="button ghost"
+          style={{ width: "auto", minWidth: 118 }}
+          onClick={handleSave}
+        >
+          Save Current
+        </button>
+
+        <button
+          type="button"
+          className="button danger"
+          style={{ width: "auto", minWidth: 96 }}
+          onClick={() => onDelete(profile.id)}
+        >
+          Clear
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SettingsAccordion({ title, chip, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="settings-accordion">
+      <button
+        type="button"
+        className="settings-accordion-head"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-expanded={open}
       >
-        <AuditTimeline events={safeEvents} />
-      </DashboardSection>
-    ),
-    warns: (
-      <div ref={warnsSectionRef}>
-        <DashboardSection
-          title="Warn Intelligence"
-          subtitle={`${safeWarns.length} warning record${safeWarns.length === 1 ? "" : "s"} in the last 24 hours`}
-          expanded={expandedPanels.warns}
-          onToggle={() => togglePanel("warns")}
-          actions={
-            <button
-              type="button"
-              className="button ghost"
-              style={{ width: "auto", minWidth: 120 }}
-              onClick={() => jumpToTickets({ status: "active" })}
-            >
-              Open Tickets
-            </button>
-          }
-        >
-          <SimpleFeedPanel
-            rows={homeSummary.recentWarns}
-            emptyMessage="No warnings were recorded in the last 24 hours."
-            renderRow={(warn, index) => (
-              <div
-                key={warn?.id || `warn-${index}`}
-                className="card"
-                style={{ padding: 14 }}
-              >
-                <div style={{ fontWeight: 800 }}>
-                  {safeText(warn?.display_name || warn?.username, "Unknown user")}
-                </div>
-                <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
-                  {safeText(warn?.reason, "No reason provided")}
-                </div>
-                <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-                  {formatTime(warn?.created_at)}
-                </div>
-              </div>
-            )}
-          />
-        </DashboardSection>
-      </div>
-    ),
-    raids: (
-      <div ref={raidsSectionRef}>
-        <DashboardSection
-          title="Raid Intelligence"
-          subtitle={`${safeRaids.length} raid alert${safeRaids.length === 1 ? "" : "s"} in the last 24 hours`}
-          expanded={expandedPanels.raids}
-          onToggle={() => togglePanel("raids")}
-        >
-          <SimpleFeedPanel
-            rows={homeSummary.recentRaids}
-            emptyMessage="No raid alerts were recorded in the last 24 hours."
-            renderRow={(raid, index) => (
-              <div
-                key={raid?.id || `raid-${index}`}
-                className="card"
-                style={{ padding: 14 }}
-              >
-                <div style={{ fontWeight: 800 }}>
-                  {safeText(raid?.summary, "Raid event")}
-                </div>
-                <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
-                  Join count: {safeText(raid?.join_count, "—")} • Window:{" "}
-                  {safeText(raid?.window_seconds, "—")}s • Severity:{" "}
-                  {safeText(raid?.severity, "unknown")}
-                </div>
-                <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-                  {formatTime(raid?.created_at)}
-                </div>
-              </div>
-            )}
-          />
-        </DashboardSection>
-      </div>
-    ),
-    fraud: (
-      <div ref={fraudSectionRef}>
-        <DashboardSection
-          title="Fraud Intelligence"
-          subtitle={`${safeFraud.length} flagged record${safeFraud.length === 1 ? "" : "s"} in the current dataset`}
-          expanded={expandedPanels.fraud}
-          onToggle={() => togglePanel("fraud")}
-        >
-          {homeSummary.recentFraud.length ? (
-            <SimpleFeedPanel
-              rows={homeSummary.recentFraud}
-              emptyMessage="No fraud items."
-              renderRow={(fraud, index) => (
-                <div
-                  key={fraud?.id || `fraud-${index}`}
-                  className="card"
-                  style={{ padding: 14 }}
-                >
-                  <div style={{ fontWeight: 800 }}>
-                    {safeText(fraud?.display_name || fraud?.username, "Suspicious member")}
-                  </div>
-                  <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
-                    Score: {safeText(fraud?.score, "0")} • Flagged:{" "}
-                    {String(Boolean(fraud?.flagged))}
-                  </div>
+        <div>
+          <div className="settings-chip-row">
+            <span className="section-chip">{chip}</span>
+          </div>
+          <div className="settings-title-sm">{title}</div>
+        </div>
 
-                  {Array.isArray(fraud?.reasons) && fraud.reasons.length ? (
-                    <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-                      {fraud.reasons.join(" • ")}
-                    </div>
-                  ) : null}
-                </div>
-              )}
+        <span className={`settings-accordion-chevron ${open ? "open" : ""}`}>
+          ⌄
+        </span>
+      </button>
+
+      {open ? <div className="settings-accordion-body">{children}</div> : null}
+    </div>
+  );
+}
+
+function DraftThemePanel({
+  draftTheme,
+  baselineTheme,
+  setDraftThemeValue,
+  applyDraftTheme,
+  resetDraftTheme,
+  hasDraftChanges,
+}) {
+  return (
+    <div className="settings-section-card">
+      <div className="settings-section-heading">
+        <div>
+          <div className="settings-chip-row">
+            <span className="section-chip">Color Engine</span>
+            {hasDraftChanges ? <span className="badge medium">Draft Changes</span> : null}
+          </div>
+          <div className="settings-title-sm">Neon Palette</div>
+        </div>
+
+        <div className="settings-head-actions">
+          <button
+            type="button"
+            className="button ghost"
+            style={{ width: "auto", minWidth: 96 }}
+            disabled={!hasDraftChanges}
+            onClick={resetDraftTheme}
+          >
+            Reset
+          </button>
+
+          <button
+            type="button"
+            className="button"
+            style={{ width: "auto", minWidth: 96 }}
+            disabled={!hasDraftChanges}
+            onClick={applyDraftTheme}
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+
+      <div className="settings-theme-grid">
+        <ToneSwatch
+          label="Accent"
+          value={draftTheme.accent}
+          onChange={(value) => setDraftThemeValue("accent", value)}
+          helper="Main green glow and primary dashboard energy."
+        />
+        <ToneSwatch
+          label="Accent 2"
+          value={draftTheme.accent2}
+          onChange={(value) => setDraftThemeValue("accent2", value)}
+          helper="Secondary neon balance for haze and highlights."
+        />
+        <ToneSwatch
+          label="Primary Text"
+          value={draftTheme.textStrong}
+          onChange={(value) => setDraftThemeValue("textStrong", value)}
+          helper="High-contrast headline and card text."
+        />
+        <ToneSwatch
+          label="Muted Text"
+          value={draftTheme.textMuted}
+          onChange={(value) => setDraftThemeValue("textMuted", value)}
+          helper="Subtext, labels, and helper copy."
+        />
+      </div>
+
+      <div className="settings-effects-wrap">
+        <div className="settings-title-sm" style={{ fontSize: 16, marginBottom: 10 }}>
+          Effects Mode
+        </div>
+
+        <div className="settings-density-grid">
+          {Object.entries(EFFECTS_MODES).map(([mode, label]) => (
+            <EffectsModeCard
+              key={mode}
+              active={draftTheme.effectsMode === mode}
+              label={label}
+              helper={
+                mode === "full"
+                  ? "Maximum glow, blur, and visual atmosphere."
+                  : mode === "reduced"
+                    ? "Less extra glow and softer visual effects for cheaper devices."
+                    : "Lowest visual overhead. Best for weak phones or laggy browsers."
+              }
+              onClick={() => setDraftThemeValue("effectsMode", mode)}
             />
-          ) : (
-            <div className="space">
-              {intelligence.flaggedMembers.length ? (
-                intelligence.flaggedMembers.map((member) => (
-                  <div
-                    key={member.user_id}
-                    className="card"
-                    style={{ padding: 14 }}
-                  >
-                    <div style={{ fontWeight: 800 }}>
-                      {getMemberDisplay(member)}
-                    </div>
-                    <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
-                      Role state: {safeText(member?.role_state)}
-                    </div>
-                    <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-                      {safeText(
-                        member?.role_state_reason,
-                        "Role conflict detected"
-                      )}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="empty-state">
-                  No fraud flags or role conflicts are present in the current dataset.
-                </div>
-              )}
-            </div>
-          )}
-        </DashboardSection>
+          ))}
+        </div>
       </div>
-    ),
-  };
 
-  const membersSections = {
-    freshEntrants: (
-      <DashboardSection
-        title="Fresh Entrants"
-        subtitle={`${safeRecentJoins.length} recent join record${safeRecentJoins.length === 1 ? "" : "s"} loaded`}
-        expanded={expandedPanels.joins}
-        onToggle={() => togglePanel("joins")}
-      >
-        <RecentJoinsCard joins={safeRecentJoins} />
-      </DashboardSection>
-    ),
-    memberSnapshot: (
-      <DashboardSection
-        title="Member Snapshot"
-        subtitle={`${safeMembers.length} member record${safeMembers.length === 1 ? "" : "s"} loaded`}
-        expanded={expandedPanels.members}
-        onToggle={() => togglePanel("members")}
-      >
-        <div className="profile-scroll-safe-zone">
-          <MemberSnapshot members={safeMembers} />
-        </div>
-      </DashboardSection>
-    ),
-    staffMetrics: (
-      <DashboardSection
-        title="Staff Metrics"
-        subtitle={`${safeMetrics.length} staff record${safeMetrics.length === 1 ? "" : "s"} loaded`}
-        expanded={expandedPanels.staff}
-        onToggle={() => togglePanel("staff")}
-      >
-        <StaffMetricsCard metrics={safeMetrics} />
-      </DashboardSection>
-    ),
-    roleHierarchy: (
-      <DashboardSection
-        title="Role Hierarchy"
-        subtitle={`${safeRoles.length} role record${safeRoles.length === 1 ? "" : "s"} loaded`}
-        expanded={expandedPanels.roles}
-        onToggle={() => togglePanel("roles")}
-      >
-        <RoleHierarchyCard
-          roles={safeRoles}
-          members={safeMembers}
-          staffUserId={currentStaffId}
-          refreshDashboardData={() =>
-            refresh({ force: true, reason: "role-hierarchy" })
-          }
-        />
-      </DashboardSection>
-    ),
-    memberSearch: (
-      <DashboardSection
-        title="Member Search"
-        subtitle="Search the tracked guild member dataset"
-        expanded={true}
-        onToggle={null}
-      >
-        <div className="profile-scroll-safe-zone">
-          <MemberSearchCard
-            currentStaffId={currentStaffId}
-            onRefresh={() => refresh({ force: true, reason: "member-search-action" })}
-          />
-        </div>
-      </DashboardSection>
-    ),
-  };
+      <div className={`settings-preview-stage effects-${draftTheme.effectsMode}`}>
+        <div className="settings-preview-card">
+          <div className="settings-preview-title">Live Mood Preview</div>
+          <div className="settings-preview-sub">
+            Draft preview only. Colors and effects apply when you press{" "}
+            <strong>Apply</strong>.
+          </div>
 
-  const desktopCategorySection = (
-    <CategoryManager
-      categories={safeCategories}
-      tickets={safeTickets}
-      onRefresh={() => refresh({ force: true, reason: "categories" })}
-      onFindTicketsByCategory={handleFindTicketsByCategory}
-    />
-  );
+          <div className="settings-preview-chip-row">
+            <span className="badge low">Verified</span>
+            <span className="badge claimed">Claimed</span>
+            <span className="badge open">Open</span>
+            <span className="badge danger">High Risk</span>
+          </div>
 
-  const commonRefreshCard = (
-    <div
-      className="card dashboard-refresh-card"
-      style={{ marginBottom: 16, padding: 12 }}
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
-      >
-        <div className="muted" style={{ fontSize: 13 }}>
-          Last successful refresh: {lastRefreshLabel}
-          {isModalPaused ? " • refresh paused while another modal is open" : ""}
-        </div>
+          <div className="settings-preview-swatch-grid">
+            <div className="settings-preview-swatch">
+              <span>Accent</span>
+              <code>{draftTheme.accent}</code>
+            </div>
+            <div className="settings-preview-swatch">
+              <span>Accent 2</span>
+              <code>{draftTheme.accent2}</code>
+            </div>
+            <div className="settings-preview-swatch">
+              <span>Primary Text</span>
+              <code>{draftTheme.textStrong}</code>
+            </div>
+            <div className="settings-preview-swatch">
+              <span>Muted Text</span>
+              <code>{draftTheme.textMuted}</code>
+            </div>
+          </div>
 
-        <div
-          className="dashboard-refresh-actions"
-          style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-        >
-          <button
-            type="button"
-            className="button ghost"
-            style={{ width: "auto", minWidth: 120 }}
-            onClick={() => setSettingsOpen(true)}
-          >
-            Personalize UI
-          </button>
-
-          <button
-            type="button"
-            className="button ghost"
-            style={{ width: "auto", minWidth: 120 }}
-            onClick={() =>
-              refresh({ force: true, reason: "manual-header-refresh" })
-            }
-          >
-            Refresh Now
-          </button>
-
-          <button
-            type="button"
-            className="button ghost"
-            style={{ width: "auto", minWidth: 140 }}
-            disabled={isMaintaining}
-            onClick={() =>
-              handleReconcileTickets({
-                includeOpenWithMissingChannel: true,
-                includeTranscriptBackfill: true,
-                dryRun: true,
-              })
-            }
-          >
-            {isMaintaining ? "Working..." : "Preview Reconcile"}
-          </button>
+          <div className="muted settings-helper-copy" style={{ marginTop: 12 }}>
+            Current applied effects mode: <strong>{baselineTheme.effectsMode}</strong>
+          </div>
         </div>
       </div>
     </div>
   );
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+export default function DashboardSettingsPanel({
+  open,
+  onClose,
+  preferences,
+  profiles = [],
+  activeProfileId,
+  lastUsedProfileId,
+  setThemeValue,
+  setDensity,
+  toggleSectionVisibility,
+  moveSection,
+  resetPreferences,
+  saveProfile,
+  saveActiveProfile,
+  loadProfile,
+  renameProfile,
+  deleteProfile,
+}) {
+  const [message, flashMessage] = useFlashMessage();
+  const isCompact = useCompactSettingsLayout(900);
+  const panelRef = useRef(null);
+
+  const homeKeys = useMemo(
+    () => safeArray(preferences?.layout?.home),
+    [preferences?.layout?.home]
+  );
+  const membersKeys = useMemo(
+    () => safeArray(preferences?.layout?.members),
+    [preferences?.layout?.members]
+  );
+  const visibility = useMemo(
+    () => preferences?.sectionVisibility || {},
+    [preferences?.sectionVisibility]
+  );
+
+  const baselineTheme = useMemo(
+    () => normalizeTheme(preferences?.theme),
+    [preferences?.theme]
+  );
+
+  const [draftTheme, setDraftTheme] = useState(baselineTheme);
+
+  const sortedProfiles = useMemo(() => {
+    return [...safeArray(profiles)]
+      .filter(Boolean)
+      .sort((a, b) => (a.slot || 0) - (b.slot || 0));
+  }, [profiles]);
+
+  const hasDraftChanges = useMemo(
+    () => !themesEqual(draftTheme, baselineTheme),
+    [draftTheme, baselineTheme]
+  );
+
+  useEffect(() => {
+    if (open) {
+      setDraftTheme(normalizeTheme(preferences?.theme));
+    }
+  }, [open, preferences?.theme]);
+
+  usePreventBodyScroll(open);
+  useModalKeyboard(open, onClose, panelRef);
+
+  const noopToggleSectionVisibility = useCallback(() => {}, []);
+  const noopMoveSection = useCallback(() => {}, []);
+  const noopSetDensity = useCallback(() => {}, []);
+
+  const setDraftThemeValue = useCallback((key, value) => {
+    setDraftTheme((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
+  const applyDraftTheme = useCallback(() => {
+    const next = normalizeTheme(draftTheme);
+    if (setThemeValue) {
+      setThemeValue("accent", next.accent);
+      setThemeValue("accent2", next.accent2);
+      setThemeValue("textStrong", next.textStrong);
+      setThemeValue("textMuted", next.textMuted);
+      setThemeValue("effectsMode", next.effectsMode);
+    }
+    flashMessage("Theme draft applied.");
+  }, [draftTheme, setThemeValue, flashMessage]);
+
+  const resetDraftTheme = useCallback(() => {
+    setDraftTheme(normalizeTheme(preferences?.theme));
+    flashMessage("Draft reset to current applied theme.");
+  }, [preferences?.theme, flashMessage]);
+
+  const handleRename = useCallback(
+    (profileId, nextName) => {
+      const ok = renameProfile?.(profileId, nextName);
+      flashMessage(ok ? "Profile renamed." : "Enter a valid profile name.");
+    },
+    [renameProfile, flashMessage]
+  );
+
+  const handleSave = useCallback(
+    (profileId, nextName) => {
+      const ok = saveProfile?.(profileId, nextName);
+      flashMessage(ok ? "Profile saved." : "Unable to save profile.");
+    },
+    [saveProfile, flashMessage]
+  );
+
+  const handleLoad = useCallback(
+    (profileId) => {
+      const ok = loadProfile?.(profileId);
+      if (ok) {
+        setDraftTheme(normalizeTheme(preferences?.theme));
+      }
+      flashMessage(ok ? "Profile loaded." : "Unable to load profile.");
+    },
+    [loadProfile, preferences?.theme, flashMessage]
+  );
+
+  const handleDelete = useCallback(
+    (profileId) => {
+      const ok = deleteProfile?.(profileId);
+      flashMessage(ok ? "Profile cleared." : "Unable to clear profile.");
+    },
+    [deleteProfile, flashMessage]
+  );
+
+  const handleQuickSave = useCallback(() => {
+    const ok = saveActiveProfile?.();
+    flashMessage(ok ? "Active profile saved." : "Unable to save active profile.");
+  }, [saveActiveProfile, flashMessage]);
+
+  const handleResetCurrent = useCallback(() => {
+    resetPreferences?.();
+    flashMessage("Current preferences reset.");
+  }, [resetPreferences, flashMessage]);
+
+  if (!open) return null;
 
   return (
-    <>
-      <Topbar />
-
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Dashboard personalization"
+      className="settings-overlay"
+      onClick={onClose}
+    >
       <div
-        className="dashboard-page-shell"
-        style={{
-          paddingBottom: isDesktopLayout
-            ? 32
-            : `calc(${MOBILE_NAV_RESERVED_PX}px + env(safe-area-inset-bottom, 0px))`,
-        }}
+        ref={panelRef}
+        className="settings-sheet"
+        onClick={(e) => e.stopPropagation()}
+        tabIndex={-1}
       >
-        {isDesktopLayout ? (
-          <>
-            <div className="desktop-only-nav">
-              <DesktopTabBar activeTab={activeTab} onChange={setActiveTab} />
+        <div className="settings-sheet-handle" />
+
+        <div className="settings-head">
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="settings-chip-row" style={{ marginBottom: 10 }}>
+              <span className="section-chip">420 Theme Lab</span>
+              <span className="badge claimed">Customization Studio</span>
+              {hasDraftChanges ? <span className="badge medium">Unsaved Draft</span> : null}
             </div>
 
-            {commonRefreshCard}
+            <div className="settings-title-lg">Dashboard Personalization</div>
 
-            {error ? (
-              <div className="error-banner" style={{ marginBottom: 16 }}>
-                {error}
-              </div>
-            ) : null}
+            <div className="muted settings-head-copy">
+              Cleaner opening behavior, lower device strain, draft-based theme editing,
+              and smoother control over how heavy the visuals feel on weaker phones.
+            </div>
+          </div>
 
-            {maintenanceError ? (
-              <div className="error-banner" style={{ marginBottom: 16 }}>
-                {maintenanceError}
-              </div>
-            ) : null}
+          <div className="settings-head-actions">
+            <button
+              type="button"
+              className="button ghost"
+              style={{ width: "auto", minWidth: 132 }}
+              onClick={handleQuickSave}
+            >
+              Save Active
+            </button>
 
-            {maintenanceMessage ? (
-              <div className="info-banner" style={{ marginBottom: 16 }}>
-                {maintenanceMessage}
-              </div>
-            ) : null}
+            <button
+              type="button"
+              className="button ghost"
+              style={{ width: "auto", minWidth: 124 }}
+              onClick={handleResetCurrent}
+            >
+              Reset Current
+            </button>
 
-            {isRefreshing ? (
-              <div className="info-banner" style={{ marginBottom: 16 }}>
-                Refreshing dashboard…
-              </div>
-            ) : null}
+            <button
+              type="button"
+              className="button ghost"
+              style={{ width: "auto", minWidth: 110 }}
+              onClick={onClose}
+            >
+              Close
+            </button>
+          </div>
+        </div>
 
-            <DesktopDashboardView
-              activeTab={activeTab}
-              counts={counts}
-              safeEvents={safeEvents}
-              safeWarns={safeWarns}
-              safeRaids={safeRaids}
-              safeFraud={safeFraud}
-              safeCategories={desktopCategorySection}
-              safeRecentJoins={safeRecentJoins}
-              safeMembers={safeMembers}
-              safeMetrics={safeMetrics}
-              safeRoles={safeRoles}
-              intelligence={intelligence}
-              expandedPanels={expandedPanels}
-              togglePanel={togglePanel}
-              jumpToTickets={jumpToTickets}
-              jumpToPanel={jumpToPanel}
-              refresh={refresh}
-              currentStaffId={currentStaffId}
-              homeLayout={homeLayout}
-              membersLayout={membersLayout}
-              sectionVisibility={sectionVisibility}
-              homeSections={homeSections}
-              membersSections={membersSections}
-              filteredTickets={
-                <TicketQueueTable
-                  tickets={filteredTickets}
-                  currentStaffId={currentStaffId}
-                  queueMode={statusFilter}
-                  onRefresh={() =>
-                    refresh({ force: true, reason: "ticket-controls" })
-                  }
+        {message ? (
+          <div className="info-banner" style={{ marginBottom: 14 }} role="status">
+            {message}
+          </div>
+        ) : null}
+
+        <div className="settings-content-stack">
+          {isCompact ? (
+            <>
+              <SettingsAccordion title="Profile Slots" chip="Saved Looks" defaultOpen>
+                <div className="settings-profile-grid">
+                  {sortedProfiles.map((profile) => (
+                    <ProfileCard
+                      key={profile.id}
+                      profile={profile}
+                      isActive={profile.id === activeProfileId}
+                      isLastUsed={profile.id === lastUsedProfileId}
+                      onLoad={handleLoad}
+                      onSave={handleSave}
+                      onRename={handleRename}
+                      onDelete={handleDelete}
+                    />
+                  ))}
+                </div>
+              </SettingsAccordion>
+
+              <SettingsAccordion title="Neon Palette + Effects" chip="Color Engine" defaultOpen>
+                <DraftThemePanel
+                  draftTheme={draftTheme}
+                  baselineTheme={baselineTheme}
+                  setDraftThemeValue={setDraftThemeValue}
+                  applyDraftTheme={applyDraftTheme}
+                  resetDraftTheme={resetDraftTheme}
+                  hasDraftChanges={hasDraftChanges}
                 />
-              }
-              search={search}
-              setSearch={setSearch}
-              statusFilter={statusFilter}
-              setStatusFilter={setStatusFilter}
-              priorityFilter={priorityFilter}
-              setPriorityFilter={setPriorityFilter}
-              sortBy={sortBy}
-              setSortBy={setSortBy}
-              handleReconcileTickets={handleReconcileTickets}
-              handlePreviewPurge={handlePreviewPurge}
-              handlePurgeStale={handlePurgeStale}
-              isMaintaining={isMaintaining}
-              density={density}
-            />
-          </>
-        ) : (
-          <>
-            {commonRefreshCard}
+              </SettingsAccordion>
 
-            {error ? (
-              <div className="error-banner" style={{ marginBottom: 16 }}>
-                {error}
-              </div>
-            ) : null}
-
-            {maintenanceError ? (
-              <div className="error-banner" style={{ marginBottom: 16 }}>
-                {maintenanceError}
-              </div>
-            ) : null}
-
-            {maintenanceMessage ? (
-              <div className="info-banner" style={{ marginBottom: 16 }}>
-                {maintenanceMessage}
-              </div>
-            ) : null}
-
-            {isRefreshing ? (
-              <div className="info-banner" style={{ marginBottom: 16 }}>
-                Refreshing dashboard…
-              </div>
-            ) : null}
-
-            <section className={`mobile-tab-panel ${activeTab === "home" ? "active" : ""}`}>
-              <div className="dashboard-home-grid">
-                {homeLayout
-                  .filter((key) => sectionVisibility[key] !== false)
-                  .map((key) => (
-                    <div key={`home-${key}`}>{homeSections[key] || null}</div>
+              <SettingsAccordion title="Density" chip="Layout Feel" defaultOpen>
+                <div className="settings-density-grid">
+                  {Object.entries(DENSITY_OPTIONS).map(([density, label]) => (
+                    <DensityPreview
+                      key={density}
+                      active={preferences?.density === density}
+                      label={label}
+                      helper={
+                        density === "compact"
+                          ? "Tighter spacing for more control on one screen."
+                          : density === "comfortable"
+                            ? "Balanced spacing for daily moderation use."
+                            : "More breathing room and stronger visual separation."
+                      }
+                      onClick={() => (setDensity || noopSetDensity)(density)}
+                    />
                   ))}
-              </div>
-            </section>
+                </div>
+              </SettingsAccordion>
 
-            <section className={`mobile-tab-panel ${activeTab === "tickets" ? "active" : ""}`}>
-              <div className="card">
-                <div
-                  className="row"
-                  style={{
-                    justifyContent: "space-between",
-                    alignItems: "flex-start",
-                    gap: 12,
-                    flexWrap: "wrap",
-                    marginBottom: 14,
-                  }}
-                >
+              <SettingsAccordion title="Home Visibility" chip="Visibility">
+                <SectionVisibilityList
+                  title="Home Section Visibility"
+                  keys={homeKeys}
+                  visibility={visibility}
+                  onToggle={toggleSectionVisibility || noopToggleSectionVisibility}
+                />
+              </SettingsAccordion>
+
+              <SettingsAccordion title="Members Visibility" chip="Visibility">
+                <SectionVisibilityList
+                  title="Members Section Visibility"
+                  keys={membersKeys}
+                  visibility={visibility}
+                  onToggle={toggleSectionVisibility || noopToggleSectionVisibility}
+                />
+              </SettingsAccordion>
+
+              <SettingsAccordion title="Home Layout Order" chip="Layout Order">
+                <MoveButtons
+                  area="home"
+                  items={homeKeys}
+                  onMove={moveSection || noopMoveSection}
+                />
+              </SettingsAccordion>
+
+              <SettingsAccordion title="Members Layout Order" chip="Layout Order">
+                <MoveButtons
+                  area="members"
+                  items={membersKeys}
+                  onMove={moveSection || noopMoveSection}
+                />
+              </SettingsAccordion>
+            </>
+          ) : (
+            <>
+              <div className="settings-section-card">
+                <div className="settings-section-heading">
                   <div>
-                    <h2 style={{ margin: 0 }}>Ticket Queue</h2>
-                    <div className="muted" style={{ marginTop: 6 }}>
-                      Live moderation queue with repair, transcript, and filtering controls
+                    <div className="settings-chip-row">
+                      <span className="section-chip">Saved Looks</span>
                     </div>
-                  </div>
-
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <button
-                      type="button"
-                      className="button ghost"
-                      style={{ width: "auto", minWidth: 120 }}
-                      onClick={clearTicketFilters}
-                    >
-                      Clear Filters
-                    </button>
-
-                    <button
-                      type="button"
-                      className="button ghost"
-                      style={{ width: "auto", minWidth: 120 }}
-                      onClick={() =>
-                        refresh({ force: true, reason: "manual-ticket-refresh" })
-                      }
-                    >
-                      Refresh Queue
-                    </button>
-
-                    <button
-                      type="button"
-                      className="button ghost"
-                      style={{ width: "auto", minWidth: 140 }}
-                      disabled={isMaintaining}
-                      onClick={() =>
-                        handleReconcileTickets({
-                          includeOpenWithMissingChannel: true,
-                          includeTranscriptBackfill: true,
-                          dryRun: false,
-                        })
-                      }
-                    >
-                      {isMaintaining ? "Working..." : "Reconcile Tickets"}
-                    </button>
-
-                    <button
-                      type="button"
-                      className="button ghost"
-                      style={{ width: "auto", minWidth: 140 }}
-                      disabled={isMaintaining}
-                      onClick={handlePreviewPurge}
-                    >
-                      {isMaintaining ? "Working..." : "Preview Purge"}
-                    </button>
-
-                    <button
-                      type="button"
-                      className="button danger"
-                      style={{ width: "auto", minWidth: 140 }}
-                      disabled={isMaintaining}
-                      onClick={handlePurgeStale}
-                    >
-                      {isMaintaining ? "Working..." : "Purge Stale"}
-                    </button>
+                    <div className="settings-title-sm">Profile Slots</div>
                   </div>
                 </div>
 
-                {selectedCategoryFilter ? (
-                  <div className="info-banner" style={{ marginBottom: 14 }}>
-                    Filtering tickets by category:{" "}
-                    <strong>
-                      {selectedCategoryFilter?.name ||
-                        selectedCategoryFilter?.slug ||
-                        "Selected Category"}
-                    </strong>
-                  </div>
-                ) : null}
-
-                <div
-                  className="muted"
-                  style={{
-                    marginBottom: 14,
-                    fontSize: 12,
-                    lineHeight: 1.5,
-                  }}
-                >
-                  Reconcile repairs stale ticket rows that no longer reflect Discord truth.
-                  Purge removes dead closed or deleted rows that no longer have a usable live channel.
-                </div>
-
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                    gap: 10,
-                    marginBottom: 14,
-                  }}
-                >
-                  <input
-                    className="input"
-                    placeholder="Search tickets, categories, intake types..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                  />
-
-                  <select
-                    className="input"
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                  >
-                    <option value="active">Active (Open + Claimed)</option>
-                    <option value="all">All statuses</option>
-                    <option value="open_only">Open Only</option>
-                    <option value="claimed">Claimed Only</option>
-                    <option value="closed">Closed</option>
-                    <option value="deleted">Deleted</option>
-                  </select>
-
-                  <select
-                    className="input"
-                    value={priorityFilter}
-                    onChange={(e) => setPriorityFilter(e.target.value)}
-                  >
-                    <option value="all">All priorities</option>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="urgent">Urgent</option>
-                  </select>
-
-                  <select
-                    className="input"
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                  >
-                    <option value="priority_desc">Priority Desc</option>
-                    <option value="priority_asc">Priority Asc</option>
-                    <option value="updated_desc">Updated Desc</option>
-                    <option value="updated_asc">Updated Asc</option>
-                    <option value="created_desc">Created Desc</option>
-                    <option value="created_asc">Created Asc</option>
-                  </select>
-                </div>
-
-                <div className="profile-scroll-safe-zone">
-                  <TicketQueueTable
-                    tickets={filteredTickets}
-                    currentStaffId={currentStaffId}
-                    queueMode={statusFilter}
-                    onRefresh={() =>
-                      refresh({ force: true, reason: "ticket-controls" })
-                    }
-                  />
-                </div>
-              </div>
-            </section>
-
-            <section className={`mobile-tab-panel ${activeTab === "members" ? "active" : ""}`}>
-              <div className="dashboard-members-grid">
-                {[...membersLayout]
-                  .filter((key, index, arr) => arr.indexOf(key) === index)
-                  .filter((key) => sectionVisibility[key] !== false)
-                  .map((key) => (
-                    <div key={`members-${key}`}>{membersSections[key] || null}</div>
+                <div className="settings-profile-grid">
+                  {sortedProfiles.map((profile) => (
+                    <ProfileCard
+                      key={profile.id}
+                      profile={profile}
+                      isActive={profile.id === activeProfileId}
+                      isLastUsed={profile.id === lastUsedProfileId}
+                      onLoad={handleLoad}
+                      onSave={handleSave}
+                      onRename={handleRename}
+                      onDelete={handleDelete}
+                    />
                   ))}
+                </div>
               </div>
-            </section>
 
-            <section className={`mobile-tab-panel ${activeTab === "categories" ? "active" : ""}`}>
-              {sectionVisibility.categories !== false ? (
-                <div className="profile-scroll-safe-zone">
-                  <CategoryManager
-                    categories={safeCategories}
-                    tickets={safeTickets}
-                    onRefresh={() => refresh({ force: true, reason: "categories" })}
-                    onFindTicketsByCategory={handleFindTicketsByCategory}
-                  />
+              <DraftThemePanel
+                draftTheme={draftTheme}
+                baselineTheme={baselineTheme}
+                setDraftThemeValue={setDraftThemeValue}
+                applyDraftTheme={applyDraftTheme}
+                resetDraftTheme={resetDraftTheme}
+                hasDraftChanges={hasDraftChanges}
+              />
+
+              <div className="settings-section-card">
+                <div className="settings-section-heading">
+                  <div>
+                    <div className="settings-chip-row">
+                      <span className="section-chip">Density</span>
+                    </div>
+                    <div className="settings-title-sm">Layout Feel</div>
+                  </div>
                 </div>
-              ) : (
-                <div className="empty-state">
-                  Categories is hidden in your personalization settings.
+
+                <div className="settings-density-grid">
+                  {Object.entries(DENSITY_OPTIONS).map(([density, label]) => (
+                    <DensityPreview
+                      key={density}
+                      active={preferences?.density === density}
+                      label={label}
+                      helper={
+                        density === "compact"
+                          ? "Tighter spacing for more control on one screen."
+                          : density === "comfortable"
+                            ? "Balanced spacing for daily moderation use."
+                            : "More breathing room and stronger visual separation."
+                      }
+                      onClick={() => (setDensity || noopSetDensity)(density)}
+                    />
+                  ))}
                 </div>
-              )}
-            </section>
+              </div>
 
-            <MobileBottomNav
-              activeTab={activeTab}
-              onChange={setActiveTab}
-              tabs={MOBILE_TABS}
-              title="Staff jumps"
-              actionButtonLabel="Actions"
-              extraActions={mobileExtraActions}
-            />
-          </>
-        )}
-      </div>
+              <SectionVisibilityList
+                title="Home Section Visibility"
+                keys={homeKeys}
+                visibility={visibility}
+                onToggle={toggleSectionVisibility || noopToggleSectionVisibility}
+              />
 
-      <DashboardSettingsPanel
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        preferences={preferences}
-        profiles={profiles}
-        activeProfileId={activeProfileId}
-        lastUsedProfileId={lastUsedProfileId}
-        setThemeValue={setThemeValue}
-        setDensity={setDensity}
-        toggleSectionVisibility={toggleSectionVisibility}
-        moveSection={moveSection}
-        resetPreferences={resetPreferences}
-        saveProfile={saveProfile}
-        saveActiveProfile={saveActiveProfile}
-        loadProfile={loadProfile}
-        renameProfile={renameProfile}
-        deleteProfile={deleteProfile}
-      />
+              <SectionVisibilityList
+                title="Members Section Visibility"
+                keys={membersKeys}
+                visibility={visibility}
+                onToggle={toggleSectionVisibility || noopToggleSectionVisibility}
+              />
 
-      <style jsx>{`
-        .dashboard-page-shell {
-          position: relative;
-        }
+              <MoveButtons
+                area="home"
+                items={homeKeys}
+                onMove={moveSection || noopMoveSection}
+              />
 
-        .desktop-only-nav {
-          display: block;
-        }
+              <MoveButtons
+                area="members"
+                items={membersKeys}
+                onMove={moveSection || noopMoveSection}
+              />
+            </>
+          )}
+        </div>
 
-        .dashboard-home-grid,
-        .dashboard-members-grid {
-          display: grid;
-          gap: ${density === "compact"
-            ? "12px"
-            : density === "spacious"
-              ? "22px"
-              : "16px"};
-          align-items: start;
-          overflow: visible;
-        }
-
-        .dashboard-section-shell,
-        .dashboard-section-body,
-        .profile-scroll-safe-zone {
-          overflow: visible !important;
-          min-height: 0;
-        }
-
-        .profile-scroll-safe-zone {
-          position: relative;
-          z-index: 1;
-          padding-bottom: 12px;
-        }
-
-        .mobile-tab-panel {
-          display: none;
-          overflow: visible;
-        }
-
-        .mobile-tab-panel.active {
-          display: block;
-          overflow: visible;
-        }
-
-        .metrics-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: ${density === "compact"
-            ? "10px"
-            : density === "spacious"
-              ? "16px"
-              : "12px"};
-        }
-
-        .intelligence-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: ${density === "compact"
-            ? "10px"
-            : density === "spacious"
-              ? "16px"
-              : "12px"};
-          margin-bottom: 14px;
-          align-items: stretch;
-        }
-
-        .intel-tile {
-          border-radius: 18px;
-          padding: ${density === "compact"
-            ? "12px"
-            : density === "spacious"
-              ? "18px"
-              : "14px"};
-          display: grid;
-          gap: 8px;
-          border: 1px solid var(--panel-border, rgba(255,255,255,0.08));
-          background: var(--panel-bg-soft, rgba(255,255,255,0.02));
-          min-width: 0;
-          overflow: hidden;
-        }
-
-        .intel-tile.ok {
-          border-color: color-mix(
-            in srgb,
-            var(--tone-success, #4ade80) 22%,
-            transparent
-          );
-          background: color-mix(
-            in srgb,
-            var(--tone-success, #4ade80) 10%,
-            transparent
-          );
-        }
-
-        .intel-tile.warn {
-          border-color: color-mix(
-            in srgb,
-            var(--tone-warn, #fbbf24) 22%,
-            transparent
-          );
-          background: color-mix(
-            in srgb,
-            var(--tone-warn, #fbbf24) 10%,
-            transparent
-          );
-        }
-
-        .intel-tile.danger {
-          border-color: color-mix(
-            in srgb,
-            var(--tone-danger, #f87171) 22%,
-            transparent
-          );
-          background: color-mix(
-            in srgb,
-            var(--tone-danger, #f87171) 10%,
-            transparent
-          );
-        }
-
-        .intel-value {
-          font-size: clamp(20px, 5vw, 28px);
-          line-height: 1.05;
-          overflow-wrap: anywhere;
-          word-break: break-word;
-        }
-
-        .detail-grid-3 {
-          display: grid;
-          grid-template-columns: 1fr;
-          gap: ${density === "compact"
-            ? "10px"
-            : density === "spacious"
-              ? "16px"
-              : "12px"};
-        }
-
-        .compact-detail-card {
-          padding: ${density === "compact"
-            ? "12px"
-            : density === "spacious"
-              ? "18px"
-              : "14px"};
-        }
-
-        .detail-card-title {
-          font-weight: 800;
-          margin-bottom: 8px;
-        }
-
-        .detail-list {
-          font-size: 13px;
-          line-height: 1.6;
-          overflow-wrap: anywhere;
-        }
-
-        @media (min-width: 768px) {
-          .metrics-grid {
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+        <style jsx global>{`
+          .settings-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 130;
+            background: rgba(8, 12, 18, 0.82);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding:
+              max(16px, env(safe-area-inset-top, 0px))
+              12px
+              max(16px, env(safe-area-inset-bottom, 0px));
+            overscroll-behavior: contain;
           }
 
-          .intelligence-grid {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-          }
-
-          .detail-grid-3 {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-          }
-        }
-
-        @media (min-width: 1024px) {
-          .dashboard-home-grid,
-          .dashboard-members-grid {
-            gap: ${density === "compact"
-              ? "14px"
-              : density === "spacious"
-                ? "24px"
-                : "18px"};
-          }
-
-          .dashboard-members-grid {
-            grid-template-columns: 1.2fr 1.2fr;
-          }
-
-          .dashboard-members-grid :global(.compact-panel:nth-child(3)),
-          .dashboard-members-grid :global(.compact-panel:nth-child(4)),
-          .dashboard-members-grid :global(.compact-panel:nth-child(5)) {
-            grid-column: span 1;
-          }
-        }
-
-        @media (max-width: 1023px) {
-          .desktop-only-nav {
-            display: none;
-          }
-        }
-
-        @media (max-width: 640px) {
-          .intelligence-grid {
-            grid-template-columns: 1fr;
-          }
-
-          .dashboard-refresh-actions {
+          .settings-sheet {
             width: 100%;
+            max-width: 1080px;
+            max-height: min(90vh, 920px);
+            overflow-y: auto;
+            overflow-x: hidden;
+            -webkit-overflow-scrolling: touch;
+            border-radius: 24px;
+            border: 1px solid rgba(90, 255, 180, 0.12);
+            background:
+              radial-gradient(circle at top left, rgba(69, 212, 131, 0.08), transparent 28%),
+              radial-gradient(circle at top right, rgba(59, 130, 246, 0.08), transparent 30%),
+              linear-gradient(
+                180deg,
+                rgba(10, 18, 30, 0.985),
+                rgba(6, 12, 22, 0.985)
+              );
+            box-shadow:
+              0 14px 40px rgba(0, 0, 0, 0.34),
+              0 0 0 1px rgba(69, 212, 131, 0.04) inset;
+            color: var(--text-strong, #f8fafc);
+            padding: 14px;
+            backdrop-filter: blur(10px);
+            outline: none;
           }
 
-          .dashboard-refresh-actions :global(button) {
-            flex: 1 1 0;
-            min-width: 0 !important;
+          .settings-sheet-handle {
+            width: 52px;
+            height: 5px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.16);
+            margin: 0 auto 14px;
           }
 
-          .dashboard-home-grid,
-          .dashboard-members-grid {
-            padding-bottom: 8px;
+          .settings-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
           }
-        }
-      `}</style>
-    </>
+
+          .settings-head-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+          }
+
+          .settings-title-lg {
+            font-weight: 900;
+            font-size: 28px;
+            line-height: 1.02;
+            letter-spacing: -0.04em;
+            color: var(--text-strong, #f8fafc);
+          }
+
+          .settings-title-sm {
+            font-weight: 900;
+            font-size: 18px;
+            line-height: 1.08;
+            letter-spacing: -0.02em;
+            color: var(--text-strong, #f8fafc);
+          }
+
+          .settings-head-copy {
+            margin-top: 8px;
+            font-size: 14px;
+            line-height: 1.55;
+            max-width: 860px;
+            color: var(--text-muted, #b8c0cc);
+          }
+
+          .settings-chip-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+          }
+
+          .settings-helper-copy,
+          .muted {
+            font-size: 12px;
+            line-height: 1.45;
+            color: var(--text-muted, #b8c0cc);
+          }
+
+          .settings-content-stack {
+            display: grid;
+            gap: 14px;
+          }
+
+          .settings-section-card {
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.025);
+            border-radius: 20px;
+            padding: 16px;
+          }
+
+          .settings-section-heading {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+          }
+
+          .settings-profile-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 12px;
+          }
+
+          .profile-slot-card {
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 18px;
+            padding: 14px;
+          }
+
+          .profile-slot-card.active {
+            border-color: rgba(93, 255, 141, 0.22);
+            box-shadow: 0 0 0 1px rgba(93, 255, 141, 0.08);
+          }
+
+          .profile-slot-title {
+            font-weight: 900;
+            color: var(--text-strong, #f8fafc);
+            overflow-wrap: anywhere;
+            font-size: 18px;
+            letter-spacing: -0.02em;
+          }
+
+          .settings-profile-rename-row {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 8px;
+            margin-top: 12px;
+          }
+
+          .settings-profile-action-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+          }
+
+          .settings-theme-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+          }
+
+          .settings-lab-card {
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.025);
+            border-radius: 18px;
+            padding: 14px;
+          }
+
+          .ticket-info-label {
+            color: var(--text-muted, #b8c0cc);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+          }
+
+          .settings-color-input-hidden {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+            width: 0;
+            height: 0;
+          }
+
+          .settings-color-trigger {
+            margin-top: 12px;
+            width: 100%;
+            min-height: 56px;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.03);
+            padding: 10px 12px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--text-strong, #f8fafc);
+            cursor: pointer;
+            text-align: left;
+          }
+
+          .settings-color-preview {
+            width: 34px;
+            height: 34px;
+            min-width: 34px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+          }
+
+          .settings-color-trigger-text {
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            color: var(--text-strong, #f8fafc);
+          }
+
+          .settings-effects-wrap {
+            margin-top: 16px;
+          }
+
+          .settings-preview-stage {
+            margin-top: 14px;
+          }
+
+          .settings-preview-card {
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background:
+              radial-gradient(circle at top left, rgba(69, 212, 131, 0.12), transparent 42%),
+              radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), transparent 42%),
+              rgba(255, 255, 255, 0.03);
+            border-radius: 20px;
+            padding: 16px;
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+          }
+
+          .effects-reduced .settings-preview-card {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+            background: rgba(255, 255, 255, 0.03);
+          }
+
+          .effects-minimal .settings-preview-card {
+            box-shadow: none;
+            background: rgba(255, 255, 255, 0.02);
+          }
+
+          .settings-preview-title {
+            font-weight: 900;
+            font-size: 18px;
+            letter-spacing: -0.02em;
+            color: var(--text-strong, #f8fafc);
+          }
+
+          .settings-preview-sub {
+            margin-top: 6px;
+            color: var(--text-muted, rgba(255, 255, 255, 0.72));
+            font-size: 13px;
+            line-height: 1.5;
+          }
+
+          .settings-preview-chip-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+          }
+
+          .settings-preview-swatch-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 10px;
+            margin-top: 14px;
+          }
+
+          .settings-preview-swatch {
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.025);
+            border-radius: 14px;
+            padding: 10px 12px;
+            display: grid;
+            gap: 4px;
+          }
+
+          .settings-preview-swatch span {
+            font-size: 12px;
+            color: var(--text-muted, rgba(255, 255, 255, 0.72));
+          }
+
+          .settings-preview-swatch code {
+            font-size: 12px;
+            font-weight: 800;
+            color: var(--text-strong, #f8fafc);
+          }
+
+          .settings-density-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 12px;
+          }
+
+          .density-preview {
+            appearance: none;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 18px;
+            padding: 14px;
+            text-align: left;
+            color: var(--text-strong, #f8fafc);
+            cursor: pointer;
+            transition:
+              border-color 0.16s ease,
+              transform 0.16s ease,
+              box-shadow 0.16s ease;
+          }
+
+          .density-preview:hover,
+          .density-preview.active {
+            border-color: rgba(93, 255, 141, 0.2);
+            box-shadow: 0 0 0 1px rgba(93, 255, 141, 0.08);
+            transform: translateY(-1px);
+          }
+
+          .density-preview-bars {
+            display: grid;
+            gap: 6px;
+            margin-bottom: 12px;
+          }
+
+          .density-preview-bars span {
+            display: block;
+            height: 10px;
+            border-radius: 999px;
+            background: linear-gradient(
+              90deg,
+              rgba(93, 255, 141, 0.7),
+              rgba(99, 213, 255, 0.7)
+            );
+          }
+
+          .effects-bars span:nth-child(2) {
+            width: 86%;
+          }
+
+          .effects-bars span:nth-child(3) {
+            width: 72%;
+          }
+
+          .density-preview-title {
+            font-weight: 900;
+            font-size: 18px;
+            line-height: 1.05;
+            letter-spacing: -0.02em;
+            color: var(--text-strong, #f8fafc);
+          }
+
+          .settings-pill-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 10px;
+          }
+
+          .settings-pill {
+            appearance: none;
+            width: 100%;
+            min-height: 64px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.025);
+            color: var(--text-strong, #f8fafc);
+            border-radius: 18px;
+            padding: 12px 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            text-align: left;
+            transition:
+              border-color 0.16s ease,
+              transform 0.16s ease,
+              box-shadow 0.16s ease;
+          }
+
+          .settings-pill.active,
+          .settings-pill:hover {
+            border-color: rgba(93, 255, 141, 0.18);
+            box-shadow: 0 0 0 1px rgba(93, 255, 141, 0.08);
+            transform: translateY(-1px);
+          }
+
+          .settings-pill-label {
+            min-width: 0;
+            flex: 1;
+            overflow-wrap: anywhere;
+            font-weight: 800;
+            line-height: 1.2;
+            color: var(--text-strong, #f8fafc);
+          }
+
+          .settings-pill-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 30px;
+            padding: 7px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 800;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text-strong, #f8fafc);
+            white-space: nowrap;
+          }
+
+          .settings-pill-badge.active {
+            background: rgba(93, 255, 141, 0.14);
+            border-color: rgba(93, 255, 141, 0.18);
+            color: #d9ffe8;
+          }
+
+          .settings-move-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 14px;
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.025);
+            flex-wrap: wrap;
+          }
+
+          .settings-move-label {
+            font-weight: 800;
+            color: var(--text-strong, #f8fafc);
+          }
+
+          .settings-move-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+          }
+
+          .settings-mini-btn {
+            min-width: 58px;
+          }
+
+          .settings-accordion {
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 20px;
+            overflow: hidden;
+          }
+
+          .settings-accordion-head {
+            appearance: none;
+            width: 100%;
+            border: 0;
+            background: transparent;
+            color: inherit;
+            text-align: left;
+            padding: 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+          }
+
+          .settings-accordion-body {
+            padding: 0 12px 12px;
+          }
+
+          .settings-accordion-chevron {
+            font-size: 22px;
+            line-height: 1;
+            transition: transform 0.16s ease;
+            color: var(--text-strong, #f8fafc);
+          }
+
+          .settings-accordion-chevron.open {
+            transform: rotate(180deg);
+          }
+
+          .button,
+          .button.ghost,
+          .button.danger {
+            appearance: none;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-strong, #f8fafc);
+            border-radius: 16px;
+            padding: 10px 14px;
+            font-weight: 800;
+            cursor: pointer;
+            min-height: 44px;
+          }
+
+          .button:hover,
+          .button.ghost:hover,
+          .button.danger:hover {
+            border-color: rgba(93, 255, 141, 0.18);
+          }
+
+          .button:disabled,
+          .button.ghost:disabled,
+          .button.danger:disabled,
+          .density-preview:disabled,
+          .settings-pill:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+          }
+
+          .button.danger {
+            background: rgba(170, 55, 80, 0.22);
+            border-color: rgba(220, 90, 120, 0.22);
+          }
+
+          .input {
+            appearance: none;
+            width: 100%;
+            min-height: 46px;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.03);
+            color: var(--text-strong, #f8fafc);
+            padding: 0 14px;
+            outline: none;
+          }
+
+          .input::placeholder {
+            color: rgba(184, 192, 204, 0.7);
+          }
+
+          .input:focus {
+            border-color: rgba(93, 255, 141, 0.2);
+            box-shadow: 0 0 0 1px rgba(93, 255, 141, 0.08);
+          }
+
+          .badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 24px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.02em;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-strong, #f8fafc);
+            background: rgba(255, 255, 255, 0.05);
+          }
+
+          .badge.claimed {
+            background: rgba(69, 212, 131, 0.14);
+            border-color: rgba(69, 212, 131, 0.2);
+          }
+
+          .badge.low {
+            background: rgba(59, 130, 246, 0.14);
+            border-color: rgba(59, 130, 246, 0.2);
+          }
+
+          .badge.medium {
+            background: rgba(255, 196, 94, 0.14);
+            border-color: rgba(255, 196, 94, 0.2);
+          }
+
+          .badge.open {
+            background: rgba(82, 167, 255, 0.14);
+            border-color: rgba(82, 167, 255, 0.2);
+          }
+
+          .badge.danger {
+            background: rgba(214, 84, 113, 0.18);
+            border-color: rgba(214, 84, 113, 0.22);
+          }
+
+          .section-chip {
+            display: inline-flex;
+            align-items: center;
+            min-height: 24px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 800;
+            color: #e9fff3;
+            background: rgba(69, 212, 131, 0.12);
+            border: 1px solid rgba(69, 212, 131, 0.18);
+          }
+
+          .info-banner {
+            border: 1px solid rgba(69, 212, 131, 0.18);
+            background: rgba(69, 212, 131, 0.1);
+            color: #ebfff3;
+            padding: 12px 14px;
+            border-radius: 14px;
+            font-weight: 700;
+          }
+
+          .space {
+            display: grid;
+            gap: 10px;
+          }
+
+          @media (max-width: 900px) {
+            .settings-overlay {
+              align-items: stretch;
+              justify-content: stretch;
+              padding:
+                max(10px, env(safe-area-inset-top, 0px))
+                8px
+                max(10px, env(safe-area-inset-bottom, 0px));
+            }
+
+            .settings-sheet {
+              max-width: none;
+              max-height: none;
+              height: 100%;
+              border-radius: 22px;
+              padding: 12px;
+              backdrop-filter: none;
+            }
+
+            .settings-title-lg {
+              font-size: 24px;
+            }
+
+            .settings-profile-grid,
+            .settings-theme-grid,
+            .settings-density-grid,
+            .settings-pill-grid,
+            .settings-preview-swatch-grid {
+              grid-template-columns: 1fr;
+            }
+
+            .settings-profile-rename-row {
+              grid-template-columns: 1fr;
+            }
+
+            .settings-profile-action-row,
+            .settings-head-actions {
+              display: grid;
+              grid-template-columns: 1fr;
+            }
+
+            .settings-head-actions .button,
+            .settings-profile-action-row .button {
+              width: 100% !important;
+              min-width: 0 !important;
+            }
+
+            .settings-pill {
+              min-height: 72px;
+              align-items: flex-start;
+              flex-direction: column;
+            }
+
+            .settings-pill-badge {
+              align-self: flex-start;
+            }
+          }
+        `}</style>
+      </div>
+    </div>
   );
 }
