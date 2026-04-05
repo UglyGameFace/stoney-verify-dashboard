@@ -294,6 +294,7 @@ export async function GET() {
       guildId,
       userId: viewer.discord_id,
       ticketIds: recentTickets.map((ticket) => ticket?.id).filter(Boolean),
+      tickets: recentTickets,
       limit: 20,
     });
 
