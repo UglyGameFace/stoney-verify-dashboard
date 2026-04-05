@@ -22,6 +22,15 @@ const TAB_META = {
       </svg>
     ),
   },
+  account: {
+    label: "Account",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 12a3.25 3.25 0 1 0-3.25-3.25A3.25 3.25 0 0 0 12 12Z" />
+        <path d="M6.75 18.5a5.25 5.25 0 0 1 10.5 0" />
+      </svg>
+    ),
+  },
   members: {
     label: "Members",
     icon: (
@@ -66,7 +75,10 @@ function normalizeText(value) {
 
 function getTabMeta(tab) {
   const key = normalizeText(tab).toLowerCase();
-  return TAB_META[key] || { label: key || "Tab", icon: null };
+  if (TAB_META[key]) return TAB_META[key];
+
+  const pretty = key ? key.charAt(0).toUpperCase() + key.slice(1) : "Tab";
+  return { label: pretty, icon: null };
 }
 
 function getActionLabel(action) {
@@ -373,9 +385,9 @@ export default function MobileBottomNav({
           position: fixed;
           left: 50%;
           transform: translateX(-50%);
-          bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+          bottom: calc(6px + env(safe-area-inset-bottom, 0px));
           z-index: 9999;
-          width: min(calc(100vw - 14px), 430px);
+          width: min(calc(100vw - 18px), 430px);
           pointer-events: none;
         }
 
@@ -383,7 +395,7 @@ export default function MobileBottomNav({
           pointer-events: auto;
           box-sizing: border-box;
           width: 100%;
-          border-radius: 20px;
+          border-radius: 18px;
           background:
             radial-gradient(circle at top right, rgba(93, 255, 141, 0.05), transparent 34%),
             radial-gradient(circle at bottom left, rgba(99, 213, 255, 0.05), transparent 28%),
@@ -397,21 +409,21 @@ export default function MobileBottomNav({
           display: grid;
           grid-template-columns: repeat(${totalNavItems || 1}, minmax(0, 1fr));
           align-items: stretch;
-          gap: 8px;
-          padding: 7px;
+          gap: 6px;
+          padding: 6px;
         }
 
         .sv-mobile-nav-item {
           all: unset;
           box-sizing: border-box;
           min-width: 0;
-          height: 66px;
-          border-radius: 16px;
+          height: 58px;
+          border-radius: 14px;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 6px;
+          gap: 5px;
           cursor: pointer;
           user-select: none;
           -webkit-tap-highlight-color: transparent;
@@ -445,18 +457,18 @@ export default function MobileBottomNav({
         }
 
         .sv-mobile-nav-icon {
-          width: 18px;
-          height: 18px;
+          width: 17px;
+          height: 17px;
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          flex: 0 0 18px;
+          flex: 0 0 17px;
           line-height: 0;
         }
 
         .sv-mobile-nav-icon :global(svg) {
-          width: 18px;
-          height: 18px;
+          width: 17px;
+          height: 17px;
           display: block;
           fill: none;
           stroke: currentColor;
@@ -468,7 +480,7 @@ export default function MobileBottomNav({
         .sv-mobile-nav-text {
           display: block;
           min-width: 0;
-          font-size: 11px;
+          font-size: 10px;
           font-weight: 800;
           line-height: 1;
           letter-spacing: 0.01em;
@@ -480,22 +492,22 @@ export default function MobileBottomNav({
 
         @media (max-width: 380px) {
           .sv-mobile-nav-wrap {
-            width: min(calc(100vw - 10px), 420px);
+            width: min(calc(100vw - 12px), 420px);
           }
 
           .sv-mobile-nav-shell {
-            gap: 6px;
-            padding: 6px;
+            gap: 5px;
+            padding: 5px;
           }
 
           .sv-mobile-nav-item {
-            height: 62px;
-            border-radius: 15px;
+            height: 56px;
+            border-radius: 13px;
           }
 
           .sv-mobile-nav-text,
           .sv-mobile-actions-label {
-            font-size: 10px;
+            font-size: 9.5px;
           }
 
           .sv-mobile-actions-grid {
