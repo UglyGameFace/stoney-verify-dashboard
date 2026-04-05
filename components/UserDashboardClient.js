@@ -49,6 +49,15 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function safeObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function safeCount(value, fallback = 0) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
 function safeText(value, fallback = "—") {
   const text = String(value ?? "").trim();
   return text || fallback;
@@ -151,7 +160,7 @@ function getRoleSummary(member, viewer = {}) {
     : Array.isArray(viewer?.role_names)
       ? viewer.role_names
       : [];
-  return names.filter(Boolean).slice(0, 8);
+  return names.filter(Boolean).slice(0, 16);
 }
 
 function getDisplayName(viewer, member) {
@@ -334,6 +343,96 @@ function getActivityTicketLabel(event, ticketLookup) {
   }
 
   return "Ticket Activity";
+}
+
+function getDashboardEntry(initialData, member) {
+  const entry = safeObject(initialData?.entry);
+
+  return {
+    joined_at: entry?.joined_at || member?.joined_at || null,
+    join_source: entry?.join_source || null,
+    entry_method: entry?.entry_method || entry?.join_source || null,
+    invite_code: entry?.invite_code || null,
+    inviter_id: entry?.inviter_id || null,
+    inviter_name: entry?.inviter_name || null,
+    vanity_used: Boolean(entry?.vanity_used),
+  };
+}
+
+function getLatestVcSession(initialData) {
+  return (
+    safeArray(initialData?.vcSessions)
+      .slice()
+      .sort(
+        (a, b) =>
+          new Date(b?.created_at || 0).getTime() - new Date(a?.created_at || 0).getTime()
+      )[0] || null
+  );
+}
+
+function getDashboardVerificationSummary(initialData, member, verificationFlags, viewer) {
+  const fallback = getVerificationState(member, verificationFlags, viewer);
+  const summary = safeObject(initialData?.verification);
+  const latestVc = getLatestVcSession(initialData);
+
+  return {
+    label: safeText(summary?.status, fallback.label),
+    flag_count: safeCount(summary?.flag_count, safeArray(verificationFlags).length),
+    flagged_count: safeCount(
+      summary?.flagged_count,
+      safeArray(verificationFlags).filter((item) => item?.flagged).length
+    ),
+    latest_flag_at: summary?.latest_flag_at || null,
+    vc_latest_status: safeText(summary?.vc_latest_status, latestVc?.status || "—"),
+    vc_request_count: safeCount(summary?.vc_request_count, safeArray(initialData?.vcSessions).length),
+    vc_completed_count: safeCount(
+      summary?.vc_completed_count,
+      safeArray(initialData?.vcSessions).filter((item) => item?.completed_at).length
+    ),
+  };
+}
+
+function getHistoricalNameList(initialData, viewer, member) {
+  const names = [];
+
+  [
+    member?.display_name,
+    member?.username,
+    member?.nickname,
+    viewer?.display_name,
+    viewer?.global_name,
+    viewer?.username,
+    ...safeArray(initialData?.historicalUsernames),
+  ].forEach((value) => {
+    const clean = String(value || "").trim();
+    if (clean) names.push(clean);
+  });
+
+  safeArray(initialData?.usernameHistory).forEach((row) => {
+    [row?.username, row?.display_name, row?.nickname].forEach((value) => {
+      const clean = String(value || "").trim();
+      if (clean) names.push(clean);
+    });
+  });
+
+  return [...new Set(names)].slice(0, 20);
+}
+
+function getDashboardRelationships(initialData) {
+  const relationships = safeObject(initialData?.relationships);
+
+  return {
+    invite_code: relationships?.invite_code || null,
+    inviter_id: relationships?.inviter_id || null,
+    inviter_name: relationships?.inviter_name || null,
+    vanity_used: Boolean(relationships?.vanity_used),
+    vouch_count: safeCount(relationships?.vouch_count, safeArray(initialData?.vouches).length),
+    latest_vouch_at: relationships?.latest_vouch_at || null,
+  };
+}
+
+function getRecentVouches(initialData) {
+  return safeArray(initialData?.vouches).slice(0, 4);
 }
 
 function getPrimaryAction({ member, openTicket, verificationFlags, viewer }) {
@@ -814,6 +913,76 @@ function RecentActivitySection({ recentActivity, recentTickets }) {
   );
 }
 
+function HomeExtraSignals({
+  initialData,
+  member,
+  verificationFlags,
+  viewer,
+  openTicket,
+}) {
+  const entry = getDashboardEntry(initialData, member);
+  const relationships = getDashboardRelationships(initialData);
+  const ticketSummary = safeObject(initialData?.ticketSummary);
+  const verificationSummary = getDashboardVerificationSummary(
+    initialData,
+    member,
+    verificationFlags,
+    viewer
+  );
+  const historicalNames = getHistoricalNameList(initialData, viewer, member);
+
+  return (
+    <>
+      <div className="info-grid" style={{ marginTop: 14 }}>
+        <div className="mini-card">
+          <div className="ticket-info-label">Total Tickets</div>
+          <div>{safeCount(ticketSummary?.total)}</div>
+        </div>
+
+        <div className="mini-card">
+          <div className="ticket-info-label">Open / Claimed</div>
+          <div>{safeCount(ticketSummary?.open, openTicket ? 1 : 0)}</div>
+        </div>
+
+        <div className="mini-card">
+          <div className="ticket-info-label">Verification Flags</div>
+          <div>{safeCount(verificationSummary?.flag_count)}</div>
+        </div>
+
+        <div className="mini-card">
+          <div className="ticket-info-label">Joined Via</div>
+          <div>{safeText(entry?.entry_method || entry?.join_source, "Unknown")}</div>
+        </div>
+
+        <div className="mini-card">
+          <div className="ticket-info-label">Vouches</div>
+          <div>{safeCount(relationships?.vouch_count)}</div>
+        </div>
+
+        <div className="mini-card">
+          <div className="ticket-info-label">Latest VC Status</div>
+          <div>{safeText(verificationSummary?.vc_latest_status, "—")}</div>
+        </div>
+      </div>
+
+      {historicalNames.length > 1 ? (
+        <div style={{ marginTop: 14 }}>
+          <div className="ticket-info-label" style={{ marginBottom: 8 }}>
+            Known Names
+          </div>
+          <div className="roles">
+            {historicalNames.map((name) => (
+              <span key={name} className="badge">
+                {name}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 function HomeTab({
   member,
   openTicket,
@@ -832,11 +1001,7 @@ function HomeTab({
 
   return (
     <div className="user-dashboard-grid">
-      <Section
-        title="Overview"
-        subtitle="Your status and next step"
-        tone="account"
-      >
+      <Section title="Overview" subtitle="Your status and next step" tone="account">
         <OverviewTiles
           verification={verification}
           openTicket={openTicket}
@@ -880,6 +1045,14 @@ function HomeTab({
             </button>
           </div>
         </div>
+
+        <HomeExtraSignals
+          initialData={initialData}
+          member={member}
+          verificationFlags={verificationFlags}
+          viewer={viewer}
+          openTicket={openTicket}
+        />
       </Section>
 
       <Section
@@ -1002,13 +1175,167 @@ function TicketsTab({
   );
 }
 
-function AccountTab({ viewer, member, verificationFlags }) {
+function AccountExtraSections({
+  initialData,
+  member,
+  verificationFlags,
+  viewer,
+  recentActivity,
+}) {
+  const entry = getDashboardEntry(initialData, member);
+  const relationships = getDashboardRelationships(initialData);
+  const stats = safeObject(initialData?.stats);
+  const verification = getDashboardVerificationSummary(
+    initialData,
+    member,
+    verificationFlags,
+    viewer
+  );
+  const latestVc = getLatestVcSession(initialData);
+  const historicalNames = getHistoricalNameList(initialData, viewer, member);
+  const vouches = getRecentVouches(initialData);
+
+  return (
+    <>
+      <Section
+        title="Verification & Activity"
+        subtitle="Signals tied to your review and support history"
+        tone="history"
+      >
+        <div className="info-grid">
+          <div className="mini-card">
+            <div className="ticket-info-label">Dashboard Status</div>
+            <div>{verification.label}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Flag Count</div>
+            <div>{safeCount(verification.flag_count)}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Flagged Count</div>
+            <div>{safeCount(verification.flagged_count)}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Latest Flag</div>
+            <div>{formatTime(verification.latest_flag_at)}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Latest VC Status</div>
+            <div>{safeText(verification.vc_latest_status, safeText(latestVc?.status))}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">VC Requests</div>
+            <div>{safeCount(verification.vc_request_count)}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">VC Completed</div>
+            <div>{safeCount(verification.vc_completed_count)}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Recent Activity</div>
+            <div>{safeCount(stats?.activity_count, safeArray(recentActivity).length)}</div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 14 }}>
+          <div className="ticket-info-label" style={{ marginBottom: 8 }}>
+            Recent Vouches
+          </div>
+
+          {vouches.length ? (
+            <div className="space">
+              {vouches.map((vouch) => (
+                <div
+                  key={vouch?.id || `${vouch?.actor_id || "vouch"}-${vouch?.created_at || ""}`}
+                  className="mini-card"
+                >
+                  <div className="ticket-info-label">
+                    {safeText(vouch?.actor_name || vouch?.actor_id, "Member Vouch")}
+                  </div>
+                  <div style={{ lineHeight: 1.6 }}>
+                    {safeText(vouch?.reason, "No note provided.")}
+                  </div>
+                  <div className="muted" style={{ marginTop: 8 }}>
+                    {formatTime(vouch?.created_at)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state" style={{ padding: 14 }}>
+              No vouch history is visible here yet.
+            </div>
+          )}
+        </div>
+      </Section>
+
+      <Section
+        title="Name & Join History"
+        subtitle="What the dashboard currently remembers about you"
+        tone="account"
+      >
+        <div className="info-grid">
+          <div className="mini-card">
+            <div className="ticket-info-label">Entry Method</div>
+            <div>{safeText(entry?.entry_method || entry?.join_source, "Unknown")}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Invited By</div>
+            <div>{safeText(entry?.inviter_name || entry?.inviter_id, "Unknown")}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Invite Code</div>
+            <div>
+              {safeText(entry?.invite_code, entry?.vanity_used ? "Vanity Link" : "Unknown")}
+            </div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Latest Vouch</div>
+            <div>{formatTime(relationships?.latest_vouch_at)}</div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 14 }}>
+          <div className="ticket-info-label" style={{ marginBottom: 8 }}>
+            Known Names
+          </div>
+          {historicalNames.length ? (
+            <div className="roles">
+              {historicalNames.map((name) => (
+                <span key={name} className="badge">
+                  {name}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state" style={{ padding: 14 }}>
+              No historical name data is visible yet.
+            </div>
+          )}
+        </div>
+      </Section>
+    </>
+  );
+}
+
+function AccountTab({ viewer, member, verificationFlags, initialData, recentActivity }) {
   const verification = getVerificationState(member, verificationFlags, viewer);
   const roles = getRoleSummary(member, viewer);
   const avatarUrl = getMemberAvatarUrl(viewer, member);
   const displayName = getDisplayName(viewer, member);
   const username = getUsername(viewer, member);
   const accessLabel = getAccessLabel(member, viewer);
+  const entry = getDashboardEntry(initialData, member);
 
   return (
     <div className="user-dashboard-grid">
@@ -1051,7 +1378,7 @@ function AccountTab({ viewer, member, verificationFlags }) {
 
           <div className="mini-card">
             <div className="ticket-info-label">Joined</div>
-            <div>{formatTime(member?.joined_at)}</div>
+            <div>{formatTime(entry?.joined_at || member?.joined_at)}</div>
           </div>
 
           <div className="mini-card">
@@ -1062,6 +1389,16 @@ function AccountTab({ viewer, member, verificationFlags }) {
           <div className="mini-card">
             <div className="ticket-info-label">Access</div>
             <div>{accessLabel}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Entry Method</div>
+            <div>{safeText(entry?.entry_method || entry?.join_source, "Unknown")}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Invited By</div>
+            <div>{safeText(entry?.inviter_name || entry?.inviter_id, "Unknown")}</div>
           </div>
         </div>
 
@@ -1085,6 +1422,14 @@ function AccountTab({ viewer, member, verificationFlags }) {
           )}
         </div>
       </Section>
+
+      <AccountExtraSections
+        initialData={initialData}
+        member={member}
+        verificationFlags={verificationFlags}
+        viewer={viewer}
+        recentActivity={recentActivity}
+      />
     </div>
   );
 }
@@ -1392,6 +1737,8 @@ export default function UserDashboardClient({ initialData }) {
             viewer={viewer}
             member={member}
             verificationFlags={verificationFlags}
+            initialData={initialData}
+            recentActivity={userRecentActivity}
           />
         </section>
       </main>
@@ -1470,6 +1817,26 @@ export default function UserDashboardClient({ initialData }) {
           line-height: 1.05;
           overflow-wrap: anywhere;
           letter-spacing: -0.03em;
+        }
+
+        .space {
+          display: grid;
+          gap: 12px;
+        }
+
+        .roles {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .ticket-info-label {
+          font-size: 12px;
+          font-weight: 800;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          opacity: 0.72;
+          margin-bottom: 6px;
         }
 
         .summary-grid {
