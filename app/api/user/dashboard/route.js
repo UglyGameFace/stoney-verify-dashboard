@@ -3,6 +3,7 @@ import { createServerSupabase } from "@/lib/supabase-server";
 import { getSession } from "@/lib/auth-server";
 import { derivePriority, sortTickets } from "@/lib/priority";
 import { env } from "@/lib/env";
+import { fetchRecentTicketEventsForUser } from "@/lib/ticketEventFeed";
 
 function normalizeString(value) {
   return String(value || "").trim();
@@ -246,19 +247,23 @@ export async function GET() {
 
     const supabase = createServerSupabase();
 
-    const [{ data: ticketRows, error: ticketError }, memberRow, categories, verificationFlags] =
-      await Promise.all([
-        supabase
-          .from("tickets")
-          .select("*")
-          .eq("guild_id", guildId)
-          .eq("user_id", viewer.discord_id)
-          .order("updated_at", { ascending: false })
-          .limit(25),
-        loadMemberRow(supabase, guildId, viewer.discord_id),
-        loadTicketCategories(supabase, guildId),
-        loadVerificationFlags(supabase, guildId, viewer.discord_id),
-      ]);
+    const [
+      { data: ticketRows, error: ticketError },
+      memberRow,
+      categories,
+      verificationFlags,
+    ] = await Promise.all([
+      supabase
+        .from("tickets")
+        .select("*")
+        .eq("guild_id", guildId)
+        .eq("user_id", viewer.discord_id)
+        .order("updated_at", { ascending: false })
+        .limit(25),
+      loadMemberRow(supabase, guildId, viewer.discord_id),
+      loadTicketCategories(supabase, guildId),
+      loadVerificationFlags(supabase, guildId, viewer.discord_id),
+    ]);
 
     if (ticketError) {
       return NextResponse.json(
@@ -285,6 +290,13 @@ export async function GET() {
 
     const member = sanitizeMember(memberRow, viewer);
 
+    const recentActivity = await fetchRecentTicketEventsForUser(supabase, {
+      guildId,
+      userId: viewer.discord_id,
+      ticketIds: recentTickets.map((ticket) => ticket?.id).filter(Boolean),
+      limit: 20,
+    });
+
     return NextResponse.json(
       {
         ok: true,
@@ -294,6 +306,7 @@ export async function GET() {
         verificationFlags,
         openTicket,
         recentTickets,
+        recentActivity,
       },
       {
         status: 200,
