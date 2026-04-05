@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Topbar from "@/components/Topbar";
 import MobileBottomNav from "@/components/MobileBottomNav";
 
@@ -215,6 +215,127 @@ function buildTicketSummary(ticket) {
   ].join("\n");
 }
 
+function formatEventTypeLabel(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "Activity";
+  return raw
+    .replace(/[_-]+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getActivityTimestamp(event) {
+  return event?.created_at || event?.updated_at || null;
+}
+
+function buildTicketLookup(tickets) {
+  const map = new Map();
+
+  safeArray(tickets).forEach((ticket) => {
+    if (ticket?.id) {
+      map.set(String(ticket.id), ticket);
+    }
+  });
+
+  return map;
+}
+
+function resolveActivityTicket(event, ticketLookup) {
+  const possibleIds = [
+    event?.ticket_id,
+    event?.source_ticket_id,
+    event?.verification_ticket_id,
+    event?.metadata?.ticket_id,
+    event?.metadata?.source_ticket_id,
+    event?.metadata?.verification_ticket_id,
+  ]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+
+  for (const id of possibleIds) {
+    if (ticketLookup.has(id)) return ticketLookup.get(id);
+  }
+
+  return null;
+}
+
+function getActivityTitle(event) {
+  const directTitle = String(event?.title || "").trim();
+  if (directTitle) return directTitle;
+  return formatEventTypeLabel(event?.event_type || event?.type || event?.action);
+}
+
+function getActivityReason(event) {
+  const candidates = [
+    event?.reason,
+    event?.message,
+    event?.description,
+    event?.metadata?.reason,
+    event?.metadata?.message,
+    event?.metadata?.description,
+    event?.metadata?.note_body,
+    event?.metadata?.content,
+    event?.metadata?.summary,
+    event?.metadata?.status_text,
+  ];
+
+  for (const candidate of candidates) {
+    const text = String(candidate || "").trim();
+    if (text) return text;
+  }
+
+  return "";
+}
+
+function getActivityActor(event) {
+  const candidates = [
+    event?.actor_name,
+    event?.staff_name,
+    event?.metadata?.actor_name,
+    event?.metadata?.staff_name,
+    event?.metadata?.approved_by_name,
+    event?.actor_id,
+    event?.staff_id,
+    event?.metadata?.actor_id,
+    event?.metadata?.staff_id,
+  ];
+
+  for (const candidate of candidates) {
+    const text = String(candidate || "").trim();
+    if (text) return text;
+  }
+
+  return "System";
+}
+
+function getActivityTicketLabel(event, ticketLookup) {
+  const matchedTicket = resolveActivityTicket(event, ticketLookup);
+  if (matchedTicket) {
+    return safeText(
+      matchedTicket?.title || matchedTicket?.channel_name || matchedTicket?.channel_id,
+      "Linked Ticket"
+    );
+  }
+
+  const candidates = [
+    event?.metadata?.ticket_title,
+    event?.metadata?.title,
+    event?.metadata?.channel_name,
+    event?.metadata?.ticket_channel_name,
+    event?.metadata?.ticket_id,
+    event?.ticket_id,
+  ];
+
+  for (const candidate of candidates) {
+    const text = String(candidate || "").trim();
+    if (text) return text;
+  }
+
+  return "Ticket Activity";
+}
+
 function getPrimaryAction({ member, openTicket, verificationFlags, viewer }) {
   const hasFlags = safeArray(verificationFlags).some((f) => Boolean(f?.flagged));
   const verification = getVerificationState(member, verificationFlags, viewer);
@@ -315,7 +436,7 @@ function Section({ title, subtitle, children, actions = null, tone = "default" }
   );
 }
 
-function OverviewTiles({ verification, openTicket, member, viewer }) {
+function OverviewTiles({ verification, openTicket, member, viewer, recentActivityCount = 0 }) {
   const accessLabel = getAccessLabel(member, viewer);
 
   return (
@@ -333,6 +454,11 @@ function OverviewTiles({ verification, openTicket, member, viewer }) {
       <div className="summary-tile neon-purple">
         <div className="ticket-info-label">Access</div>
         <div className="summary-value">{accessLabel}</div>
+      </div>
+
+      <div className="summary-tile neon-blue">
+        <div className="ticket-info-label">Recent Activity</div>
+        <div className="summary-value">{recentActivityCount}</div>
       </div>
     </div>
   );
@@ -605,6 +731,89 @@ function TicketCard({
   );
 }
 
+function ActivityCard({ event, ticketLookup }) {
+  const title = getActivityTitle(event);
+  const reason = getActivityReason(event);
+  const actor = getActivityActor(event);
+  const ticketLabel = getActivityTicketLabel(event, ticketLookup);
+  const eventType = formatEventTypeLabel(event?.event_type);
+  const sourceLabel = safeText(event?._source, "event");
+  const timestamp = getActivityTimestamp(event);
+
+  return (
+    <div className="ticket-row-card activity-card">
+      <div
+        className="row"
+        style={{
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="profile-name" style={{ fontSize: 16 }}>
+            {title}
+          </div>
+          <div className="muted" style={{ marginTop: 6, lineHeight: 1.55 }}>
+            {ticketLabel}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <StatusBadge label={eventType} tone="medium" />
+          <StatusBadge label={sourceLabel} />
+        </div>
+      </div>
+
+      <div className="info-grid" style={{ marginTop: 12 }}>
+        <div className="mini-card">
+          <div className="ticket-info-label">Actor</div>
+          <div>{actor}</div>
+        </div>
+
+        <div className="mini-card">
+          <div className="ticket-info-label">When</div>
+          <div>{formatTime(timestamp)}</div>
+        </div>
+      </div>
+
+      {reason ? (
+        <div className="mini-card" style={{ marginTop: 12 }}>
+          <div className="ticket-info-label">Details</div>
+          <div style={{ lineHeight: 1.6, overflowWrap: "anywhere" }}>{reason}</div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function RecentActivitySection({ recentActivity, recentTickets }) {
+  const ticketLookup = buildTicketLookup(recentTickets);
+
+  return (
+    <Section
+      title="Recent Ticket Activity"
+      subtitle={`${safeArray(recentActivity).length} recent event${safeArray(recentActivity).length === 1 ? "" : "s"} tied to your account`}
+      tone="history"
+    >
+      {!safeArray(recentActivity).length ? (
+        <div className="empty-state">No recent ticket activity has shown up yet.</div>
+      ) : (
+        <div className="space">
+          {safeArray(recentActivity).map((event) => (
+            <ActivityCard
+              key={event?.id || `${event?.event_type || "event"}-${event?.created_at || Math.random()}`}
+              event={event}
+              ticketLookup={ticketLookup}
+            />
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 function HomeTab({
   member,
   openTicket,
@@ -614,6 +823,7 @@ function HomeTab({
   onUseCategory,
   onGoToTab,
   isCreating,
+  recentActivity,
 }) {
   const viewer = initialData?.viewer || {};
   const verification = getVerificationState(member, verificationFlags, viewer);
@@ -632,6 +842,7 @@ function HomeTab({
           openTicket={openTicket}
           member={member}
           viewer={viewer}
+          recentActivityCount={safeArray(recentActivity).length}
         />
 
         <div className={`status-panel ${action.tone}`} style={{ marginTop: 14 }}>
@@ -709,6 +920,7 @@ function HomeTab({
 
 function TicketsTab({
   recentTickets,
+  recentActivity,
   initialData,
   isPolling,
   onRefreshAllTickets,
@@ -781,6 +993,11 @@ function TicketsTab({
           </div>
         )}
       </Section>
+
+      <RecentActivitySection
+        recentActivity={recentActivity}
+        recentTickets={recentTickets}
+      />
     </div>
   );
 }
@@ -880,11 +1097,24 @@ export default function UserDashboardClient({ initialData }) {
   const [isPolling, setIsPolling] = useState(false);
   const [userTickets, setUserTickets] = useState(safeArray(initialData?.recentTickets));
   const [userOpenTicket, setUserOpenTicket] = useState(initialData?.openTicket || null);
+  const [userRecentActivity, setUserRecentActivity] = useState(
+    safeArray(initialData?.recentActivity)
+  );
+
+  const noticeTimerRef = useRef(null);
 
   const viewer = initialData?.viewer || {};
   const member = initialData?.member || null;
   const categories = safeArray(initialData?.categories);
   const verificationFlags = safeArray(initialData?.verificationFlags);
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimerRef.current) {
+        window.clearTimeout(noticeTimerRef.current);
+      }
+    };
+  }, []);
 
   function goToTab(tab) {
     if (USER_TABS.includes(tab)) {
@@ -902,8 +1132,11 @@ export default function UserDashboardClient({ initialData }) {
     setNoticeTone(tone);
 
     if (typeof window !== "undefined") {
-      window.clearTimeout(window.__userDashNoticeTimer);
-      window.__userDashNoticeTimer = window.setTimeout(() => {
+      if (noticeTimerRef.current) {
+        window.clearTimeout(noticeTimerRef.current);
+      }
+
+      noticeTimerRef.current = window.setTimeout(() => {
         setNotice("");
         setNoticeTone("info");
       }, 3600);
@@ -933,9 +1166,13 @@ export default function UserDashboardClient({ initialData }) {
       const nextRecentTickets = Array.isArray(data?.recentTickets)
         ? data.recentTickets
         : [];
+      const nextRecentActivity = Array.isArray(data?.recentActivity)
+        ? data.recentActivity
+        : [];
 
       setUserOpenTicket(nextOpenTicket);
       setUserTickets(nextRecentTickets);
+      setUserRecentActivity(nextRecentActivity);
       showTempNotice("Ticket status refreshed.", "success");
       return Boolean(nextOpenTicket);
     } catch (error) {
@@ -977,9 +1214,13 @@ export default function UserDashboardClient({ initialData }) {
         const nextRecentTickets = Array.isArray(data?.recentTickets)
           ? data.recentTickets
           : [];
+        const nextRecentActivity = Array.isArray(data?.recentActivity)
+          ? data.recentActivity
+          : [];
 
         setUserOpenTicket(nextOpenTicket);
         setUserTickets(nextRecentTickets);
+        setUserRecentActivity(nextRecentActivity);
 
         if (nextOpenTicket) {
           found = true;
@@ -1130,12 +1371,14 @@ export default function UserDashboardClient({ initialData }) {
             onUseCategory={handleUseCategory}
             onGoToTab={goToTab}
             isCreating={isCreating}
+            recentActivity={userRecentActivity}
           />
         </section>
 
         <section className={activeTab === "tickets" ? "user-tab active" : "user-tab"}>
           <TicketsTab
             recentTickets={userTickets}
+            recentActivity={userRecentActivity}
             initialData={initialData}
             isPolling={isPolling}
             onRefreshAllTickets={refreshTicketsNow}
@@ -1212,6 +1455,12 @@ export default function UserDashboardClient({ initialData }) {
           background:
             radial-gradient(circle at top right, rgba(99,213,255,0.10), transparent 36%),
             rgba(99,213,255,0.06);
+        }
+
+        .activity-card {
+          background:
+            radial-gradient(circle at top right, rgba(178,109,255,0.07), transparent 36%),
+            rgba(255,255,255,0.025);
         }
 
         .profile-name {
@@ -1357,13 +1606,17 @@ export default function UserDashboardClient({ initialData }) {
           }
 
           .summary-grid {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-template-columns: repeat(2, minmax(0, 1fr));
           }
         }
 
         @media (min-width: 1024px) {
           .desktop-tab-bar {
             display: flex;
+          }
+
+          .summary-grid {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
           }
 
           .user-dashboard-grid {
