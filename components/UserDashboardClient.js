@@ -1677,7 +1677,7 @@ export default function UserDashboardClient({ initialData }) {
     <>
       <Topbar />
 
-      <main style={{ paddingBottom: 96 }}>
+      <main style={{ paddingBottom: "calc(156px + env(safe-area-inset-bottom, 0px))" }}>
         {notice ? (
           <div
             className={
@@ -1763,6 +1763,7 @@ export default function UserDashboardClient({ initialData }) {
 
         .user-tab.active {
           display: block;
+          padding-bottom: 12px;
         }
 
         .user-dashboard-grid {
@@ -1841,7 +1842,7 @@ export default function UserDashboardClient({ initialData }) {
 
         .summary-grid {
           display: grid;
-          grid-template-columns: repeat(1, minmax(0, 1fr));
+          grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 10px;
         }
 
@@ -1877,7 +1878,7 @@ export default function UserDashboardClient({ initialData }) {
 
         .info-grid {
           display: grid;
-          grid-template-columns: repeat(1, minmax(0, 1fr));
+          grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 10px;
         }
 
@@ -1965,6 +1966,13 @@ export default function UserDashboardClient({ initialData }) {
         .account-header-copy {
           min-width: 0;
           flex: 1;
+        }
+
+        @media (max-width: 339px) {
+          .summary-grid,
+          .info-grid {
+            grid-template-columns: 1fr;
+          }
         }
 
         @media (min-width: 768px) {
