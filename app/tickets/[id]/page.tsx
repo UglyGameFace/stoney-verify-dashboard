@@ -12,11 +12,84 @@ import { env } from "@/lib/env";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function normalizeString(value) {
+type SessionLike = {
+  isStaff?: boolean;
+  user?: {
+    discord_id?: string | null;
+    id?: string | null;
+    username?: string | null;
+    name?: string | null;
+  } | null;
+  discordUser?: {
+    id?: string | null;
+    username?: string | null;
+  } | null;
+} | null;
+
+type TicketWorkspaceData = {
+  verificationLabel: string;
+  riskLevel: string;
+  noteCount: number;
+  messageCount: number;
+  flaggedCount: number;
+  maxFlagScore: number;
+  warnCount: number;
+  latestActivityAt: string | null;
+  recommendedActions: string[];
+  sla: {
+    sla_status: string;
+    overdue: boolean;
+    minutes_overdue: number;
+    minutes_until_deadline: number;
+  };
+};
+
+type TicketCounts = {
+  notes: number;
+  messages: number;
+  flags: number;
+  warns: number;
+  tokens: number;
+  vcSessions: number;
+};
+
+type TicketPageData = {
+  ok: boolean;
+  ticket: Record<string, unknown> | null;
+  category: Record<string, unknown> | null;
+  member: Record<string, unknown> | null;
+  joins: Record<string, unknown>[];
+  latestJoin: Record<string, unknown> | null;
+  memberEvents: Record<string, unknown>[];
+  verificationFlags: Record<string, unknown>[];
+  verificationTokens: Record<string, unknown>[];
+  vcSessions: Record<string, unknown>[];
+  warns: Record<string, unknown>[];
+  activity: Record<string, unknown>[];
+  timeline: Record<string, unknown>[];
+  messages: Record<string, unknown>[];
+  notes: Record<string, unknown>[];
+  workspace: TicketWorkspaceData;
+  counts: TicketCounts;
+  viewer: {
+    id: string;
+    username: string;
+  };
+  currentStaffId: string;
+  error: string;
+};
+
+type TicketPageProps = {
+  params: {
+    id?: string;
+  };
+};
+
+function normalizeString(value: unknown): string {
   return String(value || "").trim();
 }
 
-function resolveAppOrigin() {
+function resolveAppOrigin(): string {
   const explicitCandidates = [
     env?.siteUrl,
     env?.appUrl,
@@ -52,7 +125,10 @@ function resolveAppOrigin() {
   return "http://127.0.0.1:3000";
 }
 
-function buildFallbackTicketData(ticketId, session) {
+function buildFallbackTicketData(
+  ticketId: string,
+  session: SessionLike
+): TicketPageData {
   const viewerId =
     session?.user?.discord_id ||
     session?.user?.id ||
@@ -107,15 +183,18 @@ function buildFallbackTicketData(ticketId, session) {
       vcSessions: 0,
     },
     viewer: {
-      id: viewerId || "",
+      id: viewerId,
       username: viewerName,
     },
-    currentStaffId: viewerId || "",
+    currentStaffId: viewerId,
     error: ticketId ? "Ticket not found." : "Missing ticket id.",
   };
 }
 
-async function fetchTicketData(ticketId, session) {
+async function fetchTicketData(
+  ticketId: string,
+  session: SessionLike
+): Promise<TicketPageData> {
   if (!ticketId) {
     return buildFallbackTicketData(ticketId, session);
   }
@@ -141,7 +220,9 @@ async function fetchTicketData(ticketId, session) {
       }
     );
 
-    const json = await response.json().catch(() => null);
+    const json = (await response.json().catch(() => null)) as
+      | (Partial<TicketPageData> & { error?: string })
+      | null;
 
     if (!response.ok || !json || typeof json !== "object") {
       return {
@@ -153,13 +234,18 @@ async function fetchTicketData(ticketId, session) {
     }
 
     return {
+      ...buildFallbackTicketData(ticketId, session),
       ...json,
+      ok: Boolean(json.ok ?? true),
       error: "",
     };
-  } catch (error) {
+  } catch (error: unknown) {
     return {
       ...buildFallbackTicketData(ticketId, session),
-      error: error?.message || "Failed to load ticket.",
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to load ticket.",
     };
   }
 }
@@ -198,7 +284,7 @@ function LoginRequiredState() {
   );
 }
 
-function TicketUnavailableState({ error }) {
+function TicketUnavailableState({ error }: { error?: string }) {
   return (
     <div className="space">
       <div className="card">
@@ -225,9 +311,9 @@ function TicketUnavailableState({ error }) {
   );
 }
 
-export default async function TicketPage({ params }) {
+export default async function TicketPage({ params }: TicketPageProps) {
   const ticketId = normalizeString(params?.id || "");
-  const session = await getSession();
+  const session = (await getSession()) as SessionLike;
 
   if (!session) {
     if (hasDiscordOAuthConfig()) {
