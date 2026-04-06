@@ -18,6 +18,32 @@ const PLACEHOLDER_CATEGORY_VALUES = new Set([
   "general",
 ]);
 
+function normalizeText(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function safeText(value, fallback = "—") {
+  const text = String(value ?? "").trim();
+  return text || fallback;
+}
+
+function truncateText(value, max = 120) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
+function titleize(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return raw
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
 function badgeClass(value) {
   const v = String(value || "").toLowerCase().trim();
 
@@ -39,59 +65,44 @@ function badgeClass(value) {
   if (v === "custom") return "badge";
   if (v === "support") return "badge low";
 
+  if (v === "verified") return "badge claimed";
+  if (v === "pending") return "badge open";
+  if (v === "vc in progress") return "badge open";
+  if (v === "needs review") return "badge danger";
+  if (v === "denied") return "badge danger";
+  if (v === "staff") return "badge claimed";
+  if (v === "unknown") return "badge";
+
+  if (v === "high risk") return "badge danger";
+  if (v === "medium risk") return "badge medium";
+  if (v === "low risk") return "badge low";
+
+  if (v === "overdue") return "badge danger";
+  if (v === "counting_down") return "badge medium";
+  if (v === "closed_sla") return "badge closed";
+  if (v === "no_deadline") return "badge";
+
   return "badge";
-}
-
-function safeText(value, fallback = "—") {
-  const text = String(value ?? "").trim();
-  return text || fallback;
-}
-
-function normalizeText(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
-function titleize(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-
-  return raw
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
 function getChannelId(ticket) {
   return String(ticket?.channel_id || ticket?.discord_thread_id || "").trim();
 }
 
-function getTicketUserLabel(ticket) {
-  return (
-    String(ticket?.username || "").trim() ||
-    String(ticket?.user_id || "").trim() ||
-    "Unknown User"
-  );
-}
-
-function getTicketTitle(ticket) {
-  return (
-    String(ticket?.title || "").trim() ||
-    String(ticket?.channel_name || "").trim() ||
-    "Untitled Ticket"
-  );
-}
-
-function getStatus(ticket) {
-  return String(ticket?.status || "unknown").toLowerCase().trim();
+function hasMissingChannel(ticket) {
+  return !getChannelId(ticket);
 }
 
 function isGhost(ticket) {
   return ticket?.is_ghost === true;
 }
 
-function hasMissingChannel(ticket) {
-  return !getChannelId(ticket);
+function getStatus(ticket) {
+  return String(ticket?.status || "unknown").toLowerCase().trim();
+}
+
+function getPriority(ticket) {
+  return String(ticket?.priority || "medium").toLowerCase().trim();
 }
 
 function isPlaceholderCategory(value) {
@@ -230,6 +241,125 @@ function hasMatchedCategory(ticket) {
   );
 }
 
+function getOwnerName(ticket) {
+  return (
+    String(ticket?.owner_display_name || "").trim() ||
+    String(ticket?.display_name || "").trim() ||
+    String(ticket?.username || "").trim() ||
+    String(ticket?.user_id || "").trim() ||
+    "Unknown User"
+  );
+}
+
+function getOwnerAvatar(ticket) {
+  const url = String(ticket?.owner_avatar_url || ticket?.avatar_url || "").trim();
+  return url || "";
+}
+
+function getOwnerInitials(ticket) {
+  const source = getOwnerName(ticket);
+  const parts = source.split(/\s+/).filter(Boolean).slice(0, 2);
+  if (!parts.length) return "?";
+  return parts.map((part) => part.charAt(0).toUpperCase()).join("");
+}
+
+function getTicketTitle(ticket) {
+  return (
+    String(ticket?.title || "").trim() ||
+    String(ticket?.channel_name || "").trim() ||
+    "Untitled Ticket"
+  );
+}
+
+function getClaimedByLabel(ticket) {
+  return (
+    String(ticket?.claimed_by_name || "").trim() ||
+    String(ticket?.assigned_to_name || "").trim() ||
+    String(ticket?.claimed_by || "").trim() ||
+    String(ticket?.assigned_to || "").trim() ||
+    "Unclaimed"
+  );
+}
+
+function getVerificationLabel(ticket) {
+  return (
+    String(ticket?.owner_verification_label || "").trim() ||
+    String(ticket?.verification_label || "").trim() ||
+    "Unknown"
+  );
+}
+
+function getRiskLevel(ticket) {
+  const level = normalizeText(ticket?.risk_level);
+  if (level === "high") return "High Risk";
+  if (level === "medium") return "Medium Risk";
+  if (level === "low") return "Low Risk";
+  return "Unknown";
+}
+
+function getEntryMethodLabel(ticket) {
+  const raw =
+    String(ticket?.owner_entry_method || "").trim() ||
+    String(ticket?.owner_verification_source || "").trim() ||
+    "";
+  return raw ? titleize(raw) : "Unknown";
+}
+
+function getQueueIntel(ticket) {
+  const pieces = [];
+
+  const inviter = String(ticket?.owner_invited_by_name || "").trim();
+  const voucher = String(ticket?.owner_vouched_by_name || "").trim();
+  const approver = String(ticket?.owner_approved_by_name || "").trim();
+
+  if (inviter) pieces.push(`Invited by ${inviter}`);
+  if (voucher) pieces.push(`Vouched by ${voucher}`);
+  if (approver) pieces.push(`Approved by ${approver}`);
+
+  return pieces;
+}
+
+function getSlaStatusLabel(ticket) {
+  if (ticket?.overdue) {
+    const minutes = Number(ticket?.minutes_overdue || 0);
+    if (minutes > 0) return `${minutes}m overdue`;
+    return "Overdue";
+  }
+
+  const minutesUntilDeadline = Number(ticket?.minutes_until_deadline);
+  if (Number.isFinite(minutesUntilDeadline) && minutesUntilDeadline > 0) {
+    return `${minutesUntilDeadline}m left`;
+  }
+
+  const status = String(ticket?.sla_status || "").trim();
+  if (!status) return "No SLA";
+  if (status === "counting_down") return "Countdown";
+  if (status === "closed") return "Closed";
+  if (status === "no_deadline") return "No SLA";
+
+  return titleize(status);
+}
+
+function getRecommendedActions(ticket) {
+  if (Array.isArray(ticket?.recommended_actions)) {
+    return ticket.recommended_actions.filter(Boolean);
+  }
+  return [];
+}
+
+function getLatestActivityLabel(ticket) {
+  const title =
+    String(ticket?.latest_activity_title || "").trim() ||
+    String(ticket?.latest_activity_type || "").trim();
+
+  if (!title) return "No recent activity";
+  return titleize(title);
+}
+
+function getLatestActivityTime(ticket) {
+  return ticket?.latest_activity_at || ticket?.updated_at || ticket?.created_at || null;
+}
+
 function countByStatus(tickets, status) {
   return tickets.filter(
     (ticket) => String(ticket?.status || "").toLowerCase() === status
@@ -254,6 +384,28 @@ function countVerificationLike(tickets) {
   }).length;
 }
 
+function countOverdue(tickets) {
+  return tickets.filter((ticket) => Boolean(ticket?.overdue)).length;
+}
+
+function countHighRisk(tickets) {
+  return tickets.filter(
+    (ticket) => normalizeText(ticket?.risk_level) === "high"
+  ).length;
+}
+
+function countUnassigned(tickets) {
+  return tickets.filter((ticket) => {
+    const claimed = String(ticket?.claimed_by || "").trim();
+    const assigned = String(ticket?.assigned_to || "").trim();
+    return !claimed && !assigned;
+  }).length;
+}
+
+function countNoNotes(tickets) {
+  return tickets.filter((ticket) => Number(ticket?.note_count || 0) <= 0).length;
+}
+
 function getSummaryStats(tickets) {
   return {
     total: tickets.length,
@@ -267,6 +419,10 @@ function getSummaryStats(tickets) {
     ghosts: tickets.filter((ticket) => isGhost(ticket)).length,
     matched: countMatchedCategories(tickets),
     verificationLike: countVerificationLike(tickets),
+    overdue: countOverdue(tickets),
+    highRisk: countHighRisk(tickets),
+    unassigned: countUnassigned(tickets),
+    noNotes: countNoNotes(tickets),
   };
 }
 
@@ -280,7 +436,8 @@ function getQueueHeading(tickets, explicitMode) {
   if (explicitMode === "active" || (!explicitMode && activeOnly)) {
     return {
       title: "Active Ticket Queue",
-      subtitle: "Live active tickets only — open and claimed work ready for staff action",
+      subtitle:
+        "Live active tickets with risk, verification context, urgency, and next-action intelligence",
     };
   }
 
@@ -301,21 +458,24 @@ function getQueueHeading(tickets, explicitMode) {
   if (explicitMode === "closed") {
     return {
       title: "Closed Ticket History",
-      subtitle: "Closed tickets remain visible here so staff can review and reopen when needed",
+      subtitle:
+        "Closed tickets remain visible here for audit trails, reopen workflows, and historical review",
     };
   }
 
   if (explicitMode === "deleted") {
     return {
       title: "Deleted Ticket History",
-      subtitle: "Deleted ticket records remain visible here for audit and historical review",
+      subtitle:
+        "Deleted ticket records remain visible here for audit and historical review",
     };
   }
 
   if (explicitMode === "all") {
     return {
       title: "Ticket History & Queue",
-      subtitle: "Showing active and historical tickets together for review, auditing, and reopen workflows",
+      subtitle:
+        "Showing active and historical tickets together for review, auditing, and reopen workflows",
     };
   }
 
@@ -355,6 +515,32 @@ function MiniField({ label, value, full = false }) {
     <div className={`ticket-info-item ${full ? "full" : ""}`}>
       <span className="ticket-info-label">{label}</span>
       <span style={{ overflowWrap: "anywhere" }}>{value}</span>
+    </div>
+  );
+}
+
+function AvatarBubble({ ticket, size = 42 }) {
+  const avatar = getOwnerAvatar(ticket);
+  const initials = getOwnerInitials(ticket);
+
+  if (avatar) {
+    return (
+      <img
+        src={avatar}
+        alt={getOwnerName(ticket)}
+        className="queue-avatar"
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+
+  return (
+    <div
+      className="queue-avatar queue-avatar-fallback"
+      style={{ width: size, height: size }}
+      aria-hidden="true"
+    >
+      {initials}
     </div>
   );
 }
@@ -412,6 +598,8 @@ function TicketHeaderBadges({ ticket }) {
   const status = getStatus(ticket);
   const missingChannel = hasMissingChannel(ticket);
   const ghost = isGhost(ticket);
+  const verification = getVerificationLabel(ticket);
+  const risk = getRiskLevel(ticket);
 
   return (
     <div
@@ -426,8 +614,57 @@ function TicketHeaderBadges({ ticket }) {
       <span className={badgeClass(ticket.priority)}>
         {safeText(ticket.priority)}
       </span>
+      <span className={badgeClass(verification)}>{verification}</span>
+      <span className={badgeClass(risk.toLowerCase())}>{risk}</span>
+      {ticket?.overdue ? <span className="badge danger">Overdue</span> : null}
       {ghost ? <span className="badge">Ghost</span> : null}
       {missingChannel ? <span className="badge danger">Missing Channel</span> : null}
+    </div>
+  );
+}
+
+function QueueIntelStrip({ ticket }) {
+  const intel = getQueueIntel(ticket);
+  const noteCount = Number(ticket?.note_count || 0);
+  const priorTotal = Number(ticket?.owner_ticket_total || 0);
+  const warnCount = Number(ticket?.owner_warn_count || 0);
+  const flagCount = Number(ticket?.owner_flag_count || 0);
+
+  return (
+    <div className="queue-intel-strip">
+      <span className="queue-intel-pill">Entry: {getEntryMethodLabel(ticket)}</span>
+      <span className="queue-intel-pill">SLA: {getSlaStatusLabel(ticket)}</span>
+      <span className="queue-intel-pill">Notes: {noteCount}</span>
+      <span className="queue-intel-pill">Past Tickets: {priorTotal}</span>
+      {warnCount > 0 ? (
+        <span className="queue-intel-pill danger">Warns: {warnCount}</span>
+      ) : null}
+      {flagCount > 0 ? (
+        <span className="queue-intel-pill danger">Flags: {flagCount}</span>
+      ) : null}
+      {intel.map((line) => (
+        <span key={line} className="queue-intel-pill">
+          {line}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function RecommendedActions({ ticket }) {
+  const actions = getRecommendedActions(ticket);
+
+  if (!actions.length) {
+    return <div className="muted">No suggested next actions.</div>;
+  }
+
+  return (
+    <div className="queue-actions-list">
+      {actions.map((action) => (
+        <div key={action} className="queue-action-chip">
+          {action}
+        </div>
+      ))}
     </div>
   );
 }
@@ -438,20 +675,75 @@ function TicketExpandedDetails({ ticket, currentStaffId, onRefresh }) {
 
   return (
     <div className="ticket-expanded-shell">
+      <div className="ticket-expanded-topbar">
+        <div className="ticket-expanded-owner">
+          <AvatarBubble ticket={ticket} size={54} />
+          <div style={{ minWidth: 0 }}>
+            <div className="ticket-expanded-owner-name">{getOwnerName(ticket)}</div>
+            <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
+              {getTicketTitle(ticket)}
+            </div>
+          </div>
+        </div>
+
+        <div className="ticket-expanded-badges">
+          <TicketHeaderBadges ticket={ticket} />
+        </div>
+      </div>
+
+      <QueueIntelStrip ticket={ticket} />
+
       <div className="ticket-info-grid" style={{ marginBottom: 14 }}>
         <MiniField label="Category" value={getDisplayedCategoryName(ticket)} />
         <MiniField
           label="Intake Type"
           value={getDisplayedIntakeType(ticket) || "—"}
         />
-        <MiniField label="Claimed By" value={safeText(ticket.claimed_by)} />
+        <MiniField label="Verification" value={getVerificationLabel(ticket)} />
+        <MiniField label="Risk" value={getRiskLevel(ticket)} />
+        <MiniField label="Claimed By" value={getClaimedByLabel(ticket)} />
+        <MiniField label="Entry Method" value={getEntryMethodLabel(ticket)} />
         <MiniField label="Channel ID" value={channelId || "Missing"} />
         <MiniField label="User ID" value={safeText(ticket.user_id)} />
+        <MiniField
+          label="Latest Activity"
+          value={`${getLatestActivityLabel(ticket)} • ${timeAgo(getLatestActivityTime(ticket))}`}
+          full
+        />
+        <MiniField
+          label="SLA"
+          value={getSlaStatusLabel(ticket)}
+        />
+        <MiniField
+          label="Notes"
+          value={String(Number(ticket?.note_count || 0))}
+        />
+        <MiniField
+          label="Past Tickets"
+          value={String(Number(ticket?.owner_ticket_total || 0))}
+        />
+        <MiniField label="Ghost" value={ghost ? "yes" : "no"} />
         <MiniField
           label="Updated"
           value={timeAgo(ticket.updated_at || ticket.created_at)}
         />
-        <MiniField label="Ghost" value={ghost ? "yes" : "no"} />
+        <MiniField
+          label="Invited By"
+          value={safeText(ticket?.owner_invited_by_name)}
+        />
+        <MiniField
+          label="Vouched By"
+          value={safeText(ticket?.owner_vouched_by_name)}
+        />
+        <MiniField
+          label="Approved By"
+          value={safeText(ticket?.owner_approved_by_name)}
+        />
+        <MiniField
+          label="Role State"
+          value={safeText(ticket?.owner_role_state)}
+          full
+        />
         <MiniField
           label="Match Reason"
           value={getCategoryReason(ticket) || "—"}
@@ -463,6 +755,18 @@ function TicketExpandedDetails({ ticket, currentStaffId, onRefresh }) {
         {!!ticket.closed_reason ? (
           <MiniField label="Closed Reason" value={ticket.closed_reason} full />
         ) : null}
+        {!!ticket.latest_note_staff_name || !!ticket.latest_note_at ? (
+          <MiniField
+            label="Latest Note"
+            value={`${safeText(ticket.latest_note_staff_name)} • ${timeAgo(ticket.latest_note_at)}`}
+            full
+          />
+        ) : null}
+      </div>
+
+      <div className="ticket-expanded-section">
+        <div className="ticket-expanded-section-title">Recommended Actions</div>
+        <RecommendedActions ticket={ticket} />
       </div>
 
       <div
@@ -501,14 +805,12 @@ function TicketExpandedDetails({ ticket, currentStaffId, onRefresh }) {
 function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
   const [expanded, setExpanded] = useState(false);
   const channelId = getChannelId(ticket);
-  const missingChannel = hasMissingChannel(ticket);
-  const ghost = isGhost(ticket);
 
   return (
     <div
       className={`ticket-mobile-card premium ${expanded ? "expanded" : ""}`}
       style={{
-        border: missingChannel
+        border: hasMissingChannel(ticket)
           ? "1px solid rgba(248,113,113,0.28)"
           : undefined,
       }}
@@ -518,25 +820,19 @@ function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
         className="ticket-mobile-toggle"
         onClick={() => setExpanded((prev) => !prev)}
       >
-        <div
-          className="row"
-          style={{
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-            gap: 10,
-            marginBottom: 10,
-            flexWrap: "nowrap",
-          }}
-        >
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ marginBottom: 8 }}>
-              <TicketHeaderBadges ticket={ticket} />
-            </div>
+        <div className="queue-card-topline">
+          <div className="queue-card-owner-wrap">
+            <AvatarBubble ticket={ticket} size={44} />
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ marginBottom: 8 }}>
+                <TicketHeaderBadges ticket={ticket} />
+              </div>
 
-            <div className="queue-ticket-name">{getTicketUserLabel(ticket)}</div>
+              <div className="queue-ticket-name">{getOwnerName(ticket)}</div>
 
-            <div className="muted queue-ticket-subtitle">
-              {getTicketTitle(ticket)}
+              <div className="muted queue-ticket-subtitle">
+                {getTicketTitle(ticket)}
+              </div>
             </div>
           </div>
 
@@ -548,6 +844,8 @@ function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
         <div className="queue-category-wrap">
           <CategoryDisplay ticket={ticket} compact />
         </div>
+
+        <QueueIntelStrip ticket={ticket} />
 
         <div className="queue-card-footer-row">
           <div className="muted" style={{ fontSize: 12 }}>
@@ -567,29 +865,57 @@ function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
               label="Intake Type"
               value={getDisplayedIntakeType(ticket) || "—"}
             />
-            <MetaBlock label="Claimed By" value={safeText(ticket.claimed_by)} />
-            <MetaBlock label="Priority" value={safeText(ticket.priority)} />
-            <MetaBlock label="Status" value={safeText(ticket.status)} />
+            <MetaBlock label="Verification" value={getVerificationLabel(ticket)} />
+            <MetaBlock label="Risk" value={getRiskLevel(ticket)} />
+            <MetaBlock label="Claimed By" value={getClaimedByLabel(ticket)} />
+            <MetaBlock label="Entry" value={getEntryMethodLabel(ticket)} />
             <MetaBlock label="Channel" value={channelId || "Missing"} full />
             <MetaBlock label="User ID" value={safeText(ticket.user_id)} full />
-            <MetaBlock label="Ghost" value={ghost ? "yes" : "no"} />
             <MetaBlock
-              label="Updated"
-              value={timeAgo(ticket.updated_at || ticket.created_at)}
+              label="Latest Activity"
+              value={`${getLatestActivityLabel(ticket)} • ${timeAgo(getLatestActivityTime(ticket))}`}
+              full
+            />
+            <MetaBlock
+              label="SLA"
+              value={getSlaStatusLabel(ticket)}
+            />
+            <MetaBlock
+              label="Notes"
+              value={String(Number(ticket?.note_count || 0))}
+            />
+            <MetaBlock
+              label="Past Tickets"
+              value={String(Number(ticket?.owner_ticket_total || 0))}
+            />
+            <MetaBlock
+              label="Invited By"
+              value={safeText(ticket?.owner_invited_by_name)}
+            />
+            <MetaBlock
+              label="Vouched By"
+              value={safeText(ticket?.owner_vouched_by_name)}
+            />
+            <MetaBlock
+              label="Approved By"
+              value={safeText(ticket?.owner_approved_by_name)}
             />
             <MetaBlock
               label="Match Reason"
               value={getCategoryReason(ticket) || "—"}
               full
             />
-            <MetaBlock
-              label="Suggestion"
-              value={ticket.mod_suggestion || "—"}
-              full
-            />
+            {!!ticket.mod_suggestion ? (
+              <MetaBlock label="Suggestion" value={ticket.mod_suggestion} full />
+            ) : null}
             {!!ticket.closed_reason ? (
               <MetaBlock label="Closed Reason" value={ticket.closed_reason} full />
             ) : null}
+          </div>
+
+          <div className="ticket-expanded-section" style={{ marginTop: 12 }}>
+            <div className="ticket-expanded-section-title">Recommended Actions</div>
+            <RecommendedActions ticket={ticket} />
           </div>
 
           <div
@@ -702,6 +1028,9 @@ export default function TicketQueueTable({
         <SummaryChip label="Deleted" value={stats.deleted} />
         <SummaryChip label="Urgent" value={stats.urgent} tone="danger" />
         <SummaryChip label="High" value={stats.high} tone="warn" />
+        <SummaryChip label="Overdue" value={stats.overdue} tone={stats.overdue ? "danger" : "default"} />
+        <SummaryChip label="High Risk" value={stats.highRisk} tone={stats.highRisk ? "danger" : "default"} />
+        <SummaryChip label="Unassigned" value={stats.unassigned} tone={stats.unassigned ? "warn" : "default"} />
         <SummaryChip
           label="Matched"
           value={stats.matched}
@@ -711,6 +1040,11 @@ export default function TicketQueueTable({
           label="Verification"
           value={stats.verificationLike}
           tone={stats.verificationLike ? "open" : "default"}
+        />
+        <SummaryChip
+          label="No Notes"
+          value={stats.noNotes}
+          tone={stats.noNotes ? "warn" : "default"}
         />
         <SummaryChip
           label="Missing Channel"
@@ -748,12 +1082,11 @@ export default function TicketQueueTable({
               <table>
                 <thead>
                   <tr>
-                    <th>User</th>
-                    <th>Category Intelligence</th>
+                    <th>Owner</th>
+                    <th>Category</th>
+                    <th>Queue Intelligence</th>
                     <th>Status</th>
-                    <th>Priority</th>
-                    <th>Claimed By</th>
-                    <th>Channel</th>
+                    <th>Assigned</th>
                     <th>Updated</th>
                     <th>Actions</th>
                   </tr>
@@ -764,7 +1097,6 @@ export default function TicketQueueTable({
                     const channelId = getChannelId(ticket);
                     const status = getStatus(ticket);
                     const missingChannel = hasMissingChannel(ticket);
-                    const ghost = isGhost(ticket);
                     const isExpanded = expandedDesktopId === ticket.id;
 
                     return (
@@ -776,43 +1108,54 @@ export default function TicketQueueTable({
                               : undefined
                           }
                         >
-                          <td>
-                            <div
-                              style={{
-                                display: "flex",
-                                flexWrap: "wrap",
-                                gap: 8,
-                                marginBottom: 6,
-                                alignItems: "center",
-                              }}
-                            >
-                              <span className={badgeClass(status)}>
-                                {safeText(ticket.status)}
-                              </span>
-                              <span className={badgeClass(ticket.priority)}>
-                                {safeText(ticket.priority)}
-                              </span>
-                              {ghost ? <span className="badge">Ghost</span> : null}
-                              {missingChannel ? (
-                                <span className="badge danger">Missing Channel</span>
-                              ) : null}
-                            </div>
+                          <td style={{ minWidth: 260 }}>
+                            <div className="queue-desktop-owner">
+                              <AvatarBubble ticket={ticket} size={42} />
+                              <div style={{ minWidth: 0 }}>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    flexWrap: "wrap",
+                                    gap: 8,
+                                    marginBottom: 6,
+                                    alignItems: "center",
+                                  }}
+                                >
+                                  <span className={badgeClass(status)}>
+                                    {safeText(ticket.status)}
+                                  </span>
+                                  <span className={badgeClass(ticket.priority)}>
+                                    {safeText(ticket.priority)}
+                                  </span>
+                                  <span className={badgeClass(getVerificationLabel(ticket))}>
+                                    {getVerificationLabel(ticket)}
+                                  </span>
+                                  <span className={badgeClass(getRiskLevel(ticket).toLowerCase())}>
+                                    {getRiskLevel(ticket)}
+                                  </span>
+                                  {ticket?.overdue ? (
+                                    <span className="badge danger">Overdue</span>
+                                  ) : null}
+                                  {isGhost(ticket) ? <span className="badge">Ghost</span> : null}
+                                  {missingChannel ? (
+                                    <span className="badge danger">Missing Channel</span>
+                                  ) : null}
+                                </div>
 
-                            <div style={{ fontWeight: 800 }}>
-                              {getTicketUserLabel(ticket)}
-                            </div>
+                                <div className="queue-owner-name">
+                                  {getOwnerName(ticket)}
+                                </div>
 
-                            <div
-                              className="muted"
-                              style={{
-                                fontSize: 13,
-                                marginTop: 4,
-                                whiteSpace: "normal",
-                                overflowWrap: "anywhere",
-                                lineHeight: 1.35,
-                              }}
-                            >
-                              {getTicketTitle(ticket)}
+                                <div className="muted queue-ticket-subtitle">
+                                  {getTicketTitle(ticket)}
+                                </div>
+
+                                <div className="queue-submeta">
+                                  <span>Entry: {getEntryMethodLabel(ticket)}</span>
+                                  <span>Past Tickets: {Number(ticket?.owner_ticket_total || 0)}</span>
+                                  <span>User ID: {safeText(ticket.user_id)}</span>
+                                </div>
+                              </div>
                             </div>
                           </td>
 
@@ -820,37 +1163,62 @@ export default function TicketQueueTable({
                             <CategoryDisplay ticket={ticket} />
                           </td>
 
-                          <td>
-                            <span className={badgeClass(status)}>
-                              {safeText(ticket.status)}
-                            </span>
-                          </td>
+                          <td style={{ minWidth: 260 }}>
+                            <div className="queue-intel-cell">
+                              <div className="queue-intel-row">
+                                <span className="queue-inline-pill">
+                                  SLA: {getSlaStatusLabel(ticket)}
+                                </span>
+                                <span className="queue-inline-pill">
+                                  Notes: {Number(ticket?.note_count || 0)}
+                                </span>
+                                <span className="queue-inline-pill">
+                                  Activity: {timeAgo(getLatestActivityTime(ticket))}
+                                </span>
+                              </div>
 
-                          <td>
-                            <span className={badgeClass(ticket.priority)}>
-                              {safeText(ticket.priority)}
-                            </span>
-                          </td>
+                              <div className="muted" style={{ fontSize: 12, lineHeight: 1.35 }}>
+                                {getLatestActivityLabel(ticket)}
+                              </div>
 
-                          <td style={{ whiteSpace: "normal" }}>
-                            {safeText(ticket.claimed_by)}
-                          </td>
-
-                          <td>
-                            <div
-                              style={{
-                                fontSize: 13,
-                                overflowWrap: "anywhere",
-                                whiteSpace: "normal",
-                                color: missingChannel ? "#fca5a5" : undefined,
-                                fontWeight: missingChannel ? 700 : undefined,
-                              }}
-                            >
-                              {channelId || "Missing"}
+                              <div className="queue-actions-list" style={{ marginTop: 8 }}>
+                                {getRecommendedActions(ticket).slice(0, 2).map((action) => (
+                                  <div key={action} className="queue-action-chip compact">
+                                    {action}
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           </td>
 
-                          <td>{timeAgo(ticket.updated_at || ticket.created_at)}</td>
+                          <td>
+                            <div className="queue-status-stack">
+                              <span className={badgeClass(status)}>
+                                {safeText(ticket.status)}
+                              </span>
+                              <span className={badgeClass(ticket.priority)}>
+                                {safeText(ticket.priority)}
+                              </span>
+                            </div>
+                          </td>
+
+                          <td style={{ whiteSpace: "normal", minWidth: 150 }}>
+                            <div style={{ fontWeight: 700 }}>
+                              {getClaimedByLabel(ticket)}
+                            </div>
+                            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                              {channelId || "Missing channel"}
+                            </div>
+                          </td>
+
+                          <td>
+                            <div>{timeAgo(ticket.updated_at || ticket.created_at)}</div>
+                            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                              {ticket?.latest_note_at
+                                ? `Note ${timeAgo(ticket.latest_note_at)}`
+                                : "No notes yet"}
+                            </div>
+                          </td>
 
                           <td>
                             <div
@@ -884,7 +1252,7 @@ export default function TicketQueueTable({
                         {isExpanded ? (
                           <tr>
                             <td
-                              colSpan={8}
+                              colSpan={7}
                               style={{
                                 whiteSpace: "normal",
                                 padding: 0,
@@ -986,6 +1354,130 @@ export default function TicketQueueTable({
           overflow-wrap: anywhere;
         }
 
+        .queue-avatar {
+          border-radius: 999px;
+          object-fit: cover;
+          flex-shrink: 0;
+          border: 1px solid rgba(255,255,255,0.08);
+          box-shadow: 0 8px 18px rgba(0,0,0,0.2);
+          background: rgba(255,255,255,0.04);
+        }
+
+        .queue-avatar-fallback {
+          display: grid;
+          place-items: center;
+          font-weight: 800;
+          font-size: 13px;
+          color: #f8fafc;
+          background:
+            radial-gradient(circle at top right, rgba(93,255,141,0.18), transparent 45%),
+            linear-gradient(180deg, rgba(46,77,102,0.98), rgba(20,35,50,0.98));
+        }
+
+        .queue-desktop-owner {
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+        }
+
+        .queue-owner-name {
+          font-weight: 900;
+          font-size: 15px;
+          line-height: 1.15;
+          overflow-wrap: anywhere;
+          color: var(--text-strong, #f8fafc);
+        }
+
+        .queue-submeta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+          margin-top: 6px;
+          font-size: 12px;
+          color: var(--muted, #9fb0c3);
+        }
+
+        .queue-intel-cell {
+          display: grid;
+          gap: 8px;
+        }
+
+        .queue-intel-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .queue-inline-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          border-radius: 999px;
+          padding: 4px 10px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.035);
+          font-size: 12px;
+          color: var(--text, #dbe4ee);
+        }
+
+        .queue-intel-strip {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-bottom: 14px;
+        }
+
+        .queue-intel-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          border-radius: 999px;
+          padding: 6px 10px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background:
+            radial-gradient(circle at top right, rgba(255,255,255,0.05), transparent 42%),
+            rgba(255,255,255,0.025);
+          font-size: 12px;
+          color: var(--text, #dbe4ee);
+          overflow-wrap: anywhere;
+        }
+
+        .queue-intel-pill.danger {
+          border-color: rgba(248,113,113,0.22);
+          background:
+            radial-gradient(circle at top right, rgba(248,113,113,0.1), transparent 42%),
+            rgba(248,113,113,0.06);
+        }
+
+        .queue-actions-list {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .queue-action-chip {
+          border-radius: 999px;
+          padding: 7px 10px;
+          border: 1px solid rgba(99,213,255,0.14);
+          background:
+            radial-gradient(circle at top right, rgba(99,213,255,0.10), transparent 42%),
+            rgba(99,213,255,0.05);
+          font-size: 12px;
+          line-height: 1.2;
+          color: var(--text, #dbe4ee);
+        }
+
+        .queue-action-chip.compact {
+          padding: 5px 8px;
+          font-size: 11px;
+        }
+
+        .queue-status-stack {
+          display: grid;
+          gap: 8px;
+          justify-items: start;
+        }
+
         .ticket-mobile-card.premium {
           position: relative;
           isolation: isolate;
@@ -1051,6 +1543,22 @@ export default function TicketQueueTable({
           cursor: pointer;
         }
 
+        .queue-card-topline {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 12px;
+          margin-bottom: 12px;
+        }
+
+        .queue-card-owner-wrap {
+          display: flex;
+          gap: 12px;
+          align-items: flex-start;
+          flex: 1;
+          min-width: 0;
+        }
+
         .queue-ticket-name {
           font-weight: 900;
           font-size: 16px;
@@ -1089,6 +1597,7 @@ export default function TicketQueueTable({
           align-items: center;
           justify-content: space-between;
           gap: 12px;
+          margin-top: 12px;
         }
 
         .ticket-mobile-meta {
@@ -1131,6 +1640,55 @@ export default function TicketQueueTable({
           gap: 0;
         }
 
+        .ticket-expanded-topbar {
+          display: flex;
+          justify-content: space-between;
+          gap: 16px;
+          align-items: flex-start;
+          flex-wrap: wrap;
+          margin-bottom: 14px;
+        }
+
+        .ticket-expanded-owner {
+          display: flex;
+          gap: 14px;
+          align-items: center;
+          min-width: 0;
+          flex: 1;
+        }
+
+        .ticket-expanded-owner-name {
+          font-size: 18px;
+          font-weight: 900;
+          line-height: 1.1;
+          overflow-wrap: anywhere;
+        }
+
+        .ticket-expanded-badges {
+          display: flex;
+          justify-content: flex-end;
+          max-width: 100%;
+        }
+
+        .ticket-expanded-section {
+          margin-bottom: 14px;
+          padding: 12px;
+          border-radius: 16px;
+          border: 1px solid rgba(255,255,255,0.06);
+          background:
+            radial-gradient(circle at top right, rgba(255,255,255,0.04), transparent 42%),
+            rgba(255,255,255,0.02);
+        }
+
+        .ticket-expanded-section-title {
+          font-size: 12px;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: var(--muted, #9fb0c3);
+          margin-bottom: 10px;
+        }
+
         .ticket-mobile-list {
           display: block;
         }
@@ -1141,7 +1699,7 @@ export default function TicketQueueTable({
 
         @media (min-width: 768px) {
           .queue-summary-grid {
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(5, minmax(0, 1fr));
           }
         }
 
@@ -1167,9 +1725,9 @@ export default function TicketQueueTable({
           }
         }
 
-        @media (min-width: 1200px) {
+        @media (min-width: 1280px) {
           .queue-summary-grid {
-            grid-template-columns: repeat(11, minmax(0, 1fr));
+            grid-template-columns: repeat(15, minmax(0, 1fr));
           }
         }
       `}</style>
