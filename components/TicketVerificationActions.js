@@ -2,18 +2,50 @@
 
 import { useMemo, useState } from "react";
 
-function safeText(value, fallback = "—") {
+type Dict = Record<string, unknown>;
+
+type VerificationAction =
+  | ""
+  | "approve"
+  | "remove_unverified"
+  | "repost_verify_ui"
+  | "deny";
+
+type VerificationResponse = {
+  ok?: boolean;
+  error?: string;
+  message?: string;
+};
+
+type TicketVerificationActionsProps = {
+  ticket: Dict;
+  currentStaffId?: string | null;
+  onChanged?: (() => Promise<void> | void) | null;
+};
+
+function safeText(value: unknown, fallback = "—"): string {
   const text = String(value ?? "").trim();
   return text || fallback;
 }
 
-function looksVerificationTicket(ticket) {
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
+}
+
+function looksVerificationTicket(ticket: Dict): boolean {
   const category = String(ticket?.category || "").toLowerCase();
+  const matchedCategory = String(ticket?.matched_category_name || "").toLowerCase();
+  const matchedIntakeType = String(ticket?.matched_intake_type || "").toLowerCase();
   const title = String(ticket?.title || "").toLowerCase();
   const initial = String(ticket?.initial_message || "").toLowerCase();
 
   return (
     category.includes("verification") ||
+    matchedCategory.includes("verification") ||
+    matchedIntakeType.includes("verification") ||
     title.includes("verification") ||
     initial.includes("verification")
   );
@@ -23,24 +55,30 @@ export default function TicketVerificationActions({
   ticket,
   currentStaffId,
   onChanged,
-}) {
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
-  const [decisionReason, setDecisionReason] = useState("Approved by staff review");
+}: TicketVerificationActionsProps) {
+  const [busy, setBusy] = useState<VerificationAction>("");
+  const [error, setError] = useState<string>("");
+  const [message, setMessage] = useState<string>("");
+  const [decisionReason, setDecisionReason] = useState<string>(
+    "Approved by staff review"
+  );
 
   const visible = useMemo(() => looksVerificationTicket(ticket), [ticket]);
   const userId = String(ticket?.user_id || "").trim();
+  const ticketId = String(ticket?.id || "").trim();
 
-  async function post(action, extra = {}) {
-    if (!ticket?.id) return;
+  async function post(
+    action: Exclude<VerificationAction, "">,
+    extra: Record<string, unknown> = {}
+  ) {
+    if (!ticketId) return;
 
     setBusy(action);
     setError("");
     setMessage("");
 
     try {
-      const res = await fetch(`/api/tickets/${ticket.id}/verify`, {
+      const res = await fetch(`/api/tickets/${ticketId}/verify`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -54,7 +92,9 @@ export default function TicketVerificationActions({
         }),
       });
 
-      const json = await res.json().catch(() => null);
+      const json = (await res.json().catch(() => null)) as
+        | VerificationResponse
+        | null;
 
       if (!res.ok || !json?.ok) {
         throw new Error(json?.error || "Verification action failed.");
@@ -62,8 +102,8 @@ export default function TicketVerificationActions({
 
       setMessage(json?.message || "Verification action queued.");
       await onChanged?.();
-    } catch (err) {
-      setError(err?.message || "Verification action failed.");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Verification action failed."));
     } finally {
       setBusy("");
     }
@@ -118,7 +158,7 @@ export default function TicketVerificationActions({
         <div className="ticket-info-item">
           <span className="ticket-info-label">Member</span>
           <span style={{ overflowWrap: "anywhere" }}>
-            {ticket?.username || userId || "Unknown"}
+            {safeText(ticket?.username || userId, "Unknown")}
           </span>
         </div>
 
@@ -143,7 +183,7 @@ export default function TicketVerificationActions({
           type="button"
           className="button primary"
           disabled={!userId || !!busy}
-          onClick={() => post("approve")}
+          onClick={() => void post("approve")}
         >
           {busy === "approve" ? "Approving..." : "Approve + Verify"}
         </button>
@@ -152,7 +192,7 @@ export default function TicketVerificationActions({
           type="button"
           className="button ghost"
           disabled={!userId || !!busy}
-          onClick={() => post("remove_unverified")}
+          onClick={() => void post("remove_unverified")}
         >
           {busy === "remove_unverified" ? "Working..." : "Remove Unverified"}
         </button>
@@ -161,7 +201,7 @@ export default function TicketVerificationActions({
           type="button"
           className="button ghost"
           disabled={!userId || !!busy}
-          onClick={() => post("repost_verify_ui")}
+          onClick={() => void post("repost_verify_ui")}
         >
           {busy === "repost_verify_ui" ? "Working..." : "Repost Verify UI"}
         </button>
@@ -170,7 +210,7 @@ export default function TicketVerificationActions({
           type="button"
           className="button danger"
           disabled={!userId || !!busy}
-          onClick={() => post("deny")}
+          onClick={() => void post("deny")}
         >
           {busy === "deny" ? "Denying..." : "Deny Verification"}
         </button>
