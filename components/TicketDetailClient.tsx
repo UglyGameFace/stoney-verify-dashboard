@@ -847,8 +847,8 @@ export default function TicketDetailClient({
             subtitle={`Ticket ID: ${ticket.id || ticketId}`}
             right={
               <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                <span className={`badge ${status}`}>{status}</span>
-                <span className={`badge ${priority}`}>{priority}</span>
+                <span className={badgeClass(status)}>{status}</span>
+                <span className={badgeClass(priority)}>{priority}</span>
               </div>
             }
           >
