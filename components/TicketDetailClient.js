@@ -1,32 +1,100 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { getBrowserSupabase } from "@/lib/supabase-browser";
 import TicketMessageList from "@/components/TicketMessageList";
 import TicketReplyBox from "@/components/TicketReplyBox";
 import TicketControls from "@/components/dashboard/TicketControls";
 import TicketVerificationActions from "@/components/TicketVerificationActions";
 
-function safeText(value, fallback = "—") {
+type Dict = Record<string, any>;
+
+type TimelineItemRow = {
+  id?: string | number | null;
+  title?: string | null;
+  source?: string | null;
+  actor_name?: string | null;
+  description?: string | null;
+  created_at?: string | null;
+};
+
+type TicketApiResponse = {
+  ok?: boolean;
+  error?: string;
+  ticket?: Dict | null;
+  category?: Dict | null;
+  member?: Dict | null;
+  joins?: Dict[];
+  latestJoin?: Dict | null;
+  memberEvents?: Dict[];
+  verificationFlags?: Dict[];
+  verificationTokens?: Dict[];
+  vcSessions?: Dict[];
+  warns?: Dict[];
+  activity?: Dict[];
+  timeline?: TimelineItemRow[];
+  messages?: Dict[];
+  notes?: Dict[];
+  workspace?: Dict | null;
+  counts?: Dict | null;
+  viewer?: Dict | null;
+  currentStaffId?: string | null;
+};
+
+type TicketDetailClientProps = {
+  initialData: TicketApiResponse;
+  ticketId: string;
+};
+
+type MetaCardProps = {
+  label: string;
+  value: ReactNode;
+  full?: boolean;
+};
+
+type SectionCardProps = {
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+  right?: ReactNode;
+};
+
+type TimelineItemProps = {
+  item: TimelineItemRow;
+};
+
+type IdentityBubbleProps = {
+  ticket: Dict;
+  member: Dict;
+};
+
+function safeText(value: unknown, fallback = "—"): string {
   const text = String(value ?? "").trim();
   return text || fallback;
 }
 
-function normalizeText(value) {
+function normalizeText(value: unknown): string {
   return String(value || "").trim().toLowerCase();
 }
 
-function formatDateTime(value) {
+function formatDateTime(value: unknown): string {
   if (!value) return "—";
   try {
-    return new Date(value).toLocaleString();
+    return new Date(String(value)).toLocaleString();
   } catch {
     return "—";
   }
 }
 
-function badgeClass(value) {
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
+}
+
+function badgeClass(value: unknown): string {
   const v = normalizeText(value);
 
   if (v === "open") return "badge open";
@@ -53,18 +121,18 @@ function badgeClass(value) {
   return "badge";
 }
 
-function getCurrentStaffId(data) {
+function getCurrentStaffId(data: TicketApiResponse | null | undefined): string {
   return (
     String(data?.currentStaffId || "").trim() ||
     String(data?.viewer?.id || "").trim() ||
-    String(data?.viewer?.user_id || "").trim() ||
-    String(data?.session?.user?.id || "").trim() ||
-    String(data?.session?.discordUser?.id || "").trim() ||
+    String((data?.viewer as Dict | undefined)?.user_id || "").trim() ||
+    String((data as Dict | undefined)?.session?.user?.id || "").trim() ||
+    String((data as Dict | undefined)?.session?.discordUser?.id || "").trim() ||
     ""
   );
 }
 
-function getOwnerName(ticket, member) {
+function getOwnerName(ticket: Dict, member: Dict): string {
   return (
     String(ticket?.owner_display_name || "").trim() ||
     String(member?.display_name || "").trim() ||
@@ -76,7 +144,7 @@ function getOwnerName(ticket, member) {
   );
 }
 
-function getOwnerAvatar(ticket, member) {
+function getOwnerAvatar(ticket: Dict, member: Dict): string {
   return (
     String(ticket?.owner_avatar_url || "").trim() ||
     String(member?.avatar_url || "").trim() ||
@@ -84,14 +152,14 @@ function getOwnerAvatar(ticket, member) {
   );
 }
 
-function getOwnerInitials(ticket, member) {
+function getOwnerInitials(ticket: Dict, member: Dict): string {
   const source = getOwnerName(ticket, member);
   const parts = source.split(/\s+/).filter(Boolean).slice(0, 2);
   if (!parts.length) return "?";
   return parts.map((part) => part.charAt(0).toUpperCase()).join("");
 }
 
-function getVerificationLabel(ticket, workspace) {
+function getVerificationLabel(ticket: Dict, workspace: Dict): string {
   return (
     String(ticket?.owner_verification_label || "").trim() ||
     String(workspace?.verificationLabel || "").trim() ||
@@ -99,7 +167,7 @@ function getVerificationLabel(ticket, workspace) {
   );
 }
 
-function getRiskLabel(ticket, workspace) {
+function getRiskLabel(ticket: Dict, workspace: Dict): string {
   const raw =
     String(ticket?.risk_level || "").trim() ||
     String(workspace?.riskLevel || "").trim() ||
@@ -111,7 +179,7 @@ function getRiskLabel(ticket, workspace) {
   return "Unknown";
 }
 
-function getClaimedLabel(ticket) {
+function getClaimedLabel(ticket: Dict): string {
   return (
     String(ticket?.claimed_by_name || "").trim() ||
     String(ticket?.assigned_to_name || "").trim() ||
@@ -121,7 +189,7 @@ function getClaimedLabel(ticket) {
   );
 }
 
-function getEntryLabel(ticket, member, latestJoin) {
+function getEntryLabel(ticket: Dict, member: Dict, latestJoin: Dict): string {
   return (
     String(ticket?.owner_entry_method || "").trim() ||
     String(member?.entry_method || "").trim() ||
@@ -132,7 +200,7 @@ function getEntryLabel(ticket, member, latestJoin) {
   );
 }
 
-function getSlaLabel(ticket) {
+function getSlaLabel(ticket: Dict): string {
   if (ticket?.overdue) {
     const minutes = Number(ticket?.minutes_overdue || 0);
     if (minutes > 0) return `${minutes}m overdue`;
@@ -152,7 +220,7 @@ function getSlaLabel(ticket) {
   return status;
 }
 
-function MetaCard({ label, value, full = false }) {
+function MetaCard({ label, value, full = false }: MetaCardProps) {
   return (
     <div className={`ticket-meta-card ${full ? "full" : ""}`}>
       <span className="ticket-meta-label">{label}</span>
@@ -161,7 +229,12 @@ function MetaCard({ label, value, full = false }) {
   );
 }
 
-function SectionCard({ title, subtitle = "", children, right = null }) {
+function SectionCard({
+  title,
+  subtitle = "",
+  children,
+  right = null,
+}: SectionCardProps) {
   return (
     <div className="card">
       <div
@@ -189,12 +262,15 @@ function SectionCard({ title, subtitle = "", children, right = null }) {
   );
 }
 
-function TimelineItem({ item }) {
+function TimelineItem({ item }: TimelineItemProps) {
   return (
     <div className="timeline-item">
       <div className="timeline-dot" />
       <div className="timeline-body">
-        <div className="row" style={{ justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div
+          className="row"
+          style={{ justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}
+        >
           <div className="timeline-title">{safeText(item?.title)}</div>
           <div className="muted" style={{ fontSize: 12 }}>
             {formatDateTime(item?.created_at)}
@@ -214,7 +290,7 @@ function TimelineItem({ item }) {
   );
 }
 
-function IdentityBubble({ ticket, member }) {
+function IdentityBubble({ ticket, member }: IdentityBubbleProps) {
   const avatar = getOwnerAvatar(ticket, member);
   const initials = getOwnerInitials(ticket, member);
 
@@ -231,17 +307,20 @@ function IdentityBubble({ ticket, member }) {
   return <div className="ticket-owner-avatar fallback">{initials}</div>;
 }
 
-export default function TicketDetailClient({ initialData, ticketId }) {
-  const [data, setData] = useState(initialData);
-  const [error, setError] = useState("");
-  const [isRefreshing, setIsRefreshing] = useState(false);
+export default function TicketDetailClient({
+  initialData,
+  ticketId,
+}: TicketDetailClientProps) {
+  const [data, setData] = useState<TicketApiResponse>(initialData);
+  const [error, setError] = useState<string>("");
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
-  const [note, setNote] = useState("");
-  const [savingNote, setSavingNote] = useState(false);
-  const [noteError, setNoteError] = useState("");
-  const [noteMessage, setNoteMessage] = useState("");
+  const [note, setNote] = useState<string>("");
+  const [savingNote, setSavingNote] = useState<boolean>(false);
+  const [noteError, setNoteError] = useState<string>("");
+  const [noteMessage, setNoteMessage] = useState<string>("");
 
-  async function refresh({ silent = false } = {}) {
+  async function refresh({ silent = false }: { silent?: boolean } = {}) {
     if (!silent) setIsRefreshing(true);
     setError("");
 
@@ -253,15 +332,15 @@ export default function TicketDetailClient({ initialData, ticketId }) {
         },
       });
 
-      const json = await res.json();
+      const json = (await res.json()) as TicketApiResponse;
 
       if (!res.ok) {
         throw new Error(json.error || "Failed to refresh ticket.");
       }
 
       setData(json);
-    } catch (err) {
-      setError(err.message || "Failed to refresh ticket.");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Failed to refresh ticket."));
     } finally {
       if (!silent) setIsRefreshing(false);
     }
@@ -285,7 +364,9 @@ export default function TicketDetailClient({ initialData, ticketId }) {
         body: JSON.stringify({ content }),
       });
 
-      const json = await res.json().catch(() => null);
+      const json = (await res.json().catch(() => null)) as
+        | { error?: string }
+        | null;
 
       if (!res.ok) {
         throw new Error(json?.error || "Failed to save internal note.");
@@ -294,21 +375,21 @@ export default function TicketDetailClient({ initialData, ticketId }) {
       setNote("");
       setNoteMessage("Internal note saved.");
       await refresh({ silent: true });
-    } catch (err) {
-      setNoteError(err?.message || "Failed to save internal note.");
+    } catch (err: unknown) {
+      setNoteError(getErrorMessage(err, "Failed to save internal note."));
     } finally {
       setSavingNote(false);
     }
   }
 
   useEffect(() => {
-    refresh({ silent: true });
+    void refresh({ silent: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticketId]);
 
   useEffect(() => {
-    let supabase;
-    let channel;
+    let supabase: any;
+    let channel: any;
 
     async function handleRealtimeChange() {
       await refresh({ silent: true });
@@ -326,46 +407,59 @@ export default function TicketDetailClient({ initialData, ticketId }) {
         )
         .on(
           "postgres_changes",
-          { event: "*", schema: "public", table: "ticket_messages", filter: `ticket_id=eq.${ticketId}` },
+          {
+            event: "*",
+            schema: "public",
+            table: "ticket_messages",
+            filter: `ticket_id=eq.${ticketId}`,
+          },
           handleRealtimeChange
         )
         .on(
           "postgres_changes",
-          { event: "*", schema: "public", table: "ticket_notes", filter: `ticket_id=eq.${ticketId}` },
+          {
+            event: "*",
+            schema: "public",
+            table: "ticket_notes",
+            filter: `ticket_id=eq.${ticketId}`,
+          },
           handleRealtimeChange
         )
-        .subscribe((status) => {
+        .subscribe((status: string) => {
           if (status === "SUBSCRIBED") {
-            refresh({ silent: true });
+            void refresh({ silent: true });
           }
         });
-    } catch (err) {
-      setError(err.message || "Realtime initialization failed.");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Realtime initialization failed."));
       return;
     }
 
     return () => {
       if (supabase && channel) {
-        supabase.removeChannel(channel);
+        void supabase.removeChannel(channel);
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticketId]);
 
-  const ticket = data?.ticket || {};
-  const member = data?.member || {};
-  const latestJoin = data?.latestJoin || {};
-  const category = data?.category || {};
+  const ticket = (data?.ticket || {}) as Dict;
+  const member = (data?.member || {}) as Dict;
+  const latestJoin = (data?.latestJoin || {}) as Dict;
+  const category = (data?.category || {}) as Dict;
   const messages = Array.isArray(data?.messages) ? data.messages : [];
   const notes = Array.isArray(data?.notes) ? data.notes : [];
   const warns = Array.isArray(data?.warns) ? data.warns : [];
-  const memberEvents = Array.isArray(data?.memberEvents) ? data.memberEvents : [];
-  const verificationFlags = Array.isArray(data?.verificationFlags) ? data.verificationFlags : [];
-  const verificationTokens = Array.isArray(data?.verificationTokens) ? data.verificationTokens : [];
+  const verificationFlags = Array.isArray(data?.verificationFlags)
+    ? data.verificationFlags
+    : [];
+  const verificationTokens = Array.isArray(data?.verificationTokens)
+    ? data.verificationTokens
+    : [];
   const vcSessions = Array.isArray(data?.vcSessions) ? data.vcSessions : [];
   const timeline = Array.isArray(data?.timeline) ? data.timeline : [];
-  const workspace = data?.workspace || {};
-  const counts = data?.counts || {};
+  const workspace = (data?.workspace || {}) as Dict;
+  const counts = (data?.counts || {}) as Dict;
 
   const status = String(ticket.status || "open").toLowerCase();
   const priority = String(ticket.priority || "medium").toLowerCase();
@@ -397,16 +491,24 @@ export default function TicketDetailClient({ initialData, ticketId }) {
                 Ticket Detail
               </div>
 
-              <h1 className="ticket-hero-title">
-                {ticket.title || "Ticket"}
-              </h1>
+              <h1 className="ticket-hero-title">{ticket.title || "Ticket"}</h1>
 
               <div className="muted ticket-hero-subtitle">
                 <span>{ownerName}</span>
                 <span>•</span>
-                <span>{safeText(category?.name || ticket?.matched_category_name || ticket?.category, "uncategorized")}</span>
+                <span>
+                  {safeText(
+                    category?.name || ticket?.matched_category_name || ticket?.category,
+                    "uncategorized"
+                  )}
+                </span>
                 <span>•</span>
-                <span>{safeText(ticket?.channel_id || ticket?.discord_thread_id, "Not linked")}</span>
+                <span>
+                  {safeText(
+                    ticket?.channel_id || ticket?.discord_thread_id,
+                    "Not linked"
+                  )}
+                </span>
               </div>
             </div>
           </div>
@@ -414,19 +516,27 @@ export default function TicketDetailClient({ initialData, ticketId }) {
           <div className="ticket-hero-badges">
             <span className={badgeClass(status)}>{status}</span>
             <span className={badgeClass(priority)}>{priority}</span>
-            <span className={badgeClass(verificationLabel)}>{verificationLabel}</span>
-            <span className={badgeClass(riskLabel.toLowerCase())}>{riskLabel}</span>
+            <span className={badgeClass(verificationLabel)}>
+              {verificationLabel}
+            </span>
+            <span className={badgeClass(riskLabel.toLowerCase())}>
+              {riskLabel}
+            </span>
             {ticket?.overdue ? <span className="badge danger">Overdue</span> : null}
           </div>
         </div>
 
         <div className="ticket-hero-toolbar">
           <div className="muted" style={{ minWidth: 0, flex: 1 }}>
-            This view is built for fast staff decisions: member context, verification history,
-            SLA pressure, note continuity, and a full ticket reply flow in one place.
+            This view is built for fast staff decisions: member context,
+            verification history, SLA pressure, note continuity, and a full ticket
+            reply flow in one place.
           </div>
 
-          <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <div
+            className="row"
+            style={{ gap: 10, flexWrap: "wrap", alignItems: "center" }}
+          >
             <Link
               className="button ghost"
               href="/"
@@ -438,7 +548,7 @@ export default function TicketDetailClient({ initialData, ticketId }) {
             <button
               className="button ghost"
               type="button"
-              onClick={() => refresh()}
+              onClick={() => void refresh()}
               disabled={isRefreshing}
               style={{ width: "auto", minWidth: 110 }}
             >
@@ -476,18 +586,39 @@ export default function TicketDetailClient({ initialData, ticketId }) {
           >
             <div className="ticket-info-grid">
               <MetaCard label="SLA" value={getSlaLabel(ticket)} />
-              <MetaCard label="Notes" value={String(Number(counts?.notes || notes.length || 0))} />
-              <MetaCard label="Messages" value={String(Number(counts?.messages || messages.length || 0))} />
-              <MetaCard label="Flags" value={String(Number(counts?.flags || 0))} />
-              <MetaCard label="Warns" value={String(Number(counts?.warns || warns.length || 0))} />
-              <MetaCard label="VC Sessions" value={String(Number(counts?.vcSessions || vcSessions.length || 0))} />
-              <MetaCard label="Entry Method" value={getEntryLabel(ticket, member, latestJoin)} />
+              <MetaCard
+                label="Notes"
+                value={String(Number(counts?.notes || notes.length || 0))}
+              />
+              <MetaCard
+                label="Messages"
+                value={String(Number(counts?.messages || messages.length || 0))}
+              />
+              <MetaCard
+                label="Flags"
+                value={String(Number(counts?.flags || 0))}
+              />
+              <MetaCard
+                label="Warns"
+                value={String(Number(counts?.warns || warns.length || 0))}
+              />
+              <MetaCard
+                label="VC Sessions"
+                value={String(Number(counts?.vcSessions || vcSessions.length || 0))}
+              />
+              <MetaCard
+                label="Entry Method"
+                value={getEntryLabel(ticket, member, latestJoin)}
+              />
               <MetaCard label="Claimed By" value={getClaimedLabel(ticket)} />
               <MetaCard
                 label="Latest Activity"
                 value={
                   ticket?.latest_activity_at
-                    ? `${safeText(ticket?.latest_activity_title || ticket?.latest_activity_type, "Activity")} • ${formatDateTime(ticket.latest_activity_at)}`
+                    ? `${safeText(
+                        ticket?.latest_activity_title || ticket?.latest_activity_type,
+                        "Activity"
+                      )} • ${formatDateTime(ticket.latest_activity_at)}`
                     : "No recent activity"
                 }
                 full
@@ -500,7 +631,7 @@ export default function TicketDetailClient({ initialData, ticketId }) {
                 <div className="muted">No suggested actions right now.</div>
               ) : (
                 <div className="recommended-action-list">
-                  {recommendedActions.map((action) => (
+                  {recommendedActions.map((action: string) => (
                     <div key={action} className="recommended-action-chip">
                       {action}
                     </div>
@@ -516,13 +647,31 @@ export default function TicketDetailClient({ initialData, ticketId }) {
           >
             <div className="ticket-info-grid">
               <MetaCard label="Display Name" value={ownerName} />
-              <MetaCard label="Username" value={safeText(member?.username || ticket?.username)} />
-              <MetaCard label="User ID" value={safeText(member?.user_id || ticket?.user_id)} />
+              <MetaCard
+                label="Username"
+                value={safeText(member?.username || ticket?.username)}
+              />
+              <MetaCard
+                label="User ID"
+                value={safeText(member?.user_id || ticket?.user_id)}
+              />
               <MetaCard label="Role State" value={safeText(member?.role_state)} />
-              <MetaCard label="Invited By" value={safeText(ticket?.owner_invited_by_name)} />
-              <MetaCard label="Invite Code" value={safeText(ticket?.owner_invite_code)} />
-              <MetaCard label="Vouched By" value={safeText(ticket?.owner_vouched_by_name)} />
-              <MetaCard label="Approved By" value={safeText(ticket?.owner_approved_by_name)} />
+              <MetaCard
+                label="Invited By"
+                value={safeText(ticket?.owner_invited_by_name)}
+              />
+              <MetaCard
+                label="Invite Code"
+                value={safeText(ticket?.owner_invite_code)}
+              />
+              <MetaCard
+                label="Vouched By"
+                value={safeText(ticket?.owner_vouched_by_name)}
+              />
+              <MetaCard
+                label="Approved By"
+                value={safeText(ticket?.owner_approved_by_name)}
+              />
               <MetaCard
                 label="Role State Reason"
                 value={safeText(member?.role_state_reason)}
@@ -535,7 +684,9 @@ export default function TicketDetailClient({ initialData, ticketId }) {
               />
               <MetaCard
                 label="Approval Reason"
-                value={safeText(member?.approval_reason || ticket?.owner_approval_reason)}
+                value={safeText(
+                  member?.approval_reason || ticket?.owner_approval_reason
+                )}
                 full
               />
             </div>
@@ -547,28 +698,59 @@ export default function TicketDetailClient({ initialData, ticketId }) {
           >
             <div className="ticket-info-grid">
               <MetaCard label="Verification Label" value={verificationLabel} />
-              <MetaCard label="Latest Token Status" value={safeText(ticket?.owner_latest_token_status)} />
-              <MetaCard label="Latest Token Decision" value={safeText(ticket?.owner_latest_token_decision)} />
-              <MetaCard label="Latest VC Status" value={safeText(ticket?.owner_latest_vc_status)} />
-              <MetaCard label="Flag Count" value={String(Number(ticket?.owner_flag_count || 0))} />
-              <MetaCard label="Max Flag Score" value={String(Number(ticket?.owner_max_flag_score || 0))} />
+              <MetaCard
+                label="Latest Token Status"
+                value={safeText(ticket?.owner_latest_token_status)}
+              />
+              <MetaCard
+                label="Latest Token Decision"
+                value={safeText(ticket?.owner_latest_token_decision)}
+              />
+              <MetaCard
+                label="Latest VC Status"
+                value={safeText(ticket?.owner_latest_vc_status)}
+              />
+              <MetaCard
+                label="Flag Count"
+                value={String(Number(ticket?.owner_flag_count || 0))}
+              />
+              <MetaCard
+                label="Max Flag Score"
+                value={String(Number(ticket?.owner_max_flag_score || 0))}
+              />
             </div>
 
             {verificationFlags.length ? (
               <div className="ticket-detail-section">
-                <div className="ticket-detail-section-title">Latest Verification Flags</div>
+                <div className="ticket-detail-section-title">
+                  Latest Verification Flags
+                </div>
                 <div className="space">
-                  {verificationFlags.slice(0, 5).map((row) => (
+                  {verificationFlags.slice(0, 5).map((row: Dict) => (
                     <div key={row.id} className="message staff">
-                      <div className="row" style={{ justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                      <div
+                        className="row"
+                        style={{
+                          justifyContent: "space-between",
+                          gap: 10,
+                          flexWrap: "wrap",
+                        }}
+                      >
                         <div style={{ fontWeight: 800 }}>
-                          Score {Number(row?.score || 0)} {row?.flagged ? "• Flagged" : ""}
+                          Score {Number(row?.score || 0)}{" "}
+                          {row?.flagged ? "• Flagged" : ""}
                         </div>
                         <div className="muted" style={{ fontSize: 12 }}>
                           {formatDateTime(row?.created_at)}
                         </div>
                       </div>
-                      <div style={{ marginTop: 8, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                      <div
+                        style={{
+                          marginTop: 8,
+                          whiteSpace: "pre-wrap",
+                          overflowWrap: "anywhere",
+                        }}
+                      >
                         {Array.isArray(row?.reasons) && row.reasons.length
                           ? row.reasons.join(" • ")
                           : "No reasons recorded."}
@@ -581,11 +763,23 @@ export default function TicketDetailClient({ initialData, ticketId }) {
 
             {verificationTokens.length ? (
               <div className="ticket-detail-section">
-                <div className="ticket-detail-section-title">Recent Verification Tokens</div>
+                <div className="ticket-detail-section-title">
+                  Recent Verification Tokens
+                </div>
                 <div className="space">
-                  {verificationTokens.slice(0, 5).map((row) => (
-                    <div key={row.token || row.created_at} className="message">
-                      <div className="row" style={{ justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                  {verificationTokens.slice(0, 5).map((row: Dict) => (
+                    <div
+                      key={row.token || row.created_at}
+                      className="message"
+                    >
+                      <div
+                        className="row"
+                        style={{
+                          justifyContent: "space-between",
+                          gap: 10,
+                          flexWrap: "wrap",
+                        }}
+                      >
                         <div style={{ fontWeight: 800 }}>
                           {safeText(row?.status)} • {safeText(row?.decision)}
                         </div>
@@ -599,7 +793,9 @@ export default function TicketDetailClient({ initialData, ticketId }) {
                         </div>
                       </div>
                       <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
-                        {row?.role_sync_reason || row?.ai_status || "No extra token notes."}
+                        {row?.role_sync_reason ||
+                          row?.ai_status ||
+                          "No extra token notes."}
                       </div>
                     </div>
                   ))}
@@ -609,12 +805,23 @@ export default function TicketDetailClient({ initialData, ticketId }) {
 
             {vcSessions.length ? (
               <div className="ticket-detail-section">
-                <div className="ticket-detail-section-title">Recent VC Sessions</div>
+                <div className="ticket-detail-section-title">
+                  Recent VC Sessions
+                </div>
                 <div className="space">
-                  {vcSessions.slice(0, 5).map((row) => (
+                  {vcSessions.slice(0, 5).map((row: Dict) => (
                     <div key={row.token || row.created_at} className="message">
-                      <div className="row" style={{ justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                        <div style={{ fontWeight: 800 }}>{safeText(row?.status)}</div>
+                      <div
+                        className="row"
+                        style={{
+                          justifyContent: "space-between",
+                          gap: 10,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <div style={{ fontWeight: 800 }}>
+                          {safeText(row?.status)}
+                        </div>
                         <div className="muted" style={{ fontSize: 12 }}>
                           {formatDateTime(
                             row?.completed_at ||
@@ -648,10 +855,25 @@ export default function TicketDetailClient({ initialData, ticketId }) {
             <div className="ticket-info-grid">
               <MetaCard label="User" value={safeText(ticket.username || ticket.user_id)} />
               <MetaCard label="Category" value={safeText(category?.name || ticket.category)} />
-              <MetaCard label="Claimed By" value={safeText(ticket.claimed_by_name || ticket.claimed_by)} />
-              <MetaCard label="Assigned To" value={safeText(ticket.assigned_to_name || ticket.assigned_to)} />
-              <MetaCard label="Closed By" value={safeText(ticket.closed_by_name || ticket.closed_by)} />
-              <MetaCard label="Discord Channel" value={safeText(ticket.channel_id || ticket.discord_thread_id, "Not linked")} />
+              <MetaCard
+                label="Claimed By"
+                value={safeText(ticket.claimed_by_name || ticket.claimed_by)}
+              />
+              <MetaCard
+                label="Assigned To"
+                value={safeText(ticket.assigned_to_name || ticket.assigned_to)}
+              />
+              <MetaCard
+                label="Closed By"
+                value={safeText(ticket.closed_by_name || ticket.closed_by)}
+              />
+              <MetaCard
+                label="Discord Channel"
+                value={safeText(
+                  ticket.channel_id || ticket.discord_thread_id,
+                  "Not linked"
+                )}
+              />
               <MetaCard label="Suggestion" value={safeText(ticket.mod_suggestion)} />
               <MetaCard label="Closed Reason" value={safeText(ticket.closed_reason)} />
               <MetaCard
@@ -698,7 +920,7 @@ export default function TicketDetailClient({ initialData, ticketId }) {
             <div className="space" style={{ marginBottom: 14 }}>
               <textarea
                 className="textarea"
-                rows="4"
+                rows={4}
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 placeholder="Add internal note..."
@@ -706,8 +928,9 @@ export default function TicketDetailClient({ initialData, ticketId }) {
 
               <button
                 className="button ghost"
+                type="button"
                 disabled={savingNote || !note.trim()}
-                onClick={saveInternalNote}
+                onClick={() => void saveInternalNote()}
               >
                 {savingNote ? "Saving..." : "Save Note"}
               </button>
@@ -718,7 +941,7 @@ export default function TicketDetailClient({ initialData, ticketId }) {
                 <div className="empty-state">No internal notes yet.</div>
               ) : null}
 
-              {notes.map((noteRow) => (
+              {notes.map((noteRow: Dict) => (
                 <div key={noteRow.id} className="message staff">
                   <div
                     className="row"
@@ -763,8 +986,11 @@ export default function TicketDetailClient({ initialData, ticketId }) {
               <div className="empty-state">No timeline activity yet.</div>
             ) : (
               <div className="timeline-list">
-                {timeline.map((item) => (
-                  <TimelineItem key={item.id} item={item} />
+                {timeline.map((item: TimelineItemRow, index: number) => (
+                  <TimelineItem
+                    key={String(item.id || `${item.created_at || "item"}-${index}`)}
+                    item={item}
+                  />
                 ))}
               </div>
             )}
