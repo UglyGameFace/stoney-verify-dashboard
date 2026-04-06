@@ -38,22 +38,30 @@ async function discordApi(path) {
   return text ? JSON.parse(text) : null;
 }
 
-function toJoinedTimestamp(value) {
-  const ts = new Date(value || 0).getTime();
-  return Number.isFinite(ts) ? ts : 0;
-}
-
-function toTime(value) {
-  const ts = new Date(value || 0).getTime();
-  return Number.isFinite(ts) ? ts : 0;
-}
-
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function safeObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
 function normalizeString(value) {
   return String(value || "").trim();
+}
+
+function normalizeStatus(value) {
+  return normalizeString(value).toLowerCase();
+}
+
+function normalizeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function parseDateMs(value) {
+  const ms = new Date(value || 0).getTime();
+  return Number.isFinite(ms) ? ms : 0;
 }
 
 function truncateText(value, max = 240) {
@@ -63,13 +71,51 @@ function truncateText(value, max = 240) {
   return `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
-function parseDateMs(value) {
-  const ms = new Date(value || 0).getTime();
-  return Number.isFinite(ms) ? ms : 0;
+function clampActivityLimit(value, fallback = 500, max = 5000) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(Math.max(Math.floor(parsed), 1), max);
 }
 
-function normalizeStatus(value) {
-  return String(value || "").trim().toLowerCase();
+function chunkArray(values, size = 150) {
+  const clean = safeArray(values).filter(Boolean);
+  const out = [];
+  for (let i = 0; i < clean.length; i += size) {
+    out.push(clean.slice(i, i + size));
+  }
+  return out;
+}
+
+function uniqueBy(items, keyFn) {
+  const seen = new Set();
+  const out = [];
+
+  for (const item of safeArray(items)) {
+    const key = String(keyFn(item) || "");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+
+  return out;
+}
+
+async function safeSupabaseRows(queryFactory) {
+  try {
+    const res = await queryFactory();
+    return safeArray(res?.data);
+  } catch {
+    return [];
+  }
+}
+
+async function safeSupabaseCount(queryFactory) {
+  try {
+    const res = await queryFactory();
+    return Number(res?.count || 0);
+  } catch {
+    return 0;
+  }
 }
 
 function isClosedLikeStatus(status) {
@@ -84,15 +130,15 @@ function isOpenLikeStatus(status) {
 
 function hasUsableChannel(ticket) {
   return Boolean(
-    String(ticket?.channel_id || ticket?.discord_thread_id || "").trim()
+    normalizeString(ticket?.channel_id || ticket?.discord_thread_id)
   );
 }
 
 function hasTranscriptEvidence(ticket) {
   return Boolean(
-    String(ticket?.transcript_url || "").trim() ||
-      String(ticket?.transcript_message_id || "").trim() ||
-      String(ticket?.transcript_channel_id || "").trim()
+    normalizeString(ticket?.transcript_url) ||
+      normalizeString(ticket?.transcript_message_id) ||
+      normalizeString(ticket?.transcript_channel_id)
   );
 }
 
@@ -109,7 +155,7 @@ function newestTicketTimestamp(ticket) {
 function ageMinutesFromTicket(ticket) {
   const newest = newestTicketTimestamp(ticket);
   if (!newest) return 999999;
-  return Math.max(0, (Date.now() - newest) / 60000);
+  return Math.max(0, Math.floor((Date.now() - newest) / 60000));
 }
 
 function shouldHideStaleClosedTicket(ticket) {
@@ -141,12 +187,7 @@ function shouldHideStaleOpenTicket(ticket) {
 
 function ticketFreshnessScore(ticket) {
   const status = normalizeStatus(ticket?.status);
-  const now = Date.now();
-  const updatedAt = parseDateMs(ticket?.updated_at);
-  const createdAt = parseDateMs(ticket?.created_at);
-  const closedAt = parseDateMs(ticket?.closed_at);
-  const deletedAt = parseDateMs(ticket?.deleted_at);
-  const newest = Math.max(updatedAt, createdAt, closedAt, deletedAt);
+  const newest = newestTicketTimestamp(ticket);
 
   let score = 0;
 
@@ -157,7 +198,7 @@ function ticketFreshnessScore(ticket) {
   if (status === "closed") score += 8;
   if (status === "deleted") score += 4;
 
-  const ageMinutes = newest > 0 ? (now - newest) / 60000 : 999999;
+  const ageMinutes = newest > 0 ? (Date.now() - newest) / 60000 : 999999;
   if (ageMinutes <= 30) score += 30;
   else if (ageMinutes <= 180) score += 15;
   else if (ageMinutes <= 1440) score += 5;
@@ -178,12 +219,12 @@ function canonicalTicketKey(ticket) {
 
   const userId = normalizeString(ticket?.user_id || ticket?.owner_id);
   const category = normalizeString(ticket?.category).toLowerCase();
-  const username = normalizeString(ticket?.username).toLowerCase();
+  const matchedSlug = normalizeString(ticket?.matched_category_slug).toLowerCase();
   const title = normalizeString(ticket?.title).toLowerCase();
 
+  if (userId && matchedSlug) return `user:${userId}:${matchedSlug}`;
   if (userId && category) return `user:${userId}:${category}`;
   if (userId && title) return `user_title:${userId}:${title}`;
-  if (username && category) return `username:${username}:${category}`;
 
   return `row:${normalizeString(ticket?.id)}`;
 }
@@ -219,9 +260,7 @@ function canonicalizeTickets(rawTickets) {
 
   for (const ticket of visibleBase) {
     const key = canonicalTicketKey(ticket);
-    if (!grouped.has(key)) {
-      grouped.set(key, []);
-    }
+    if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push(ticket);
   }
 
@@ -242,408 +281,6 @@ function canonicalizeTickets(rawTickets) {
 
     return newestTicketTimestamp(b) - newestTicketTimestamp(a);
   });
-}
-
-function normalizeStaffKey(value) {
-  return String(value || "").trim();
-}
-
-function looksLikeDiscordId(value) {
-  const text = normalizeString(value);
-  return /^\d{16,22}$/.test(text);
-}
-
-function normalizeStaffName(value) {
-  return normalizeString(value);
-}
-
-function cleanDisplayName(value) {
-  const text = normalizeStaffName(value);
-  if (!text) return "";
-  if (looksLikeDiscordId(text)) return "";
-  return text;
-}
-
-function isTruthyFlag(value) {
-  if (typeof value === "boolean") return value;
-  const text = normalizeString(value).toLowerCase();
-  return text === "true" || text === "1" || text === "yes";
-}
-
-function isLikelyBotName(value) {
-  const text = normalizeString(value).toLowerCase();
-  if (!text) return false;
-
-  const needles = [
-    "bot",
-    "ticket tool",
-    "tickettool",
-    "disboard",
-    "probot",
-    "jockie music",
-    "top.gg",
-    "pokemon idle",
-    "verify helper",
-    "stoney verify",
-    "stoney-verify-helper",
-    "manager bot",
-    "idle grow op",
-  ];
-
-  return needles.some((needle) => text.includes(needle));
-}
-
-function isBotLikeMember(member) {
-  if (!member) return false;
-
-  if (
-    isTruthyFlag(member?.is_bot) ||
-    isTruthyFlag(member?.bot) ||
-    isTruthyFlag(member?.isBot) ||
-    isTruthyFlag(member?.user_is_bot) ||
-    isTruthyFlag(member?.member_is_bot)
-  ) {
-    return true;
-  }
-
-  return isLikelyBotName(member?.display_name) || isLikelyBotName(member?.username);
-}
-
-function pickBestStaffDisplayName(candidates, fallback = "Unknown Staff") {
-  const cleaned = safeArray(candidates)
-    .map(cleanDisplayName)
-    .filter(Boolean)
-    .filter((name) => !isLikelyBotName(name));
-
-  if (!cleaned.length) return fallback;
-
-  cleaned.sort((a, b) => {
-    const score = (name) => {
-      let s = 0;
-      if (/[A-Z]/.test(name)) s += 5;
-      if (!name.includes("#")) s += 2;
-      if (!/^\d+$/.test(name)) s += 5;
-      s += Math.min(name.length, 32) / 10;
-      return s;
-    };
-
-    const diff = score(b) - score(a);
-    if (diff !== 0) return diff;
-
-    return a.localeCompare(b);
-  });
-
-  return cleaned[0] || fallback;
-}
-
-function buildMemberIdentityMaps(guildMembers) {
-  const byId = new Map();
-  const nameToId = new Map();
-
-  for (const member of safeArray(guildMembers)) {
-    const userId = normalizeString(member?.user_id);
-    const names = [
-      member?.display_name,
-      member?.nickname,
-      member?.username,
-      ...(Array.isArray(member?.previous_usernames) ? member.previous_usernames : []),
-      ...(Array.isArray(member?.previous_display_names) ? member.previous_display_names : []),
-      ...(Array.isArray(member?.previous_nicknames) ? member.previous_nicknames : []),
-    ]
-      .map((v) => normalizeString(v))
-      .filter(Boolean);
-
-    if (userId) {
-      byId.set(userId, member);
-    }
-
-    for (const name of names) {
-      const key = name.toLowerCase();
-      if (key && userId && !nameToId.has(key)) {
-        nameToId.set(key, userId);
-      }
-    }
-  }
-
-  return { byId, nameToId };
-}
-
-function resolveStaffIdentity(value, memberMaps) {
-  const raw = normalizeStaffKey(value);
-  if (!raw) return { key: "", member: null, rawName: "" };
-
-  if (looksLikeDiscordId(raw)) {
-    return {
-      key: raw,
-      member: memberMaps.byId.get(raw) || null,
-      rawName: "",
-    };
-  }
-
-  const matchedId = memberMaps.nameToId.get(raw.toLowerCase()) || "";
-  if (matchedId) {
-    return {
-      key: matchedId,
-      member: memberMaps.byId.get(matchedId) || null,
-      rawName: raw,
-    };
-  }
-
-  return {
-    key: `name:${raw.toLowerCase()}`,
-    member: null,
-    rawName: raw,
-  };
-}
-
-function deriveMetricsFromTickets(tickets = [], existingMetrics = [], guildMembers = []) {
-  const humanGuildMembers = safeArray(guildMembers).filter(
-    (member) => !isBotLikeMember(member)
-  );
-
-  const memberMaps = buildMemberIdentityMaps(humanGuildMembers);
-  const byStaff = new Map();
-
-  function isHumanIdentity(identity) {
-    if (!identity?.key) return false;
-    if (identity.member) return !isBotLikeMember(identity.member);
-    if (isLikelyBotName(identity.rawName)) return false;
-    return true;
-  }
-
-  function ensureRow(identityKey, seed = {}) {
-    const key = normalizeStaffKey(identityKey);
-    if (!key) return null;
-
-    if (!byStaff.has(key)) {
-      const member = seed.member || null;
-
-      if (member && isBotLikeMember(member)) {
-        return null;
-      }
-
-      const fallbackName =
-        member?.display_name ||
-        member?.nickname ||
-        member?.username ||
-        seed?.staff_name ||
-        seed?.rawName ||
-        "Unknown Staff";
-
-      if (isLikelyBotName(fallbackName)) {
-        return null;
-      }
-
-      byStaff.set(key, {
-        staff_id: looksLikeDiscordId(key)
-          ? key
-          : normalizeStaffKey(seed?.staff_id || ""),
-        staff_name: pickBestStaffDisplayName(
-          [
-            seed?.staff_name,
-            seed?.rawName,
-            member?.display_name,
-            member?.nickname,
-            member?.username,
-          ],
-          fallbackName
-        ),
-        tickets_handled: 0,
-        approvals: 0,
-        denials: 0,
-        avg_response_minutes: 0,
-        last_active: null,
-        is_bot: false,
-      });
-    }
-
-    return byStaff.get(key);
-  }
-
-  for (const row of safeArray(existingMetrics)) {
-    const idIdentity = resolveStaffIdentity(row?.staff_id, memberMaps);
-    const nameIdentity = resolveStaffIdentity(row?.staff_name, memberMaps);
-
-    const preferredMember = idIdentity.member || nameIdentity.member || null;
-    const identityKey =
-      idIdentity.key ||
-      nameIdentity.key ||
-      normalizeStaffKey(row?.staff_id || row?.staff_name);
-
-    if (!identityKey) continue;
-    if (preferredMember && isBotLikeMember(preferredMember)) continue;
-    if (!preferredMember && isLikelyBotName(row?.staff_name || row?.staff_id)) continue;
-
-    byStaff.set(identityKey, {
-      staff_id: preferredMember?.user_id || (looksLikeDiscordId(identityKey) ? identityKey : ""),
-      staff_name: pickBestStaffDisplayName(
-        [
-          row?.staff_name,
-          nameIdentity.rawName,
-          preferredMember?.display_name,
-          preferredMember?.nickname,
-          preferredMember?.username,
-        ],
-        preferredMember?.display_name ||
-          preferredMember?.nickname ||
-          preferredMember?.username ||
-          row?.staff_name ||
-          "Unknown Staff"
-      ),
-      tickets_handled: Number(row?.tickets_handled || 0),
-      approvals: Number(row?.approvals || 0),
-      denials: Number(row?.denials || 0),
-      avg_response_minutes: Number(row?.avg_response_minutes || 0),
-      last_active: row?.last_active || null,
-      is_bot: false,
-    });
-  }
-
-  for (const ticket of safeArray(tickets)) {
-    const status = normalizeStatus(ticket?.status);
-    const category = String(ticket?.category || "").trim().toLowerCase();
-
-    const candidates = [
-      ticket?.closed_by,
-      ticket?.claimed_by,
-      ticket?.assigned_to,
-      ticket?.staff_id,
-      ticket?.closed_by_name,
-      ticket?.claimed_by_name,
-      ticket?.assigned_to_name,
-      ticket?.staff_name,
-    ];
-
-    let identity = { key: "", member: null, rawName: "" };
-
-    for (const candidate of candidates) {
-      identity = resolveStaffIdentity(candidate, memberMaps);
-      if (identity.key) break;
-    }
-
-    if (!identity.key) continue;
-    if (!isHumanIdentity(identity)) continue;
-
-    const row = ensureRow(identity.key, {
-      staff_id:
-        identity.member?.user_id ||
-        (looksLikeDiscordId(identity.key) ? identity.key : ""),
-      staff_name: pickBestStaffDisplayName(
-        [
-          ticket?.closed_by_name,
-          ticket?.claimed_by_name,
-          ticket?.assigned_to_name,
-          ticket?.staff_name,
-          identity.rawName,
-          identity.member?.display_name,
-          identity.member?.nickname,
-          identity.member?.username,
-        ],
-        identity.member?.display_name ||
-          identity.member?.nickname ||
-          identity.member?.username ||
-          identity.rawName ||
-          "Unknown Staff"
-      ),
-      rawName: identity.rawName,
-      member: identity.member,
-    });
-
-    if (!row) continue;
-
-    const updatedAt = ticket?.updated_at || ticket?.closed_at || ticket?.created_at || null;
-
-    if (
-      updatedAt &&
-      (!row.last_active || parseDateMs(updatedAt) > parseDateMs(row.last_active))
-    ) {
-      row.last_active = updatedAt;
-    }
-
-    row.staff_name = pickBestStaffDisplayName(
-      [
-        row.staff_name,
-        ticket?.closed_by_name,
-        ticket?.claimed_by_name,
-        ticket?.assigned_to_name,
-        ticket?.staff_name,
-        identity.rawName,
-        identity.member?.display_name,
-        identity.member?.nickname,
-        identity.member?.username,
-      ],
-      row.staff_name || "Unknown Staff"
-    );
-
-    if (!row.staff_id && identity.member?.user_id) {
-      row.staff_id = String(identity.member.user_id);
-    } else if (!row.staff_id && looksLikeDiscordId(identity.key)) {
-      row.staff_id = identity.key;
-    }
-
-    if (status === "closed" || status === "deleted") {
-      row.tickets_handled += 1;
-
-      const reasonText = String(
-        ticket?.closed_reason || ticket?.reason || ticket?.mod_suggestion || ""
-      ).toLowerCase();
-
-      const denied = /\b(deny|denied|reject|rejected|decline|declined|failed)\b/.test(reasonText);
-
-      if (category.includes("verification")) {
-        if (denied) row.denials += 1;
-        else row.approvals += 1;
-      }
-    }
-  }
-
-  return [...byStaff.values()]
-    .filter((row) => row.staff_id || row.staff_name)
-    .filter((row) => !isLikelyBotName(row?.staff_name || row?.staff_id))
-    .sort((a, b) => {
-      const handledDiff = Number(b?.tickets_handled || 0) - Number(a?.tickets_handled || 0);
-      if (handledDiff !== 0) return handledDiff;
-
-      const approvalsDiff = Number(b?.approvals || 0) - Number(a?.approvals || 0);
-      if (approvalsDiff !== 0) return approvalsDiff;
-
-      return String(a?.staff_name || a?.staff_id || "").localeCompare(
-        String(b?.staff_name || b?.staff_id || "")
-      );
-    });
-}
-
-function mergeJoinWithMember(joinRow, memberRow) {
-  return {
-    ...(memberRow || {}),
-    ...(joinRow || {}),
-    user_id: joinRow?.user_id || memberRow?.user_id || "",
-    username: memberRow?.username || joinRow?.username || "",
-    display_name:
-      memberRow?.display_name || joinRow?.display_name || joinRow?.username || "",
-    nickname: memberRow?.nickname || "",
-    avatar_url: memberRow?.avatar_url || null,
-    in_guild: memberRow?.in_guild !== false,
-    has_verified_role: Boolean(memberRow?.has_verified_role),
-    has_staff_role: Boolean(memberRow?.has_staff_role),
-    has_unverified: Boolean(memberRow?.has_unverified),
-    role_state: memberRow?.role_state || "unknown",
-    role_state_reason: memberRow?.role_state_reason || "",
-    top_role: memberRow?.top_role || memberRow?.highest_role_name || null,
-    highest_role_name: memberRow?.highest_role_name || null,
-    highest_role_id: memberRow?.highest_role_id || null,
-    role_names: Array.isArray(memberRow?.role_names) ? memberRow.role_names : [],
-    role_ids: Array.isArray(memberRow?.role_ids) ? memberRow.role_ids : [],
-    roles: Array.isArray(memberRow?.roles) ? memberRow.roles : [],
-    joined_at: joinRow?.joined_at || memberRow?.joined_at || null,
-    synced_at: memberRow?.synced_at || null,
-    updated_at: memberRow?.updated_at || null,
-    last_seen_at: memberRow?.last_seen_at || null,
-    left_at: memberRow?.left_at || null,
-    rejoined_at: memberRow?.rejoined_at || null,
-    voice_channel_id: memberRow?.voice_channel_id || null,
-    voice_state: memberRow?.voice_state || null,
-  };
 }
 
 function mapTicket(row) {
@@ -695,27 +332,30 @@ function mapGuildMember(row) {
     last_seen_at: row?.last_seen_at || null,
     left_at: row?.left_at || null,
     rejoined_at: row?.rejoined_at || null,
+    first_seen_at: row?.first_seen_at || null,
+    last_seen_username: row?.last_seen_username || null,
+    last_seen_display_name: row?.last_seen_display_name || null,
+    last_seen_nickname: row?.last_seen_nickname || null,
     previous_usernames: Array.isArray(row?.previous_usernames) ? row.previous_usernames : [],
     previous_display_names: Array.isArray(row?.previous_display_names) ? row.previous_display_names : [],
     previous_nicknames: Array.isArray(row?.previous_nicknames) ? row.previous_nicknames : [],
-    voice_channel_id: row?.voice_channel_id || null,
-    voice_state: row?.voice_state || null,
+    top_role: row?.top_role || row?.highest_role_name || null,
+    highest_role_name: row?.highest_role_name || row?.top_role || null,
+    highest_role_id: row?.highest_role_id || null,
+    invited_by: row?.invited_by || null,
+    invited_by_name: row?.invited_by_name || null,
+    invite_code: row?.invite_code || null,
+    vouched_by: row?.vouched_by || null,
+    vouched_by_name: row?.vouched_by_name || null,
+    approved_by: row?.approved_by || null,
+    approved_by_name: row?.approved_by_name || null,
+    verification_ticket_id: row?.verification_ticket_id || null,
+    source_ticket_id: row?.source_ticket_id || null,
+    entry_method: row?.entry_method || null,
+    verification_source: row?.verification_source || null,
+    entry_reason: row?.entry_reason || null,
+    approval_reason: row?.approval_reason || null,
   };
-}
-
-function computeRoleMemberCount(role, members) {
-  const roleId = normalizeString(role?.role_id);
-  const roleName = normalizeString(role?.name).toLowerCase();
-
-  return members.filter((member) => {
-    const ids = safeArray(member?.role_ids).map((v) => normalizeString(v));
-    const names = safeArray(member?.role_names).map((v) => normalizeString(v).toLowerCase());
-
-    return (
-      (roleId && ids.includes(roleId)) ||
-      (roleName && names.includes(roleName))
-    );
-  }).length;
 }
 
 function mapWarn(row, guildMembers) {
@@ -763,6 +403,23 @@ function mapRaid(row) {
   };
 }
 
+function computeRoleMemberCount(role, members) {
+  const roleId = normalizeString(role?.role_id);
+  const roleName = normalizeString(role?.name).toLowerCase();
+
+  return members.filter((member) => {
+    const ids = safeArray(member?.role_ids).map((v) => normalizeString(v));
+    const names = safeArray(member?.role_names).map((v) =>
+      normalizeString(v).toLowerCase()
+    );
+
+    return (
+      (roleId && ids.includes(roleId)) ||
+      (roleName && names.includes(roleName))
+    );
+  }).length;
+}
+
 function mapVoiceChannels(channels) {
   const allowedTypes = new Set([2, 13]);
   const rows = safeArray(channels)
@@ -789,128 +446,35 @@ function mapVoiceChannels(channels) {
   return rows;
 }
 
-function buildIntelligence({ counts, memberCounts, fraud, guildMembers }) {
-  const openTickets = Number(counts?.openTickets || 0);
-  const warnsToday = Number(counts?.warnsToday || 0);
-  const raidAlerts = Number(counts?.raidAlerts || 0);
-  const fraudFlags = Number(counts?.fraudFlags || 0);
-  const pendingVerification = Number(memberCounts?.pendingVerification || 0);
-  const verified = Number(memberCounts?.verified || 0);
-  const active = Number(memberCounts?.active || 0);
-
-  let serverHealth = "Stable";
-  if (fraudFlags >= 4 || raidAlerts >= 2 || openTickets >= 14) {
-    serverHealth = "Elevated";
-  }
-  if (fraudFlags >= 8 || raidAlerts >= 4 || openTickets >= 24) {
-    serverHealth = "Critical";
-  }
-
-  let raidRisk = "Low";
-  let raidReason = "No recent raid alert threshold was crossed.";
-  if (raidAlerts >= 1) {
-    raidRisk = "Moderate";
-    raidReason = `${raidAlerts} recent raid alert(s) were recorded in the last 24 hours.`;
-  }
-  if (raidAlerts >= 3) {
-    raidRisk = "High";
-    raidReason = `${raidAlerts} raid alerts were recorded recently and need immediate review.`;
-  }
-
-  let fraudRisk = "Low";
-  let fraudReason = "No active fraud flags are currently driving the score.";
-  if (fraudFlags >= 1 || pendingVerification >= 12) {
-    fraudRisk = "Moderate";
-    fraudReason =
-      fraudFlags >= 1
-        ? `${fraudFlags} active fraud flag(s) exist and should be reviewed.`
-        : `Verification backlog is elevated at ${pendingVerification} pending, which raises fraud/manual review pressure.`;
-  }
-  if (fraudFlags >= 5) {
-    fraudRisk = "High";
-    fraudReason = `${fraudFlags} active fraud flag(s) are currently unresolved.`;
-  }
-
-  let ticketPressure = "Low";
-  let ticketReason = "Ticket load is within normal range.";
-  if (openTickets >= 6) {
-    ticketPressure = "Moderate";
-    ticketReason = `${openTickets} active tickets are open or claimed.`;
-  }
-  if (openTickets >= 14) {
-    ticketPressure = "High";
-    ticketReason = `${openTickets} active tickets are creating heavy staff load.`;
-  }
-
-  let verificationPressure = "Low";
-  let verificationReason = "Verification queue is under control.";
-  if (pendingVerification >= 8) {
-    verificationPressure = "Moderate";
-    verificationReason = `${pendingVerification} members are currently pending verification after strict filtering.`;
-  }
-  if (pendingVerification >= 16) {
-    verificationPressure = "High";
-    verificationReason = `${pendingVerification} members are pending verification and the queue likely needs direct staff cleanup.`;
-  }
-
-  const verifiedRate = active > 0 ? Math.round((verified / active) * 100) : 0;
-
-  const topFraudMembers = safeArray(fraud)
-    .slice(0, 5)
-    .map((row) => ({
-      user_id: row?.user_id || "",
-      display_name: row?.display_name || row?.username || row?.user_id || "Unknown User",
-      score: Number(row?.score || 0),
-      reasons: Array.isArray(row?.reasons) ? row.reasons : [],
-    }));
-
-  const topConflictMembers = safeArray(guildMembers)
-    .filter((member) => String(member?.role_state || "").includes("conflict"))
-    .slice(0, 5)
-    .map((member) => ({
-      user_id: member?.user_id || "",
-      display_name:
-        member?.display_name || member?.nickname || member?.username || member?.user_id || "Unknown User",
-      role_state: member?.role_state || "unknown",
-      role_state_reason: member?.role_state_reason || "",
-    }));
-
+function mergeJoinWithMember(joinRow, memberRow) {
   return {
-    serverHealth,
-    raidRisk,
-    fraudRisk,
-    ticketPressure,
-    verificationPressure,
-    verifiedRate,
-    reasons: {
-      serverHealth:
-        serverHealth === "Stable"
-          ? "No major threshold is currently tripping the health score."
-          : "Health is elevated by ticket load, fraud signals, or raid activity.",
-      raidRiskReason: raidReason,
-      fraudRiskReason: fraudReason,
-      ticketPressureReason: ticketReason,
-      verificationPressureReason: verificationReason,
-    },
-    topFraudMembers,
-    topConflictMembers,
+    ...(memberRow || {}),
+    ...(joinRow || {}),
+    user_id: joinRow?.user_id || memberRow?.user_id || "",
+    username: memberRow?.username || joinRow?.username || "",
+    display_name:
+      memberRow?.display_name || joinRow?.display_name || joinRow?.username || "",
+    nickname: memberRow?.nickname || "",
+    avatar_url: memberRow?.avatar_url || null,
+    in_guild: memberRow?.in_guild !== false,
+    has_verified_role: Boolean(memberRow?.has_verified_role),
+    has_staff_role: Boolean(memberRow?.has_staff_role),
+    has_unverified: Boolean(memberRow?.has_unverified),
+    role_state: memberRow?.role_state || "unknown",
+    role_state_reason: memberRow?.role_state_reason || "",
+    top_role: memberRow?.top_role || memberRow?.highest_role_name || null,
+    highest_role_name: memberRow?.highest_role_name || null,
+    highest_role_id: memberRow?.highest_role_id || null,
+    role_names: Array.isArray(memberRow?.role_names) ? memberRow.role_names : [],
+    role_ids: Array.isArray(memberRow?.role_ids) ? memberRow.role_ids : [],
+    roles: Array.isArray(memberRow?.roles) ? memberRow.roles : [],
+    joined_at: joinRow?.joined_at || memberRow?.joined_at || null,
+    synced_at: memberRow?.synced_at || null,
+    updated_at: memberRow?.updated_at || null,
+    last_seen_at: memberRow?.last_seen_at || null,
+    left_at: memberRow?.left_at || null,
+    rejoined_at: memberRow?.rejoined_at || null,
   };
-}
-
-function buildSupportPayload({ roles, voiceChannels, debugInfo = null }) {
-  return {
-    roles,
-    voiceChannels,
-    supportOnly: true,
-    debug: debugEnabled() ? debugInfo : undefined,
-  };
-}
-
-// NOTE: Bumping the max and default limit drastically to support pulling back the missing historical events
-function clampActivityLimit(value, fallback = 500, max = 5000) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-  return Math.min(Math.max(Math.floor(parsed), 1), max);
 }
 
 function firstNonEmpty(...values) {
@@ -921,6 +485,36 @@ function firstNonEmpty(...values) {
   return "";
 }
 
+function buildMemberIdentityMaps(guildMembers) {
+  const byId = new Map();
+  const nameToId = new Map();
+
+  for (const member of safeArray(guildMembers)) {
+    const userId = normalizeString(member?.user_id);
+    if (userId) byId.set(userId, member);
+
+    const names = [
+      member?.display_name,
+      member?.nickname,
+      member?.username,
+      ...(Array.isArray(member?.previous_usernames) ? member.previous_usernames : []),
+      ...(Array.isArray(member?.previous_display_names) ? member.previous_display_names : []),
+      ...(Array.isArray(member?.previous_nicknames) ? member.previous_nicknames : []),
+    ]
+      .map((v) => normalizeString(v))
+      .filter(Boolean);
+
+    for (const name of names) {
+      const key = name.toLowerCase();
+      if (key && userId && !nameToId.has(key)) {
+        nameToId.set(key, userId);
+      }
+    }
+  }
+
+  return { byId, nameToId };
+}
+
 function getSafeMeta(row) {
   return row?.metadata && typeof row.metadata === "object"
     ? row.metadata
@@ -929,17 +523,13 @@ function getSafeMeta(row) {
       : {};
 }
 
-function resolveMemberByIdOrName({ guildMembers, memberMaps, idCandidates = [], nameCandidates = [] }) {
+function resolveMemberByIdOrName({ memberMaps, idCandidates = [], nameCandidates = [] }) {
   for (const candidate of idCandidates) {
     const id = normalizeString(candidate);
     if (!id) continue;
     const member = memberMaps.byId.get(id);
     if (member) {
-      return {
-        member,
-        id,
-        resolvedBy: "id",
-      };
+      return { member, id, resolvedBy: "id" };
     }
   }
 
@@ -947,98 +537,70 @@ function resolveMemberByIdOrName({ guildMembers, memberMaps, idCandidates = [], 
     const name = normalizeString(candidate);
     if (!name) continue;
     const matchedId = memberMaps.nameToId.get(name.toLowerCase());
-    if (matchedId) {
-      const member = memberMaps.byId.get(matchedId);
-      if (member) {
-        return {
-          member,
-          id: matchedId,
-          resolvedBy: "name",
-        };
-      }
+    if (!matchedId) continue;
+    const member = memberMaps.byId.get(matchedId);
+    if (member) {
+      return { member, id: matchedId, resolvedBy: "name" };
     }
   }
 
-  return {
-    member: null,
-    id: "",
-    resolvedBy: "",
-  };
+  return { member: null, id: "", resolvedBy: "" };
 }
 
 function mapActivityFeedEvent(row, guildMembers, memberMaps) {
   const meta = getSafeMeta(row);
 
-  const actorIdCandidates = [
-    row?.actor_user_id,
-    row?.actor_id,
-    row?.staff_id,
-    row?.requested_by,
-    row?.performed_by,
-    meta?.actor_user_id,
-    meta?.actor_id,
-    meta?.staff_id,
-    meta?.requested_by,
-    meta?.performed_by,
-    meta?.closed_by,
-    meta?.claimed_by,
-    meta?.assigned_to,
-  ];
-
-  const actorNameCandidates = [
-    row?.actor_name,
-    row?.actor_display,
-    row?.staff_name,
-    row?.requested_by_name,
-    row?.performed_by_name,
-    meta?.actor_name,
-    meta?.actor_display,
-    meta?.staff_name,
-    meta?.staff_display,
-    meta?.requested_by_name,
-    meta?.performed_by_name,
-    meta?.closed_by_name,
-    meta?.claimed_by_name,
-    meta?.assigned_to_name,
-  ];
-
-  const targetIdCandidates = [
-    row?.target_user_id,
-    row?.user_id,
-    row?.member_id,
-    row?.owner_id,
-    meta?.target_user_id,
-    meta?.user_id,
-    meta?.member_id,
-    meta?.owner_id,
-    meta?.requester_id,
-  ];
-
-  const targetNameCandidates = [
-    row?.target_name,
-    row?.username,
-    row?.member_name,
-    row?.owner_name,
-    meta?.target_name,
-    meta?.username,
-    meta?.member_name,
-    meta?.owner_name,
-    meta?.requester_display_name,
-    meta?.requester_username,
-  ];
-
   const actorResolved = resolveMemberByIdOrName({
-    guildMembers,
     memberMaps,
-    idCandidates: actorIdCandidates,
-    nameCandidates: actorNameCandidates,
+    idCandidates: [
+      row?.actor_user_id,
+      row?.actor_id,
+      row?.staff_id,
+      meta?.actor_user_id,
+      meta?.actor_id,
+      meta?.staff_id,
+      meta?.requested_by,
+      meta?.closed_by,
+      meta?.claimed_by,
+      meta?.assigned_to,
+    ],
+    nameCandidates: [
+      row?.actor_name,
+      row?.actor_display,
+      row?.staff_name,
+      meta?.actor_name,
+      meta?.actor_display,
+      meta?.staff_name,
+      meta?.requested_by_name,
+      meta?.closed_by_name,
+      meta?.claimed_by_name,
+      meta?.assigned_to_name,
+    ],
   });
 
   const targetResolved = resolveMemberByIdOrName({
-    guildMembers,
     memberMaps,
-    idCandidates: targetIdCandidates,
-    nameCandidates: targetNameCandidates,
+    idCandidates: [
+      row?.target_user_id,
+      row?.user_id,
+      row?.member_id,
+      meta?.target_user_id,
+      meta?.user_id,
+      meta?.member_id,
+      meta?.owner_id,
+      meta?.requester_id,
+    ],
+    nameCandidates: [
+      row?.target_name,
+      row?.username,
+      row?.member_name,
+      meta?.target_name,
+      meta?.username,
+      meta?.member_name,
+      meta?.owner_name,
+      meta?.requester_display_name,
+      meta?.requester_username,
+    ],
   });
 
   const actorId = firstNonEmpty(
@@ -1047,30 +609,22 @@ function mapActivityFeedEvent(row, guildMembers, memberMaps) {
     row?.actor_user_id,
     row?.actor_id,
     row?.staff_id,
-    row?.requested_by,
-    row?.performed_by,
     meta?.actor_user_id,
     meta?.actor_id,
-    meta?.staff_id,
-    meta?.requested_by,
-    meta?.performed_by
+    meta?.staff_id
   );
 
   const actorName = firstNonEmpty(
     row?.actor_name,
     row?.actor_display,
     row?.staff_name,
-    row?.requested_by_name,
-    row?.performed_by_name,
     meta?.actor_name,
     meta?.actor_display,
     meta?.staff_name,
-    meta?.staff_display,
-    meta?.requested_by_name,
-    meta?.performed_by_name,
     actorResolved?.member?.display_name,
     actorResolved?.member?.nickname,
-    actorResolved?.member?.username
+    actorResolved?.member?.username,
+    "System"
   );
 
   const targetId = firstNonEmpty(
@@ -1079,7 +633,6 @@ function mapActivityFeedEvent(row, guildMembers, memberMaps) {
     row?.target_user_id,
     row?.user_id,
     row?.member_id,
-    row?.owner_id,
     meta?.target_user_id,
     meta?.user_id,
     meta?.member_id,
@@ -1091,7 +644,6 @@ function mapActivityFeedEvent(row, guildMembers, memberMaps) {
     row?.target_name,
     row?.username,
     row?.member_name,
-    row?.owner_name,
     meta?.target_name,
     meta?.username,
     meta?.member_name,
@@ -1179,8 +731,42 @@ function buildTimeline(activityRows, guildMembers, limit = 500) {
 
   return safeArray(activityRows)
     .map((row) => mapActivityFeedEvent(row, guildMembers, memberMaps))
-    .sort((a, b) => toTime(b.created_at) - toTime(a.created_at))
+    .sort((a, b) => parseDateMs(b.created_at) - parseDateMs(a.created_at))
     .slice(0, limit);
+}
+
+function buildSupportPayload({ roles, voiceChannels, debugInfo = null }) {
+  return {
+    roles,
+    voiceChannels,
+    supportOnly: true,
+    debug: debugEnabled() ? debugInfo : undefined,
+  };
+}
+
+function isPendingVerificationMember(row) {
+  const member = mapGuildMember(row);
+  if (!member) return false;
+  if (member.in_guild === false) return false;
+  if (member.is_bot) return false;
+  if (member.has_staff_role) return false;
+  if (member.has_verified_role) return false;
+  if (!member.has_unverified) return false;
+
+  const health = normalizeString(member?.data_health || "ok").toLowerCase();
+  if (health === "left_guild") return false;
+
+  const roleState = normalizeString(member?.role_state || "").toLowerCase();
+  if (
+    roleState &&
+    roleState !== "unverified_only" &&
+    roleState !== "missing_verified_role" &&
+    roleState !== "unknown"
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 async function loadActivityFeed({
@@ -1228,24 +814,676 @@ async function loadActivityFeed({
   return query;
 }
 
-function isPendingVerificationMember(row) {
-  const member = mapGuildMember(row);
-  if (!member) return false;
-  if (member.in_guild === false) return false;
-  if (member.is_bot) return false;
-  if (member.has_staff_role) return false;
-  if (member.has_verified_role) return false;
-  if (!member.has_unverified) return false;
+async function loadRowsByChunk({
+  ids,
+  size = 150,
+  loader,
+}) {
+  const chunks = chunkArray(ids, size);
+  if (!chunks.length) return [];
 
-  const health = normalizeString(member?.data_health || "ok").toLowerCase();
-  if (health === "left_guild") return false;
+  const results = await Promise.all(
+    chunks.map((chunk) => loader(chunk))
+  );
 
-  const roleState = normalizeString(member?.role_state || "").toLowerCase();
-  if (roleState && roleState !== "unverified_only" && roleState !== "missing_verified_role" && roleState !== "unknown") {
-    return false;
+  return results.flat();
+}
+
+function buildFlagsByUser(rows) {
+  const map = new Map();
+
+  for (const row of safeArray(rows)) {
+    const userId = normalizeString(row?.user_id);
+    if (!userId) continue;
+
+    if (!map.has(userId)) {
+      map.set(userId, []);
+    }
+
+    map.get(userId).push({
+      id: row?.id || null,
+      user_id: userId,
+      score: normalizeNumber(row?.score, 0),
+      flagged: Boolean(row?.flagged),
+      reasons: Array.isArray(row?.reasons) ? row.reasons : [],
+      created_at: row?.created_at || null,
+    });
   }
 
-  return true;
+  return map;
+}
+
+function buildMemberEventsByUser(rows) {
+  const map = new Map();
+
+  for (const row of safeArray(rows)) {
+    const userId = normalizeString(row?.user_id);
+    if (!userId) continue;
+
+    if (!map.has(userId)) {
+      map.set(userId, []);
+    }
+
+    map.get(userId).push({
+      id: row?.id || null,
+      user_id: userId,
+      event_type: normalizeString(row?.event_type).toLowerCase(),
+      title: row?.title || "",
+      reason: row?.reason || "",
+      created_at: row?.created_at || null,
+      metadata: safeObject(row?.metadata),
+    });
+  }
+
+  return map;
+}
+
+function buildNotesByTicket(rows) {
+  const map = new Map();
+
+  for (const row of safeArray(rows)) {
+    const ticketId = normalizeString(row?.ticket_id);
+    if (!ticketId) continue;
+
+    if (!map.has(ticketId)) {
+      map.set(ticketId, []);
+    }
+
+    map.get(ticketId).push({
+      id: row?.id || null,
+      ticket_id: ticketId,
+      staff_id: row?.staff_id || row?.author_id || null,
+      staff_name: row?.staff_name || row?.author_name || null,
+      content: row?.content || row?.note_body || "",
+      created_at: row?.created_at || null,
+      updated_at: row?.updated_at || null,
+      is_pinned: Boolean(row?.is_pinned),
+    });
+  }
+
+  return map;
+}
+
+function buildMessagesByTicket(rows) {
+  const map = new Map();
+
+  for (const row of safeArray(rows)) {
+    const ticketId = normalizeString(row?.ticket_id);
+    if (!ticketId) continue;
+
+    if (!map.has(ticketId)) {
+      map.set(ticketId, []);
+    }
+
+    map.get(ticketId).push({
+      id: row?.id || null,
+      ticket_id: ticketId,
+      author_id: row?.author_id || null,
+      author_name: row?.author_name || null,
+      content: row?.content || "",
+      message_type: normalizeString(row?.message_type).toLowerCase() || "staff",
+      created_at: row?.created_at || null,
+      source: row?.source || null,
+      attachments: safeArray(row?.attachments),
+    });
+  }
+
+  return map;
+}
+
+function buildActivityByTicket(rows) {
+  const map = new Map();
+
+  for (const row of safeArray(rows)) {
+    const ticketId = normalizeString(row?.ticket_id);
+    if (!ticketId) continue;
+
+    if (!map.has(ticketId)) {
+      map.set(ticketId, []);
+    }
+
+    map.get(ticketId).push(row);
+  }
+
+  return map;
+}
+
+function buildTicketStatsByUser(tickets) {
+  const map = new Map();
+
+  for (const ticket of safeArray(tickets)) {
+    const userId = normalizeString(ticket?.user_id);
+    if (!userId) continue;
+
+    if (!map.has(userId)) {
+      map.set(userId, {
+        total: 0,
+        active: 0,
+        closed: 0,
+        deleted: 0,
+        latest_ticket_at: null,
+      });
+    }
+
+    const row = map.get(userId);
+    row.total += 1;
+
+    const status = normalizeStatus(ticket?.status);
+    if (status === "open" || status === "claimed") row.active += 1;
+    if (status === "closed") row.closed += 1;
+    if (status === "deleted") row.deleted += 1;
+
+    const candidateTime =
+      ticket?.updated_at || ticket?.created_at || ticket?.closed_at || null;
+
+    if (
+      candidateTime &&
+      (!row.latest_ticket_at ||
+        parseDateMs(candidateTime) > parseDateMs(row.latest_ticket_at))
+    ) {
+      row.latest_ticket_at = candidateTime;
+    }
+  }
+
+  return map;
+}
+
+function deriveModerationCount(memberEvents = []) {
+  const moderationTypes = new Set([
+    "warn",
+    "warning",
+    "kick",
+    "ban",
+    "timeout",
+    "deny",
+    "denial",
+    "appeal_denied",
+    "verification_denied",
+  ]);
+
+  return safeArray(memberEvents).filter((row) => {
+    const type = normalizeString(row?.event_type).toLowerCase();
+    if (moderationTypes.has(type)) return true;
+
+    const haystack = `${row?.title || ""} ${row?.reason || ""}`.toLowerCase();
+    return /(warn|kick|ban|timeout|denied|deny|rejected|reject)/.test(haystack);
+  }).length;
+}
+
+function deriveVerificationLabel({
+  member,
+  flagRows,
+  ticket,
+}) {
+  const status = normalizeStatus(ticket?.status);
+
+  if (member?.has_staff_role) return "Staff";
+  if (member?.has_verified_role || member?.has_secondary_verified_role) return "Verified";
+  if (safeArray(flagRows).some((row) => row?.flagged)) return "Needs Review";
+  if (ticket?.matched_intake_type === "verification" || member?.has_unverified) {
+    if (status === "closed" || status === "deleted") {
+      return "Verification History";
+    }
+    return "Pending Verification";
+  }
+
+  return "Unknown";
+}
+
+function deriveSla(ticket) {
+  const now = Date.now();
+  const deadlineMs = parseDateMs(ticket?.sla_deadline);
+  const createdMs = parseDateMs(ticket?.created_at);
+  const updatedMs = parseDateMs(ticket?.updated_at);
+  const basisMs = Math.max(updatedMs, createdMs);
+  const ageMinutes = basisMs ? Math.max(0, Math.floor((now - basisMs) / 60000)) : 0;
+  const status = normalizeStatus(ticket?.status);
+  const priority = normalizeStatus(ticket?.priority || "medium");
+
+  let overdue = false;
+  let minutesOverdue = 0;
+  let minutesUntilDeadline = null;
+  let slaStatus = "no_deadline";
+
+  if (deadlineMs) {
+    const diffMinutes = Math.floor((deadlineMs - now) / 60000);
+    if (diffMinutes < 0 && !isClosedLikeStatus(status)) {
+      overdue = true;
+      minutesOverdue = Math.abs(diffMinutes);
+      slaStatus = "overdue";
+    } else if (!isClosedLikeStatus(status)) {
+      minutesUntilDeadline = diffMinutes;
+      slaStatus = "counting_down";
+    } else {
+      slaStatus = "closed";
+    }
+  } else {
+    const softThreshold =
+      priority === "urgent"
+        ? 30
+        : priority === "high"
+          ? 60
+          : priority === "medium"
+            ? 180
+            : 360;
+
+    if (!isClosedLikeStatus(status) && ageMinutes > softThreshold) {
+      overdue = true;
+      minutesOverdue = ageMinutes - softThreshold;
+      slaStatus = "overdue_soft";
+    } else if (!isClosedLikeStatus(status)) {
+      slaStatus = "open";
+    } else {
+      slaStatus = "closed";
+    }
+  }
+
+  return {
+    deadline_at: ticket?.sla_deadline || null,
+    overdue,
+    minutes_overdue: minutesOverdue,
+    minutes_until_deadline: minutesUntilDeadline,
+    age_minutes: ageMinutes,
+    status: slaStatus,
+  };
+}
+
+function deriveRiskLevel({
+  member,
+  flagRows,
+  moderationCount,
+  userTicketStats,
+  sla,
+  ticket,
+}) {
+  const flaggedCount = safeArray(flagRows).filter((row) => row?.flagged).length;
+  const maxScore = Math.max(
+    0,
+    ...safeArray(flagRows).map((row) => normalizeNumber(row?.score, 0))
+  );
+  const activeCount = normalizeNumber(userTicketStats?.active, 0);
+  const totalCount = normalizeNumber(userTicketStats?.total, 0);
+  const priority = normalizeStatus(ticket?.priority || "medium");
+
+  if (
+    sla?.overdue ||
+    priority === "urgent" ||
+    flaggedCount > 0 ||
+    maxScore >= 5 ||
+    moderationCount >= 3 ||
+    normalizeString(member?.role_state).includes("conflict")
+  ) {
+    return "high";
+  }
+
+  if (
+    priority === "high" ||
+    maxScore >= 2 ||
+    moderationCount >= 1 ||
+    activeCount >= 2 ||
+    totalCount >= 4
+  ) {
+    return "medium";
+  }
+
+  return "low";
+}
+
+function buildRecommendedActions({
+  ticket,
+  member,
+  flagRows,
+  moderationCount,
+  noteCount,
+  sla,
+  userTicketStats,
+}) {
+  const actions = [];
+
+  if (!normalizeString(ticket?.assigned_to) && !normalizeString(ticket?.claimed_by)) {
+    actions.push("Claim this ticket.");
+  }
+
+  if (sla?.overdue) {
+    actions.push("Respond now — this ticket is overdue.");
+  }
+
+  if (safeArray(flagRows).some((row) => row?.flagged)) {
+    actions.push("Review verification flags before deciding.");
+  }
+
+  if (normalizeString(member?.role_state).includes("conflict")) {
+    actions.push("Check member role-state conflict.");
+  }
+
+  if ((ticket?.matched_intake_type || ticket?.category) === "verification" || member?.has_unverified) {
+    actions.push("Confirm verification path and final role state.");
+  }
+
+  if (noteCount <= 0) {
+    actions.push("Add an internal note for staff continuity.");
+  }
+
+  if (moderationCount > 0) {
+    actions.push("Review prior moderation history.");
+  }
+
+  if (normalizeNumber(userTicketStats?.total, 0) >= 3) {
+    actions.push("Check prior ticket history before replying.");
+  }
+
+  return uniqueBy(actions, (value) => value).slice(0, 6);
+}
+
+function buildOwnerContext(member, ticket) {
+  return {
+    owner_user_id: member?.user_id || ticket?.user_id || null,
+    owner_username: member?.username || ticket?.username || null,
+    owner_display_name:
+      member?.display_name ||
+      member?.nickname ||
+      member?.username ||
+      ticket?.username ||
+      ticket?.user_id ||
+      "Unknown Member",
+    owner_avatar_url: member?.avatar_url || null,
+    owner_role_state: member?.role_state || "unknown",
+    owner_role_state_reason: member?.role_state_reason || null,
+    owner_top_role: member?.top_role || member?.highest_role_name || null,
+    owner_entry_method: member?.entry_method || null,
+    owner_verification_source: member?.verification_source || null,
+    owner_entry_reason: member?.entry_reason || null,
+    owner_approval_reason: member?.approval_reason || null,
+    owner_invited_by: member?.invited_by || null,
+    owner_invited_by_name: member?.invited_by_name || null,
+    owner_invite_code: member?.invite_code || null,
+    owner_vouched_by: member?.vouched_by || null,
+    owner_vouched_by_name: member?.vouched_by_name || null,
+    owner_approved_by: member?.approved_by || null,
+    owner_approved_by_name: member?.approved_by_name || null,
+  };
+}
+
+function buildTicketWorkspace({
+  ticket,
+  member,
+  flagRows,
+  memberEvents,
+  notes,
+  messages,
+  activities,
+  userTicketStats,
+}) {
+  const sortedNotes = [...safeArray(notes)].sort(
+    (a, b) =>
+      parseDateMs(b?.updated_at || b?.created_at) -
+      parseDateMs(a?.updated_at || a?.created_at)
+  );
+
+  const sortedMessages = [...safeArray(messages)].sort(
+    (a, b) => parseDateMs(b?.created_at) - parseDateMs(a?.created_at)
+  );
+
+  const sortedActivities = [...safeArray(activities)].sort(
+    (a, b) => parseDateMs(b?.created_at) - parseDateMs(a?.created_at)
+  );
+
+  const latestNote = sortedNotes[0] || null;
+  const latestMessage = sortedMessages[0] || null;
+  const latestActivity = sortedActivities[0] || null;
+
+  const latestActivityAt =
+    latestActivity?.created_at ||
+    latestMessage?.created_at ||
+    latestNote?.updated_at ||
+    latestNote?.created_at ||
+    ticket?.updated_at ||
+    ticket?.created_at ||
+    null;
+
+  const noteCount = sortedNotes.length;
+  const messageCount = sortedMessages.length;
+  const activityCount = sortedActivities.length;
+  const flaggedCount = safeArray(flagRows).filter((row) => row?.flagged).length;
+  const maxFlagScore = Math.max(
+    0,
+    ...safeArray(flagRows).map((row) => normalizeNumber(row?.score, 0))
+  );
+  const moderationCount = deriveModerationCount(memberEvents);
+  const sla = deriveSla(ticket);
+
+  const verificationLabel = deriveVerificationLabel({
+    member,
+    flagRows,
+    ticket,
+  });
+
+  const riskLevel = deriveRiskLevel({
+    member,
+    flagRows,
+    moderationCount,
+    userTicketStats,
+    sla,
+    ticket,
+  });
+
+  const recommendedActions = buildRecommendedActions({
+    ticket,
+    member,
+    flagRows,
+    moderationCount,
+    noteCount,
+    sla,
+    userTicketStats,
+  });
+
+  return {
+    note_count: noteCount,
+    latest_note_at: latestNote?.updated_at || latestNote?.created_at || null,
+    latest_note_preview: latestNote?.content ? truncateText(latestNote.content, 120) : "",
+    message_count: messageCount,
+    latest_message_at: latestMessage?.created_at || null,
+    latest_message_preview: latestMessage?.content ? truncateText(latestMessage.content, 120) : "",
+    activity_count: activityCount,
+    latest_activity_at: latestActivityAt,
+    latest_activity_title:
+      latestActivity?.title ||
+      latestActivity?.event_type ||
+      latestMessage?.message_type ||
+      null,
+    flagged_count: flaggedCount,
+    flag_max_score: maxFlagScore,
+    moderation_count: moderationCount,
+    prior_ticket_total: normalizeNumber(userTicketStats?.total, 0),
+    prior_active_ticket_total: normalizeNumber(userTicketStats?.active, 0),
+    verification_label: verificationLabel,
+    risk_level: riskLevel,
+    recommended_actions: recommendedActions,
+    sla,
+  };
+}
+
+function enrichTicketForDashboard({
+  ticket,
+  member,
+  workspace,
+}) {
+  const ownerContext = buildOwnerContext(member, ticket);
+
+  return {
+    ...ticket,
+    ...ownerContext,
+    owner_verification_label: workspace.verification_label,
+    note_count: workspace.note_count,
+    latest_note_at: workspace.latest_note_at,
+    latest_note_preview: workspace.latest_note_preview,
+    message_count: workspace.message_count,
+    latest_message_at: workspace.latest_message_at,
+    latest_message_preview: workspace.latest_message_preview,
+    activity_count: workspace.activity_count,
+    latest_activity_at: workspace.latest_activity_at,
+    latest_activity_title: workspace.latest_activity_title,
+    flagged_count: workspace.flagged_count,
+    flag_max_score: workspace.flag_max_score,
+    moderation_count: workspace.moderation_count,
+    prior_ticket_total: workspace.prior_ticket_total,
+    prior_active_ticket_total: workspace.prior_active_ticket_total,
+    risk_level: workspace.risk_level,
+    recommended_actions: workspace.recommended_actions,
+    overdue: workspace.sla?.overdue || false,
+    sla_status: workspace.sla?.status || "no_deadline",
+    age_minutes: workspace.sla?.age_minutes || 0,
+    minutes_overdue: workspace.sla?.minutes_overdue || 0,
+    minutes_until_deadline: workspace.sla?.minutes_until_deadline ?? null,
+    workspace: {
+      verification_label: workspace.verification_label,
+      risk_level: workspace.risk_level,
+      note_count: workspace.note_count,
+      message_count: workspace.message_count,
+      activity_count: workspace.activity_count,
+      latest_activity_at: workspace.latest_activity_at,
+      latest_activity_title: workspace.latest_activity_title,
+      flagged_count: workspace.flagged_count,
+      flag_max_score: workspace.flag_max_score,
+      moderation_count: workspace.moderation_count,
+      prior_ticket_total: workspace.prior_ticket_total,
+      prior_active_ticket_total: workspace.prior_active_ticket_total,
+      recommended_actions: workspace.recommended_actions,
+      sla: workspace.sla,
+    },
+  };
+}
+
+function buildIntelligence({ counts, memberCounts, fraud, guildMembers, activeTickets = [] }) {
+  const openTickets = Number(counts?.openTickets || 0);
+  const warnsToday = Number(counts?.warnsToday || 0);
+  const raidAlerts = Number(counts?.raidAlerts || 0);
+  const fraudFlags = Number(counts?.fraudFlags || 0);
+  const pendingVerification = Number(memberCounts?.pendingVerification || 0);
+  const verified = Number(memberCounts?.verified || 0);
+  const active = Number(memberCounts?.active || 0);
+  const overdueTickets = safeArray(activeTickets).filter((t) => t?.overdue).length;
+  const highRiskTickets = safeArray(activeTickets).filter(
+    (t) => normalizeString(t?.risk_level).toLowerCase() === "high"
+  ).length;
+
+  let serverHealth = "Stable";
+  if (fraudFlags >= 4 || raidAlerts >= 2 || openTickets >= 14 || overdueTickets >= 5) {
+    serverHealth = "Elevated";
+  }
+  if (fraudFlags >= 8 || raidAlerts >= 4 || openTickets >= 24 || overdueTickets >= 10) {
+    serverHealth = "Critical";
+  }
+
+  let raidRisk = "Low";
+  let raidReason = "No recent raid alert threshold was crossed.";
+  if (raidAlerts >= 1) {
+    raidRisk = "Moderate";
+    raidReason = `${raidAlerts} recent raid alert(s) were recorded.`;
+  }
+  if (raidAlerts >= 3) {
+    raidRisk = "High";
+    raidReason = `${raidAlerts} raid alerts were recorded recently and need immediate review.`;
+  }
+
+  let fraudRisk = "Low";
+  let fraudReason = "No active fraud flags are currently driving the score.";
+  if (fraudFlags >= 1 || pendingVerification >= 12 || highRiskTickets >= 3) {
+    fraudRisk = "Moderate";
+    fraudReason =
+      fraudFlags >= 1
+        ? `${fraudFlags} active fraud flag(s) exist and should be reviewed.`
+        : `Verification backlog or high-risk queue pressure is elevated.`;
+  }
+  if (fraudFlags >= 5 || highRiskTickets >= 8) {
+    fraudRisk = "High";
+    fraudReason = `${fraudFlags} fraud flag(s) or ${highRiskTickets} high-risk tickets are unresolved.`;
+  }
+
+  let ticketPressure = "Low";
+  let ticketReason = "Ticket load is within normal range.";
+  if (openTickets >= 6 || overdueTickets >= 2) {
+    ticketPressure = "Moderate";
+    ticketReason = `${openTickets} active tickets with ${overdueTickets} overdue.`;
+  }
+  if (openTickets >= 14 || overdueTickets >= 5) {
+    ticketPressure = "High";
+    ticketReason = `${openTickets} active tickets are creating heavy staff load.`;
+  }
+
+  let verificationPressure = "Low";
+  let verificationReason = "Verification queue is under control.";
+  if (pendingVerification >= 8) {
+    verificationPressure = "Moderate";
+    verificationReason = `${pendingVerification} members are currently pending verification.`;
+  }
+  if (pendingVerification >= 16) {
+    verificationPressure = "High";
+    verificationReason = `${pendingVerification} members are pending verification and need direct staff cleanup.`;
+  }
+
+  const verifiedRate = active > 0 ? Math.round((verified / active) * 100) : 0;
+
+  const topFraudMembers = safeArray(fraud)
+    .slice(0, 5)
+    .map((row) => ({
+      user_id: row?.user_id || "",
+      display_name:
+        row?.display_name || row?.username || row?.user_id || "Unknown User",
+      score: Number(row?.score || 0),
+      reasons: Array.isArray(row?.reasons) ? row.reasons : [],
+    }));
+
+  const topConflictMembers = safeArray(guildMembers)
+    .filter((member) => String(member?.role_state || "").includes("conflict"))
+    .slice(0, 5)
+    .map((member) => ({
+      user_id: member?.user_id || "",
+      display_name:
+        member?.display_name ||
+        member?.nickname ||
+        member?.username ||
+        member?.user_id ||
+        "Unknown User",
+      role_state: member?.role_state || "unknown",
+      role_state_reason: member?.role_state_reason || "",
+    }));
+
+  return {
+    serverHealth,
+    raidRisk,
+    fraudRisk,
+    ticketPressure,
+    verificationPressure,
+    verifiedRate,
+    reasons: {
+      serverHealth:
+        serverHealth === "Stable"
+          ? "No major threshold is currently tripping the health score."
+          : "Health is elevated by ticket load, overdue queue pressure, fraud signals, or raid activity.",
+      raidRiskReason: raidReason,
+      fraudRiskReason: fraudReason,
+      ticketPressureReason: ticketReason,
+      verificationPressureReason: verificationReason,
+    },
+    topFraudMembers,
+    topConflictMembers,
+  };
+}
+
+async function loadOptionalTableByIds({
+  ids,
+  loader,
+  dedupeKey,
+  size = 150,
+}) {
+  const rows = await loadRowsByChunk({
+    ids,
+    size,
+    loader,
+  });
+
+  return uniqueBy(rows, dedupeKey);
 }
 
 export async function GET(request) {
@@ -1267,13 +1505,24 @@ export async function GET(request) {
     const activityFamily = normalizeString(url.searchParams.get("activity_family"));
     const activityType = normalizeString(url.searchParams.get("activity_type"));
     const activitySource = normalizeString(url.searchParams.get("activity_source"));
-    // Defaulting to 500 up to 5000 to solve the missing historical events requirement natively here
-    const activityLimit = clampActivityLimit(url.searchParams.get("activity_limit"), 500, 5000);
+    const activityLimit = clampActivityLimit(
+      url.searchParams.get("activity_limit"),
+      500,
+      5000
+    );
+
+    if (!guildId) {
+      return Response.json(
+        { error: "Missing guild id." },
+        {
+          status: 500,
+          headers: { "Cache-Control": "no-store, max-age=0" },
+        }
+      );
+    }
 
     if (debugEnabled()) {
-      console.log("[dashboard/live] env.guildId =", guildId);
-      console.log("[dashboard/live] DISCORD_GUILD_ID =", process.env.DISCORD_GUILD_ID || "");
-      console.log("[dashboard/live] GUILD_ID =", process.env.GUILD_ID || "");
+      console.log("[dashboard/live] guildId =", guildId);
       console.log("[dashboard/live] supportOnly =", supportOnly);
       console.log("[dashboard/live] activity filters =", {
         activityQuery,
@@ -1284,16 +1533,6 @@ export async function GET(request) {
         activitySource,
         activityLimit,
       });
-    }
-
-    if (!guildId) {
-      return Response.json(
-        { error: "Missing guild id." },
-        {
-          status: 500,
-          headers: { "Cache-Control": "no-store, max-age=0" },
-        }
-      );
     }
 
     if (supportOnly) {
@@ -1454,7 +1693,6 @@ export async function GET(request) {
         .order("updated_at", { ascending: false })
         .limit(250),
 
-      // Counts still need to look at last 24h
       supabase
         .from("warns")
         .select("*", { count: "exact", head: true })
@@ -1502,7 +1740,6 @@ export async function GET(request) {
         .eq("is_bot", false)
         .eq("has_staff_role", true),
 
-      // Removed `.gte("created_at", last24hIso)` directly from rows to pull missing historical events & bumped limit
       supabase
         .from("warns")
         .select("*")
@@ -1559,7 +1796,10 @@ export async function GET(request) {
 
       return Response.json(
         { error: firstError.message || "Failed to load dashboard data." },
-        { status: 500 }
+        {
+          status: 500,
+          headers: { "Cache-Control": "no-store, max-age=0" },
+        }
       );
     }
 
@@ -1568,26 +1808,165 @@ export async function GET(request) {
     const rawTickets = mappedTickets.map((ticket) =>
       enrichTicketWithMatchedCategory(ticket, categoryRows)
     );
-    const canonicalTickets = canonicalizeTickets(rawTickets);
+    const canonicalTicketsBase = canonicalizeTickets(rawTickets);
 
     const categories = categoryRows;
-    const memberJoins = memberJoinsRes.data || [];
+    const memberJoins = safeArray(memberJoinsRes.data || []);
     const recentActiveMembers = safeArray(recentActiveMembersRes.data).map(mapGuildMember);
     const recentFormerMembers = safeArray(recentFormerMembersRes.data).map(mapGuildMember);
     const guildMembers = safeArray(allGuildMembersRes.data).map(mapGuildMember);
     const activityFeedRows = safeArray(activityFeedRes.data || []);
 
-    // Expose Exact Raw rows (so you aren't fighting missing members due to mapping/filtering assumptions)
-    const pendingVerificationMembersRaw = safeArray(pendingVerificationRowsRes.data || []);
+    const pendingVerificationMembersRaw = safeArray(
+      pendingVerificationRowsRes.data || []
+    );
 
     const pendingVerificationMembers = pendingVerificationMembersRaw
       .map(mapGuildMember)
       .filter(isPendingVerificationMember)
       .sort(
         (a, b) =>
-          toTime(b.updated_at || b.last_seen_at || b.joined_at) -
-          toTime(a.updated_at || a.last_seen_at || a.joined_at)
+          parseDateMs(b.updated_at || b.last_seen_at || b.joined_at) -
+          parseDateMs(a.updated_at || a.last_seen_at || a.joined_at)
       );
+
+    const ownerUserIds = uniqueBy(
+      canonicalTicketsBase
+        .map((ticket) => normalizeString(ticket?.user_id))
+        .filter(Boolean),
+      (id) => id
+    );
+
+    const canonicalTicketIds = uniqueBy(
+      canonicalTicketsBase
+        .map((ticket) => normalizeString(ticket?.id))
+        .filter(Boolean),
+      (id) => id
+    );
+
+    const [
+      verificationFlagRows,
+      memberEventRows,
+      ticketNotesRows,
+      ticketMessageRows,
+      ticketActivityRows,
+    ] = await Promise.all([
+      loadOptionalTableByIds({
+        ids: ownerUserIds,
+        loader: (chunk) =>
+          safeSupabaseRows(() =>
+            supabase
+              .from("verification_flags")
+              .select("*")
+              .eq("guild_id", guildId)
+              .in("user_id", chunk)
+              .order("created_at", { ascending: false })
+              .limit(1000)
+          ),
+        dedupeKey: (row) => row?.id || `${row?.user_id}:${row?.created_at}:${row?.score}`,
+      }),
+
+      loadOptionalTableByIds({
+        ids: ownerUserIds,
+        loader: (chunk) =>
+          safeSupabaseRows(() =>
+            supabase
+              .from("member_events")
+              .select("*")
+              .eq("guild_id", guildId)
+              .in("user_id", chunk)
+              .order("created_at", { ascending: false })
+              .limit(1500)
+          ),
+        dedupeKey: (row) => row?.id || `${row?.user_id}:${row?.event_type}:${row?.created_at}`,
+      }),
+
+      loadOptionalTableByIds({
+        ids: canonicalTicketIds,
+        loader: (chunk) =>
+          safeSupabaseRows(() =>
+            supabase
+              .from("ticket_notes")
+              .select("*")
+              .in("ticket_id", chunk)
+              .order("created_at", { ascending: false })
+              .limit(1500)
+          ),
+        dedupeKey: (row) => row?.id || `${row?.ticket_id}:${row?.created_at}:${row?.staff_id}`,
+      }),
+
+      loadOptionalTableByIds({
+        ids: canonicalTicketIds,
+        loader: (chunk) =>
+          safeSupabaseRows(() =>
+            supabase
+              .from("ticket_messages")
+              .select("*")
+              .in("ticket_id", chunk)
+              .order("created_at", { ascending: false })
+              .limit(2500)
+          ),
+        dedupeKey: (row) => row?.id || `${row?.ticket_id}:${row?.created_at}:${row?.author_id}`,
+      }),
+
+      loadOptionalTableByIds({
+        ids: canonicalTicketIds,
+        loader: (chunk) =>
+          safeSupabaseRows(() =>
+            supabase
+              .from("activity_feed_events")
+              .select("*")
+              .eq("guild_id", guildId)
+              .in("ticket_id", chunk)
+              .order("created_at", { ascending: false })
+              .limit(2500)
+          ),
+        dedupeKey: (row) => row?.id || `${row?.ticket_id}:${row?.created_at}:${row?.event_type}`,
+      }),
+    ]);
+
+    const flagsByUser = buildFlagsByUser(verificationFlagRows);
+    const memberEventsByUser = buildMemberEventsByUser(memberEventRows);
+    const notesByTicket = buildNotesByTicket(ticketNotesRows);
+    const messagesByTicket = buildMessagesByTicket(ticketMessageRows);
+    const activityByTicket = buildActivityByTicket(ticketActivityRows);
+    const ticketStatsByUser = buildTicketStatsByUser(canonicalTicketsBase);
+
+    const memberLookup = new Map(guildMembers.map((member) => [String(member.user_id), member]));
+
+    const canonicalTickets = canonicalTicketsBase.map((ticket) => {
+      const userId = normalizeString(ticket?.user_id);
+      const member = memberLookup.get(userId) || null;
+      const flagRows = flagsByUser.get(userId) || [];
+      const userEvents = memberEventsByUser.get(userId) || [];
+      const notes = notesByTicket.get(normalizeString(ticket?.id)) || [];
+      const messages = messagesByTicket.get(normalizeString(ticket?.id)) || [];
+      const activities = activityByTicket.get(normalizeString(ticket?.id)) || [];
+      const userTicketStats = ticketStatsByUser.get(userId) || {
+        total: 0,
+        active: 0,
+        closed: 0,
+        deleted: 0,
+        latest_ticket_at: null,
+      };
+
+      const workspace = buildTicketWorkspace({
+        ticket,
+        member,
+        flagRows,
+        memberEvents: userEvents,
+        notes,
+        messages,
+        activities,
+        userTicketStats,
+      });
+
+      return enrichTicketForDashboard({
+        ticket,
+        member,
+        workspace,
+      });
+    });
 
     const activeTickets = canonicalTickets.filter((ticket) => {
       if (!isOpenLikeStatus(ticket?.status)) return false;
@@ -1636,8 +2015,8 @@ export async function GET(request) {
         )
         .sort(
           (a, b) =>
-            toJoinedTimestamp(b.joined_at || b.created_at) -
-            toJoinedTimestamp(a.joined_at || a.created_at)
+            parseDateMs(b.joined_at || b.created_at) -
+            parseDateMs(a.joined_at || a.created_at)
         )
         .slice(0, 25);
     }
@@ -1647,8 +2026,8 @@ export async function GET(request) {
         .slice()
         .sort(
           (a, b) =>
-            toJoinedTimestamp(b.joined_at || b.created_at) -
-            toJoinedTimestamp(a.joined_at || a.created_at)
+            parseDateMs(b.joined_at || b.created_at) -
+            parseDateMs(a.joined_at || a.created_at)
         )
         .slice(0, 25);
     }
@@ -1657,18 +2036,35 @@ export async function GET(request) {
       .slice()
       .sort(
         (a, b) =>
-          toTime(b.updated_at || b.last_seen_at || b.joined_at) -
-          toTime(a.updated_at || a.last_seen_at || a.joined_at)
+          parseDateMs(b.updated_at || b.last_seen_at || b.joined_at) -
+          parseDateMs(a.updated_at || a.last_seen_at || a.joined_at)
       );
 
-    const metrics = deriveMetricsFromTickets(
-      canonicalTickets,
-      metricsRes.data || [],
-      guildMembers
-    );
+    const metrics = uniqueBy(
+      safeArray(metricsRes.data || []).map((row) => ({
+        ...row,
+        staff_id: row?.staff_id || null,
+        staff_name: row?.staff_name || row?.staff_id || "Unknown Staff",
+        tickets_handled: normalizeNumber(row?.tickets_handled, 0),
+        approvals: normalizeNumber(row?.approvals, 0),
+        denials: normalizeNumber(row?.denials, 0),
+        avg_response_minutes: normalizeNumber(row?.avg_response_minutes, 0),
+        last_active: row?.last_active || null,
+      })),
+      (row) => row?.id || row?.staff_id || row?.staff_name
+    ).sort((a, b) => {
+      const handledDiff = normalizeNumber(b?.tickets_handled, 0) - normalizeNumber(a?.tickets_handled, 0);
+      if (handledDiff !== 0) return handledDiff;
+      return normalizeString(a?.staff_name).localeCompare(normalizeString(b?.staff_name));
+    });
 
-    const openTicketsCount = activeTickets.length;
-    const closedTicketsCount = closedTickets.length;
+    const counts = {
+      openTickets: activeTickets.length,
+      closedTickets: closedTickets.length,
+      warnsToday: warnsTodayRes.count || 0,
+      raidAlerts: raidAlertsRes.count || 0,
+      fraudFlags: fraudFlagsRes.count || 0,
+    };
 
     const memberCounts = {
       tracked: (activeMembersCountRes.count || 0) + (formerMembersCountRes.count || 0),
@@ -1679,19 +2075,12 @@ export async function GET(request) {
       staff: staffMembersCountRes.count || 0,
     };
 
-    const counts = {
-      openTickets: openTicketsCount,
-      closedTickets: closedTicketsCount,
-      warnsToday: warnsTodayRes.count || 0,
-      raidAlerts: raidAlertsRes.count || 0,
-      fraudFlags: fraudFlagsRes.count || 0,
-    };
-
     const intelligence = buildIntelligence({
       counts,
       memberCounts,
       fraud,
       guildMembers,
+      activeTickets,
     });
 
     if (debugEnabled()) {
@@ -1707,9 +2096,17 @@ export async function GET(request) {
       console.log("[dashboard/live] fraud found =", fraud.length);
       console.log("[dashboard/live] guildMembers found =", guildMembers.length);
       console.log("[dashboard/live] pendingVerificationMembers =", pendingVerificationMembers.length);
+      console.log("[dashboard/live] verificationFlagRows =", verificationFlagRows.length);
+      console.log("[dashboard/live] memberEventRows =", memberEventRows.length);
+      console.log("[dashboard/live] ticketNotesRows =", ticketNotesRows.length);
+      console.log("[dashboard/live] ticketMessageRows =", ticketMessageRows.length);
+      console.log("[dashboard/live] ticketActivityRows =", ticketActivityRows.length);
       console.log("[dashboard/live] voiceChannels found =", voiceChannels.length);
       if (discordChannelsResult?.__discord_error) {
-        console.warn("[dashboard/live] voice channel fetch warning =", discordChannelsResult.__discord_error);
+        console.warn(
+          "[dashboard/live] voice channel fetch warning =",
+          discordChannelsResult.__discord_error
+        );
       }
     }
 
@@ -1744,7 +2141,7 @@ export async function GET(request) {
       memberRows,
       memberCounts,
       pendingVerificationMembers,
-      pendingVerificationMembersRaw, // Exposes the exact db member row for 1:1 mapping on the FE
+      pendingVerificationMembersRaw,
       counts,
       intelligence,
       voiceChannels,
@@ -1767,9 +2164,14 @@ export async function GET(request) {
             voiceChannelsCount: voiceChannels.length,
             voiceChannelsError: discordChannelsResult?.__discord_error || null,
             memberCounts,
-            pendingVerificationMembers,
+            pendingVerificationMembersCount: pendingVerificationMembers.length,
             recentJoinsCount: recentJoins.length,
             memberJoinsCount: memberJoins.length,
+            verificationFlagRowsCount: verificationFlagRows.length,
+            memberEventRowsCount: memberEventRows.length,
+            ticketNotesRowsCount: ticketNotesRows.length,
+            ticketMessageRowsCount: ticketMessageRows.length,
+            ticketActivityRowsCount: ticketActivityRows.length,
             activityFilters: {
               activityQuery,
               activityUserId,
