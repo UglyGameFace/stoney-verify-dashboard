@@ -289,8 +289,17 @@ function safeObject<T extends object = JsonRecord>(value: unknown): T {
 }
 
 function parseDateMs(value: unknown): number {
-  const ms = new Date(value || 0).getTime();
-  return Number.isFinite(ms) ? ms : 0;
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  if (typeof value === "string" || typeof value === "number") {
+    const ms = new Date(value).getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  return 0;
 }
 
 function newestTimestamp(...values: unknown[]): number {
