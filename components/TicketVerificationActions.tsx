@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 
 type Dict = Record<string, unknown>;
 
@@ -11,10 +11,15 @@ type VerifyAction =
   | "repost_verify_ui"
   | "deny";
 
+type Tone = "neutral" | "good" | "warn" | "danger" | "info";
+
 type VerificationResponse = {
   ok?: boolean;
   error?: string;
   message?: string;
+  noteWarning?: string | null;
+  commandId?: string | null;
+  action?: string | null;
 };
 
 type TicketVerificationActionsProps = {
@@ -26,7 +31,7 @@ type TicketVerificationActionsProps = {
 type ActionCardProps = {
   title: string;
   description: string;
-  tone?: "neutral" | "good" | "warn" | "danger" | "info";
+  tone?: Tone;
   buttonLabel: string;
   busyLabel: string;
   disabled?: boolean;
@@ -101,7 +106,7 @@ function looksVerificationTicket(ticket: Dict): boolean {
   );
 }
 
-function getBadgeTone(value: string): string {
+function getToneFromText(value: string): Tone {
   const v = value.toLowerCase();
 
   if (
@@ -147,7 +152,7 @@ function SummaryPill({
   tone = "neutral",
 }: {
   label: string;
-  tone?: "neutral" | "good" | "warn" | "danger" | "info";
+  tone?: Tone;
 }) {
   return <span className={`verify-summary-pill ${tone}`}>{label}</span>;
 }
@@ -158,7 +163,7 @@ function DetailCard({
   full = false,
 }: {
   label: string;
-  value: ReactNode;
+  value: React.ReactNode;
   full?: boolean;
 }) {
   return (
@@ -207,10 +212,10 @@ export default function TicketVerificationActions({
 }: TicketVerificationActionsProps) {
   const [busy, setBusy] = useState<VerifyAction>("");
   const [linkingContext, setLinkingContext] = useState<boolean>(false);
-  const [copyingUserId, setCopyingUserId] = useState<boolean>(false);
 
   const [error, setError] = useState<string>("");
   const [message, setMessage] = useState<string>("");
+  const [warning, setWarning] = useState<string>("");
 
   const [decisionReason, setDecisionReason] = useState<string>(
     "Approved by staff review"
@@ -225,7 +230,6 @@ export default function TicketVerificationActions({
   const latestTokenStatus = safeText(ticket?.owner_latest_token_status, "Unknown");
   const latestTokenDecision = safeText(ticket?.owner_latest_token_decision, "Unknown");
   const latestVcStatus = safeText(ticket?.owner_latest_vc_status, "Unknown");
-  const roleState = safeText(ticket?.owner_role_state, "Unknown");
   const ticketStatus = safeText(ticket?.status, "unknown");
   const categoryName = safeText(
     ticket?.matched_category_name || ticket?.category,
@@ -236,15 +240,15 @@ export default function TicketVerificationActions({
   const warnCount = normalizeNumber(ticket?.owner_warn_count, 0);
   const tokenCount = normalizeNumber(ticket?.owner_token_count, 0);
   const vcCount = normalizeNumber(ticket?.owner_vc_count, 0);
-  const hasUnverified = normalizeBoolean(ticket?.owner_has_unverified);
-  const hasVerifiedRole = normalizeBoolean(ticket?.owner_has_verified_role);
-  const hasStaffRole = normalizeBoolean(ticket?.owner_has_staff_role);
   const latestFlagAt = safeText(ticket?.owner_latest_flag_at, "");
   const latestTokenAt = safeText(ticket?.owner_latest_token_at, "");
   const latestVcAt = safeText(ticket?.owner_latest_vc_at, "");
+  const hasUnverified = normalizeBoolean(ticket?.owner_has_unverified);
+  const hasVerifiedRole = normalizeBoolean(ticket?.owner_has_verified_role);
+  const hasStaffRole = normalizeBoolean(ticket?.owner_has_staff_role);
 
   const actionsDisabled = !userId || !ticketId || !currentStaffId;
-  const anyBusy = Boolean(busy) || linkingContext || copyingUserId;
+  const anyBusy = Boolean(busy) || linkingContext;
 
   const quickReasons: QuickReason[] = [
     {
@@ -269,15 +273,13 @@ export default function TicketVerificationActions({
     },
   ];
 
-  async function post(
-    action: Exclude<VerifyAction, "">,
-    extra: Record<string, unknown> = {}
-  ) {
+  async function post(action: Exclude<VerifyAction, "">) {
     if (!ticketId) return;
 
     setBusy(action);
     setError("");
     setMessage("");
+    setWarning("");
 
     try {
       const res = await fetch(`/api/tickets/${ticketId}/verify`, {
@@ -290,7 +292,6 @@ export default function TicketVerificationActions({
           action,
           staff_id: currentStaffId || null,
           reason: decisionReason || "",
-          ...extra,
         }),
       });
 
@@ -303,6 +304,10 @@ export default function TicketVerificationActions({
       }
 
       setMessage(json?.message || "Verification action queued.");
+      if (json?.noteWarning) {
+        setWarning(json.noteWarning);
+      }
+
       await onChanged?.();
     } catch (err: unknown) {
       setError(getErrorMessage(err, "Verification action failed."));
@@ -317,6 +322,7 @@ export default function TicketVerificationActions({
     setLinkingContext(true);
     setError("");
     setMessage("");
+    setWarning("");
 
     try {
       const res = await fetch(`/api/tickets/${ticketId}`, {
@@ -354,27 +360,6 @@ export default function TicketVerificationActions({
     }
   }
 
-  async function handleCopyUserId() {
-    if (!userId) return;
-
-    setCopyingUserId(true);
-    setError("");
-    setMessage("");
-
-    try {
-      if (!navigator?.clipboard?.writeText) {
-        throw new Error("Clipboard is not available on this device.");
-      }
-
-      await navigator.clipboard.writeText(userId);
-      setMessage("User ID copied.");
-    } catch (err: unknown) {
-      setError(getErrorMessage(err, "Could not copy user ID."));
-    } finally {
-      setCopyingUserId(false);
-    }
-  }
-
   if (!visible) return null;
 
   return (
@@ -404,27 +389,27 @@ export default function TicketVerificationActions({
 
           <h2 style={{ margin: 0 }}>Verification Actions</h2>
           <div className="muted" style={{ marginTop: 6, overflowWrap: "anywhere" }}>
-            Approve, deny, repost, clean role state, or link verification context
-            directly from the ticket workspace.
+            Queue approval, denial, unverified cleanup, verify UI repost, or
+            backfill verification context from the dashboard.
           </div>
         </div>
 
         <div className="verify-summary-pill-row">
           <SummaryPill
             label={`Ticket: ${ticketStatus}`}
-            tone={getBadgeTone(ticketStatus) as any}
+            tone={getToneFromText(ticketStatus)}
           />
           <SummaryPill
             label={`Verification: ${verificationLabel}`}
-            tone={getBadgeTone(verificationLabel) as any}
+            tone={getToneFromText(verificationLabel)}
           />
           <SummaryPill
             label={`Token: ${latestTokenStatus}`}
-            tone={getBadgeTone(latestTokenStatus) as any}
+            tone={getToneFromText(latestTokenStatus)}
           />
           <SummaryPill
             label={`VC: ${latestVcStatus}`}
-            tone={getBadgeTone(latestVcStatus) as any}
+            tone={getToneFromText(latestVcStatus)}
           />
           {ticket?.category_override ? (
             <SummaryPill label="Manual Category" tone="warn" />
@@ -444,6 +429,12 @@ export default function TicketVerificationActions({
         </div>
       ) : null}
 
+      {warning ? (
+        <div className="warning-banner" style={{ marginBottom: 12 }}>
+          {warning}
+        </div>
+      ) : null}
+
       {actionsDisabled ? (
         <div className="warning-banner" style={{ marginBottom: 12 }}>
           Verification actions are partially blocked because a required value is
@@ -455,40 +446,8 @@ export default function TicketVerificationActions({
       ) : null}
 
       <div className="verify-detail-grid" style={{ marginBottom: 14 }}>
-        <DetailCard label="Member" value={safeText(ticket?.username || userId, "Unknown")} />
-        <DetailCard
-          label="User ID"
-          value={
-            <div className="verify-inline-row">
-              <span style={{ overflowWrap: "anywhere" }}>{userId || "—"}</span>
-              {userId ? (
-                <button
-                  type="button"
-                  className="mini-copy-button"
-                  disabled={copyingUserId || anyBusy}
-                  onClick={() => void handleCopyUserId()}
-                >
-                  {copyingUserId ? "Copying..." : "Copy"}
-                </button>
-              ) : null}
-            </div>
-          }
-        />
         <DetailCard label="Category" value={categoryName} />
         <DetailCard label="Intake Type" value={intakeType} />
-        <DetailCard label="Role State" value={roleState} />
-        <DetailCard
-          label="Role Snapshot"
-          value={
-            [
-              hasUnverified ? "Has unverified" : "",
-              hasVerifiedRole ? "Has verified role" : "",
-              hasStaffRole ? "Has staff role" : "",
-            ]
-              .filter(Boolean)
-              .join(" • ") || "No role markers"
-          }
-        />
         <DetailCard label="Flag Count" value={String(flagCount)} />
         <DetailCard label="Warn Count" value={String(warnCount)} />
         <DetailCard label="Token Count" value={String(tokenCount)} />
@@ -507,13 +466,27 @@ export default function TicketVerificationActions({
           label="Latest VC At"
           value={latestVcAt ? formatDateTime(latestVcAt) : "—"}
         />
+        <DetailCard
+          label="Role Markers"
+          value={
+            [
+              hasUnverified ? "Has unverified" : "",
+              hasVerifiedRole ? "Has verified role" : "",
+              hasStaffRole ? "Has staff role" : "",
+            ]
+              .filter(Boolean)
+              .join(" • ") || "No role markers"
+          }
+          full
+        />
       </div>
 
       <div className="verify-reason-box">
         <div className="verify-reason-head">
           <div className="verify-reason-title">Decision Reason</div>
           <div className="muted" style={{ fontSize: 12 }}>
-            Used in verification logs, context linking, and staff history.
+            This gets written into the queued verification note and command
+            payload for staff traceability.
           </div>
         </div>
 
@@ -521,7 +494,7 @@ export default function TicketVerificationActions({
           className="input"
           value={decisionReason}
           onChange={(e) => setDecisionReason(e.target.value)}
-          placeholder="Reason shown in logs / ticket history"
+          placeholder="Reason shown in verification note / queue"
         />
 
         <div className="verify-quick-reason-row">
@@ -542,7 +515,7 @@ export default function TicketVerificationActions({
       <div className="verify-action-grid">
         <ActionCard
           title="Approve + Verify"
-          description="Best for successful verification review when the member is ready to be moved out of the pending path."
+          description="Queues verification approval for the member through the backend command route."
           tone="good"
           buttonLabel="Approve + Verify"
           busyLabel="Approving..."
@@ -553,7 +526,7 @@ export default function TicketVerificationActions({
 
         <ActionCard
           title="Remove Unverified"
-          description="Use when verification is already effectively complete but the unverified state still needs cleanup."
+          description="Queues unverified-role cleanup when the member is already effectively through the verification flow."
           tone="info"
           buttonLabel="Remove Unverified"
           busyLabel="Working..."
@@ -564,18 +537,18 @@ export default function TicketVerificationActions({
 
         <ActionCard
           title="Repost Verify UI"
-          description="Good for broken flows, lost prompts, or when staff wants the member to restart the submission cleanly."
+          description="Queues a fresh verification UI repost for broken, stale, or restarted verification attempts."
           tone="neutral"
           buttonLabel="Repost Verify UI"
           busyLabel="Working..."
-          disabled={actionsDisabled}
+          disabled={!ticketId || !currentStaffId}
           busy={busy === "repost_verify_ui"}
           onClick={() => void post("repost_verify_ui")}
         />
 
         <ActionCard
           title="Deny Verification"
-          description="Use when the submission fails review or the member must resubmit with corrected information."
+          description="Queues denial and lets the backend close the ticket with the supplied reason."
           tone="danger"
           buttonLabel="Deny Verification"
           busyLabel="Denying..."
@@ -597,8 +570,8 @@ export default function TicketVerificationActions({
         </button>
 
         <div className="muted verify-secondary-copy">
-          This writes verification-entry context back to the member records so the
-          dashboard keeps the member’s path understandable later.
+          This updates member-entry context so the dashboard remembers how the
+          verification path was connected later.
         </div>
       </div>
 
@@ -685,30 +658,6 @@ export default function TicketVerificationActions({
           white-space: pre-wrap;
           color: var(--text, #dbe4ee);
           line-height: 1.45;
-        }
-
-        .verify-inline-row {
-          display: flex;
-          gap: 8px;
-          align-items: center;
-          flex-wrap: wrap;
-        }
-
-        .mini-copy-button {
-          appearance: none;
-          border: 1px solid rgba(255,255,255,0.08);
-          background: rgba(255,255,255,0.04);
-          color: var(--text, #dbe4ee);
-          border-radius: 999px;
-          padding: 6px 10px;
-          font-size: 12px;
-          font-weight: 700;
-          cursor: pointer;
-        }
-
-        .mini-copy-button:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
         }
 
         .verify-reason-box {
