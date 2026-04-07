@@ -54,6 +54,7 @@ type MetaCardProps = {
 };
 
 type SectionCardProps = {
+  id?: string;
   title: string;
   subtitle?: string;
   children: ReactNode;
@@ -67,6 +68,16 @@ type TimelineItemProps = {
 type IdentityBubbleProps = {
   ticket: Dict;
   member: Dict;
+};
+
+type WorkspacePillProps = {
+  label: string;
+  tone?: "neutral" | "good" | "warn" | "danger" | "info";
+};
+
+type QuickJumpItem = {
+  href: string;
+  label: string;
 };
 
 function safeText(value: unknown, fallback = "—"): string {
@@ -220,6 +231,27 @@ function getSlaLabel(ticket: Dict): string {
   return status;
 }
 
+function transcriptExportUrl(ticketId: string, format?: "html" | "txt" | "json") {
+  const encoded = encodeURIComponent(ticketId);
+  if (!format || format === "html") return `/api/tickets/${encoded}/transcript`;
+  return `/api/tickets/${encoded}/transcript?format=${format}`;
+}
+
+function WorkspacePill({ label, tone = "neutral" }: WorkspacePillProps) {
+  const toneClass =
+    tone === "good"
+      ? "good"
+      : tone === "warn"
+        ? "warn"
+        : tone === "danger"
+          ? "danger"
+          : tone === "info"
+            ? "info"
+            : "neutral";
+
+  return <span className={`workspace-pill ${toneClass}`}>{label}</span>;
+}
+
 function MetaCard({ label, value, full = false }: MetaCardProps) {
   return (
     <div className={`ticket-meta-card ${full ? "full" : ""}`}>
@@ -230,13 +262,14 @@ function MetaCard({ label, value, full = false }: MetaCardProps) {
 }
 
 function SectionCard({
+  id,
   title,
   subtitle = "",
   children,
   right = null,
 }: SectionCardProps) {
   return (
-    <div className="card">
+    <div className="card scroll-section" id={id}>
       <div
         className="row"
         style={{
@@ -474,6 +507,20 @@ export default function TicketDetailClient({
       ? workspace.recommendedActions
       : [];
 
+  const transcriptUrl =
+    String(ticket?.transcript_url || "").trim() ||
+    transcriptExportUrl(String(ticket.id || ticketId), "html");
+
+  const quickJumps: QuickJumpItem[] = [
+    { href: "#workspace-summary", label: "Summary" },
+    { href: "#member-context", label: "Member" },
+    { href: "#verification-context", label: "Verification" },
+    { href: "#ticket-snapshot", label: "Snapshot" },
+    { href: "#notes", label: "Notes" },
+    { href: "#timeline", label: "Timeline" },
+    { href: "#conversation", label: "Conversation" },
+  ];
+
   return (
     <>
       {error ? (
@@ -523,14 +570,17 @@ export default function TicketDetailClient({
               {riskLabel}
             </span>
             {ticket?.overdue ? <span className="badge danger">Overdue</span> : null}
+            {ticket?.category_override ? (
+              <span className="badge medium">Manual Category</span>
+            ) : null}
           </div>
         </div>
 
         <div className="ticket-hero-toolbar">
           <div className="muted" style={{ minWidth: 0, flex: 1 }}>
             This view is built for fast staff decisions: member context,
-            verification history, SLA pressure, note continuity, and a full ticket
-            reply flow in one place.
+            verification history, SLA pressure, note continuity, category control,
+            and the full reply flow in one place.
           </div>
 
           <div
@@ -557,7 +607,7 @@ export default function TicketDetailClient({
 
             <a
               className="button primary"
-              href={`/api/tickets/${ticket.id || ticketId}/transcript`}
+              href={transcriptExportUrl(String(ticket.id || ticketId), "html")}
               target="_blank"
               rel="noreferrer"
               style={{ width: "auto", minWidth: 170 }}
@@ -566,11 +616,100 @@ export default function TicketDetailClient({
             </a>
           </div>
         </div>
+
+        <div className="ticket-workspace-pills">
+          <WorkspacePill
+            label={`Status: ${safeText(ticket?.status, "unknown")}`}
+            tone={
+              status === "deleted"
+                ? "danger"
+                : status === "closed"
+                  ? "warn"
+                  : status === "claimed"
+                    ? "good"
+                    : "info"
+            }
+          />
+          <WorkspacePill
+            label={`SLA: ${getSlaLabel(ticket)}`}
+            tone={ticket?.overdue ? "danger" : "info"}
+          />
+          <WorkspacePill
+            label={`Messages: ${Number(counts?.messages || messages.length || 0)}`}
+            tone="neutral"
+          />
+          <WorkspacePill
+            label={`Notes: ${Number(counts?.notes || notes.length || 0)}`}
+            tone="neutral"
+          />
+          <WorkspacePill
+            label={`Flags: ${Number(counts?.flags || 0)}`}
+            tone={Number(counts?.flags || 0) > 0 ? "warn" : "good"}
+          />
+          <WorkspacePill
+            label={`Warns: ${Number(counts?.warns || warns.length || 0)}`}
+            tone={Number(counts?.warns || warns.length || 0) > 0 ? "warn" : "good"}
+          />
+          <WorkspacePill
+            label={`VC: ${Number(counts?.vcSessions || vcSessions.length || 0)}`}
+            tone="info"
+          />
+        </div>
+
+        <div className="ticket-hero-link-row">
+          <a
+            className="button ghost"
+            href={transcriptExportUrl(String(ticket.id || ticketId), "html")}
+            target="_blank"
+            rel="noreferrer"
+            style={{ width: "auto" }}
+          >
+            HTML
+          </a>
+          <a
+            className="button ghost"
+            href={transcriptExportUrl(String(ticket.id || ticketId), "txt")}
+            target="_blank"
+            rel="noreferrer"
+            style={{ width: "auto" }}
+          >
+            TXT
+          </a>
+          <a
+            className="button ghost"
+            href={transcriptExportUrl(String(ticket.id || ticketId), "json")}
+            target="_blank"
+            rel="noreferrer"
+            style={{ width: "auto" }}
+          >
+            JSON
+          </a>
+          {ticket?.transcript_url ? (
+            <a
+              className="button ghost"
+              href={transcriptUrl}
+              target="_blank"
+              rel="noreferrer"
+              style={{ width: "auto" }}
+            >
+              Stored Transcript
+            </a>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="ticket-jump-strip">
+        {quickJumps.map((item) => (
+          <a key={item.href} href={item.href} className="ticket-jump-chip">
+            {item.label}
+          </a>
+        ))}
       </div>
 
       <div className="ticket-shell">
         <div className="space">
           <SectionCard
+            id="workspace-summary"
             title="Workspace Summary"
             subtitle="The pieces that matter most before staff takes action."
             right={
@@ -642,6 +781,7 @@ export default function TicketDetailClient({
           </SectionCard>
 
           <SectionCard
+            id="member-context"
             title="Member Context"
             subtitle="How this person entered, what state they are in, and who is attached to their path."
           >
@@ -693,6 +833,7 @@ export default function TicketDetailClient({
           </SectionCard>
 
           <SectionCard
+            id="verification-context"
             title="Verification Context"
             subtitle="Manual review pressure, token status, and VC state all in one place."
           >
@@ -737,8 +878,7 @@ export default function TicketDetailClient({
                         }}
                       >
                         <div style={{ fontWeight: 800 }}>
-                          Score {Number(row?.score || 0)}{" "}
-                          {row?.flagged ? "• Flagged" : ""}
+                          Score {Number(row?.score || 0)} {row?.flagged ? "• Flagged" : ""}
                         </div>
                         <div className="muted" style={{ fontSize: 12 }}>
                           {formatDateTime(row?.created_at)}
@@ -843,6 +983,7 @@ export default function TicketDetailClient({
           </SectionCard>
 
           <SectionCard
+            id="ticket-snapshot"
             title="Ticket Snapshot"
             subtitle={`Ticket ID: ${ticket.id || ticketId}`}
             right={
@@ -902,6 +1043,7 @@ export default function TicketDetailClient({
           />
 
           <SectionCard
+            id="notes"
             title="Internal Notes"
             subtitle="Staff-only notes for continuity and decision memory."
           >
@@ -979,6 +1121,7 @@ export default function TicketDetailClient({
           </SectionCard>
 
           <SectionCard
+            id="timeline"
             title="Timeline"
             subtitle="A stitched view of ticket, verification, note, and member activity."
           >
@@ -997,8 +1140,26 @@ export default function TicketDetailClient({
           </SectionCard>
         </div>
 
-        <div className="space">
-          <TicketMessageList messages={messages} />
+        <div className="space" id="conversation">
+          <SectionCard
+            title="Conversation"
+            subtitle="Live ticket messages and staff replies."
+            right={
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <WorkspacePill
+                  label={`${Number(counts?.messages || messages.length || 0)} messages`}
+                  tone="info"
+                />
+                <WorkspacePill
+                  label={`${Number(counts?.notes || notes.length || 0)} notes`}
+                  tone="neutral"
+                />
+              </div>
+            }
+          >
+            <TicketMessageList messages={messages} />
+          </SectionCard>
+
           <TicketReplyBox ticketId={ticketId} onPosted={refresh} />
         </div>
       </div>
@@ -1079,6 +1240,91 @@ export default function TicketDetailClient({
           align-items: center;
           gap: 14px;
           flex-wrap: wrap;
+        }
+
+        .ticket-workspace-pills {
+          margin-top: 14px;
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          align-items: center;
+        }
+
+        .workspace-pill {
+          display: inline-flex;
+          align-items: center;
+          min-height: 30px;
+          padding: 6px 10px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 700;
+          color: #f8fafc;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.04);
+        }
+
+        .workspace-pill.good {
+          border-color: rgba(93,255,141,0.24);
+          background: rgba(93,255,141,0.08);
+        }
+
+        .workspace-pill.warn {
+          border-color: rgba(251,191,36,0.22);
+          background: rgba(251,191,36,0.08);
+        }
+
+        .workspace-pill.danger {
+          border-color: rgba(248,113,113,0.22);
+          background: rgba(248,113,113,0.08);
+        }
+
+        .workspace-pill.info {
+          border-color: rgba(99,213,255,0.22);
+          background: rgba(99,213,255,0.08);
+        }
+
+        .ticket-hero-link-row {
+          margin-top: 14px;
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+          align-items: center;
+        }
+
+        .ticket-jump-strip {
+          position: sticky;
+          top: 10px;
+          z-index: 8;
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin-bottom: 18px;
+          padding: 10px;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 16px;
+          background: rgba(9, 16, 24, 0.92);
+          backdrop-filter: blur(10px);
+        }
+
+        .ticket-jump-chip {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 34px;
+          padding: 8px 12px;
+          border-radius: 999px;
+          text-decoration: none;
+          font-size: 12px;
+          font-weight: 800;
+          color: #f8fafc;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.04);
+          white-space: nowrap;
+        }
+
+        .ticket-jump-chip:hover {
+          border-color: rgba(99,213,255,0.22);
+          background: rgba(99,213,255,0.08);
         }
 
         .ticket-meta-card {
@@ -1186,6 +1432,27 @@ export default function TicketDetailClient({
           white-space: pre-wrap;
           overflow-wrap: anywhere;
           line-height: 1.4;
+        }
+
+        @media (max-width: 900px) {
+          .ticket-jump-strip {
+            top: 6px;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .ticket-hero-toolbar,
+          .ticket-hero-link-row {
+            display: grid;
+            grid-template-columns: 1fr;
+          }
+
+          .ticket-hero-link-row :global(.button),
+          .ticket-hero-toolbar :global(.button),
+          .ticket-hero-link-row a {
+            width: 100%;
+            text-align: center;
+          }
         }
       `}</style>
     </>
