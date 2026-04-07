@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 type TimelineItemRow = {
   id?: string | number | null;
@@ -52,7 +52,9 @@ function safeItems(value: unknown): TimelineItemRow[] {
   return Array.isArray(value) ? (value as TimelineItemRow[]) : [];
 }
 
-function getTimelineTone(item: TimelineItemRow): "neutral" | "good" | "warn" | "danger" | "info" {
+function getTimelineTone(
+  item: TimelineItemRow
+): "neutral" | "good" | "warn" | "danger" | "info" {
   const source = normalizeText(item?.source);
   const type = normalizeText(item?.type);
   const title = normalizeText(item?.title);
@@ -166,7 +168,7 @@ function TimelineBadge({
   children,
   tone = "neutral",
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   tone?: "neutral" | "good" | "warn" | "danger" | "info";
 }) {
   return <span className={`timeline-badge ${tone}`}>{children}</span>;
