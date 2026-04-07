@@ -423,13 +423,17 @@ export default function TicketControls({
   async function handleCopy(value: string, successMessage: string) {
     const result = await copyTextToClipboard(value);
 
-    if (result.ok) {
+    if (result.ok === true) {
       setError("");
       setMessage(successMessage);
       return;
     }
 
-    setError(result.error || "Could not copy to clipboard.");
+    setError(
+      "error" in result && result.error
+        ? result.error
+        : "Could not copy to clipboard."
+    );
   }
 
   async function handleAssign() {
