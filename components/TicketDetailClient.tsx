@@ -8,6 +8,7 @@ import TicketReplyBox from "@/components/TicketReplyBox";
 import TicketControls from "@/components/dashboard/TicketControls";
 import TicketVerificationActions from "@/components/TicketVerificationActions";
 import TicketTimelinePanel from "@/components/TicketTimelinePanel";
+import TicketNotesPanel from "@/components/TicketNotesPanel";
 
 type Dict = Record<string, any>;
 
@@ -308,11 +309,6 @@ export default function TicketDetailClient({
   const [error, setError] = useState<string>("");
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
-  const [note, setNote] = useState<string>("");
-  const [savingNote, setSavingNote] = useState<boolean>(false);
-  const [noteError, setNoteError] = useState<string>("");
-  const [noteMessage, setNoteMessage] = useState<string>("");
-
   async function refresh({ silent = false }: { silent?: boolean } = {}) {
     if (!silent) setIsRefreshing(true);
     setError("");
@@ -336,42 +332,6 @@ export default function TicketDetailClient({
       setError(getErrorMessage(err, "Failed to refresh ticket."));
     } finally {
       if (!silent) setIsRefreshing(false);
-    }
-  }
-
-  async function saveInternalNote() {
-    const content = String(note || "").trim();
-    if (!content) return;
-
-    setSavingNote(true);
-    setNoteError("");
-    setNoteMessage("");
-
-    try {
-      const res = await fetch(`/api/tickets/${ticketId}/notes`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store",
-        },
-        body: JSON.stringify({ content }),
-      });
-
-      const json = (await res.json().catch(() => null)) as
-        | { error?: string }
-        | null;
-
-      if (!res.ok) {
-        throw new Error(json?.error || "Failed to save internal note.");
-      }
-
-      setNote("");
-      setNoteMessage("Internal note saved.");
-      await refresh({ silent: true });
-    } catch (err: unknown) {
-      setNoteError(getErrorMessage(err, "Failed to save internal note."));
-    } finally {
-      setSavingNote(false);
     }
   }
 
@@ -1002,83 +962,13 @@ export default function TicketDetailClient({
             onChanged={refresh}
           />
 
-          <SectionCard
-            id="notes"
-            title="Internal Notes"
-            subtitle="Staff-only notes for continuity and decision memory."
-          >
-            {noteError ? (
-              <div className="error-banner" style={{ marginBottom: 12 }}>
-                {noteError}
-              </div>
-            ) : null}
-
-            {noteMessage ? (
-              <div className="info-banner" style={{ marginBottom: 12 }}>
-                {noteMessage}
-              </div>
-            ) : null}
-
-            <div className="space" style={{ marginBottom: 14 }}>
-              <textarea
-                className="textarea"
-                rows={4}
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="Add internal note..."
-              />
-
-              <button
-                className="button ghost"
-                type="button"
-                disabled={savingNote || !note.trim()}
-                onClick={() => void saveInternalNote()}
-              >
-                {savingNote ? "Saving..." : "Save Note"}
-              </button>
-            </div>
-
-            <div className="space">
-              {!notes.length ? (
-                <div className="empty-state">No internal notes yet.</div>
-              ) : null}
-
-              {notes.map((noteRow: Dict) => (
-                <div key={noteRow.id} className="message staff">
-                  <div
-                    className="row"
-                    style={{
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      gap: 10,
-                    }}
-                  >
-                    <div style={{ fontWeight: 800, overflowWrap: "anywhere" }}>
-                      {noteRow.staff_name || noteRow.staff_id}
-                    </div>
-
-                    <div className="muted" style={{ fontSize: 12 }}>
-                      Internal
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      marginTop: 8,
-                      whiteSpace: "pre-wrap",
-                      overflowWrap: "anywhere",
-                    }}
-                  >
-                    {noteRow.content}
-                  </div>
-
-                  <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-                    {formatDateTime(noteRow.created_at)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
+          <div id="notes">
+            <TicketNotesPanel
+              ticketId={ticketId}
+              notes={notes}
+              onSaved={refresh}
+            />
+          </div>
 
           <div id="timeline">
             <TicketTimelinePanel
