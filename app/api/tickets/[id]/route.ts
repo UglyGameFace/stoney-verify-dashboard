@@ -792,10 +792,18 @@ function buildTimeline(args: {
   vcSessions: VcSessionRow[];
   notes: TicketNoteRow[];
 }) {
-  const { activityRows, memberEvents, verificationFlags, verificationTokens, vcSessions, notes } = args;
+  const {
+    activityRows,
+    memberEvents,
+    verificationFlags,
+    verificationTokens,
+    vcSessions,
+    notes,
+  } = args;
+
   const items: Array<Record<string, unknown>> = [];
 
-  for (const row of safeArray(activityRows)) {
+  for (const row of safeArray<ActivityFeedRow>(activityRows)) {
     items.push({
       id: `activity:${row.id || row.created_at}`,
       type: row.event_type || "activity",
@@ -809,7 +817,7 @@ function buildTimeline(args: {
     });
   }
 
-  for (const row of safeArray(memberEvents)) {
+  for (const row of safeArray<MemberEventRow>(memberEvents)) {
     items.push({
       id: `member_event:${row.id || row.created_at}`,
       type: row.event_type || "member_event",
@@ -823,7 +831,7 @@ function buildTimeline(args: {
     });
   }
 
-  for (const row of safeArray(verificationFlags)) {
+  for (const row of safeArray<VerificationFlagRow>(verificationFlags)) {
     items.push({
       id: `flag:${row.id || row.created_at}`,
       type: "verification_flag",
@@ -837,8 +845,9 @@ function buildTimeline(args: {
     });
   }
 
-  for (const row of safeArray(verificationTokens)) {
+  for (const row of safeArray<VerificationTokenRow>(verificationTokens)) {
     const decision = normalizeString(row?.decision || row?.status).toUpperCase();
+
     items.push({
       id: `token:${row.token || row.created_at}`,
       type: "verification_token",
@@ -848,21 +857,24 @@ function buildTimeline(args: {
           : decision === "DENIED"
             ? "Verification Denied"
             : "Verification Token Updated",
-      description: `Status: ${row.status || "pending"}${decision ? ` • Decision: ${decision}` : ""}`,
+      description: `Status: ${row.status || "pending"}${
+        decision ? ` • Decision: ${decision}` : ""
+      }`,
       created_at:
         row.decided_at ||
         row.submitted_at ||
         row.updated_at ||
         row.created_at ||
         null,
-      actor_name: row.decided_by_display_name || row.decided_by_username || "System",
+      actor_name:
+        row.decided_by_display_name || row.decided_by_username || "System",
       actor_id: row.decided_by || null,
       source: "verification_tokens",
       raw: row,
     });
   }
 
-  for (const row of safeArray(vcSessions)) {
+  for (const row of safeArray<VcSessionRow>(vcSessions)) {
     items.push({
       id: `vc:${row.token || row.created_at}`,
       type: "vc_session",
@@ -882,7 +894,7 @@ function buildTimeline(args: {
     });
   }
 
-  for (const row of safeArray(notes)) {
+  for (const row of safeArray<TicketNoteRow>(notes)) {
     items.push({
       id: `note:${row.id || row.created_at}`,
       type: "internal_note",
