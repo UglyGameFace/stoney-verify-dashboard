@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import Sidebar from "@/components/Sidebar";
@@ -87,6 +88,33 @@ type TicketPageProps = {
 
 function normalizeString(value: unknown): string {
   return String(value || "").trim();
+}
+
+function normalizeNumber(value: unknown, fallback = 0): number {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function normalizeBoolean(value: unknown): boolean {
+  return value === true;
+}
+
+function safeText(value: unknown, fallback = "—"): string {
+  const text = normalizeString(value);
+  return text || fallback;
+}
+
+function formatDateTime(value: unknown): string {
+  const text = normalizeString(value);
+  if (!text) return "—";
+
+  try {
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) return "—";
+    return date.toLocaleString();
+  } catch {
+    return "—";
+  }
 }
 
 function resolveAppOrigin(): string {
@@ -243,9 +271,7 @@ async function fetchTicketData(
     return {
       ...buildFallbackTicketData(ticketId, session),
       error:
-        error instanceof Error
-          ? error.message
-          : "Failed to load ticket.",
+        error instanceof Error ? error.message : "Failed to load ticket.",
     };
   }
 }
@@ -284,27 +310,435 @@ function LoginRequiredState() {
   );
 }
 
-function TicketUnavailableState({ error }: { error?: string }) {
+function TopActionLink({
+  href,
+  label,
+  primary = false,
+}: {
+  href: string;
+  label: string;
+  primary?: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: 42,
+        padding: "10px 14px",
+        borderRadius: 14,
+        textDecoration: "none",
+        fontWeight: 800,
+        fontSize: 14,
+        lineHeight: 1,
+        border: primary
+          ? "1px solid rgba(93,255,141,0.28)"
+          : "1px solid rgba(255,255,255,0.08)",
+        background: primary
+          ? "rgba(93,255,141,0.10)"
+          : "rgba(255,255,255,0.04)",
+        color: "#f8fafc",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {label}
+    </Link>
+  );
+}
+
+function WorkspaceBadge({
+  label,
+  tone = "neutral",
+}: {
+  label: string;
+  tone?: "neutral" | "good" | "warn" | "danger" | "info";
+}) {
+  const stylesByTone: Record<string, { border: string; background: string }> = {
+    neutral: {
+      border: "1px solid rgba(255,255,255,0.08)",
+      background: "rgba(255,255,255,0.04)",
+    },
+    good: {
+      border: "1px solid rgba(93,255,141,0.24)",
+      background: "rgba(93,255,141,0.08)",
+    },
+    warn: {
+      border: "1px solid rgba(251,191,36,0.22)",
+      background: "rgba(251,191,36,0.08)",
+    },
+    danger: {
+      border: "1px solid rgba(248,113,113,0.22)",
+      background: "rgba(248,113,113,0.08)",
+    },
+    info: {
+      border: "1px solid rgba(99,213,255,0.22)",
+      background: "rgba(99,213,255,0.08)",
+    },
+  };
+
+  const toneStyles = stylesByTone[tone] || stylesByTone.neutral;
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        minHeight: 30,
+        padding: "6px 10px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 700,
+        color: "#f8fafc",
+        ...toneStyles,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function TicketUnavailableState({
+  error,
+  ticketId,
+}: {
+  error?: string;
+  ticketId?: string;
+}) {
   return (
     <div className="space">
       <div className="card">
-        <div className="muted" style={{ marginBottom: 8 }}>
-          Ticket Detail
-        </div>
-
-        <h1
+        <div
           style={{
-            margin: 0,
-            fontSize: "clamp(30px, 5vw, 46px)",
-            lineHeight: 0.96,
-            letterSpacing: "-0.05em",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 12,
+            flexWrap: "wrap",
           }}
         >
-          Ticket unavailable
-        </h1>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="muted" style={{ marginBottom: 8 }}>
+              Ticket Detail
+            </div>
 
-        <div className="error-banner" style={{ marginTop: 16 }}>
-          {error || "Ticket not found."}
+            <h1
+              style={{
+                margin: 0,
+                fontSize: "clamp(30px, 5vw, 46px)",
+                lineHeight: 0.96,
+                letterSpacing: "-0.05em",
+              }}
+            >
+              Ticket unavailable
+            </h1>
+
+            <div className="error-banner" style={{ marginTop: 16 }}>
+              {error || "Ticket not found."}
+            </div>
+
+            {ticketId ? (
+              <div className="muted" style={{ marginTop: 10 }}>
+                Requested ticket ID: {ticketId}
+              </div>
+            ) : null}
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+          >
+            <TopActionLink href="/" label="← Dashboard" primary />
+            <TopActionLink href="/#tickets" label="Tickets" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TicketWorkspaceHero({
+  data,
+  ticketId,
+}: {
+  data: TicketPageData;
+  ticketId: string;
+}) {
+  const ticket = data.ticket || {};
+  const member = data.member || {};
+  const category = data.category || {};
+  const workspace = data.workspace || {
+    verificationLabel: "Unknown",
+    riskLevel: "unknown",
+    noteCount: 0,
+    messageCount: 0,
+    flaggedCount: 0,
+    maxFlagScore: 0,
+    warnCount: 0,
+    latestActivityAt: null,
+    recommendedActions: [],
+    sla: {
+      sla_status: "no_deadline",
+      overdue: false,
+      minutes_overdue: 0,
+      minutes_until_deadline: 0,
+    },
+  };
+  const counts = data.counts || {
+    notes: 0,
+    messages: 0,
+    flags: 0,
+    warns: 0,
+    tokens: 0,
+    vcSessions: 0,
+  };
+
+  const title =
+    safeText(ticket.title, "") ||
+    safeText(ticket.channel_name, "") ||
+    `Ticket ${ticketId}`;
+
+  const ownerName =
+    safeText(member.display_name, "") ||
+    safeText(member.nickname, "") ||
+    safeText(member.username, "") ||
+    safeText(ticket.username, "") ||
+    safeText(ticket.user_id, "Unknown User");
+
+  const categoryName =
+    safeText(category.name, "") ||
+    safeText(ticket.matched_category_name, "") ||
+    safeText(ticket.category, "Uncategorized");
+
+  const status = safeText(ticket.status, "unknown").toLowerCase();
+  const risk = safeText(workspace.riskLevel, "unknown").toLowerCase();
+  const verification = safeText(workspace.verificationLabel, "Unknown");
+  const slaOverdue = normalizeBoolean(workspace?.sla?.overdue);
+  const transcriptReady =
+    normalizeString(ticket.transcript_url) ||
+    normalizeString(ticket.transcript_message_id) ||
+    normalizeString(ticket.transcript_channel_id);
+
+  return (
+    <div
+      className="card"
+      style={{
+        background:
+          "radial-gradient(circle at top right, rgba(93,255,141,0.08), transparent 28%), radial-gradient(circle at bottom left, rgba(99,213,255,0.06), transparent 24%), linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015)), linear-gradient(180deg, rgba(14, 25, 35, 0.98), rgba(7, 13, 21, 0.98))",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 14,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div
+            className="muted"
+            style={{
+              marginBottom: 8,
+              fontSize: 12,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+            }}
+          >
+            Staff Ticket Workspace
+          </div>
+
+          <h1
+            style={{
+              margin: 0,
+              fontSize: "clamp(30px, 5vw, 46px)",
+              lineHeight: 0.96,
+              letterSpacing: "-0.05em",
+              overflowWrap: "anywhere",
+            }}
+          >
+            {title}
+          </h1>
+
+          <div
+            className="muted"
+            style={{
+              marginTop: 12,
+              maxWidth: 920,
+              lineHeight: 1.55,
+              overflowWrap: "anywhere",
+            }}
+          >
+            {ownerName} • {categoryName} • Ticket ID {ticketId}
+          </div>
+
+          <div
+            style={{
+              marginTop: 14,
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+          >
+            <WorkspaceBadge
+              label={`Status: ${safeText(ticket.status, "unknown")}`}
+              tone={
+                status === "deleted"
+                  ? "danger"
+                  : status === "closed"
+                    ? "warn"
+                    : status === "claimed"
+                      ? "good"
+                      : "info"
+              }
+            />
+            <WorkspaceBadge
+              label={`Verification: ${verification}`}
+              tone={
+                verification.toLowerCase() === "verified"
+                  ? "good"
+                  : verification.toLowerCase().includes("review")
+                    ? "danger"
+                    : verification.toLowerCase().includes("pending")
+                      ? "warn"
+                      : "neutral"
+              }
+            />
+            <WorkspaceBadge
+              label={`Risk: ${risk}`}
+              tone={
+                risk === "high"
+                  ? "danger"
+                  : risk === "medium"
+                    ? "warn"
+                    : risk === "low"
+                      ? "good"
+                      : "neutral"
+              }
+            />
+            <WorkspaceBadge
+              label={
+                slaOverdue
+                  ? `SLA Overdue • ${normalizeNumber(
+                      workspace?.sla?.minutes_overdue,
+                      0
+                    )}m`
+                  : `SLA • ${safeText(workspace?.sla?.sla_status, "no_deadline")}`
+              }
+              tone={slaOverdue ? "danger" : "info"}
+            />
+            <WorkspaceBadge
+              label={transcriptReady ? "Transcript Ready" : "Transcript Pending"}
+              tone={transcriptReady ? "good" : "neutral"}
+            />
+            {normalizeBoolean(ticket.is_ghost) ? (
+              <WorkspaceBadge label="Ghost Ticket" tone="neutral" />
+            ) : null}
+            {normalizeBoolean(ticket.category_override) ? (
+              <WorkspaceBadge label="Manual Category" tone="warn" />
+            ) : null}
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <TopActionLink href="/" label="← Dashboard" primary />
+          <TopActionLink href="/#tickets" label="Tickets" />
+          <TopActionLink href="/ticket-categories" label="Category Manager" />
+          <TopActionLink href="/#members" label="Members" />
+        </div>
+      </div>
+
+      <div
+        style={{
+          marginTop: 16,
+          display: "grid",
+          gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
+          gap: 10,
+        }}
+      >
+        <div className="member-detail-item">
+          <div className="ticket-info-label">Messages</div>
+          <div>{normalizeNumber(counts.messages, 0)}</div>
+        </div>
+        <div className="member-detail-item">
+          <div className="ticket-info-label">Notes</div>
+          <div>{normalizeNumber(counts.notes, 0)}</div>
+        </div>
+        <div className="member-detail-item">
+          <div className="ticket-info-label">Flags</div>
+          <div>{normalizeNumber(counts.flags, 0)}</div>
+        </div>
+        <div className="member-detail-item">
+          <div className="ticket-info-label">Warns</div>
+          <div>{normalizeNumber(counts.warns, 0)}</div>
+        </div>
+        <div className="member-detail-item">
+          <div className="ticket-info-label">Tokens</div>
+          <div>{normalizeNumber(counts.tokens, 0)}</div>
+        </div>
+        <div className="member-detail-item">
+          <div className="ticket-info-label">VC Sessions</div>
+          <div>{normalizeNumber(counts.vcSessions, 0)}</div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          marginTop: 16,
+          display: "flex",
+          gap: 10,
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
+        <TopActionLink
+          href={`/api/tickets/${encodeURIComponent(ticketId)}/transcript`}
+          label="Export HTML"
+        />
+        <TopActionLink
+          href={`/api/tickets/${encodeURIComponent(ticketId)}/transcript?format=txt`}
+          label="Export TXT"
+        />
+        <TopActionLink
+          href={`/api/tickets/${encodeURIComponent(ticketId)}/transcript?format=json`}
+          label="Export JSON"
+        />
+      </div>
+
+      <div
+        style={{
+          marginTop: 16,
+          display: "grid",
+          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+          gap: 12,
+        }}
+      >
+        <div className="member-detail-item">
+          <div className="ticket-info-label">Latest Activity</div>
+          <div>{formatDateTime(workspace.latestActivityAt)}</div>
+        </div>
+        <div className="member-detail-item">
+          <div className="ticket-info-label">Recommended Actions</div>
+          <div style={{ overflowWrap: "anywhere" }}>
+            {Array.isArray(workspace.recommendedActions) &&
+            workspace.recommendedActions.length
+              ? workspace.recommendedActions.slice(0, 4).join(" • ")
+              : "No immediate recommendations"}
+          </div>
         </div>
       </div>
     </div>
@@ -336,9 +770,12 @@ export default async function TicketPage({ params }: TicketPageProps) {
       <main className="content">
         <div className="content-inner">
           {data?.ticket ? (
-            <TicketDetailClient initialData={data} ticketId={ticketId} />
+            <div className="space">
+              <TicketWorkspaceHero data={data} ticketId={ticketId} />
+              <TicketDetailClient initialData={data} ticketId={ticketId} />
+            </div>
           ) : (
-            <TicketUnavailableState error={data?.error} />
+            <TicketUnavailableState error={data?.error} ticketId={ticketId} />
           )}
         </div>
       </main>
