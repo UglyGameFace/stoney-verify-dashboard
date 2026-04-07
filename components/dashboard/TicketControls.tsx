@@ -1,10 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   assignTicketAction,
   closeTicketAction,
+  copyTextToClipboard,
   deleteTicketAction,
+  getTicketTranscriptState,
   reopenTicketAction,
 } from "@/lib/dashboardActions";
 
@@ -69,7 +76,12 @@ type ActionState =
   | "deleting"
   | "saving-category";
 
-type PanelName = "overview" | "category" | "transcript" | "close" | "delete";
+type PanelName =
+  | "overview"
+  | "category"
+  | "transcript"
+  | "close"
+  | "delete";
 
 const MOBILE_LAYOUT_MAX_WIDTH = 1023;
 
@@ -142,6 +154,14 @@ function getCurrentCategoryReason(ticket: TicketLike): string {
   return normalizeString(ticket.matched_category_reason) || "No match reason";
 }
 
+function getCurrentCategorySlug(ticket: TicketLike): string {
+  return (
+    normalizeString(ticket.matched_category_slug) ||
+    normalizeString(ticket.category) ||
+    "—"
+  );
+}
+
 function sortCategories(categories: TicketCategory[]): TicketCategory[] {
   return [...categories].sort((a, b) => {
     const sortA = Number(a?.sort_order ?? 9999);
@@ -156,6 +176,12 @@ function sortCategories(categories: TicketCategory[]): TicketCategory[] {
   });
 }
 
+function buildTranscriptExportUrl(ticketId: string, format?: "html" | "txt" | "json"): string {
+  const base = `/api/tickets/${encodeURIComponent(ticketId)}/transcript`;
+  if (!format || format === "html") return base;
+  return `${base}?format=${format}`;
+}
+
 function ActionAccordion({
   title,
   subtitle,
@@ -167,10 +193,10 @@ function ActionAccordion({
 }: {
   title: string;
   subtitle?: string;
-  badge?: React.ReactNode;
+  badge?: ReactNode;
   open: boolean;
   onToggle: () => void;
-  children: React.ReactNode;
+  children: ReactNode;
   danger?: boolean;
 }) {
   return (
@@ -213,6 +239,7 @@ export default function TicketControls({
   onChanged,
 }: TicketControlsProps) {
   const channelId = useMemo(() => getChannelId(ticket), [ticket]);
+  const ticketId = useMemo(() => normalizeString(ticket?.id), [ticket]);
 
   const derived = useMemo(() => {
     const ghost = normalizeBoolean(ticket.is_ghost);
@@ -221,12 +248,7 @@ export default function TicketControls({
     const open = isOpen(ticket.status);
     const claimed = isClaimed(ticket.status);
 
-    const transcriptUrl = normalizeString(ticket.transcript_url);
-    const transcriptMessageId = normalizeString(ticket.transcript_message_id);
-    const transcriptChannelId = normalizeString(ticket.transcript_channel_id);
-
-    const hasTranscript =
-      !!transcriptUrl || !!transcriptMessageId || !!transcriptChannelId;
+    const transcript = getTicketTranscriptState(ticket);
 
     return {
       ghost,
@@ -234,10 +256,16 @@ export default function TicketControls({
       deleted,
       open,
       claimed,
-      transcriptUrl,
-      transcriptMessageId,
-      transcriptChannelId,
-      hasTranscript,
+      transcriptUrl: normalizeString(transcript.transcriptUrl),
+      transcriptMessageId: normalizeString(transcript.transcriptMessageId),
+      transcriptChannelId: normalizeString(transcript.transcriptChannelId),
+      hasTranscript: transcript.hasTranscript,
+      transcriptState: transcript.transcriptState,
+      currentCategoryName: getCurrentCategoryName(ticket),
+      currentCategorySlug: getCurrentCategorySlug(ticket),
+      currentCategoryReason: getCurrentCategoryReason(ticket),
+      currentCategoryScore: Number(ticket?.matched_category_score ?? 0),
+      currentIntakeType: normalizeString(ticket?.matched_intake_type) || "—",
     };
   }, [ticket]);
 
@@ -269,13 +297,26 @@ export default function TicketControls({
     setError("");
     setMessage("");
     setForceTranscript(false);
+    setCloseReason(normalizeString(ticket?.closed_reason) || "Resolved");
+    setDeleteReason("Deleted from dashboard");
+
     setOpenPanels((prev) => ({
       ...prev,
       overview: true,
+      category: false,
+      transcript: derived.hasTranscript || derived.closed || derived.deleted,
       close: false,
       delete: false,
     }));
-  }, [ticket?.id, ticket?.category_id, ticket?.matched_category_id]);
+  }, [
+    ticket?.id,
+    ticket?.category_id,
+    ticket?.matched_category_id,
+    ticket?.closed_reason,
+    derived.hasTranscript,
+    derived.closed,
+    derived.deleted,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -315,7 +356,7 @@ export default function TicketControls({
       }
     }
 
-    loadCategories();
+    void loadCategories();
 
     return () => {
       cancelled = true;
@@ -368,14 +409,14 @@ export default function TicketControls({
     }
   }
 
-  async function copyText(value: string, successMessage: string) {
-    try {
-      await navigator.clipboard.writeText(value);
+  async function handleCopy(value: string, successMessage: string) {
+    const result = await copyTextToClipboard(value);
+    if (result.ok) {
       setError("");
       setMessage(successMessage);
-    } catch {
-      setError("Could not copy to clipboard on this device.");
+      return;
     }
+    setError(result.error || "Could not copy to clipboard.");
   }
 
   async function handleAssign() {
@@ -398,7 +439,7 @@ export default function TicketControls({
         throw new Error(result.command?.error || "Failed to assign ticket.");
       }
 
-      setMessage("Ticket assigned.");
+      setMessage(derived.claimed ? "Ticket re-assigned." : "Ticket assigned.");
       await afterChange(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to assign ticket.");
@@ -502,7 +543,11 @@ export default function TicketControls({
           : "Ticket deleted after transcript posted."
       );
 
-      setOpenPanels((prev) => ({ ...prev, delete: false }));
+      setOpenPanels((prev) => ({
+        ...prev,
+        delete: false,
+        transcript: true,
+      }));
       await afterChange(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete ticket.");
@@ -580,6 +625,9 @@ export default function TicketControls({
             ) : (
               <span className="badge">No Transcript</span>
             )}
+            {normalizeBoolean(ticket.category_override) ? (
+              <span className="badge medium">Manual Category</span>
+            ) : null}
           </div>
         </div>
 
@@ -628,7 +676,7 @@ export default function TicketControls({
 
       <ActionAccordion
         title="Overview"
-        subtitle="Current ticket state, channel identity, and quick copy actions."
+        subtitle="Current ticket state, channel identity, and quick actions."
         badge={<span className="badge open">Info</span>}
         open={openPanels.overview}
         onToggle={() => togglePanel("overview")}
@@ -644,7 +692,14 @@ export default function TicketControls({
           <div className="member-detail-item">
             <div className="ticket-info-label">Category</div>
             <div className="ticket-controls-mini-value">
-              {getCurrentCategoryName(ticket)}
+              {derived.currentCategoryName}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Category Slug</div>
+            <div className="ticket-controls-mini-value">
+              {derived.currentCategorySlug}
             </div>
           </div>
 
@@ -663,16 +718,51 @@ export default function TicketControls({
           </div>
 
           <div className="member-detail-item">
-            <div className="ticket-info-label">Current Reason</div>
+            <div className="ticket-info-label">Source</div>
             <div className="ticket-controls-mini-value">
-              {getCurrentCategoryReason(ticket)}
+              {safeText(ticket.source)}
             </div>
           </div>
 
           <div className="member-detail-item">
-            <div className="ticket-info-label">Source</div>
+            <div className="ticket-info-label">Current Reason</div>
             <div className="ticket-controls-mini-value">
-              {safeText(ticket.source)}
+              {derived.currentCategoryReason}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Match Score</div>
+            <div className="ticket-controls-mini-value">
+              {String(derived.currentCategoryScore || 0)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Matched Intake Type</div>
+            <div className="ticket-controls-mini-value">
+              {derived.currentIntakeType}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Override Set By</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(ticket.category_set_by)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Override Set At</div>
+            <div className="ticket-controls-mini-value">
+              {formatDateTime(ticket.category_set_at)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Transcript State</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(derived.transcriptState)}
             </div>
           </div>
         </div>
@@ -682,7 +772,7 @@ export default function TicketControls({
             <button
               type="button"
               className="button ghost"
-              onClick={() => copyText(channelId, "Channel ID copied.")}
+              onClick={() => void handleCopy(channelId, "Channel ID copied.")}
             >
               Copy Channel ID
             </button>
@@ -693,7 +783,7 @@ export default function TicketControls({
               type="button"
               className="button ghost"
               onClick={() =>
-                copyText(String(ticket.title), "Ticket title copied.")
+                void handleCopy(String(ticket.title), "Ticket title copied.")
               }
             >
               Copy Title
@@ -705,11 +795,22 @@ export default function TicketControls({
               type="button"
               className="button ghost"
               onClick={() =>
-                copyText(String(ticket.claimed_by), "Claimed-by value copied.")
+                void handleCopy(String(ticket.claimed_by), "Claimed-by value copied.")
               }
             >
               Copy Claimed By
             </button>
+          ) : null}
+
+          {ticketId ? (
+            <a
+              href={`/api/tickets/${ticketId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="button ghost"
+            >
+              Open Raw API
+            </a>
           ) : null}
         </div>
       </ActionAccordion>
@@ -731,21 +832,35 @@ export default function TicketControls({
           <div className="member-detail-item">
             <div className="ticket-info-label">Current Category</div>
             <div className="ticket-controls-mini-value">
-              {getCurrentCategoryName(ticket)}
+              {derived.currentCategoryName}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Current Slug</div>
+            <div className="ticket-controls-mini-value">
+              {derived.currentCategorySlug}
             </div>
           </div>
 
           <div className="member-detail-item">
             <div className="ticket-info-label">Current Reason</div>
             <div className="ticket-controls-mini-value">
-              {getCurrentCategoryReason(ticket)}
+              {derived.currentCategoryReason}
             </div>
           </div>
 
           <div className="member-detail-item">
             <div className="ticket-info-label">Matched Intake Type</div>
             <div className="ticket-controls-mini-value">
-              {safeText(ticket?.matched_intake_type)}
+              {derived.currentIntakeType}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Matched Score</div>
+            <div className="ticket-controls-mini-value">
+              {String(derived.currentCategoryScore || 0)}
             </div>
           </div>
 
@@ -817,9 +932,26 @@ export default function TicketControls({
             </div>
 
             <div className="member-detail-item">
-              <div className="ticket-info-label">Description</div>
+              <div className="ticket-info-label">Selected Description</div>
               <div className="ticket-controls-mini-value">
                 {safeText(selectedCategory.description)}
+              </div>
+            </div>
+
+            <div className="member-detail-item">
+              <div className="ticket-info-label">Default Category</div>
+              <div className="ticket-controls-mini-value">
+                {selectedCategory.is_default ? "Yes" : "No"}
+              </div>
+            </div>
+
+            <div className="member-detail-item">
+              <div className="ticket-info-label">Keywords</div>
+              <div className="ticket-controls-mini-value">
+                {Array.isArray(selectedCategory.match_keywords) &&
+                selectedCategory.match_keywords.length
+                  ? selectedCategory.match_keywords.join(" • ")
+                  : "—"}
               </div>
             </div>
           </div>
@@ -828,7 +960,7 @@ export default function TicketControls({
 
       <ActionAccordion
         title="Transcript & History"
-        subtitle="Closure, deletion, transcript links, and archival proof."
+        subtitle="Closure, deletion, transcript links, and export tools."
         badge={
           derived.hasTranscript ? (
             <span className="badge claimed">Available</span>
@@ -850,7 +982,7 @@ export default function TicketControls({
                   rel="noreferrer"
                   className="ticket-inline-link"
                 >
-                  Open Transcript
+                  Open Stored Transcript
                 </a>
               ) : (
                 "—"
@@ -908,55 +1040,101 @@ export default function TicketControls({
           </div>
         </div>
 
-        {derived.hasTranscript ? (
-          <div className="ticket-controls-actions">
-            {derived.transcriptUrl ? (
+        <div className="ticket-controls-actions">
+          {derived.transcriptUrl ? (
+            <a
+              href={derived.transcriptUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="button primary"
+            >
+              Open Stored Transcript
+            </a>
+          ) : null}
+
+          {ticketId ? (
+            <>
               <a
-                href={derived.transcriptUrl}
+                href={buildTranscriptExportUrl(ticketId, "html")}
                 target="_blank"
                 rel="noreferrer"
-                className="button primary"
+                className="button ghost"
               >
-                Open Transcript
+                Export HTML
               </a>
-            ) : null}
 
-            {derived.transcriptMessageId ? (
-              <button
-                type="button"
+              <a
+                href={buildTranscriptExportUrl(ticketId, "txt")}
+                target="_blank"
+                rel="noreferrer"
                 className="button ghost"
-                onClick={() =>
-                  copyText(
-                    derived.transcriptMessageId,
-                    "Transcript message ID copied."
-                  )
-                }
               >
-                Copy Message ID
-              </button>
-            ) : null}
+                Export TXT
+              </a>
 
-            {derived.transcriptChannelId ? (
-              <button
-                type="button"
+              <a
+                href={buildTranscriptExportUrl(ticketId, "json")}
+                target="_blank"
+                rel="noreferrer"
                 className="button ghost"
-                onClick={() =>
-                  copyText(
-                    derived.transcriptChannelId,
-                    "Transcript channel ID copied."
-                  )
-                }
               >
-                Copy Channel ID
-              </button>
-            ) : null}
-          </div>
-        ) : (
+                Export JSON
+              </a>
+            </>
+          ) : null}
+
+          {derived.transcriptUrl ? (
+            <button
+              type="button"
+              className="button ghost"
+              onClick={() =>
+                void handleCopy(
+                  derived.transcriptUrl,
+                  "Transcript link copied."
+                )
+              }
+            >
+              Copy Transcript Link
+            </button>
+          ) : null}
+
+          {derived.transcriptMessageId ? (
+            <button
+              type="button"
+              className="button ghost"
+              onClick={() =>
+                void handleCopy(
+                  derived.transcriptMessageId,
+                  "Transcript message ID copied."
+                )
+              }
+            >
+              Copy Message ID
+            </button>
+          ) : null}
+
+          {derived.transcriptChannelId ? (
+            <button
+              type="button"
+              className="button ghost"
+              onClick={() =>
+                void handleCopy(
+                  derived.transcriptChannelId,
+                  "Transcript channel ID copied."
+                )
+              }
+            >
+              Copy Channel ID
+            </button>
+          ) : null}
+        </div>
+
+        {!derived.hasTranscript ? (
           <div className="empty-state" style={{ padding: 12 }}>
             Transcript data will appear here after the ticket is closed or
             deleted through the bot workflow.
           </div>
-        )}
+        ) : null}
       </ActionAccordion>
 
       <ActionAccordion
