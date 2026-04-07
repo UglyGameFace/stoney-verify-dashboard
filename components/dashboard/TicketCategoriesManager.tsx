@@ -27,6 +27,12 @@ type TicketCategory = {
   } | null;
 };
 
+type LinkedTicketPreview = {
+  id?: string | null;
+  title?: string | null;
+  status?: string | null;
+};
+
 type CategoriesResponse = {
   categories?: TicketCategory[];
   defaultCategoryId?: string | null;
@@ -40,11 +46,7 @@ type MutationResponse = {
   error?: string;
   category?: TicketCategory | null;
   deletedId?: string | null;
-  linkedTickets?: Array<{
-    id?: string | null;
-    title?: string | null;
-    status?: string | null;
-  }>;
+  linkedTickets?: LinkedTicketPreview[];
 };
 
 type FormState = {
@@ -185,7 +187,7 @@ export default function TicketCategoriesManager() {
         category.description,
         category.intake_type,
         category.button_label,
-        ...(safeArray<string>(category.match_keywords)),
+        ...safeArray<string>(category.match_keywords),
       ]
         .map(normalizeString)
         .join(" ")
@@ -356,12 +358,15 @@ export default function TicketCategoriesManager() {
       }
 
       setMessage(form.id ? "Category updated." : "Category created.");
-      const savedId = normalizeString(json?.category?.id);
+
+      const savedCategory = json?.category || null;
+      const savedId = normalizeString(savedCategory?.id);
 
       await loadCategories({ preserveSelection: false });
 
       if (savedId) {
         setSelectedId(savedId);
+        setForm(buildFormFromCategory(savedCategory));
       } else {
         resetForm();
       }
@@ -396,11 +401,15 @@ export default function TicketCategoriesManager() {
       const json = (await res.json().catch(() => null)) as MutationResponse | null;
 
       if (!res.ok || (json && json.error)) {
-        const linkedTickets = safeArray(json?.linkedTickets || []);
+        const linkedTickets = safeArray<LinkedTicketPreview>(json?.linkedTickets || []);
+
         if (linkedTickets.length) {
           const linkedPreview = linkedTickets
             .slice(0, 3)
-            .map((ticket) => `${ticket.title || "Untitled"} (${ticket.status || "unknown"})`)
+            .map(
+              (ticket) =>
+                `${ticket.title || "Untitled"} (${ticket.status || "unknown"})`
+            )
             .join(" • ");
 
           throw new Error(
@@ -515,14 +524,18 @@ export default function TicketCategoriesManager() {
                         {category.is_default ? (
                           <span className="badge claimed">Default</span>
                         ) : null}
-                        <span className="badge">{normalizeString(category.intake_type) || "general"}</span>
+                        <span className="badge">
+                          {normalizeString(category.intake_type) || "general"}
+                        </span>
                       </div>
                     </div>
 
                     <div className="ticket-category-meta">
                       <span>{normalizeString(category.slug) || "—"}</span>
                       <span>•</span>
-                      <span>{Number(category.keyword_count || category.match_keywords?.length || 0)} keywords</span>
+                      <span>
+                        {Number(category.keyword_count || category.match_keywords?.length || 0)} keywords
+                      </span>
                       <span>•</span>
                       <span>{usageCount(category, "total")} tickets</span>
                     </div>
