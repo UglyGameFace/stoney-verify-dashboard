@@ -462,7 +462,7 @@ function TicketUnavailableState({
   );
 }
 
-function TicketWorkspaceHero({
+function TicketWorkspaceShellHeader({
   data,
   ticketId,
 }: {
@@ -470,8 +470,6 @@ function TicketWorkspaceHero({
   ticketId: string;
 }) {
   const ticket = data.ticket || {};
-  const member = data.member || {};
-  const category = data.category || {};
   const workspace = data.workspace || {
     verificationLabel: "Unknown",
     riskLevel: "unknown",
@@ -497,23 +495,6 @@ function TicketWorkspaceHero({
     tokens: 0,
     vcSessions: 0,
   };
-
-  const title =
-    safeText(ticket.title, "") ||
-    safeText(ticket.channel_name, "") ||
-    `Ticket ${ticketId}`;
-
-  const ownerName =
-    safeText(member.display_name, "") ||
-    safeText(member.nickname, "") ||
-    safeText(member.username, "") ||
-    safeText(ticket.username, "") ||
-    safeText(ticket.user_id, "Unknown User");
-
-  const categoryName =
-    safeText(category.name, "") ||
-    safeText(ticket.matched_category_name, "") ||
-    safeText(ticket.category, "Uncategorized");
 
   const status = safeText(ticket.status, "unknown").toLowerCase();
   const risk = safeText(workspace.riskLevel, "unknown").toLowerCase();
@@ -563,7 +544,7 @@ function TicketWorkspaceHero({
               overflowWrap: "anywhere",
             }}
           >
-            {title}
+            Ticket Workspace
           </h1>
 
           <div
@@ -575,7 +556,8 @@ function TicketWorkspaceHero({
               overflowWrap: "anywhere",
             }}
           >
-            {ownerName} • {categoryName} • Ticket ID {ticketId}
+            Ticket ID {ticketId} • Use this page for staff actions, member context,
+            verification decisions, notes, timeline, and replies.
           </div>
 
           <div
@@ -699,29 +681,6 @@ function TicketWorkspaceHero({
       <div
         style={{
           marginTop: 16,
-          display: "flex",
-          gap: 10,
-          flexWrap: "wrap",
-          alignItems: "center",
-        }}
-      >
-        <TopActionLink
-          href={`/api/tickets/${encodeURIComponent(ticketId)}/transcript`}
-          label="Export HTML"
-        />
-        <TopActionLink
-          href={`/api/tickets/${encodeURIComponent(ticketId)}/transcript?format=txt`}
-          label="Export TXT"
-        />
-        <TopActionLink
-          href={`/api/tickets/${encodeURIComponent(ticketId)}/transcript?format=json`}
-          label="Export JSON"
-        />
-      </div>
-
-      <div
-        style={{
-          marginTop: 16,
           display: "grid",
           gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
           gap: 12,
@@ -771,7 +730,7 @@ export default async function TicketPage({ params }: TicketPageProps) {
         <div className="content-inner">
           {data?.ticket ? (
             <div className="space">
-              <TicketWorkspaceHero data={data} ticketId={ticketId} />
+              <TicketWorkspaceShellHeader data={data} ticketId={ticketId} />
               <TicketDetailClient initialData={data} ticketId={ticketId} />
             </div>
           ) : (
