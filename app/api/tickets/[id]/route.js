@@ -1,5 +1,8 @@
 import { createServerSupabase } from "@/lib/supabase-server";
-import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
+import {
+  requireStaffSessionForRoute,
+  applyAuthCookies,
+} from "@/lib/auth-server";
 import { env } from "@/lib/env";
 import { enrichTicketWithMatchedCategory } from "@/lib/ticketCategoryMatching";
 import {
@@ -11,50 +14,322 @@ import {
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function normalizeString(value) {
+type JsonRecord = Record<string, unknown>;
+type RefreshedTokens = unknown;
+
+type RouteContext = {
+  params: {
+    id?: string;
+  };
+};
+
+type SessionLike = {
+  user?: {
+    discord_id?: string | null;
+    id?: string | null;
+    user_id?: string | null;
+    username?: string | null;
+    name?: string | null;
+  } | null;
+  discordUser?: {
+    id?: string | null;
+    username?: string | null;
+  } | null;
+};
+
+type TicketRow = {
+  id?: string | null;
+  guild_id?: string | null;
+  user_id?: string | null;
+  username?: string | null;
+  title?: string | null;
+  category?: string | null;
+  category_id?: string | null;
+  category_override?: boolean | null;
+  category_set_by?: string | null;
+  category_set_at?: string | null;
+  status?: string | null;
+  priority?: string | null;
+  claimed_by?: string | null;
+  assigned_to?: string | null;
+  closed_by?: string | null;
+  closed_reason?: string | null;
+  closed_at?: string | null;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+  initial_message?: string | null;
+  channel_id?: string | null;
+  discord_thread_id?: string | null;
+  channel_name?: string | null;
+  transcript_url?: string | null;
+  transcript_message_id?: string | null;
+  transcript_channel_id?: string | null;
+  source?: string | null;
+  is_ghost?: boolean | null;
+  matched_category_id?: string | null;
+  matched_category_name?: string | null;
+  matched_category_slug?: string | null;
+  matched_intake_type?: string | null;
+  matched_category_reason?: string | null;
+  matched_category_score?: number | null;
+  ticket_number?: number | null;
+  updated_at?: string | null;
+  created_at?: string | null;
+  sla_deadline?: string | null;
+};
+
+type GuildMemberRow = {
+  guild_id?: string | null;
+  user_id?: string | null;
+  username?: string | null;
+  display_name?: string | null;
+  nickname?: string | null;
+  avatar_url?: string | null;
+  role_ids?: string[] | null;
+  role_names?: string[] | null;
+  roles?: JsonRecord[] | null;
+  in_guild?: boolean | null;
+  has_unverified?: boolean | null;
+  has_verified_role?: boolean | null;
+  has_staff_role?: boolean | null;
+  has_secondary_verified_role?: boolean | null;
+  has_cosmetic_only?: boolean | null;
+  role_state?: string | null;
+  role_state_reason?: string | null;
+  is_bot?: boolean | null;
+  entry_method?: string | null;
+  verification_source?: string | null;
+  entry_reason?: string | null;
+  approval_reason?: string | null;
+  invited_by?: string | null;
+  invited_by_name?: string | null;
+  invite_code?: string | null;
+  vouched_by?: string | null;
+  vouched_by_name?: string | null;
+  approved_by?: string | null;
+  approved_by_name?: string | null;
+  verification_ticket_id?: string | null;
+  source_ticket_id?: string | null;
+};
+
+type TicketCategoryRow = {
+  id?: string | null;
+  guild_id?: string | null;
+  name?: string | null;
+  slug?: string | null;
+  color?: string | null;
+  description?: string | null;
+  intake_type?: string | null;
+  match_keywords?: string[] | null;
+  button_label?: string | null;
+  sort_order?: number | null;
+  is_default?: boolean | null;
+};
+
+type TicketNoteRow = {
+  id?: string | null;
+  ticket_id?: string | null;
+  staff_id?: string | null;
+  staff_name?: string | null;
+  content?: string | null;
+  created_at?: string | null;
+};
+
+type TicketMessageRow = {
+  id?: string | null;
+  ticket_id?: string | null;
+  author_id?: string | null;
+  author_name?: string | null;
+  content?: string | null;
+  message_type?: string | null;
+  created_at?: string | null;
+  attachments?: JsonRecord[] | null;
+  source?: string | null;
+};
+
+type VerificationFlagRow = {
+  id?: string | null;
+  user_id?: string | null;
+  score?: number | null;
+  flagged?: boolean | null;
+  reasons?: string[] | null;
+  created_at?: string | null;
+};
+
+type VerificationTokenRow = {
+  token?: string | null;
+  requester_id?: string | null;
+  user_id?: string | null;
+  approved_user_id?: string | null;
+  status?: string | null;
+  decision?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  submitted_at?: string | null;
+  decided_at?: string | null;
+  expires_at?: string | null;
+  role_sync_ok?: boolean | null;
+  role_sync_reason?: string | null;
+  ai_status?: string | null;
+  decided_by?: string | null;
+  decided_by_display_name?: string | null;
+  decided_by_username?: string | null;
+};
+
+type VcSessionRow = {
+  token?: string | null;
+  guild_id?: string | number | null;
+  ticket_channel_id?: string | number | null;
+  requester_id?: string | number | null;
+  owner_id?: string | number | null;
+  vc_channel_id?: string | number | null;
+  queue_channel_id?: string | number | null;
+  accepted_by?: string | number | null;
+  canceled_by?: string | number | null;
+  status?: string | null;
+  created_at?: string | null;
+  accepted_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  canceled_at?: string | null;
+  revoke_at?: string | null;
+  access_minutes?: number | null;
+  meta?: JsonRecord | null;
+};
+
+type WarnRow = {
+  id?: string | null;
+  user_id?: string | null;
+  reason?: string | null;
+  created_at?: string | null;
+};
+
+type MemberEventRow = {
+  id?: string | null;
+  user_id?: string | null;
+  actor_id?: string | null;
+  actor_name?: string | null;
+  event_type?: string | null;
+  title?: string | null;
+  reason?: string | null;
+  metadata?: JsonRecord | null;
+  created_at?: string | null;
+};
+
+type MemberJoinRow = {
+  id?: string | null;
+  user_id?: string | null;
+  username?: string | null;
+  display_name?: string | null;
+  avatar_url?: string | null;
+  joined_at?: string | null;
+  entry_method?: string | null;
+  verification_source?: string | null;
+  invite_code?: string | null;
+  invited_by?: string | null;
+  invited_by_name?: string | null;
+  vouched_by?: string | null;
+  vouched_by_name?: string | null;
+  approved_by?: string | null;
+  approved_by_name?: string | null;
+  join_note?: string | null;
+  source_ticket_id?: string | null;
+};
+
+type ActivityFeedRow = {
+  id?: string | null;
+  created_at?: string | null;
+  title?: string | null;
+  description?: string | null;
+  reason?: string | null;
+  event_family?: string | null;
+  event_type?: string | null;
+  source?: string | null;
+  actor_user_id?: string | null;
+  actor_name?: string | null;
+  target_user_id?: string | null;
+  target_name?: string | null;
+  channel_id?: string | null;
+  channel_name?: string | null;
+  ticket_id?: string | null;
+  metadata?: JsonRecord | null;
+};
+
+type CategoryPatchAction = "update-category" | "clear-category-override";
+type ContextPatchAction = "link-verification-context";
+type PatchAction = CategoryPatchAction | ContextPatchAction;
+
+function normalizeString(value: unknown): string {
   return String(value || "").trim();
 }
 
-function normalizeLower(value) {
+function normalizeLower(value: unknown): string {
   return normalizeString(value).toLowerCase();
 }
 
-function normalizeNumber(value, fallback = 0) {
+function normalizeNumber(value: unknown, fallback = 0): number {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
 }
 
-function normalizeBoolean(value) {
+function normalizeBoolean(value: unknown): boolean {
   if (typeof value === "boolean") return value;
   const clean = normalizeString(value).toLowerCase();
   return clean === "true" || clean === "1" || clean === "yes" || clean === "on";
 }
 
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+function safeArray<T = unknown>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
 }
 
-function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+function safeObject<T extends object = JsonRecord>(value: unknown): T {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as T)
+    : ({} as T);
 }
 
-function parseDateMs(value) {
+function parseDateMs(value: unknown): number {
   const ms = new Date(value || 0).getTime();
   return Number.isFinite(ms) ? ms : 0;
 }
 
-function newestTimestamp(...values) {
+function newestTimestamp(...values: unknown[]): number {
   return Math.max(...values.map(parseDateMs), 0);
 }
 
-function truncateText(value, max = 220) {
+function truncateText(value: unknown, max = 220): string {
   const text = normalizeString(value);
   if (!text) return "";
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
-function mapTicket(row) {
+function buildJsonResponse(
+  payload: Record<string, unknown>,
+  status = 200,
+  refreshedTokens: RefreshedTokens | null = null
+): Response {
+  const response = new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    },
+  });
+
+  applyAuthCookies(response, refreshedTokens);
+  return response;
+}
+
+function buildErrorResponse(
+  message: string,
+  status = 500,
+  refreshedTokens: RefreshedTokens | null = null
+): Response {
+  return buildJsonResponse({ error: message }, status, refreshedTokens);
+}
+
+function mapTicket(row: TicketRow): TicketRow {
   return {
     ...row,
     priority: row?.priority || "medium",
@@ -65,7 +340,7 @@ function mapTicket(row) {
   };
 }
 
-function mapGuildMember(row) {
+function mapGuildMember(row: GuildMemberRow | null): GuildMemberRow | null {
   if (!row) return null;
 
   return {
@@ -90,7 +365,7 @@ function mapGuildMember(row) {
   };
 }
 
-function mapTicketNote(row) {
+function mapTicketNote(row: TicketNoteRow): TicketNoteRow {
   return {
     ...row,
     ticket_id: normalizeString(row?.ticket_id),
@@ -101,7 +376,7 @@ function mapTicketNote(row) {
   };
 }
 
-function mapTicketMessage(row) {
+function mapTicketMessage(row: TicketMessageRow): TicketMessageRow {
   return {
     ...row,
     ticket_id: normalizeString(row?.ticket_id),
@@ -110,12 +385,12 @@ function mapTicketMessage(row) {
     content: row?.content || "",
     message_type: normalizeLower(row?.message_type || "staff") || "staff",
     created_at: row?.created_at || null,
-    attachments: safeArray(row?.attachments),
+    attachments: safeArray<JsonRecord>(row?.attachments),
     source: row?.source || null,
   };
 }
 
-function mapVerificationFlag(row) {
+function mapVerificationFlag(row: VerificationFlagRow): VerificationFlagRow {
   return {
     ...row,
     user_id: normalizeString(row?.user_id),
@@ -126,7 +401,7 @@ function mapVerificationFlag(row) {
   };
 }
 
-function mapVerificationToken(row) {
+function mapVerificationToken(row: VerificationTokenRow): VerificationTokenRow {
   return {
     ...row,
     requester_id: normalizeString(row?.requester_id),
@@ -145,7 +420,7 @@ function mapVerificationToken(row) {
   };
 }
 
-function mapVcSession(row) {
+function mapVcSession(row: VcSessionRow): VcSessionRow {
   return {
     ...row,
     token: row?.token || null,
@@ -169,7 +444,7 @@ function mapVcSession(row) {
   };
 }
 
-function mapWarn(row) {
+function mapWarn(row: WarnRow): WarnRow {
   return {
     ...row,
     user_id: normalizeString(row?.user_id),
@@ -178,7 +453,7 @@ function mapWarn(row) {
   };
 }
 
-function mapMemberEvent(row) {
+function mapMemberEvent(row: MemberEventRow): MemberEventRow {
   return {
     ...row,
     user_id: normalizeString(row?.user_id),
@@ -192,7 +467,7 @@ function mapMemberEvent(row) {
   };
 }
 
-function mapJoin(row) {
+function mapJoin(row: MemberJoinRow): MemberJoinRow {
   return {
     ...row,
     user_id: normalizeString(row?.user_id),
@@ -214,7 +489,7 @@ function mapJoin(row) {
   };
 }
 
-function mapActivityRow(row) {
+function mapActivityRow(row: ActivityFeedRow): ActivityFeedRow {
   const meta = safeObject(row?.metadata);
 
   return {
@@ -226,30 +501,18 @@ function mapActivityRow(row) {
     event_family: row?.event_family || "activity",
     event_type: row?.event_type || "activity",
     source: row?.source || "system",
-    actor_id: normalizeString(row?.actor_user_id),
+    actor_user_id: normalizeString(row?.actor_user_id),
     actor_name: row?.actor_name || "",
     target_user_id: normalizeString(row?.target_user_id),
     target_name: row?.target_name || "",
-    channel_id: row?.channel_id || meta?.channel_id || null,
-    channel_name: row?.channel_name || meta?.channel_name || null,
-    ticket_id: row?.ticket_id || meta?.ticket_id || null,
+    channel_id: row?.channel_id || normalizeString((meta as JsonRecord)?.channel_id) || null,
+    channel_name: row?.channel_name || normalizeString((meta as JsonRecord)?.channel_name) || null,
+    ticket_id: row?.ticket_id || normalizeString((meta as JsonRecord)?.ticket_id) || null,
     metadata: meta,
   };
 }
 
-function buildCategoryPatch(body) {
-  return {
-    category: normalizeString(body?.category) || null,
-    category_id: normalizeString(body?.category_id) || null,
-    category_override: normalizeBoolean(
-      body?.category_override ?? body?.manual_override ?? true
-    ),
-    category_set_by: normalizeString(body?.category_set_by) || null,
-    category_set_at: new Date().toISOString(),
-  };
-}
-
-function getActorIdentity(session) {
+function getActorIdentity(session: SessionLike | null | undefined) {
   return {
     actorId:
       session?.user?.discord_id ||
@@ -265,30 +528,33 @@ function getActorIdentity(session) {
   };
 }
 
-function indexCategories(rows) {
-  const byId = new Map();
-  const bySlug = new Map();
+function indexCategories(rows: TicketCategoryRow[]) {
+  const byId = new Map<string, TicketCategoryRow>();
+  const bySlug = new Map<string, TicketCategoryRow>();
+  const byName = new Map<string, TicketCategoryRow>();
 
-  for (const row of safeArray(rows)) {
+  for (const row of safeArray<TicketCategoryRow>(rows)) {
     const id = normalizeString(row?.id);
     const slug = normalizeLower(row?.slug);
+    const name = normalizeLower(row?.name);
     if (id) byId.set(id, row);
     if (slug) bySlug.set(slug, row);
+    if (name) byName.set(name, row);
   }
 
-  return { byId, bySlug };
+  return { byId, bySlug, byName };
 }
 
-function getTicketCategoryRow(ticket, categoryIndex) {
-  const idCandidates = [
-    ticket?.category_id,
-    ticket?.matched_category_id,
-  ]
+function getTicketCategoryRow(
+  ticket: TicketRow,
+  categoryIndex: ReturnType<typeof indexCategories>
+): TicketCategoryRow | null {
+  const idCandidates = [ticket?.category_id, ticket?.matched_category_id]
     .map(normalizeString)
     .filter(Boolean);
 
   for (const id of idCandidates) {
-    if (categoryIndex.byId.has(id)) return categoryIndex.byId.get(id);
+    if (categoryIndex.byId.has(id)) return categoryIndex.byId.get(id) || null;
   }
 
   const slugCandidates = [
@@ -300,13 +566,42 @@ function getTicketCategoryRow(ticket, categoryIndex) {
     .filter(Boolean);
 
   for (const slug of slugCandidates) {
-    if (categoryIndex.bySlug.has(slug)) return categoryIndex.bySlug.get(slug);
+    if (categoryIndex.bySlug.has(slug)) return categoryIndex.bySlug.get(slug) || null;
   }
 
   return null;
 }
 
-function deriveVerificationLabel({ member, latestToken, latestVc, flaggedCount, ticket }) {
+function findCategoryFromPatch(
+  patch: {
+    category_id?: string | null;
+    category?: string | null;
+  },
+  categoryIndex: ReturnType<typeof indexCategories>
+): TicketCategoryRow | null {
+  const categoryId = normalizeString(patch?.category_id);
+  if (categoryId && categoryIndex.byId.has(categoryId)) {
+    return categoryIndex.byId.get(categoryId) || null;
+  }
+
+  const categoryKey = normalizeLower(patch?.category);
+  if (!categoryKey) return null;
+
+  return (
+    categoryIndex.bySlug.get(categoryKey) ||
+    categoryIndex.byName.get(categoryKey) ||
+    null
+  );
+}
+
+function deriveVerificationLabel(args: {
+  member: GuildMemberRow | null;
+  latestToken: VerificationTokenRow | null;
+  latestVc: VcSessionRow | null;
+  flaggedCount: number;
+  ticket: TicketRow;
+}): string {
+  const { member, latestToken, latestVc, flaggedCount, ticket } = args;
   const tokenStatus = normalizeLower(latestToken?.status);
   const tokenDecision = normalizeString(latestToken?.decision).toUpperCase();
   const vcStatus = normalizeString(latestVc?.status).toUpperCase();
@@ -350,7 +645,7 @@ function deriveVerificationLabel({ member, latestToken, latestVc, flaggedCount, 
   return "Unknown";
 }
 
-function deriveSlaState(ticket) {
+function deriveSlaState(ticket: TicketRow) {
   const status = normalizeLower(ticket?.status);
   const deadlineMs = parseDateMs(ticket?.sla_deadline);
 
@@ -391,15 +686,18 @@ function deriveSlaState(ticket) {
   };
 }
 
-function deriveRiskLevel({
-  ticket,
-  member,
-  flaggedCount,
-  warnCount,
-  maxFlagScore,
-  noteCount,
-  slaState,
-}) {
+function deriveRiskLevel(args: {
+  ticket: TicketRow;
+  member: GuildMemberRow | null;
+  flaggedCount: number;
+  warnCount: number;
+  maxFlagScore: number;
+  noteCount: number;
+  slaState: {
+    overdue: boolean;
+  };
+}): string {
+  const { ticket, member, flaggedCount, warnCount, maxFlagScore, noteCount, slaState } = args;
   const priority = normalizeLower(ticket?.priority);
 
   if (
@@ -425,15 +723,18 @@ function deriveRiskLevel({
   return "low";
 }
 
-function deriveRecommendedActions({
-  ticket,
-  member,
-  flaggedCount,
-  latestVc,
-  noteCount,
-  slaState,
-}) {
-  const actions = [];
+function deriveRecommendedActions(args: {
+  ticket: TicketRow;
+  member: GuildMemberRow | null;
+  flaggedCount: number;
+  latestVc: VcSessionRow | null;
+  noteCount: number;
+  slaState: {
+    overdue: boolean;
+  };
+}): string[] {
+  const { ticket, member, flaggedCount, latestVc, noteCount, slaState } = args;
+  const actions: string[] = [];
 
   if (!normalizeString(ticket?.claimed_by) && !normalizeString(ticket?.assigned_to)) {
     actions.push("Claim this ticket.");
@@ -463,16 +764,27 @@ function deriveRecommendedActions({
   return [...new Set(actions)].slice(0, 6);
 }
 
-function latestBy(rows, ...fields) {
-  return [...safeArray(rows)].sort((a, b) => {
+function latestBy<T extends Record<string, unknown>>(
+  rows: T[],
+  ...fields: string[]
+): T | null {
+  return [...safeArray<T>(rows)].sort((a, b) => {
     const aTs = newestTimestamp(...fields.map((field) => a?.[field]));
     const bTs = newestTimestamp(...fields.map((field) => b?.[field]));
     return bTs - aTs;
   })[0] || null;
 }
 
-function buildTimeline({ activityRows, memberEvents, verificationFlags, verificationTokens, vcSessions, notes }) {
-  const items = [];
+function buildTimeline(args: {
+  activityRows: ActivityFeedRow[];
+  memberEvents: MemberEventRow[];
+  verificationFlags: VerificationFlagRow[];
+  verificationTokens: VerificationTokenRow[];
+  vcSessions: VcSessionRow[];
+  notes: TicketNoteRow[];
+}) {
+  const { activityRows, memberEvents, verificationFlags, verificationTokens, vcSessions, notes } = args;
+  const items: Array<Record<string, unknown>> = [];
 
   for (const row of safeArray(activityRows)) {
     items.push({
@@ -482,7 +794,7 @@ function buildTimeline({ activityRows, memberEvents, verificationFlags, verifica
       description: row.description || "",
       created_at: row.created_at || null,
       actor_name: row.actor_name || "System",
-      actor_id: row.actor_id || null,
+      actor_id: row.actor_user_id || null,
       source: row.source || "activity_feed_events",
       raw: row,
     });
@@ -581,33 +893,149 @@ function buildTimeline({ activityRows, memberEvents, verificationFlags, verifica
     .slice(0, 40);
 }
 
-export async function GET(request, { params }) {
+function buildCategoryPatch(body: JsonRecord) {
+  return {
+    category: normalizeString(body?.category) || null,
+    category_id: normalizeString(body?.category_id) || null,
+    category_override: normalizeBoolean(
+      body?.category_override ?? body?.manual_override ?? true
+    ),
+    category_set_by: normalizeString(body?.category_set_by) || null,
+    category_set_at: new Date().toISOString(),
+  };
+}
+
+function buildTranscriptExports(ticketId: string) {
+  const encoded = encodeURIComponent(ticketId);
+  return {
+    html: `/api/tickets/${encoded}/transcript`,
+    txt: `/api/tickets/${encoded}/transcript?format=txt`,
+    json: `/api/tickets/${encoded}/transcript?format=json`,
+  };
+}
+
+async function parseRequestBody(request: Request): Promise<JsonRecord> {
+  try {
+    const body = await request.json();
+    return safeObject<JsonRecord>(body);
+  } catch {
+    return {};
+  }
+}
+
+async function writeVerificationContext(args: {
+  supabase: ReturnType<typeof createServerSupabase>;
+  guildId: string;
+  ticketId: string;
+  existingTicket: TicketRow;
+  actorId: string | null;
+  actorName: string;
+  entryMethod?: string | null;
+  verificationSource?: string | null;
+  entryReason?: string | null;
+  approvalReason?: string | null;
+  categoryName?: string | null;
+  categorySlug?: string | null;
+}) {
+  const {
+    supabase,
+    guildId,
+    ticketId,
+    existingTicket,
+    actorId,
+    actorName,
+    entryMethod,
+    verificationSource,
+    entryReason,
+    approvalReason,
+    categoryName,
+    categorySlug,
+  } = args;
+
+  const userId = String(existingTicket.user_id || "").trim();
+  if (!userId) return;
+
+  await patchGuildMemberEntryFields(
+    {
+      guildId,
+      userId,
+      approvedBy: actorId,
+      approvedByName: actorName,
+      sourceTicketId: ticketId,
+      verificationTicketId: ticketId,
+      entryMethod:
+        normalizeString(entryMethod) ||
+        normalizeString(verificationSource) ||
+        "verification_ticket",
+      verificationSource:
+        normalizeString(verificationSource) ||
+        "dashboard_manual_category_override",
+      entryReason:
+        normalizeString(entryReason) ||
+        `Ticket category manually set to ${categoryName || categorySlug || "verification"}.`,
+      approvalReason:
+        normalizeString(approvalReason) ||
+        `Dashboard staff manually linked verification context on ticket ${ticketId}.`,
+    },
+    supabase
+  );
+
+  await patchLatestMemberJoinContext(
+    {
+      guildId,
+      userId,
+      username: existingTicket.username || null,
+      approvedBy: actorId,
+      approvedByName: actorName,
+      sourceTicketId: ticketId,
+      entryMethod: normalizeString(entryMethod) || "verification_ticket",
+      verificationSource:
+        normalizeString(verificationSource) ||
+        "dashboard_manual_category_override",
+      joinNote:
+        normalizeString(entryReason) ||
+        `Verification context linked from ticket ${ticketId}.`,
+    },
+    supabase
+  );
+
+  await insertMemberEvent(
+    {
+      guildId,
+      userId,
+      actorId,
+      actorName,
+      eventType: "verification_context_linked",
+      title: "Verification Context Linked",
+      reason:
+        normalizeString(approvalReason) ||
+        "Verification entry context was linked from dashboard ticket override.",
+      metadata: {
+        ticket_id: ticketId,
+        verification_ticket_id: ticketId,
+        category_name: categoryName || null,
+        category_slug: categorySlug || null,
+        verification_source:
+          normalizeString(verificationSource) ||
+          "dashboard_manual_category_override",
+      },
+    },
+    supabase
+  );
+}
+
+export async function GET(request: Request, context: RouteContext) {
   try {
     const { session, refreshedTokens } = await requireStaffSessionForRoute();
+    const typedSession = session as SessionLike;
     const supabase = createServerSupabase();
-    const ticketId = normalizeString(params?.id);
+    const ticketId = normalizeString(context?.params?.id);
 
     if (!ticketId) {
-      const badResponse = new Response(
-        JSON.stringify({ error: "Missing ticket id." }),
-        {
-          status: 400,
-          headers: {
-            "Content-Type": "application/json",
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-          },
-        }
-      );
-      applyAuthCookies(badResponse, refreshedTokens);
-      return badResponse;
+      return buildErrorResponse("Missing ticket id.", 400, refreshedTokens);
     }
 
-    const [
-      ticketRes,
-      messagesRes,
-      notesRes,
-      categoriesRes,
-    ] = await Promise.all([
+    const [ticketRes, messagesRes, notesRes, categoriesRes] = await Promise.all([
       supabase.from("tickets").select("*").eq("id", ticketId).single(),
       supabase
         .from("ticket_messages")
@@ -626,140 +1054,116 @@ export async function GET(request, { params }) {
     ]);
 
     if (ticketRes.error || !ticketRes.data) {
-      const notFoundResponse = new Response(
-        JSON.stringify({ error: ticketRes.error?.message || "Ticket not found." }),
-        {
-          status: 404,
-          headers: {
-            "Content-Type": "application/json",
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-          },
-        }
+      return buildErrorResponse(
+        ticketRes.error?.message || "Ticket not found.",
+        404,
+        refreshedTokens
       );
-      applyAuthCookies(notFoundResponse, refreshedTokens);
-      return notFoundResponse;
     }
 
-    const rawTicket = mapTicket(ticketRes.data);
-    const categoryRows = safeArray(categoriesRes.data || []);
+    const rawTicket = mapTicket(ticketRes.data as TicketRow);
+    const categoryRows = safeArray<TicketCategoryRow>(categoriesRes.data || []);
     const categoryIndex = indexCategories(categoryRows);
-    const ticket = enrichTicketWithMatchedCategory(rawTicket, categoryRows);
+    const ticket = enrichTicketWithMatchedCategory(rawTicket, categoryRows) as TicketRow;
 
     const ticketUserId = normalizeString(ticket?.user_id);
     const ticketChannelId = normalizeString(ticket?.channel_id || ticket?.discord_thread_id);
 
-    const [
-      memberRowsRes,
-      joinsRes,
-      memberEventsRes,
-      flagsRes,
-      tokensRes,
-      vcRes,
-      warnsRes,
-      activityRes,
-    ] = await Promise.all([
-      ticketUserId
-        ? supabase
-            .from("guild_members")
-            .select("*")
-            .eq("guild_id", env.guildId || "")
-            .eq("user_id", ticketUserId)
-            .limit(1)
-        : Promise.resolve({ data: [], error: null }),
+    const [memberRowsRes, joinsRes, memberEventsRes, flagsRes, tokensRes, vcRes, warnsRes, activityRes] =
+      await Promise.all([
+        ticketUserId
+          ? supabase
+              .from("guild_members")
+              .select("*")
+              .eq("guild_id", env.guildId || "")
+              .eq("user_id", ticketUserId)
+              .limit(1)
+          : Promise.resolve({ data: [], error: null }),
+        ticketUserId
+          ? supabase
+              .from("member_joins")
+              .select("*")
+              .eq("guild_id", env.guildId || "")
+              .eq("user_id", ticketUserId)
+              .order("joined_at", { ascending: false })
+              .limit(20)
+          : Promise.resolve({ data: [], error: null }),
+        ticketUserId
+          ? supabase
+              .from("member_events")
+              .select("*")
+              .eq("guild_id", env.guildId || "")
+              .eq("user_id", ticketUserId)
+              .order("created_at", { ascending: false })
+              .limit(50)
+          : Promise.resolve({ data: [], error: null }),
+        ticketUserId
+          ? supabase
+              .from("verification_flags")
+              .select("*")
+              .eq("guild_id", env.guildId || "")
+              .eq("user_id", ticketUserId)
+              .order("created_at", { ascending: false })
+              .limit(50)
+          : Promise.resolve({ data: [], error: null }),
+        ticketUserId
+          ? supabase
+              .from("verification_tokens")
+              .select("*")
+              .eq("guild_id", env.guildId || "")
+              .or(`requester_id.eq.${ticketUserId},user_id.eq.${ticketUserId},approved_user_id.eq.${ticketUserId}`)
+              .order("created_at", { ascending: false })
+              .limit(60)
+          : Promise.resolve({ data: [], error: null }),
+        ticketUserId
+          ? supabase
+              .from("vc_verify_sessions")
+              .select("*")
+              .eq("guild_id", env.guildId || "")
+              .or(`owner_id.eq.${ticketUserId},requester_id.eq.${ticketUserId}`)
+              .order("created_at", { ascending: false })
+              .limit(40)
+          : Promise.resolve({ data: [], error: null }),
+        ticketUserId
+          ? supabase
+              .from("warns")
+              .select("*")
+              .eq("guild_id", env.guildId || "")
+              .eq("user_id", ticketUserId)
+              .order("created_at", { ascending: false })
+              .limit(30)
+          : Promise.resolve({ data: [], error: null }),
+        ticketUserId
+          ? supabase
+              .from("activity_feed_events")
+              .select("*")
+              .eq("guild_id", env.guildId || "")
+              .or(
+                ticketChannelId
+                  ? `ticket_id.eq.${ticketId},channel_id.eq.${ticketChannelId},target_user_id.eq.${ticketUserId}`
+                  : `ticket_id.eq.${ticketId},target_user_id.eq.${ticketUserId}`
+              )
+              .order("created_at", { ascending: false })
+              .limit(100)
+          : supabase
+              .from("activity_feed_events")
+              .select("*")
+              .eq("guild_id", env.guildId || "")
+              .eq("ticket_id", ticketId)
+              .order("created_at", { ascending: false })
+              .limit(100),
+      ]);
 
-      ticketUserId
-        ? supabase
-            .from("member_joins")
-            .select("*")
-            .eq("guild_id", env.guildId || "")
-            .eq("user_id", ticketUserId)
-            .order("joined_at", { ascending: false })
-            .limit(20)
-        : Promise.resolve({ data: [], error: null }),
-
-      ticketUserId
-        ? supabase
-            .from("member_events")
-            .select("*")
-            .eq("guild_id", env.guildId || "")
-            .eq("user_id", ticketUserId)
-            .order("created_at", { ascending: false })
-            .limit(50)
-        : Promise.resolve({ data: [], error: null }),
-
-      ticketUserId
-        ? supabase
-            .from("verification_flags")
-            .select("*")
-            .eq("guild_id", env.guildId || "")
-            .eq("user_id", ticketUserId)
-            .order("created_at", { ascending: false })
-            .limit(50)
-        : Promise.resolve({ data: [], error: null }),
-
-      ticketUserId
-        ? supabase
-            .from("verification_tokens")
-            .select("*")
-            .eq("guild_id", env.guildId || "")
-            .or(
-              `requester_id.eq.${ticketUserId},user_id.eq.${ticketUserId},approved_user_id.eq.${ticketUserId}`
-            )
-            .order("created_at", { ascending: false })
-            .limit(60)
-        : Promise.resolve({ data: [], error: null }),
-
-      ticketUserId
-        ? supabase
-            .from("vc_verify_sessions")
-            .select("*")
-            .eq("guild_id", env.guildId || "")
-            .or(`owner_id.eq.${ticketUserId},requester_id.eq.${ticketUserId}`)
-            .order("created_at", { ascending: false })
-            .limit(40)
-        : Promise.resolve({ data: [], error: null }),
-
-      ticketUserId
-        ? supabase
-            .from("warns")
-            .select("*")
-            .eq("guild_id", env.guildId || "")
-            .eq("user_id", ticketUserId)
-            .order("created_at", { ascending: false })
-            .limit(30)
-        : Promise.resolve({ data: [], error: null }),
-
-      ticketUserId
-        ? supabase
-            .from("activity_feed_events")
-            .select("*")
-            .eq("guild_id", env.guildId || "")
-            .or(
-              ticketChannelId
-                ? `ticket_id.eq.${ticketId},channel_id.eq.${ticketChannelId},target_user_id.eq.${ticketUserId}`
-                : `ticket_id.eq.${ticketId},target_user_id.eq.${ticketUserId}`
-            )
-            .order("created_at", { ascending: false })
-            .limit(100)
-        : supabase
-            .from("activity_feed_events")
-            .select("*")
-            .eq("guild_id", env.guildId || "")
-            .eq("ticket_id", ticketId)
-            .order("created_at", { ascending: false })
-            .limit(100),
-    ]);
-
-    const member = mapGuildMember(safeArray(memberRowsRes.data || [])[0] || null);
-    const messages = safeArray(messagesRes.data).map(mapTicketMessage);
-    const notes = safeArray(notesRes.data).map(mapTicketNote);
-    const joins = safeArray(joinsRes.data).map(mapJoin);
-    const memberEvents = safeArray(memberEventsRes.data).map(mapMemberEvent);
-    const verificationFlags = safeArray(flagsRes.data).map(mapVerificationFlag);
-    const verificationTokens = safeArray(tokensRes.data).map(mapVerificationToken);
-    const vcSessions = safeArray(vcRes.data).map(mapVcSession);
-    const warns = safeArray(warnsRes.data).map(mapWarn);
-    const activity = safeArray(activityRes.data).map(mapActivityRow);
+    const member = mapGuildMember((safeArray<GuildMemberRow>(memberRowsRes.data || [])[0] || null) as GuildMemberRow | null);
+    const messages = safeArray<TicketMessageRow>(messagesRes.data).map(mapTicketMessage);
+    const notes = safeArray<TicketNoteRow>(notesRes.data).map(mapTicketNote);
+    const joins = safeArray<MemberJoinRow>(joinsRes.data).map(mapJoin);
+    const memberEvents = safeArray<MemberEventRow>(memberEventsRes.data).map(mapMemberEvent);
+    const verificationFlags = safeArray<VerificationFlagRow>(flagsRes.data).map(mapVerificationFlag);
+    const verificationTokens = safeArray<VerificationTokenRow>(tokensRes.data).map(mapVerificationToken);
+    const vcSessions = safeArray<VcSessionRow>(vcRes.data).map(mapVcSession);
+    const warns = safeArray<WarnRow>(warnsRes.data).map(mapWarn);
+    const activity = safeArray<ActivityFeedRow>(activityRes.data).map(mapActivityRow);
 
     const category = getTicketCategoryRow(ticket, categoryIndex);
     const latestNote = latestBy(notes, "created_at");
@@ -831,6 +1235,15 @@ export async function GET(request, { params }) {
       ticket?.updated_at ||
       ticket?.created_at ||
       null;
+
+    const transcriptState =
+      normalizeString(ticket?.transcript_url) ||
+      normalizeString(ticket?.transcript_message_id) ||
+      normalizeString(ticket?.transcript_channel_id)
+        ? "available"
+        : normalizeLower(ticket?.status) === "closed" || normalizeLower(ticket?.status) === "deleted"
+          ? "expected_missing"
+          : "not_ready";
 
     const enrichedTicket = {
       ...ticket,
@@ -913,18 +1326,34 @@ export async function GET(request, { params }) {
 
       risk_level: riskLevel,
       recommended_actions: recommendedActions,
+
+      transcript_state: transcriptState,
+      transcript_available:
+        Boolean(normalizeString(ticket?.transcript_url)) ||
+        Boolean(normalizeString(ticket?.transcript_message_id)) ||
+        Boolean(normalizeString(ticket?.transcript_channel_id)),
+      transcript_exports: buildTranscriptExports(ticketId),
+
+      can_assign: !normalizeLower(ticket?.status).includes("deleted"),
+      can_close:
+        normalizeLower(ticket?.status) !== "closed" &&
+        normalizeLower(ticket?.status) !== "deleted",
+      can_reopen:
+        normalizeLower(ticket?.status) !== "open" &&
+        normalizeLower(ticket?.status) !== "deleted",
+      can_delete: normalizeLower(ticket?.status) !== "deleted",
     };
 
     const viewer = {
       id:
-        session?.user?.discord_id ||
-        session?.user?.id ||
-        session?.discordUser?.id ||
+        typedSession?.user?.discord_id ||
+        typedSession?.user?.id ||
+        typedSession?.discordUser?.id ||
         null,
       username:
-        session?.user?.username ||
-        session?.discordUser?.username ||
-        session?.user?.name ||
+        typedSession?.user?.username ||
+        typedSession?.discordUser?.username ||
+        typedSession?.user?.name ||
         "Staff",
     };
 
@@ -937,8 +1366,8 @@ export async function GET(request, { params }) {
       notes,
     });
 
-    const response = new Response(
-      JSON.stringify({
+    return buildJsonResponse(
+      {
         ok: true,
         ticket: enrichedTicket,
         category: category || null,
@@ -976,60 +1405,45 @@ export async function GET(request, { params }) {
         },
         viewer,
         currentStaffId: viewer.id || "",
-      }),
-      {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        },
-      }
-    );
-
-    applyAuthCookies(response, refreshedTokens);
-    return response;
-  } catch (error) {
-    const message = error?.message || "Failed to load ticket.";
-
-    return new Response(JSON.stringify({ error: message }), {
-      status: message === "Unauthorized" ? 401 : 500,
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
       },
-    });
+      200,
+      refreshedTokens
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to load ticket.";
+    return buildErrorResponse(
+      message,
+      message === "Unauthorized" ? 401 : 500
+    );
   }
 }
 
-export async function PATCH(request, { params }) {
+export async function PATCH(request: Request, context: RouteContext) {
   try {
     const { session, refreshedTokens } = await requireStaffSessionForRoute();
+    const typedSession = session as SessionLike;
     const supabase = createServerSupabase();
-    const body = await request.json();
-    const ticketId = params?.id;
-    const guildId = env.guildId || "";
-    const { actorId, actorName } = getActorIdentity(session);
+    const body = await parseRequestBody(request);
+    const ticketId = normalizeString(context?.params?.id);
+    const { actorId, actorName } = getActorIdentity(typedSession);
 
     if (!ticketId) {
-      return new Response(JSON.stringify({ error: "Missing ticket id." }), {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        },
-      });
+      return buildErrorResponse("Missing ticket id.", 400, refreshedTokens);
     }
 
-    const action = normalizeString(body?.action || "update-category").toLowerCase();
+    const action = normalizeLower(body?.action || "update-category") as PatchAction;
 
-    if (action !== "update-category") {
-      return new Response(JSON.stringify({ error: "Unsupported patch action." }), {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        },
-      });
+    if (
+      action !== "update-category" &&
+      action !== "clear-category-override" &&
+      action !== "link-verification-context"
+    ) {
+      return buildErrorResponse(
+        "Unsupported patch action.",
+        400,
+        refreshedTokens
+      );
     }
 
     const { data: existingTicket, error: existingTicketError } = await supabase
@@ -1039,15 +1453,131 @@ export async function PATCH(request, { params }) {
       .single();
 
     if (existingTicketError || !existingTicket) {
-      return new Response(
-        JSON.stringify({ error: existingTicketError?.message || "Ticket not found." }),
+      return buildErrorResponse(
+        existingTicketError?.message || "Ticket not found.",
+        404,
+        refreshedTokens
+      );
+    }
+
+    const typedTicket = existingTicket as TicketRow;
+    const guildId = normalizeString(env.guildId || typedTicket.guild_id || "");
+
+    if (!guildId) {
+      return buildErrorResponse(
+        "Missing guild id configuration.",
+        500,
+        refreshedTokens
+      );
+    }
+
+    const { data: categoryRows, error: categoryRowsError } = await supabase
+      .from("ticket_categories")
+      .select("*")
+      .eq("guild_id", guildId);
+
+    if (categoryRowsError) {
+      return buildErrorResponse(categoryRowsError.message, 500, refreshedTokens);
+    }
+
+    const categoryIndex = indexCategories(
+      safeArray<TicketCategoryRow>(categoryRows || [])
+    );
+
+    if (action === "clear-category-override") {
+      const currentCategory = getTicketCategoryRow(typedTicket, categoryIndex);
+
+      const updatePayload = {
+        updated_at: new Date().toISOString(),
+        category_override: false,
+        category_set_by: actorId || null,
+        category_set_at: new Date().toISOString(),
+        category_id: currentCategory?.id || typedTicket.category_id || null,
+        category:
+          currentCategory?.slug ||
+          currentCategory?.name ||
+          typedTicket.category ||
+          null,
+        matched_category_id: currentCategory?.id || typedTicket.matched_category_id || null,
+        matched_category_name:
+          currentCategory?.name || typedTicket.matched_category_name || null,
+        matched_category_slug:
+          currentCategory?.slug || typedTicket.matched_category_slug || null,
+        matched_intake_type:
+          currentCategory?.intake_type || typedTicket.matched_intake_type || null,
+        matched_category_reason: "manual-override-cleared",
+        matched_category_score: normalizeNumber(
+          typedTicket.matched_category_score,
+          0
+        ),
+      };
+
+      const { data: ticket, error } = await supabase
+        .from("tickets")
+        .update(updatePayload)
+        .eq("id", ticketId)
+        .select("*")
+        .single();
+
+      if (error) {
+        return buildErrorResponse(error.message, 500, refreshedTokens);
+      }
+
+      await insertMemberEvent(
         {
-          status: 404,
-          headers: {
-            "Content-Type": "application/json",
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+          guildId,
+          userId: normalizeString(typedTicket.user_id),
+          actorId,
+          actorName,
+          eventType: "ticket_category_override_cleared",
+          title: "Ticket Category Override Cleared",
+          reason: "Manual category override was removed.",
+          metadata: {
+            ticket_id: ticketId,
+            ticket_number: typedTicket.ticket_number || null,
+            category: updatePayload.category,
+            category_id: updatePayload.category_id,
+            source: "dashboard_ticket_patch",
           },
-        }
+        },
+        supabase
+      );
+
+      return buildJsonResponse({ ok: true, ticket }, 200, refreshedTokens);
+    }
+
+    if (action === "link-verification-context") {
+      const inferredCategory = findCategoryFromPatch(
+        {
+          category_id: normalizeString(body?.category_id) || typedTicket.category_id || null,
+          category:
+            normalizeString(body?.category) ||
+            typedTicket.matched_category_slug ||
+            typedTicket.category ||
+            null,
+        },
+        categoryIndex
+      );
+
+      await writeVerificationContext({
+        supabase,
+        guildId,
+        ticketId,
+        existingTicket: typedTicket,
+        actorId,
+        actorName,
+        entryMethod: normalizeString(body?.entry_method) || null,
+        verificationSource: normalizeString(body?.verification_source) || null,
+        entryReason: normalizeString(body?.entry_reason) || null,
+        approvalReason: normalizeString(body?.approval_reason) || null,
+        categoryName: inferredCategory?.name || typedTicket.matched_category_name || null,
+        categorySlug: inferredCategory?.slug || typedTicket.matched_category_slug || null,
+      });
+
+      return buildJsonResponse(
+        { ok: true, message: "Verification context linked." },
+        200,
+        refreshedTokens
       );
     }
 
@@ -1056,36 +1586,14 @@ export async function PATCH(request, { params }) {
       category_set_by: body?.category_set_by || actorId || "",
     });
 
-    let categoryRow = null;
+    const categoryRow = findCategoryFromPatch(patch, categoryIndex);
 
-    if (patch.category_id) {
-      const { data, error } = await supabase
-        .from("ticket_categories")
-        .select("*")
-        .eq("id", patch.category_id)
-        .eq("guild_id", guildId)
-        .single();
-
-      if (error) {
-        return new Response(JSON.stringify({ error: error.message }), {
-          status: 400,
-          headers: {
-            "Content-Type": "application/json",
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-          },
-        });
-      }
-
-      categoryRow = data || null;
-    } else if (patch.category) {
-      const { data } = await supabase
-        .from("ticket_categories")
-        .select("*")
-        .eq("guild_id", guildId)
-        .or(`slug.eq.${patch.category},name.eq.${patch.category}`)
-        .limit(1);
-
-      categoryRow = Array.isArray(data) && data.length ? data[0] : null;
+    if (!categoryRow && !patch.category && !patch.category_id) {
+      return buildErrorResponse(
+        "Choose a valid category first.",
+        400,
+        refreshedTokens
+      );
     }
 
     const selectedCategorySlug = categoryRow?.slug || patch.category || null;
@@ -1115,19 +1623,13 @@ export async function PATCH(request, { params }) {
       .single();
 
     if (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        },
-      });
+      return buildErrorResponse(error.message, 500, refreshedTokens);
     }
 
     await insertMemberEvent(
       {
         guildId,
-        userId: String(existingTicket.user_id || "").trim(),
+        userId: normalizeString(typedTicket.user_id),
         actorId,
         actorName,
         eventType: "ticket_category_overridden",
@@ -1135,11 +1637,11 @@ export async function PATCH(request, { params }) {
         reason: `Manual category override set to ${selectedCategoryName || selectedCategorySlug || "unknown"}.`,
         metadata: {
           ticket_id: ticketId,
-          ticket_number: existingTicket.ticket_number || null,
-          previous_category: existingTicket.category || null,
-          previous_category_id: existingTicket.category_id || null,
-          previous_matched_category_id: existingTicket.matched_category_id || null,
-          previous_matched_category_name: existingTicket.matched_category_name || null,
+          ticket_number: typedTicket.ticket_number || null,
+          previous_category: typedTicket.category || null,
+          previous_category_id: typedTicket.category_id || null,
+          previous_matched_category_id: typedTicket.matched_category_id || null,
+          previous_matched_category_name: typedTicket.matched_category_name || null,
           next_category: updatePayload.category,
           next_category_id: updatePayload.category_id,
           matched_category_name: updatePayload.matched_category_name,
@@ -1152,101 +1654,34 @@ export async function PATCH(request, { params }) {
     );
 
     const shouldPatchEntryContext =
-      String(selectedIntakeType || "").toLowerCase() === "verification" ||
-      String(selectedCategorySlug || "").toLowerCase().includes("verification") ||
-      String(selectedCategoryName || "").toLowerCase().includes("verification");
+      normalizeLower(selectedIntakeType).includes("verification") ||
+      normalizeLower(selectedCategorySlug).includes("verification") ||
+      normalizeLower(selectedCategoryName).includes("verification");
 
     if (shouldPatchEntryContext) {
-      await patchGuildMemberEntryFields(
-        {
-          guildId,
-          userId: String(existingTicket.user_id || "").trim(),
-          approvedBy: actorId,
-          approvedByName: actorName,
-          sourceTicketId: ticketId,
-          verificationTicketId: ticketId,
-          entryMethod:
-            normalizeString(body?.entry_method) ||
-            normalizeString(body?.verification_source) ||
-            "verification_ticket",
-          verificationSource:
-            normalizeString(body?.verification_source) ||
-            "dashboard_manual_category_override",
-          entryReason:
-            normalizeString(body?.entry_reason) ||
-            `Ticket category manually set to ${selectedCategoryName || selectedCategorySlug || "verification"}.`,
-          approvalReason:
-            normalizeString(body?.approval_reason) ||
-            `Dashboard staff manually set verification category on ticket ${ticketId}.`,
-        },
-        supabase
-      );
-
-      await patchLatestMemberJoinContext(
-        {
-          guildId,
-          userId: String(existingTicket.user_id || "").trim(),
-          username: existingTicket.username || null,
-          approvedBy: actorId,
-          approvedByName: actorName,
-          sourceTicketId: ticketId,
-          entryMethod:
-            normalizeString(body?.entry_method) || "verification_ticket",
-          verificationSource:
-            normalizeString(body?.verification_source) ||
-            "dashboard_manual_category_override",
-          joinNote:
-            normalizeString(body?.entry_reason) ||
-            `Verification context linked from ticket ${ticketId}.`,
-        },
-        supabase
-      );
-
-      await insertMemberEvent(
-        {
-          guildId,
-          userId: String(existingTicket.user_id || "").trim(),
-          actorId,
-          actorName,
-          eventType: "verification_context_linked",
-          title: "Verification Context Linked",
-          reason:
-            normalizeString(body?.approval_reason) ||
-            "Verification entry context was linked from dashboard ticket override.",
-          metadata: {
-            ticket_id: ticketId,
-            verification_ticket_id: ticketId,
-            category_name: selectedCategoryName,
-            category_slug: selectedCategorySlug,
-            verification_source:
-              normalizeString(body?.verification_source) ||
-              "dashboard_manual_category_override",
-          },
-        },
-        supabase
-      );
+      await writeVerificationContext({
+        supabase,
+        guildId,
+        ticketId,
+        existingTicket: typedTicket,
+        actorId,
+        actorName,
+        entryMethod: normalizeString(body?.entry_method) || null,
+        verificationSource: normalizeString(body?.verification_source) || null,
+        entryReason: normalizeString(body?.entry_reason) || null,
+        approvalReason: normalizeString(body?.approval_reason) || null,
+        categoryName: selectedCategoryName,
+        categorySlug: selectedCategorySlug,
+      });
     }
 
-    const response = new Response(JSON.stringify({ ok: true, ticket }), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-      },
-    });
-
-    applyAuthCookies(response, refreshedTokens);
-    return response;
+    return buildJsonResponse({ ok: true, ticket }, 200, refreshedTokens);
   } catch (error) {
-    const message = error?.message || "Unauthorized";
-    const status = message === "Unauthorized" ? 401 : 500;
-
-    return new Response(JSON.stringify({ error: message }), {
-      status,
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-      },
-    });
+    const message =
+      error instanceof Error ? error.message : "Unauthorized";
+    return buildErrorResponse(
+      message,
+      message === "Unauthorized" ? 401 : 500
+    );
   }
 }
