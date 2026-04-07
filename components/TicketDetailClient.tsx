@@ -79,6 +79,20 @@ function normalizeText(value: unknown): string {
   return String(value || "").trim().toLowerCase();
 }
 
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean);
+}
+
+function normalizeObjectList(value: unknown): Dict[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item) => Boolean(item) && typeof item === "object" && !Array.isArray(item)
+  ) as Dict[];
+}
+
 function formatDateTime(value: unknown): string {
   if (!value) return "—";
   try {
@@ -86,6 +100,12 @@ function formatDateTime(value: unknown): string {
   } catch {
     return "—";
   }
+}
+
+function formatRatio(value: unknown): string {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  return `${Math.round(num * 100)}%`;
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -118,6 +138,12 @@ function badgeClass(value: unknown): string {
   if (v === "high risk") return "badge danger";
   if (v === "medium risk") return "badge medium";
   if (v === "low risk") return "badge low";
+
+  if (v === "critical alt risk") return "badge danger";
+  if (v === "high alt risk") return "badge danger";
+  if (v === "medium alt risk") return "badge medium";
+  if (v === "low alt risk") return "badge low";
+  if (v === "unknown alt risk") return "badge";
 
   return "badge";
 }
@@ -178,6 +204,112 @@ function getRiskLabel(ticket: Dict, workspace: Dict): string {
   if (raw.toLowerCase() === "medium") return "Medium Risk";
   if (raw.toLowerCase() === "low") return "Low Risk";
   return "Unknown";
+}
+
+function getAltRiskLevel(ticket: Dict, member: Dict, latestJoin: Dict): string {
+  return (
+    String(ticket?.owner_alt_risk_level || "").trim() ||
+    String(member?.risk_level || "").trim() ||
+    String(latestJoin?.risk_level || "").trim() ||
+    String(member?.last_join_risk_level || "").trim() ||
+    "low"
+  );
+}
+
+function getAltRiskLabel(ticket: Dict, member: Dict, latestJoin: Dict): string {
+  const explicit =
+    String(ticket?.owner_alt_risk_label || "").trim() ||
+    String(ticket?.alt_risk_label || "").trim();
+
+  if (explicit) return explicit;
+
+  const level = getAltRiskLevel(ticket, member, latestJoin).toLowerCase();
+  if (level === "critical") return "Critical Alt Risk";
+  if (level === "high") return "High Alt Risk";
+  if (level === "medium") return "Medium Alt Risk";
+  if (level === "low") return "Low Alt Risk";
+  return "Unknown Alt Risk";
+}
+
+function getAltRiskScore(ticket: Dict, member: Dict, latestJoin: Dict): number {
+  const values = [
+    ticket?.owner_alt_risk_score,
+    member?.risk_score,
+    latestJoin?.risk_score,
+    member?.last_join_risk_score,
+  ];
+
+  for (const value of values) {
+    const num = Number(value);
+    if (Number.isFinite(num)) return num;
+  }
+
+  return 0;
+}
+
+function getAltRiskReasons(ticket: Dict, member: Dict, latestJoin: Dict): string[] {
+  const candidates = [
+    ticket?.owner_alt_risk_reasons,
+    member?.risk_reasons,
+    latestJoin?.risk_reasons,
+  ];
+
+  for (const candidate of candidates) {
+    const list = normalizeStringList(candidate);
+    if (list.length) return list;
+  }
+
+  return [];
+}
+
+function getAltSuspicionFlags(ticket: Dict, member: Dict, latestJoin: Dict): string[] {
+  const candidates = [
+    ticket?.owner_suspicion_flags,
+    member?.suspicion_flags,
+    latestJoin?.suspicion_flags,
+  ];
+
+  for (const candidate of candidates) {
+    const list = normalizeStringList(candidate);
+    if (list.length) return list;
+  }
+
+  return [];
+}
+
+function getAltClusterMembers(ticket: Dict, member: Dict, latestJoin: Dict): Dict[] {
+  const candidates = [
+    ticket?.owner_alt_cluster_members,
+    member?.cluster_members,
+    latestJoin?.cluster_members,
+  ];
+
+  for (const candidate of candidates) {
+    const list = normalizeObjectList(candidate);
+    if (list.length) return list;
+  }
+
+  return [];
+}
+
+function getAltField(
+  ticket: Dict,
+  member: Dict,
+  latestJoin: Dict,
+  keys: string[],
+  fallback: string | number | boolean | null = null
+) {
+  const sources = [ticket, member, latestJoin];
+
+  for (const source of sources) {
+    for (const key of keys) {
+      if (source && source[key] !== undefined && source[key] !== null && source[key] !== "") {
+        return source[key];
+      }
+    }
+  }
+
+  return fallback;
 }
 
 function getClaimedLabel(ticket: Dict): string {
@@ -424,6 +556,136 @@ export default function TicketDetailClient({
   const ownerName = getOwnerName(ticket, member);
   const verificationLabel = getVerificationLabel(ticket, workspace);
   const riskLabel = getRiskLabel(ticket, workspace);
+  const altRiskLabel = getAltRiskLabel(ticket, member, latestJoin);
+  const altRiskLevel = getAltRiskLevel(ticket, member, latestJoin);
+  const altRiskScore = getAltRiskScore(ticket, member, latestJoin);
+  const altRiskReasons = getAltRiskReasons(ticket, member, latestJoin);
+  const altSuspicionFlags = getAltSuspicionFlags(ticket, member, latestJoin);
+  const altClusterMembers = getAltClusterMembers(ticket, member, latestJoin);
+
+  const altFingerprint = String(
+    getAltField(ticket, member, latestJoin, [
+      "owner_fingerprint",
+      "fingerprint",
+      "last_join_fingerprint",
+      "join_fingerprint",
+    ]) || ""
+  ).trim();
+
+  const altClusterKey = String(
+    getAltField(ticket, member, latestJoin, ["owner_alt_cluster_key", "alt_cluster_key"]) || ""
+  ).trim();
+
+  const altClusterSize = Number(
+    getAltField(ticket, member, latestJoin, ["owner_alt_cluster_size", "alt_cluster_size"], 0) || 0
+  );
+
+  const altBurstCount = Number(
+    getAltField(ticket, member, latestJoin, ["owner_burst_join_count", "burst_join_count"], 0) || 0
+  );
+
+  const altSameFingerprintCount = Number(
+    getAltField(
+      ticket,
+      member,
+      latestJoin,
+      ["owner_same_fingerprint_count", "same_fingerprint_count"],
+      0
+    ) || 0
+  );
+
+  const altSimilarNameCount = Number(
+    getAltField(
+      ticket,
+      member,
+      latestJoin,
+      ["owner_similar_name_count", "similar_name_count"],
+      0
+    ) || 0
+  );
+
+  const altSameAgeBucketCount = Number(
+    getAltField(
+      ticket,
+      member,
+      latestJoin,
+      ["owner_same_age_bucket_count", "same_age_bucket_count"],
+      0
+    ) || 0
+  );
+
+  const altAccountAgeDaysRaw = getAltField(
+    ticket,
+    member,
+    latestJoin,
+    ["owner_account_age_days", "account_age_days"],
+    null
+  );
+  const altAccountAgeDays =
+    altAccountAgeDaysRaw === null || altAccountAgeDaysRaw === undefined || altAccountAgeDaysRaw === ""
+      ? null
+      : Number(altAccountAgeDaysRaw);
+
+  const altAgeBucket = String(
+    getAltField(ticket, member, latestJoin, ["owner_age_bucket", "age_bucket"]) || ""
+  ).trim();
+
+  const altDigitRatio = getAltField(
+    ticket,
+    member,
+    latestJoin,
+    ["owner_digit_ratio", "digit_ratio"],
+    null
+  );
+
+  const altUnderscoreRatio = getAltField(
+    ticket,
+    member,
+    latestJoin,
+    ["owner_underscore_ratio", "underscore_ratio"],
+    null
+  );
+
+  const altDefaultAvatar = Boolean(
+    getAltField(ticket, member, latestJoin, ["owner_default_avatar", "default_avatar"], false)
+  );
+
+  const altSuspiciousNamePattern = Boolean(
+    getAltField(
+      ticket,
+      member,
+      latestJoin,
+      ["owner_suspicious_name_pattern", "suspicious_name_pattern"],
+      false
+    )
+  );
+
+  const altRepeatedCharPattern = Boolean(
+    getAltField(
+      ticket,
+      member,
+      latestJoin,
+      ["owner_repeated_char_pattern", "repeated_char_pattern"],
+      false
+    )
+  );
+
+  const altRiskEvaluatedAt = String(
+    getAltField(
+      ticket,
+      member,
+      latestJoin,
+      ["owner_risk_evaluated_at", "risk_last_evaluated_at", "risk_evaluated_at"],
+      ""
+    ) || ""
+  ).trim();
+
+  const altNotes = String(
+    getAltField(ticket, member, latestJoin, ["owner_alt_notes", "alt_notes"], "") || ""
+  ).trim();
+
+  const altRiskSource = String(ticket?.owner_alt_risk_source || "").trim() || "unknown";
+
   const recommendedActions = Array.isArray(ticket?.recommended_actions)
     ? ticket.recommended_actions
     : Array.isArray(workspace?.recommendedActions)
@@ -438,6 +700,7 @@ export default function TicketDetailClient({
     { href: "#workspace-summary", label: "Summary" },
     { href: "#member-context", label: "Member" },
     { href: "#verification-context", label: "Verification" },
+    { href: "#alt-risk", label: "Alt Risk" },
     { href: "#ticket-snapshot", label: "Snapshot" },
     { href: "#notes", label: "Notes" },
     { href: "#timeline", label: "Timeline" },
@@ -492,6 +755,9 @@ export default function TicketDetailClient({
             <span className={badgeClass(riskLabel.toLowerCase())}>
               {riskLabel}
             </span>
+            <span className={badgeClass(altRiskLabel.toLowerCase())}>
+              {altRiskLabel}
+            </span>
             {ticket?.overdue ? <span className="badge danger">Overdue</span> : null}
             {ticket?.category_override ? (
               <span className="badge medium">Manual Category</span>
@@ -503,7 +769,7 @@ export default function TicketDetailClient({
           <div className="muted" style={{ minWidth: 0, flex: 1 }}>
             This view is built for fast staff decisions: member context,
             verification history, SLA pressure, note continuity, category control,
-            and the full reply flow in one place.
+            full reply flow, and alt / bot detection in one place.
           </div>
 
           <div
@@ -577,6 +843,16 @@ export default function TicketDetailClient({
             label={`VC: ${Number(counts?.vcSessions || vcSessions.length || 0)}`}
             tone="info"
           />
+          <WorkspacePill
+            label={`Alt Risk: ${altRiskScore}/100`}
+            tone={
+              altRiskLevel === "critical" || altRiskLevel === "high"
+                ? "danger"
+                : altRiskLevel === "medium"
+                  ? "warn"
+                  : "good"
+            }
+          />
         </div>
 
         <div className="ticket-hero-link-row">
@@ -643,6 +919,9 @@ export default function TicketDetailClient({
                 <span className={badgeClass(getRiskLabel(ticket, workspace).toLowerCase())}>
                   {getRiskLabel(ticket, workspace)}
                 </span>
+                <span className={badgeClass(altRiskLabel.toLowerCase())}>
+                  {altRiskLabel}
+                </span>
               </div>
             }
           >
@@ -673,6 +952,15 @@ export default function TicketDetailClient({
                 value={getEntryLabel(ticket, member, latestJoin)}
               />
               <MetaCard label="Claimed By" value={getClaimedLabel(ticket)} />
+              <MetaCard label="Alt Risk" value={`${altRiskLabel} • ${altRiskScore}/100`} />
+              <MetaCard
+                label="Fingerprint"
+                value={safeText(altFingerprint, "No fingerprint")}
+              />
+              <MetaCard
+                label="Cluster Key"
+                value={safeText(altClusterKey, "No cluster")}
+              />
               <MetaCard
                 label="Latest Activity"
                 value={
@@ -859,6 +1147,170 @@ export default function TicketDetailClient({
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            ) : null}
+          </SectionCard>
+
+          <SectionCard
+            id="alt-risk"
+            title="Alt / Bot Detection"
+            subtitle="Latest join-risk signals, clustering, fingerprinting, and suspicious patterns."
+            right={
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <span className={badgeClass(altRiskLabel.toLowerCase())}>
+                  {altRiskLabel}
+                </span>
+                <span className="badge">{altRiskScore}/100</span>
+              </div>
+            }
+          >
+            <div className="ticket-info-grid">
+              <MetaCard label="Alt Risk" value={altRiskLabel} />
+              <MetaCard label="Risk Score" value={`${altRiskScore}/100`} />
+              <MetaCard
+                label="Fingerprint"
+                value={safeText(altFingerprint, "No fingerprint")}
+              />
+              <MetaCard
+                label="Cluster Key"
+                value={safeText(altClusterKey, "No cluster")}
+              />
+              <MetaCard
+                label="Cluster Size"
+                value={String(Number.isFinite(altClusterSize) ? altClusterSize : 0)}
+              />
+              <MetaCard
+                label="Burst Joins"
+                value={String(Number.isFinite(altBurstCount) ? altBurstCount : 0)}
+              />
+              <MetaCard
+                label="FP Matches"
+                value={String(
+                  Number.isFinite(altSameFingerprintCount) ? altSameFingerprintCount : 0
+                )}
+              />
+              <MetaCard
+                label="Name Matches"
+                value={String(
+                  Number.isFinite(altSimilarNameCount) ? altSimilarNameCount : 0
+                )}
+              />
+              <MetaCard
+                label="Age Bucket Matches"
+                value={String(
+                  Number.isFinite(altSameAgeBucketCount) ? altSameAgeBucketCount : 0
+                )}
+              />
+              <MetaCard
+                label="Account Age"
+                value={
+                  altAccountAgeDays === null || !Number.isFinite(altAccountAgeDays)
+                    ? "—"
+                    : `${altAccountAgeDays} day(s)`
+                }
+              />
+              <MetaCard label="Age Bucket" value={safeText(altAgeBucket)} />
+              <MetaCard label="Digit Ratio" value={formatRatio(altDigitRatio)} />
+              <MetaCard
+                label="Underscore Ratio"
+                value={formatRatio(altUnderscoreRatio)}
+              />
+              <MetaCard
+                label="Default Avatar"
+                value={altDefaultAvatar ? "Yes" : "No"}
+              />
+              <MetaCard
+                label="Suspicious Name"
+                value={altSuspiciousNamePattern ? "Yes" : "No"}
+              />
+              <MetaCard
+                label="Repeated Characters"
+                value={altRepeatedCharPattern ? "Yes" : "No"}
+              />
+              <MetaCard
+                label="Evaluated At"
+                value={altRiskEvaluatedAt ? formatDateTime(altRiskEvaluatedAt) : "—"}
+              />
+              <MetaCard
+                label="Risk Source"
+                value={safeText(altRiskSource)}
+              />
+            </div>
+
+            <div className="ticket-detail-section">
+              <div className="ticket-detail-section-title">Risk Reasons</div>
+              {!altRiskReasons.length ? (
+                <div className="muted">No risk reasons recorded.</div>
+              ) : (
+                <div className="recommended-action-list">
+                  {altRiskReasons.map((reason) => (
+                    <div key={reason} className="recommended-action-chip">
+                      {reason}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="ticket-detail-section">
+              <div className="ticket-detail-section-title">Suspicion Flags</div>
+              {!altSuspicionFlags.length ? (
+                <div className="muted">No suspicion flags recorded.</div>
+              ) : (
+                <div className="recommended-action-list">
+                  {altSuspicionFlags.map((flag) => (
+                    <div key={flag} className="recommended-action-chip alt-flag-chip">
+                      {flag}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="ticket-detail-section">
+              <div className="ticket-detail-section-title">Cluster Members</div>
+              {!altClusterMembers.length ? (
+                <div className="muted">No related recent cluster members found.</div>
+              ) : (
+                <div className="space">
+                  {altClusterMembers.slice(0, 8).map((row: Dict, index: number) => (
+                    <div
+                      key={`${row?.user_id || row?.username || "cluster"}-${index}`}
+                      className="message"
+                    >
+                      <div
+                        className="row"
+                        style={{
+                          justifyContent: "space-between",
+                          gap: 10,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <div style={{ fontWeight: 800 }}>
+                          {safeText(row?.display_name || row?.username || row?.user_id, "Unknown")}
+                        </div>
+                        <div className="muted" style={{ fontSize: 12 }}>
+                          {safeText(row?.reason, "related")}
+                        </div>
+                      </div>
+                      <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
+                        ID: {safeText(row?.user_id, "unknown")}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {altNotes ? (
+              <div className="ticket-detail-section">
+                <div className="ticket-detail-section-title">Alt Notes</div>
+                <div
+                  className="message"
+                  style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+                >
+                  {altNotes}
                 </div>
               </div>
             ) : null}
@@ -1188,6 +1640,13 @@ export default function TicketDetailClient({
           font-size: 12px;
           line-height: 1.2;
           color: var(--text, #dbe4ee);
+        }
+
+        .alt-flag-chip {
+          border-color: rgba(248,113,113,0.16);
+          background:
+            radial-gradient(circle at top right, rgba(248,113,113,0.10), transparent 42%),
+            rgba(248,113,113,0.05);
         }
 
         @media (max-width: 900px) {
