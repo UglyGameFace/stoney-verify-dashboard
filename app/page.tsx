@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
@@ -358,7 +359,14 @@ function LoginRequiredState() {
 
 function StaffQuickToolsCard() {
   return (
-    <div className="card staff-quick-tools-card">
+    <div
+      className="card"
+      style={{
+        marginBottom: 18,
+        background:
+          "radial-gradient(circle at top right, rgba(93,255,141,0.08), transparent 28%), radial-gradient(circle at bottom left, rgba(99,213,255,0.06), transparent 24%), linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015)), linear-gradient(180deg, rgba(14, 25, 35, 0.98), rgba(7, 13, 21, 0.98))",
+      }}
+    >
       <div
         className="row"
         style={{
@@ -423,22 +431,11 @@ function StaffQuickToolsCard() {
           </Link>
         </div>
       </div>
-
-      <style jsx>{`
-        .staff-quick-tools-card {
-          background:
-            radial-gradient(circle at top right, rgba(93,255,141,0.08), transparent 28%),
-            radial-gradient(circle at bottom left, rgba(99,213,255,0.06), transparent 24%),
-            linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015)),
-            linear-gradient(180deg, rgba(14, 25, 35, 0.98), rgba(7, 13, 21, 0.98));
-          margin-bottom: 18px;
-        }
-      `}</style>
     </div>
   );
 }
 
-function StaffShell({ children }: { children: React.ReactNode }) {
+function StaffShell({ children }: { children: ReactNode }) {
   return (
     <div className="shell staff-shell">
       <Sidebar />
