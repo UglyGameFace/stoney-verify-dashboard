@@ -9,6 +9,7 @@ import TicketControls from "@/components/dashboard/TicketControls";
 import TicketVerificationActions from "@/components/TicketVerificationActions";
 import TicketTimelinePanel from "@/components/TicketTimelinePanel";
 import TicketNotesPanel from "@/components/TicketNotesPanel";
+import TicketMemberContextPanel from "@/components/TicketMemberContextPanel";
 
 type Dict = Record<string, any>;
 
@@ -403,6 +404,8 @@ export default function TicketDetailClient({
   const messages = Array.isArray(data?.messages) ? data.messages : [];
   const notes = Array.isArray(data?.notes) ? data.notes : [];
   const warns = Array.isArray(data?.warns) ? data.warns : [];
+  const memberEvents = Array.isArray(data?.memberEvents) ? data.memberEvents : [];
+  const joins = Array.isArray(data?.joins) ? data.joins : [];
   const verificationFlags = Array.isArray(data?.verificationFlags)
     ? data.verificationFlags
     : [];
@@ -700,57 +703,16 @@ export default function TicketDetailClient({
             </div>
           </SectionCard>
 
-          <SectionCard
-            id="member-context"
-            title="Member Context"
-            subtitle="How this person entered, what state they are in, and who is attached to their path."
-          >
-            <div className="ticket-info-grid">
-              <MetaCard label="Display Name" value={ownerName} />
-              <MetaCard
-                label="Username"
-                value={safeText(member?.username || ticket?.username)}
-              />
-              <MetaCard
-                label="User ID"
-                value={safeText(member?.user_id || ticket?.user_id)}
-              />
-              <MetaCard label="Role State" value={safeText(member?.role_state)} />
-              <MetaCard
-                label="Invited By"
-                value={safeText(ticket?.owner_invited_by_name)}
-              />
-              <MetaCard
-                label="Invite Code"
-                value={safeText(ticket?.owner_invite_code)}
-              />
-              <MetaCard
-                label="Vouched By"
-                value={safeText(ticket?.owner_vouched_by_name)}
-              />
-              <MetaCard
-                label="Approved By"
-                value={safeText(ticket?.owner_approved_by_name)}
-              />
-              <MetaCard
-                label="Role State Reason"
-                value={safeText(member?.role_state_reason)}
-                full
-              />
-              <MetaCard
-                label="Entry Reason"
-                value={safeText(member?.entry_reason || ticket?.owner_entry_reason)}
-                full
-              />
-              <MetaCard
-                label="Approval Reason"
-                value={safeText(
-                  member?.approval_reason || ticket?.owner_approval_reason
-                )}
-                full
-              />
-            </div>
-          </SectionCard>
+          <div id="member-context">
+            <TicketMemberContextPanel
+              ticket={ticket}
+              member={member}
+              latestJoin={latestJoin}
+              joins={joins}
+              warns={warns}
+              memberEvents={memberEvents}
+            />
+          </div>
 
           <SectionCard
             id="verification-context"
