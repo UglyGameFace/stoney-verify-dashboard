@@ -7,17 +7,9 @@ import TicketMessageList from "@/components/TicketMessageList";
 import TicketReplyBox from "@/components/TicketReplyBox";
 import TicketControls from "@/components/dashboard/TicketControls";
 import TicketVerificationActions from "@/components/TicketVerificationActions";
+import TicketTimelinePanel from "@/components/TicketTimelinePanel";
 
 type Dict = Record<string, any>;
-
-type TimelineItemRow = {
-  id?: string | number | null;
-  title?: string | null;
-  source?: string | null;
-  actor_name?: string | null;
-  description?: string | null;
-  created_at?: string | null;
-};
 
 type TicketApiResponse = {
   ok?: boolean;
@@ -33,7 +25,7 @@ type TicketApiResponse = {
   vcSessions?: Dict[];
   warns?: Dict[];
   activity?: Dict[];
-  timeline?: TimelineItemRow[];
+  timeline?: Dict[];
   messages?: Dict[];
   notes?: Dict[];
   workspace?: Dict | null;
@@ -59,10 +51,6 @@ type SectionCardProps = {
   subtitle?: string;
   children: ReactNode;
   right?: ReactNode;
-};
-
-type TimelineItemProps = {
-  item: TimelineItemRow;
 };
 
 type IdentityBubbleProps = {
@@ -291,34 +279,6 @@ function SectionCard({
         {right}
       </div>
       {children}
-    </div>
-  );
-}
-
-function TimelineItem({ item }: TimelineItemProps) {
-  return (
-    <div className="timeline-item">
-      <div className="timeline-dot" />
-      <div className="timeline-body">
-        <div
-          className="row"
-          style={{ justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}
-        >
-          <div className="timeline-title">{safeText(item?.title)}</div>
-          <div className="muted" style={{ fontSize: 12 }}>
-            {formatDateTime(item?.created_at)}
-          </div>
-        </div>
-
-        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-          {safeText(item?.source, "system")}
-          {item?.actor_name ? ` • ${item.actor_name}` : ""}
-        </div>
-
-        {item?.description ? (
-          <div className="timeline-description">{item.description}</div>
-        ) : null}
-      </div>
     </div>
   );
 }
@@ -1120,24 +1080,13 @@ export default function TicketDetailClient({
             </div>
           </SectionCard>
 
-          <SectionCard
-            id="timeline"
-            title="Timeline"
-            subtitle="A stitched view of ticket, verification, note, and member activity."
-          >
-            {!timeline.length ? (
-              <div className="empty-state">No timeline activity yet.</div>
-            ) : (
-              <div className="timeline-list">
-                {timeline.map((item: TimelineItemRow, index: number) => (
-                  <TimelineItem
-                    key={String(item.id || `${item.created_at || "item"}-${index}`)}
-                    item={item}
-                  />
-                ))}
-              </div>
-            )}
-          </SectionCard>
+          <div id="timeline">
+            <TicketTimelinePanel
+              items={timeline}
+              title="Timeline"
+              subtitle="A stitched view of ticket, verification, note, and member activity."
+            />
+          </div>
         </div>
 
         <div className="space" id="conversation">
@@ -1387,51 +1336,6 @@ export default function TicketDetailClient({
           font-size: 12px;
           line-height: 1.2;
           color: var(--text, #dbe4ee);
-        }
-
-        .timeline-list {
-          display: grid;
-          gap: 12px;
-        }
-
-        .timeline-item {
-          display: flex;
-          gap: 12px;
-          align-items: flex-start;
-        }
-
-        .timeline-dot {
-          width: 10px;
-          height: 10px;
-          border-radius: 999px;
-          margin-top: 8px;
-          flex-shrink: 0;
-          background: linear-gradient(180deg, #63d5ff, #5dff8d);
-          box-shadow: 0 0 0 4px rgba(99,213,255,0.10);
-        }
-
-        .timeline-body {
-          flex: 1;
-          min-width: 0;
-          padding: 12px;
-          border-radius: 16px;
-          border: 1px solid rgba(255,255,255,0.06);
-          background:
-            radial-gradient(circle at top right, rgba(255,255,255,0.04), transparent 42%),
-            rgba(255,255,255,0.02);
-        }
-
-        .timeline-title {
-          font-weight: 800;
-          overflow-wrap: anywhere;
-        }
-
-        .timeline-description {
-          margin-top: 8px;
-          color: var(--text, #dbe4ee);
-          white-space: pre-wrap;
-          overflow-wrap: anywhere;
-          line-height: 1.4;
         }
 
         @media (max-width: 900px) {
