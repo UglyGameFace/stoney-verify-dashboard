@@ -77,7 +77,7 @@ type ActionState =
   | "saving-category";
 
 type PanelName =
-  | "overview"
+  | "workflow"
   | "category"
   | "transcript"
   | "close"
@@ -176,7 +176,10 @@ function sortCategories(categories: TicketCategory[]): TicketCategory[] {
   });
 }
 
-function buildTranscriptExportUrl(ticketId: string, format?: "html" | "txt" | "json"): string {
+function buildTranscriptExportUrl(
+  ticketId: string,
+  format?: "html" | "txt" | "json"
+): string {
   const base = `/api/tickets/${encodeURIComponent(ticketId)}/transcript`;
   if (!format || format === "html") return base;
   return `${base}?format=${format}`;
@@ -266,6 +269,14 @@ export default function TicketControls({
       currentCategoryReason: getCurrentCategoryReason(ticket),
       currentCategoryScore: Number(ticket?.matched_category_score ?? 0),
       currentIntakeType: normalizeString(ticket?.matched_intake_type) || "—",
+      ownerLabel:
+        normalizeString(ticket?.username) ||
+        normalizeString(ticket?.title) ||
+        "Unknown member",
+      claimedBy:
+        normalizeString(ticket?.claimed_by) ||
+        normalizeString(ticket?.assigned_to) ||
+        "Unclaimed",
     };
   }, [ticket]);
 
@@ -285,7 +296,7 @@ export default function TicketControls({
   );
 
   const [openPanels, setOpenPanels] = useState<Record<PanelName, boolean>>({
-    overview: true,
+    workflow: true,
     category: false,
     transcript: false,
     close: false,
@@ -302,7 +313,7 @@ export default function TicketControls({
 
     setOpenPanels((prev) => ({
       ...prev,
-      overview: true,
+      workflow: true,
       category: false,
       transcript: derived.hasTranscript || derived.closed || derived.deleted,
       close: false,
@@ -418,7 +429,7 @@ export default function TicketControls({
       return;
     }
 
-    setError("error" in result ? result.error : "Could not copy to clipboard.");
+    setError(result.error || "Could not copy to clipboard.");
   }
 
   async function handleAssign() {
@@ -612,8 +623,9 @@ export default function TicketControls({
           <div style={{ minWidth: 0, flex: 1 }}>
             <div className="ticket-controls-header-title">Ticket Actions</div>
             <div className="muted ticket-controls-header-copy">
-              Cleaner mobile-first control sheet for status, category,
-              transcript, and deletion workflow.
+              Queue ownership, closure, reopening, category correction,
+              transcript exports, and deletion without repeating the whole ticket
+              summary again.
             </div>
           </div>
 
@@ -677,31 +689,24 @@ export default function TicketControls({
       </div>
 
       <ActionAccordion
-        title="Overview"
-        subtitle="Current ticket state, channel identity, and quick actions."
-        badge={<span className="badge open">Info</span>}
-        open={openPanels.overview}
-        onToggle={() => togglePanel("overview")}
+        title="Workflow"
+        subtitle="Only the action-critical ticket state staff need here."
+        badge={<span className="badge open">Live</span>}
+        open={openPanels.workflow}
+        onToggle={() => togglePanel("workflow")}
       >
         <div className="ticket-controls-info-grid">
           <div className="member-detail-item">
-            <div className="ticket-info-label">Ticket</div>
+            <div className="ticket-info-label">Member</div>
             <div className="ticket-controls-mini-value">
-              {safeText(ticket.title || ticket.channel_name, "Untitled")}
+              {derived.ownerLabel}
             </div>
           </div>
 
           <div className="member-detail-item">
-            <div className="ticket-info-label">Category</div>
+            <div className="ticket-info-label">Claimed By</div>
             <div className="ticket-controls-mini-value">
-              {derived.currentCategoryName}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Category Slug</div>
-            <div className="ticket-controls-mini-value">
-              {derived.currentCategorySlug}
+              {derived.claimedBy}
             </div>
           </div>
 
@@ -713,9 +718,9 @@ export default function TicketControls({
           </div>
 
           <div className="member-detail-item">
-            <div className="ticket-info-label">Claimed By</div>
+            <div className="ticket-info-label">Transcript State</div>
             <div className="ticket-controls-mini-value">
-              {safeText(ticket.claimed_by)}
+              {safeText(derived.transcriptState)}
             </div>
           </div>
 
@@ -727,44 +732,23 @@ export default function TicketControls({
           </div>
 
           <div className="member-detail-item">
-            <div className="ticket-info-label">Current Reason</div>
+            <div className="ticket-info-label">Ghost Ticket</div>
             <div className="ticket-controls-mini-value">
-              {derived.currentCategoryReason}
+              {derived.ghost ? "Yes" : "No"}
             </div>
           </div>
 
           <div className="member-detail-item">
-            <div className="ticket-info-label">Match Score</div>
+            <div className="ticket-info-label">Closed At</div>
             <div className="ticket-controls-mini-value">
-              {String(derived.currentCategoryScore || 0)}
+              {formatDateTime(ticket.closed_at)}
             </div>
           </div>
 
           <div className="member-detail-item">
-            <div className="ticket-info-label">Matched Intake Type</div>
+            <div className="ticket-info-label">Deleted At</div>
             <div className="ticket-controls-mini-value">
-              {derived.currentIntakeType}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Override Set By</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(ticket.category_set_by)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Override Set At</div>
-            <div className="ticket-controls-mini-value">
-              {formatDateTime(ticket.category_set_at)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Transcript State</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(derived.transcriptState)}
+              {formatDateTime(ticket.deleted_at)}
             </div>
           </div>
         </div>
@@ -777,30 +761,6 @@ export default function TicketControls({
               onClick={() => void handleCopy(channelId, "Channel ID copied.")}
             >
               Copy Channel ID
-            </button>
-          ) : null}
-
-          {!!ticket.title ? (
-            <button
-              type="button"
-              className="button ghost"
-              onClick={() =>
-                void handleCopy(String(ticket.title), "Ticket title copied.")
-              }
-            >
-              Copy Title
-            </button>
-          ) : null}
-
-          {!!ticket.claimed_by ? (
-            <button
-              type="button"
-              className="button ghost"
-              onClick={() =>
-                void handleCopy(String(ticket.claimed_by), "Claimed-by value copied.")
-              }
-            >
-              Copy Claimed By
             </button>
           ) : null}
 
@@ -819,7 +779,7 @@ export default function TicketControls({
 
       <ActionAccordion
         title="Category Override"
-        subtitle="Fix a wrong auto-match and assign the category staff actually want."
+        subtitle="Correct a bad match without duplicating the full ticket summary."
         badge={
           ticket?.category_override ? (
             <span className="badge claimed">Manual Override</span>
@@ -846,13 +806,6 @@ export default function TicketControls({
           </div>
 
           <div className="member-detail-item">
-            <div className="ticket-info-label">Current Reason</div>
-            <div className="ticket-controls-mini-value">
-              {derived.currentCategoryReason}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
             <div className="ticket-info-label">Matched Intake Type</div>
             <div className="ticket-controls-mini-value">
               {derived.currentIntakeType}
@@ -863,6 +816,13 @@ export default function TicketControls({
             <div className="ticket-info-label">Matched Score</div>
             <div className="ticket-controls-mini-value">
               {String(derived.currentCategoryScore || 0)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Current Reason</div>
+            <div className="ticket-controls-mini-value">
+              {derived.currentCategoryReason}
             </div>
           </div>
 
@@ -934,16 +894,16 @@ export default function TicketControls({
             </div>
 
             <div className="member-detail-item">
-              <div className="ticket-info-label">Selected Description</div>
+              <div className="ticket-info-label">Default Category</div>
               <div className="ticket-controls-mini-value">
-                {safeText(selectedCategory.description)}
+                {selectedCategory.is_default ? "Yes" : "No"}
               </div>
             </div>
 
             <div className="member-detail-item">
-              <div className="ticket-info-label">Default Category</div>
+              <div className="ticket-info-label">Selected Description</div>
               <div className="ticket-controls-mini-value">
-                {selectedCategory.is_default ? "Yes" : "No"}
+                {safeText(selectedCategory.description)}
               </div>
             </div>
 
@@ -961,8 +921,8 @@ export default function TicketControls({
       </ActionAccordion>
 
       <ActionAccordion
-        title="Transcript & History"
-        subtitle="Closure, deletion, transcript links, and export tools."
+        title="Transcript & Lifecycle"
+        subtitle="Transcript links, exports, and lifecycle timestamps without repeating the hero area."
         badge={
           derived.hasTranscript ? (
             <span className="badge claimed">Available</span>
@@ -1141,7 +1101,7 @@ export default function TicketControls({
 
       <ActionAccordion
         title="Close Ticket"
-        subtitle="Marks the ticket as resolved while preserving the ticket record and channel."
+        subtitle="Resolve the ticket while preserving the ticket record."
         badge={<span className="badge medium">Resolve</span>}
         open={openPanels.close}
         onToggle={() => togglePanel("close")}
@@ -1231,25 +1191,6 @@ export default function TicketControls({
 
       {!!message && <div className="info-banner">{message}</div>}
       {!!error && <div className="error-banner">{error}</div>}
-
-      <div className="ticket-controls-footnote">
-        <div>
-          <span className="ticket-controls-footnote-label">Ticket:</span>{" "}
-          {ticket.title || ticket.channel_name || "Untitled"}
-        </div>
-        <div>
-          <span className="ticket-controls-footnote-label">Channel ID:</span>{" "}
-          {channelId || "Missing"}
-        </div>
-        <div>
-          <span className="ticket-controls-footnote-label">Status:</span>{" "}
-          {ticket.status || "unknown"}
-        </div>
-        <div>
-          <span className="ticket-controls-footnote-label">Ghost:</span>{" "}
-          {derived.ghost ? "yes" : "no"}
-        </div>
-      </div>
 
       <style jsx>{`
         .ticket-controls {
@@ -1431,23 +1372,6 @@ export default function TicketControls({
           color: #c8f1ff;
           text-decoration: underline;
           text-underline-offset: 2px;
-        }
-
-        .ticket-controls-footnote {
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          border-radius: 16px;
-          padding: 12px 14px;
-          background: rgba(255, 255, 255, 0.02);
-          color: var(--muted);
-          font-size: 12px;
-          line-height: 1.55;
-          display: grid;
-          gap: 4px;
-        }
-
-        .ticket-controls-footnote-label {
-          font-weight: 700;
-          color: var(--text-strong, #f8fafc);
         }
 
         @media (max-width: ${MOBILE_LAYOUT_MAX_WIDTH}px) {
