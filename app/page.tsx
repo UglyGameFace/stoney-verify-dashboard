@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import Sidebar from "@/components/Sidebar";
@@ -10,11 +11,44 @@ import {
 } from "@/lib/auth-server";
 import { env } from "@/lib/env";
 
-function normalizeString(value) {
+type SessionLike = {
+  isStaff?: boolean;
+  user?: {
+    discord_id?: string | null;
+    id?: string | null;
+    username?: string | null;
+    global_name?: string | null;
+    name?: string | null;
+    avatar_url?: string | null;
+    avatar?: string | null;
+    image?: string | null;
+    picture?: string | null;
+  } | null;
+  discordUser?: {
+    id?: string | null;
+    username?: string | null;
+    global_name?: string | null;
+    avatar_url?: string | null;
+    avatar?: string | null;
+  } | null;
+  member?: {
+    display_name?: string | null;
+    verification_label?: string | null;
+    access_label?: string | null;
+    roles?: string[] | null;
+    has_unverified_role?: boolean | null;
+    has_verified_role?: boolean | null;
+    has_staff_role?: boolean | null;
+  } | null;
+} | null;
+
+type DashboardPayload = Record<string, unknown>;
+
+function normalizeString(value: unknown): string {
   return String(value || "").trim();
 }
 
-function buildFallbackUserData(session, guildId) {
+function buildFallbackUserData(session: SessionLike, guildId: string): DashboardPayload {
   const discordId = normalizeString(
     session?.user?.discord_id ||
       session?.user?.id ||
@@ -178,7 +212,7 @@ function buildFallbackUserData(session, guildId) {
   };
 }
 
-function buildFallbackStaffData() {
+function buildFallbackStaffData(): DashboardPayload {
   return {
     ok: true,
     generated_at: new Date().toISOString(),
@@ -215,7 +249,7 @@ function buildFallbackStaffData() {
   };
 }
 
-function resolveAppOrigin() {
+function resolveAppOrigin(): string {
   const explicitCandidates = [
     env?.siteUrl,
     env?.appUrl,
@@ -251,7 +285,10 @@ function resolveAppOrigin() {
   return "http://127.0.0.1:3000";
 }
 
-async function fetchDashboardJson(pathname, fallbackData) {
+async function fetchDashboardJson(
+  pathname: string,
+  fallbackData: DashboardPayload
+): Promise<DashboardPayload> {
   try {
     const headerStore = headers();
     const origin = resolveAppOrigin();
@@ -274,7 +311,7 @@ async function fetchDashboardJson(pathname, fallbackData) {
       return fallbackData;
     }
 
-    const json = await response.json();
+    const json = (await response.json().catch(() => null)) as DashboardPayload | null;
     if (!json || typeof json !== "object") {
       return fallbackData;
     }
@@ -285,54 +322,145 @@ async function fetchDashboardJson(pathname, fallbackData) {
   }
 }
 
-function StaffShell({ children }) {
+function LoginRequiredState() {
   return (
-    <div className="shell staff-shell">
-      <Sidebar />
-      <main className="content staff-content">{children}</main>
+    <main
+      style={{
+        minHeight: "100vh",
+        display: "grid",
+        placeItems: "center",
+        padding: "24px",
+        background: "#09090b",
+        color: "white",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 520,
+          border: "1px solid rgba(255,255,255,0.08)",
+          background: "rgba(255,255,255,0.03)",
+          borderRadius: 20,
+          padding: 24,
+        }}
+      >
+        <h1 style={{ marginTop: 0 }}>Login Required</h1>
+        <p style={{ color: "rgba(255,255,255,0.72)", lineHeight: 1.5 }}>
+          Discord login is required to use this dashboard.
+        </p>
+        <p style={{ color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>
+          OAuth configuration is currently missing or incomplete.
+        </p>
+      </div>
+    </main>
+  );
+}
+
+function StaffQuickToolsCard() {
+  return (
+    <div className="card staff-quick-tools-card">
+      <div
+        className="row"
+        style={{
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 14,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="muted" style={{ marginBottom: 8 }}>
+            Staff Tools
+          </div>
+
+          <h1
+            style={{
+              margin: 0,
+              fontSize: "clamp(30px, 5vw, 46px)",
+              lineHeight: 0.96,
+              letterSpacing: "-0.05em",
+            }}
+          >
+            Control the ticket system
+          </h1>
+
+          <div
+            className="muted"
+            style={{
+              marginTop: 12,
+              maxWidth: 820,
+              lineHeight: 1.55,
+            }}
+          >
+            Jump straight into category routing and matching rules without digging
+            through the dashboard. This is where you tune intake types, keyword
+            matching, default category behavior, and safe deletion rules.
+          </div>
+        </div>
+
+        <div
+          className="row"
+          style={{
+            gap: 10,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <Link
+            href="/ticket-categories"
+            className="button primary"
+            style={{ width: "auto", minWidth: 220 }}
+          >
+            Open Category Manager
+          </Link>
+
+          <Link
+            href="/#categories"
+            className="button ghost"
+            style={{ width: "auto", minWidth: 160 }}
+          >
+            View Category Stats
+          </Link>
+        </div>
+      </div>
+
+      <style jsx>{`
+        .staff-quick-tools-card {
+          background:
+            radial-gradient(circle at top right, rgba(93,255,141,0.08), transparent 28%),
+            radial-gradient(circle at bottom left, rgba(99,213,255,0.06), transparent 24%),
+            linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015)),
+            linear-gradient(180deg, rgba(14, 25, 35, 0.98), rgba(7, 13, 21, 0.98));
+          margin-bottom: 18px;
+        }
+      `}</style>
     </div>
   );
 }
 
+function StaffShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="shell staff-shell">
+      <Sidebar />
+      <main className="content staff-content">
+        <div className="content-inner">{children}</div>
+      </main>
+    </div>
+  );
+}
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function HomePage() {
-  const session = await getSession();
+  const session = (await getSession()) as SessionLike;
 
   if (!session) {
     if (hasDiscordOAuthConfig()) {
       redirect(getDiscordLoginUrl());
     }
 
-    return (
-      <main
-        style={{
-          minHeight: "100vh",
-          display: "grid",
-          placeItems: "center",
-          padding: "24px",
-          background: "#09090b",
-          color: "white",
-        }}
-      >
-        <div
-          style={{
-            width: "100%",
-            maxWidth: 520,
-            border: "1px solid rgba(255,255,255,0.08)",
-            background: "rgba(255,255,255,0.03)",
-            borderRadius: 20,
-            padding: 24,
-          }}
-        >
-          <h1 style={{ marginTop: 0 }}>Login Required</h1>
-          <p style={{ color: "rgba(255,255,255,0.72)", lineHeight: 1.5 }}>
-            Discord login is required to use this dashboard.
-          </p>
-          <p style={{ color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>
-            OAuth configuration is currently missing or incomplete.
-          </p>
-        </div>
-      </main>
-    );
+    return <LoginRequiredState />;
   }
 
   const guildId = normalizeString(env?.guildId);
@@ -345,6 +473,7 @@ export default async function HomePage() {
 
     return (
       <StaffShell>
+        <StaffQuickToolsCard />
         <DashboardClient
           initialData={staffData}
           staffName={
