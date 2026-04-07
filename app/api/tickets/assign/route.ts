@@ -1,95 +1,43 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { queueAssignTicket } from "@/lib/botCommands";
-import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
+import { requireStaffSessionForRoute } from "@/lib/auth-server";
+import {
+  buildRouteJson,
+  getActorId,
+  missingFieldRouteResponse,
+  parseRouteBody,
+  readString,
+  toErrorMessage,
+  unauthorizedRouteResponse,
+  type RefreshedTokens,
+} from "@/lib/ticketActionRoute";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function getActorId(session: any): string | null {
-  const candidates = [
-    session?.user?.id,
-    session?.user?.user_id,
-    session?.user?.discord_id,
-    session?.discordUser?.id,
-  ];
-
-  for (const value of candidates) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-
-  if (typeof candidates[0] === "number") {
-    return String(candidates[0]);
-  }
-
-  return null;
-}
-
 export async function POST(req: NextRequest) {
-  try {
-    const { session, refreshedTokens } = await requireStaffSessionForRoute();
-    const actorId = getActorId(session);
+  let refreshedTokens: RefreshedTokens | null = null;
 
+  try {
+    const auth = await requireStaffSessionForRoute();
+    refreshedTokens = auth?.refreshedTokens ?? null;
+
+    const actorId = getActorId(auth?.session);
     if (!actorId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Unauthorized",
-        },
-        {
-          status: 401,
-          headers: {
-            "Cache-Control": "no-store, max-age=0",
-          },
-        }
-      );
+      return unauthorizedRouteResponse(refreshedTokens);
     }
 
-    const body = await req.json().catch(() => ({}));
+    const body = await parseRouteBody(req);
 
-    const channelId =
-      typeof body?.channelId === "string" && body.channelId.trim()
-        ? body.channelId.trim()
-        : typeof body?.channel_id === "string" && body.channel_id.trim()
-        ? body.channel_id.trim()
-        : "";
-
-    const staffId =
-      typeof body?.staffId === "string" && body.staffId.trim()
-        ? body.staffId.trim()
-        : typeof body?.staff_id === "string" && body.staff_id.trim()
-        ? body.staff_id.trim()
-        : actorId;
+    const channelId = readString(body, ["channelId", "channel_id"]);
+    const staffId = readString(body, ["staffId", "staff_id"], actorId);
 
     if (!channelId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Missing channelId",
-        },
-        {
-          status: 400,
-          headers: {
-            "Cache-Control": "no-store, max-age=0",
-          },
-        }
-      );
+      return missingFieldRouteResponse("channelId", refreshedTokens);
     }
 
     if (!staffId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Missing staffId",
-        },
-        {
-          status: 400,
-          headers: {
-            "Cache-Control": "no-store, max-age=0",
-          },
-        }
-      );
+      return missingFieldRouteResponse("staffId", refreshedTokens);
     }
 
     const command = await queueAssignTicket({
@@ -98,37 +46,28 @@ export async function POST(req: NextRequest) {
       requestedBy: actorId,
     });
 
-    const response = NextResponse.json(
+    return buildRouteJson(
       {
         ok: true,
         queued: true,
         command,
+        channelId,
+        staffId,
+        requestedBy: actorId,
       },
-      {
-        status: 200,
-        headers: {
-          "Cache-Control": "no-store, max-age=0",
-        },
-      }
+      200,
+      refreshedTokens
     );
-
-    applyAuthCookies(response, refreshedTokens);
-    return response;
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unexpected server error";
+    const message = toErrorMessage(error);
 
-    return NextResponse.json(
+    return buildRouteJson(
       {
         ok: false,
         error: message,
       },
-      {
-        status: message === "Unauthorized" ? 401 : 500,
-        headers: {
-          "Cache-Control": "no-store, max-age=0",
-        },
-      }
+      message === "Unauthorized" ? 401 : 500,
+      refreshedTokens
     );
   }
 }
