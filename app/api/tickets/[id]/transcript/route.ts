@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
-import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
+import {
+  requireStaffSessionForRoute,
+  applyAuthCookies,
+} from "@/lib/auth-server";
 import { env } from "@/lib/env";
 import { enrichTicketWithMatchedCategory } from "@/lib/ticketCategoryMatching";
 
@@ -242,8 +245,17 @@ function safeObject<T extends object = Record<string, unknown>>(value: unknown):
 }
 
 function parseDateMs(value: unknown): number {
-  const ms = new Date(value || 0).getTime();
-  return Number.isFinite(ms) ? ms : 0;
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  if (typeof value === "string" || typeof value === "number") {
+    const ms = new Date(value).getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  return 0;
 }
 
 function formatDateTime(value: unknown): string {
@@ -260,7 +272,7 @@ function escapeHtml(value: unknown): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
+    .replace(/\\"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
 
@@ -357,7 +369,8 @@ function mapVerificationToken(row: VerificationTokenRow): VerificationTokenRow {
     user_id: normalizeString(row?.user_id),
     approved_user_id: normalizeString(row?.approved_user_id),
     status: normalizeLower(row?.status || "pending") || "pending",
-    decision: normalizeString(row?.decision || "PENDING").toUpperCase() || "PENDING",
+    decision:
+      normalizeString(row?.decision || "PENDING").toUpperCase() || "PENDING",
     created_at: row?.created_at || null,
     updated_at: row?.updated_at || null,
     submitted_at: row?.submitted_at || null,
@@ -377,7 +390,8 @@ function mapVcSession(row: VcSessionRow): VcSessionRow {
     ticket_channel_id: normalizeString(row?.ticket_channel_id),
     requester_id: normalizeString(row?.requester_id),
     owner_id: normalizeString(row?.owner_id),
-    status: normalizeString(row?.status || "PENDING").toUpperCase() || "PENDING",
+    status:
+      normalizeString(row?.status || "PENDING").toUpperCase() || "PENDING",
     created_at: row?.created_at || null,
     accepted_at: row?.accepted_at || null,
     started_at: row?.started_at || null,
@@ -436,7 +450,8 @@ function mapActivityRow(row: ActivityFeedRow): ActivityFeedRow {
     target_user_id: normalizeString(row?.target_user_id),
     target_name: row?.target_name || "",
     channel_id: row?.channel_id || normalizeString(meta?.channel_id) || null,
-    channel_name: row?.channel_name || normalizeString(meta?.channel_name) || null,
+    channel_name:
+      row?.channel_name || normalizeString(meta?.channel_name) || null,
     ticket_id: row?.ticket_id || normalizeString(meta?.ticket_id) || null,
     metadata: meta,
   };
@@ -472,7 +487,11 @@ function deriveVerificationLabel(args: {
     return "Needs Review";
   }
 
-  if (["PENDING", "ACCEPTED", "STAFF_ACCEPTED", "READY", "IN_VC", "STARTED"].includes(vcStatus)) {
+  if (
+    ["PENDING", "ACCEPTED", "STAFF_ACCEPTED", "READY", "IN_VC", "STARTED"].includes(
+      vcStatus
+    )
+  ) {
     return "VC In Progress";
   }
 
@@ -497,7 +516,8 @@ function deriveRiskLevel(args: {
   maxFlagScore: number;
   noteCount: number;
 }): string {
-  const { ticket, member, flaggedCount, warnCount, maxFlagScore, noteCount } = args;
+  const { ticket, member, flaggedCount, warnCount, maxFlagScore, noteCount } =
+    args;
   const priority = normalizeLower(ticket?.priority);
 
   if (
@@ -513,7 +533,8 @@ function deriveRiskLevel(args: {
     priority === "high" ||
     warnCount >= 1 ||
     maxFlagScore >= 2 ||
-    (member?.has_unverified && normalizeLower(ticket?.matched_intake_type) === "verification") ||
+    (member?.has_unverified &&
+      normalizeLower(ticket?.matched_intake_type) === "verification") ||
     noteCount === 0
   ) {
     return "medium";
@@ -522,7 +543,10 @@ function deriveRiskLevel(args: {
   return "low";
 }
 
-function latestBy<T extends Record<string, unknown>>(rows: T[], ...fields: string[]): T | null {
+function latestBy<T extends Record<string, unknown>>(
+  rows: T[],
+  ...fields: string[]
+): T | null {
   return [...safeArray<T>(rows)].sort((a, b) => {
     const aTs = Math.max(...fields.map((field) => parseDateMs(a?.[field])));
     const bTs = Math.max(...fields.map((field) => parseDateMs(b?.[field])));
@@ -566,25 +590,45 @@ function buildTextTranscript(payload: TranscriptPayload): string {
   lines.push(`Title: ${normalizeString(ticket?.title) || "—"}`);
   lines.push(`Status: ${normalizeString(ticket?.status) || "—"}`);
   lines.push(`Priority: ${normalizeString(ticket?.priority) || "—"}`);
-  lines.push(`Category: ${normalizeString(category?.name || ticket?.matched_category_name || ticket?.category) || "—"}`);
+  lines.push(
+    `Category: ${normalizeString(category?.name || ticket?.matched_category_name || ticket?.category) || "—"}`
+  );
   lines.push(`Channel: ${normalizeString(ticket?.channel_name) || "—"}`);
-  lines.push(`Channel ID: ${normalizeString(ticket?.channel_id || ticket?.discord_thread_id) || "—"}`);
+  lines.push(
+    `Channel ID: ${normalizeString(ticket?.channel_id || ticket?.discord_thread_id) || "—"}`
+  );
   lines.push(`Created: ${formatDateTime(ticket?.created_at)}`);
   lines.push(`Updated: ${formatDateTime(ticket?.updated_at)}`);
   lines.push(`Closed: ${formatDateTime(ticket?.closed_at)}`);
   lines.push("");
   lines.push("MEMBER CONTEXT");
   lines.push("-".repeat(44));
-  lines.push(`Display Name: ${normalizeString(member?.display_name || ticket?.username) || "—"}`);
-  lines.push(`Username: ${normalizeString(member?.username || ticket?.username) || "—"}`);
-  lines.push(`User ID: ${normalizeString(member?.user_id || ticket?.user_id) || "—"}`);
-  lines.push(`Verification: ${normalizeString(workspace?.verificationLabel) || "—"}`);
+  lines.push(
+    `Display Name: ${normalizeString(member?.display_name || ticket?.username) || "—"}`
+  );
+  lines.push(
+    `Username: ${normalizeString(member?.username || ticket?.username) || "—"}`
+  );
+  lines.push(
+    `User ID: ${normalizeString(member?.user_id || ticket?.user_id) || "—"}`
+  );
+  lines.push(
+    `Verification: ${normalizeString(workspace?.verificationLabel) || "—"}`
+  );
   lines.push(`Risk: ${normalizeString(workspace?.riskLevel) || "—"}`);
   lines.push(`Role State: ${normalizeString(member?.role_state) || "—"}`);
-  lines.push(`Entry Method: ${normalizeString(member?.entry_method || joins?.[0]?.entry_method) || "—"}`);
-  lines.push(`Invited By: ${normalizeString(member?.invited_by_name || joins?.[0]?.invited_by_name) || "—"}`);
-  lines.push(`Vouched By: ${normalizeString(member?.vouched_by_name || joins?.[0]?.vouched_by_name) || "—"}`);
-  lines.push(`Approved By: ${normalizeString(member?.approved_by_name || joins?.[0]?.approved_by_name) || "—"}`);
+  lines.push(
+    `Entry Method: ${normalizeString(member?.entry_method || joins?.[0]?.entry_method) || "—"}`
+  );
+  lines.push(
+    `Invited By: ${normalizeString(member?.invited_by_name || joins?.[0]?.invited_by_name) || "—"}`
+  );
+  lines.push(
+    `Vouched By: ${normalizeString(member?.vouched_by_name || joins?.[0]?.vouched_by_name) || "—"}`
+  );
+  lines.push(
+    `Approved By: ${normalizeString(member?.approved_by_name || joins?.[0]?.approved_by_name) || "—"}`
+  );
   lines.push("");
 
   if (ticket?.initial_message) {
@@ -606,7 +650,9 @@ function buildTextTranscript(payload: TranscriptPayload): string {
       lines.push(row?.content || "");
       if (safeArray(row?.attachments).length) {
         lines.push("Attachments:");
-        safeArray<{ name?: string | null; url?: string | null }>(row.attachments).forEach((attachment) => {
+        safeArray<{ name?: string | null; url?: string | null }>(
+          row.attachments
+        ).forEach((attachment) => {
           const name = normalizeString(attachment?.name) || "attachment";
           const url = normalizeString(attachment?.url) || "";
           lines.push(`- ${name}: ${url}`);
@@ -725,17 +771,20 @@ function buildHtmlTranscript(payload: TranscriptPayload): string {
   const ownerName =
     normalizeString(
       member?.display_name ||
-      member?.nickname ||
-      member?.username ||
-      ticket?.username ||
-      ticket?.user_id
+        member?.nickname ||
+        member?.username ||
+        ticket?.username ||
+        ticket?.user_id
     ) || "Unknown User";
 
   const categoryName =
-    normalizeString(category?.name || ticket?.matched_category_name || ticket?.category) ||
-    "Uncategorized";
+    normalizeString(
+      category?.name || ticket?.matched_category_name || ticket?.category
+    ) || "Uncategorized";
 
-  const recommendedActions = safeArray<string>(workspace?.recommendedActions || []);
+  const recommendedActions = safeArray<string>(
+    workspace?.recommendedActions || []
+  );
 
   const renderBadge = (value: unknown, tone = ""): string => {
     const label = escapeHtml(value || "Unknown");
@@ -780,28 +829,47 @@ function buildHtmlTranscript(payload: TranscriptPayload): string {
   `;
 
   const renderMessages = (): string => {
-    if (!messages.length) return `<div class="empty">No ticket messages recorded.</div>`;
+    if (!messages.length)
+      return `<div class="empty">No ticket messages recorded.</div>`;
 
-    return messages.map((row) => `
+    return messages
+      .map(
+        (row) => `
       <div class="entry ${row?.message_type === "staff" ? "staff" : "user"}">
         <div class="entry-top">
           <strong>${escapeHtml(row?.author_name || row?.author_id || "Unknown")}</strong>
           <span>${escapeHtml(formatDateTime(row?.created_at))}</span>
         </div>
         <div class="entry-body">${escapeHtml(row?.content || "").replace(/\n/g, "<br />")}</div>
-        ${safeArray(row?.attachments).length ? `
+        ${
+          safeArray(row?.attachments).length
+            ? `
           <div class="sublist">
-            ${safeArray<{ name?: string | null; url?: string | null }>(row.attachments).map((attachment) => `<div>📎 <a href="${escapeHtml(attachment?.url || "")}" target="_blank" rel="noreferrer">${escapeHtml(attachment?.name || attachment?.url || "attachment")}</a></div>`).join("")}
+            ${safeArray<{ name?: string | null; url?: string | null }>(
+              row.attachments
+            )
+              .map(
+                (attachment) =>
+                  `<div>📎 <a href="${escapeHtml(attachment?.url || "")}" target="_blank" rel="noreferrer">${escapeHtml(attachment?.name || attachment?.url || "attachment")}</a></div>`
+              )
+              .join("")}
           </div>
-        ` : ""}
+        `
+            : ""
+        }
       </div>
-    `).join("");
+    `
+      )
+      .join("");
   };
 
   const renderNotes = (): string => {
-    if (!notes.length) return `<div class="empty">No internal notes recorded.</div>`;
+    if (!notes.length)
+      return `<div class="empty">No internal notes recorded.</div>`;
 
-    return notes.map((row) => `
+    return notes
+      .map(
+        (row) => `
       <div class="entry note">
         <div class="entry-top">
           <strong>${escapeHtml(row?.staff_name || row?.staff_id || "Unknown Staff")}</strong>
@@ -809,7 +877,9 @@ function buildHtmlTranscript(payload: TranscriptPayload): string {
         </div>
         <div class="entry-body">${escapeHtml(row?.content || "").replace(/\n/g, "<br />")}</div>
       </div>
-    `).join("");
+    `
+      )
+      .join("");
   };
 
   const renderSimpleList = <T,>(
@@ -969,12 +1039,16 @@ function buildHtmlTranscript(payload: TranscriptPayload): string {
       ${renderMemberGrid()}
     </section>
 
-    ${ticket?.initial_message ? `
+    ${
+      ticket?.initial_message
+        ? `
       <section class="card section">
         <h2>Initial Message</h2>
         <div class="entry"><div class="entry-body">${escapeHtml(ticket.initial_message).replace(/\n/g, "<br />")}</div></div>
       </section>
-    ` : ""}
+    `
+        : ""
+    }
 
     <section class="card section">
       <h2>Messages</h2>
@@ -1090,9 +1164,20 @@ export async function GET(request: Request, context: RouteContext) {
 
     const [ticketRes, messagesRes, notesRes, categoriesRes] = await Promise.all([
       supabase.from("tickets").select("*").eq("id", ticketId).single(),
-      supabase.from("ticket_messages").select("*").eq("ticket_id", ticketId).order("created_at", { ascending: true }),
-      supabase.from("ticket_notes").select("*").eq("ticket_id", ticketId).order("created_at", { ascending: false }),
-      supabase.from("ticket_categories").select("*").eq("guild_id", env.guildId || ""),
+      supabase
+        .from("ticket_messages")
+        .select("*")
+        .eq("ticket_id", ticketId)
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("ticket_notes")
+        .select("*")
+        .eq("ticket_id", ticketId)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("ticket_categories")
+        .select("*")
+        .eq("guild_id", env.guildId || ""),
     ]);
 
     if (ticketRes.error || !ticketRes.data) {
@@ -1109,7 +1194,9 @@ export async function GET(request: Request, context: RouteContext) {
     ) as TicketRow;
 
     const ticketUserId = normalizeString(ticket?.user_id);
-    const ticketChannelId = normalizeString(ticket?.channel_id || ticket?.discord_thread_id);
+    const ticketChannelId = normalizeString(
+      ticket?.channel_id || ticket?.discord_thread_id
+    );
 
     const [
       memberRowsRes,
@@ -1121,55 +1208,139 @@ export async function GET(request: Request, context: RouteContext) {
       activityRes,
     ] = await Promise.all([
       ticketUserId
-        ? supabase.from("guild_members").select("*").eq("guild_id", env.guildId || "").eq("user_id", ticketUserId).limit(1)
+        ? supabase
+            .from("guild_members")
+            .select("*")
+            .eq("guild_id", env.guildId || "")
+            .eq("user_id", ticketUserId)
+            .limit(1)
         : Promise.resolve({ data: [], error: null }),
       ticketUserId
-        ? supabase.from("member_joins").select("*").eq("guild_id", env.guildId || "").eq("user_id", ticketUserId).order("joined_at", { ascending: false }).limit(20)
+        ? supabase
+            .from("member_joins")
+            .select("*")
+            .eq("guild_id", env.guildId || "")
+            .eq("user_id", ticketUserId)
+            .order("joined_at", { ascending: false })
+            .limit(20)
         : Promise.resolve({ data: [], error: null }),
       ticketUserId
-        ? supabase.from("verification_flags").select("*").eq("guild_id", env.guildId || "").eq("user_id", ticketUserId).order("created_at", { ascending: false }).limit(50)
+        ? supabase
+            .from("verification_flags")
+            .select("*")
+            .eq("guild_id", env.guildId || "")
+            .eq("user_id", ticketUserId)
+            .order("created_at", { ascending: false })
+            .limit(50)
         : Promise.resolve({ data: [], error: null }),
       ticketUserId
-        ? supabase.from("verification_tokens").select("*").eq("guild_id", env.guildId || "").or(`requester_id.eq.${ticketUserId},user_id.eq.${ticketUserId},approved_user_id.eq.${ticketUserId}`).order("created_at", { ascending: false }).limit(60)
+        ? supabase
+            .from("verification_tokens")
+            .select("*")
+            .eq("guild_id", env.guildId || "")
+            .or(
+              `requester_id.eq.${ticketUserId},user_id.eq.${ticketUserId},approved_user_id.eq.${ticketUserId}`
+            )
+            .order("created_at", { ascending: false })
+            .limit(60)
         : Promise.resolve({ data: [], error: null }),
       ticketUserId
-        ? supabase.from("vc_verify_sessions").select("*").eq("guild_id", env.guildId || "").or(`owner_id.eq.${ticketUserId},requester_id.eq.${ticketUserId}`).order("created_at", { ascending: false }).limit(40)
+        ? supabase
+            .from("vc_verify_sessions")
+            .select("*")
+            .eq("guild_id", env.guildId || "")
+            .or(`owner_id.eq.${ticketUserId},requester_id.eq.${ticketUserId}`)
+            .order("created_at", { ascending: false })
+            .limit(40)
         : Promise.resolve({ data: [], error: null }),
       ticketUserId
-        ? supabase.from("warns").select("*").eq("guild_id", env.guildId || "").eq("user_id", ticketUserId).order("created_at", { ascending: false }).limit(30)
+        ? supabase
+            .from("warns")
+            .select("*")
+            .eq("guild_id", env.guildId || "")
+            .eq("user_id", ticketUserId)
+            .order("created_at", { ascending: false })
+            .limit(30)
         : Promise.resolve({ data: [], error: null }),
       ticketUserId
-        ? supabase.from("activity_feed_events").select("*").eq("guild_id", env.guildId || "").or(
-            ticketChannelId
-              ? `ticket_id.eq.${ticketId},channel_id.eq.${ticketChannelId},target_user_id.eq.${ticketUserId}`
-              : `ticket_id.eq.${ticketId},target_user_id.eq.${ticketUserId}`
-          ).order("created_at", { ascending: false }).limit(100)
-        : supabase.from("activity_feed_events").select("*").eq("guild_id", env.guildId || "").eq("ticket_id", ticketId).order("created_at", { ascending: false }).limit(100),
+        ? supabase
+            .from("activity_feed_events")
+            .select("*")
+            .eq("guild_id", env.guildId || "")
+            .or(
+              ticketChannelId
+                ? `ticket_id.eq.${ticketId},channel_id.eq.${ticketChannelId},target_user_id.eq.${ticketUserId}`
+                : `ticket_id.eq.${ticketId},target_user_id.eq.${ticketUserId}`
+            )
+            .order("created_at", { ascending: false })
+            .limit(100)
+        : supabase
+            .from("activity_feed_events")
+            .select("*")
+            .eq("guild_id", env.guildId || "")
+            .eq("ticket_id", ticketId)
+            .order("created_at", { ascending: false })
+            .limit(100),
     ]);
 
-    const member = mapGuildMember((safeArray<GuildMemberRow>(memberRowsRes.data || [])[0] || null) as GuildMemberRow | null);
-    const messages = safeArray<TicketMessageRow>(messagesRes.data).map(mapTicketMessage);
+    const member = mapGuildMember(
+      (safeArray<GuildMemberRow>(memberRowsRes.data || [])[0] ||
+        null) as GuildMemberRow | null
+    );
+    const messages = safeArray<TicketMessageRow>(messagesRes.data).map(
+      mapTicketMessage
+    );
     const notes = safeArray<TicketNoteRow>(notesRes.data).map(mapTicketNote);
     const joins = safeArray<JoinRow>(joinsRes.data).map(mapJoin);
-    const verificationFlags = safeArray<VerificationFlagRow>(flagsRes.data).map(mapVerificationFlag);
-    const verificationTokens = safeArray<VerificationTokenRow>(tokensRes.data).map(mapVerificationToken);
+    const verificationFlags = safeArray<VerificationFlagRow>(flagsRes.data).map(
+      mapVerificationFlag
+    );
+    const verificationTokens = safeArray<VerificationTokenRow>(
+      tokensRes.data
+    ).map(mapVerificationToken);
     const vcSessions = safeArray<VcSessionRow>(vcRes.data).map(mapVcSession);
     const warns = safeArray<WarnRow>(warnsRes.data).map(mapWarn);
-    const activity = safeArray<ActivityFeedRow>(activityRes.data).map(mapActivityRow);
+    const activity = safeArray<ActivityFeedRow>(activityRes.data).map(
+      mapActivityRow
+    );
 
     const category =
       safeArray<TicketCategoryRow>(categoriesRes.data || []).find((row) => {
         return (
-          normalizeString(row?.id) === normalizeString(ticket?.category_id || ticket?.matched_category_id) ||
-          normalizeLower(row?.slug) === normalizeLower(ticket?.matched_category_slug || ticket?.category || ticket?.matched_intake_type)
+          normalizeString(row?.id) ===
+            normalizeString(
+              ticket?.category_id || ticket?.matched_category_id
+            ) ||
+          normalizeLower(row?.slug) ===
+            normalizeLower(
+              ticket?.matched_category_slug ||
+                ticket?.category ||
+                ticket?.matched_intake_type
+            )
         );
       }) || null;
 
     const latestFlag = latestBy(verificationFlags, "created_at");
-    const latestToken = latestBy(verificationTokens, "updated_at", "decided_at", "submitted_at", "created_at");
-    const latestVc = latestBy(vcSessions, "completed_at", "started_at", "accepted_at", "canceled_at", "created_at");
+    const latestToken = latestBy(
+      verificationTokens,
+      "updated_at",
+      "decided_at",
+      "submitted_at",
+      "created_at"
+    );
+    const latestVc = latestBy(
+      vcSessions,
+      "completed_at",
+      "started_at",
+      "accepted_at",
+      "canceled_at",
+      "created_at"
+    );
     const flaggedCount = verificationFlags.filter((row) => row.flagged).length;
-    const maxFlagScore = Math.max(0, ...verificationFlags.map((row) => Number(row.score || 0)));
+    const maxFlagScore = Math.max(
+      0,
+      ...verificationFlags.map((row) => Number(row.score || 0))
+    );
     const warnCount = warns.length;
     const noteCount = notes.length;
 
@@ -1203,10 +1374,18 @@ export async function GET(request: Request, context: RouteContext) {
         noteCount,
       }),
       recommendedActions: [
-        !normalizeString(ticket?.claimed_by) && !normalizeString(ticket?.assigned_to) ? "Claim this ticket." : "",
-        flaggedCount > 0 ? "Review verification flags before resolving." : "",
+        !normalizeString(ticket?.claimed_by) &&
+        !normalizeString(ticket?.assigned_to)
+          ? "Claim this ticket."
+          : "",
+        flaggedCount > 0
+          ? "Review verification flags before resolving."
+          : "",
         noteCount === 0 ? "Add an internal note for staff continuity." : "",
-        normalizeLower(ticket?.matched_intake_type) === "verification" && member?.has_unverified ? "Confirm verification path and final role state." : "",
+        normalizeLower(ticket?.matched_intake_type) === "verification" &&
+        member?.has_unverified
+          ? "Confirm verification path and final role state."
+          : "",
       ].filter(Boolean),
       latestFlag: latestFlag || null,
       latestToken: latestToken || null,
@@ -1225,7 +1404,9 @@ export async function GET(request: Request, context: RouteContext) {
       vcSessions,
       notes,
       messages,
-      activity: activity.sort((a, b) => parseDateMs(a.created_at) - parseDateMs(b.created_at)),
+      activity: activity.sort(
+        (a, b) => parseDateMs(a.created_at) - parseDateMs(b.created_at)
+      ),
       workspace,
       viewer,
       exportedAt: new Date().toISOString(),
@@ -1234,14 +1415,18 @@ export async function GET(request: Request, context: RouteContext) {
     const fileBase = transcriptFileName(ticket);
 
     if (format === "json") {
-      const response = new NextResponse(JSON.stringify(transcriptPayload, null, 2), {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          "Content-Disposition": `attachment; filename="${fileBase}.json"`,
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        },
-      });
+      const response = new NextResponse(
+        JSON.stringify(transcriptPayload, null, 2),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Content-Disposition": `attachment; filename="${fileBase}.json"`,
+            "Cache-Control":
+              "no-store, no-cache, must-revalidate, max-age=0",
+          },
+        }
+      );
       applyAuthCookies(response, refreshedTokens);
       return response;
     }
