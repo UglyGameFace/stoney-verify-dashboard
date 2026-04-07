@@ -110,6 +110,31 @@ type GuildMemberRow = {
   approved_by_name?: string | null;
   verification_ticket_id?: string | null;
   source_ticket_id?: string | null;
+
+  risk_score?: number | null;
+  risk_level?: string | null;
+  risk_reasons?: string[] | null;
+  fingerprint?: string | null;
+  alt_cluster_key?: string | null;
+  alt_cluster_size?: number | null;
+  burst_join_count?: number | null;
+  same_fingerprint_count?: number | null;
+  similar_name_count?: number | null;
+  same_age_bucket_count?: number | null;
+  suspicious_name_pattern?: boolean | null;
+  repeated_char_pattern?: boolean | null;
+  default_avatar?: boolean | null;
+  account_age_days?: number | null;
+  age_bucket?: string | null;
+  digit_ratio?: number | null;
+  underscore_ratio?: number | null;
+  cluster_members?: JsonRecord[] | null;
+  suspicion_flags?: string[] | null;
+  risk_last_evaluated_at?: string | null;
+  last_join_risk_score?: number | null;
+  last_join_risk_level?: string | null;
+  last_join_fingerprint?: string | null;
+  alt_notes?: string | null;
 };
 
 type TicketCategoryRow = {
@@ -234,6 +259,28 @@ type MemberJoinRow = {
   approved_by_name?: string | null;
   join_note?: string | null;
   source_ticket_id?: string | null;
+
+  risk_score?: number | null;
+  risk_level?: string | null;
+  risk_reasons?: string[] | null;
+  fingerprint?: string | null;
+  alt_cluster_key?: string | null;
+  alt_cluster_size?: number | null;
+  burst_join_count?: number | null;
+  same_fingerprint_count?: number | null;
+  similar_name_count?: number | null;
+  same_age_bucket_count?: number | null;
+  suspicious_name_pattern?: boolean | null;
+  repeated_char_pattern?: boolean | null;
+  default_avatar?: boolean | null;
+  account_age_days?: number | null;
+  age_bucket?: string | null;
+  digit_ratio?: number | null;
+  underscore_ratio?: number | null;
+  cluster_members?: JsonRecord[] | null;
+  suspicion_flags?: string[] | null;
+  risk_evaluated_at?: string | null;
+  join_fingerprint?: string | null;
 };
 
 type ActivityFeedRow = {
@@ -253,6 +300,35 @@ type ActivityFeedRow = {
   channel_name?: string | null;
   ticket_id?: string | null;
   metadata?: JsonRecord | null;
+};
+
+type AltRiskSourceRow = {
+  risk_score?: number | null;
+  risk_level?: string | null;
+  risk_reasons?: string[] | null;
+  fingerprint?: string | null;
+  alt_cluster_key?: string | null;
+  alt_cluster_size?: number | null;
+  burst_join_count?: number | null;
+  same_fingerprint_count?: number | null;
+  similar_name_count?: number | null;
+  same_age_bucket_count?: number | null;
+  suspicious_name_pattern?: boolean | null;
+  repeated_char_pattern?: boolean | null;
+  default_avatar?: boolean | null;
+  account_age_days?: number | null;
+  age_bucket?: string | null;
+  digit_ratio?: number | null;
+  underscore_ratio?: number | null;
+  cluster_members?: JsonRecord[] | null;
+  suspicion_flags?: string[] | null;
+  risk_last_evaluated_at?: string | null;
+  risk_evaluated_at?: string | null;
+  last_join_risk_score?: number | null;
+  last_join_risk_level?: string | null;
+  last_join_fingerprint?: string | null;
+  join_fingerprint?: string | null;
+  alt_notes?: string | null;
 };
 
 type CategoryPatchAction = "update-category" | "clear-category-override";
@@ -286,6 +362,18 @@ function safeObject<T extends object = JsonRecord>(value: unknown): T {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as T)
     : ({} as T);
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  return safeArray(value)
+    .map((item) => normalizeString(item))
+    .filter(Boolean);
+}
+
+function normalizeJsonRecordArray(value: unknown): JsonRecord[] {
+  return safeArray<JsonRecord>(value).filter(
+    (item) => Boolean(item) && typeof item === "object" && !Array.isArray(item)
+  );
 }
 
 function parseDateMs(value: unknown): number {
@@ -371,6 +459,34 @@ function mapGuildMember(row: GuildMemberRow | null): GuildMemberRow | null {
     role_state: row?.role_state || "unknown",
     role_state_reason: row?.role_state_reason || "",
     is_bot: Boolean(row?.is_bot),
+
+    risk_score: normalizeNumber(row?.risk_score, 0),
+    risk_level: normalizeLower(row?.risk_level) || null,
+    risk_reasons: normalizeStringArray(row?.risk_reasons),
+    fingerprint: normalizeString(row?.fingerprint) || null,
+    alt_cluster_key: normalizeString(row?.alt_cluster_key) || null,
+    alt_cluster_size: normalizeNumber(row?.alt_cluster_size, 0),
+    burst_join_count: normalizeNumber(row?.burst_join_count, 0),
+    same_fingerprint_count: normalizeNumber(row?.same_fingerprint_count, 0),
+    similar_name_count: normalizeNumber(row?.similar_name_count, 0),
+    same_age_bucket_count: normalizeNumber(row?.same_age_bucket_count, 0),
+    suspicious_name_pattern: Boolean(row?.suspicious_name_pattern),
+    repeated_char_pattern: Boolean(row?.repeated_char_pattern),
+    default_avatar: Boolean(row?.default_avatar),
+    account_age_days:
+      row?.account_age_days === null || row?.account_age_days === undefined
+        ? null
+        : normalizeNumber(row?.account_age_days, 0),
+    age_bucket: normalizeString(row?.age_bucket) || null,
+    digit_ratio: normalizeNumber(row?.digit_ratio, 0),
+    underscore_ratio: normalizeNumber(row?.underscore_ratio, 0),
+    cluster_members: normalizeJsonRecordArray(row?.cluster_members),
+    suspicion_flags: normalizeStringArray(row?.suspicion_flags),
+    risk_last_evaluated_at: row?.risk_last_evaluated_at || null,
+    last_join_risk_score: normalizeNumber(row?.last_join_risk_score, 0),
+    last_join_risk_level: normalizeLower(row?.last_join_risk_level) || null,
+    last_join_fingerprint: normalizeString(row?.last_join_fingerprint) || null,
+    alt_notes: normalizeString(row?.alt_notes) || null,
   };
 }
 
@@ -495,6 +611,31 @@ function mapJoin(row: MemberJoinRow): MemberJoinRow {
     approved_by_name: row?.approved_by_name || null,
     join_note: row?.join_note || null,
     source_ticket_id: row?.source_ticket_id || null,
+
+    risk_score: normalizeNumber(row?.risk_score, 0),
+    risk_level: normalizeLower(row?.risk_level) || null,
+    risk_reasons: normalizeStringArray(row?.risk_reasons),
+    fingerprint: normalizeString(row?.fingerprint) || null,
+    alt_cluster_key: normalizeString(row?.alt_cluster_key) || null,
+    alt_cluster_size: normalizeNumber(row?.alt_cluster_size, 0),
+    burst_join_count: normalizeNumber(row?.burst_join_count, 0),
+    same_fingerprint_count: normalizeNumber(row?.same_fingerprint_count, 0),
+    similar_name_count: normalizeNumber(row?.similar_name_count, 0),
+    same_age_bucket_count: normalizeNumber(row?.same_age_bucket_count, 0),
+    suspicious_name_pattern: Boolean(row?.suspicious_name_pattern),
+    repeated_char_pattern: Boolean(row?.repeated_char_pattern),
+    default_avatar: Boolean(row?.default_avatar),
+    account_age_days:
+      row?.account_age_days === null || row?.account_age_days === undefined
+        ? null
+        : normalizeNumber(row?.account_age_days, 0),
+    age_bucket: normalizeString(row?.age_bucket) || null,
+    digit_ratio: normalizeNumber(row?.digit_ratio, 0),
+    underscore_ratio: normalizeNumber(row?.underscore_ratio, 0),
+    cluster_members: normalizeJsonRecordArray(row?.cluster_members),
+    suspicion_flags: normalizeStringArray(row?.suspicion_flags),
+    risk_evaluated_at: row?.risk_evaluated_at || null,
+    join_fingerprint: normalizeString(row?.join_fingerprint) || null,
   };
 }
 
@@ -534,6 +675,99 @@ function getActorIdentity(session: SessionLike | null | undefined) {
       session?.user?.name ||
       session?.discordUser?.username ||
       "Dashboard Staff",
+  };
+}
+
+function hasAltRiskData(row: AltRiskSourceRow | null | undefined): boolean {
+  if (!row) return false;
+
+  if (normalizeString(row?.risk_level)) return true;
+  if (normalizeString(row?.fingerprint)) return true;
+  if (normalizeString(row?.alt_cluster_key)) return true;
+  if (normalizeString(row?.last_join_fingerprint)) return true;
+  if (normalizeString(row?.join_fingerprint)) return true;
+  if (normalizeNumber(row?.risk_score, -1) >= 0) return true;
+  if (normalizeNumber(row?.alt_cluster_size, 0) > 0) return true;
+  if (normalizeStringArray(row?.risk_reasons).length > 0) return true;
+
+  return false;
+}
+
+function formatAltRiskLabel(level: unknown): string {
+  const clean = normalizeLower(level);
+
+  if (clean === "critical") return "Critical Alt Risk";
+  if (clean === "high") return "High Alt Risk";
+  if (clean === "medium") return "Medium Alt Risk";
+  if (clean === "low") return "Low Alt Risk";
+  return "Unknown Alt Risk";
+}
+
+function buildAltRiskSnapshot(
+  member: GuildMemberRow | null,
+  latestJoin: MemberJoinRow | null
+) {
+  const source = hasAltRiskData(member)
+    ? member
+    : hasAltRiskData(latestJoin)
+      ? latestJoin
+      : null;
+
+  const sourceLabel = hasAltRiskData(member)
+    ? "guild_member"
+    : hasAltRiskData(latestJoin)
+      ? "member_join"
+      : "none";
+
+  return {
+    source: sourceLabel,
+    score: normalizeNumber(
+      source?.risk_score,
+      normalizeNumber(source?.last_join_risk_score, 0)
+    ),
+    level:
+      normalizeLower(source?.risk_level || source?.last_join_risk_level) || "low",
+    reasons: normalizeStringArray(source?.risk_reasons),
+    fingerprint:
+      normalizeString(
+        source?.fingerprint ||
+          source?.last_join_fingerprint ||
+          source?.join_fingerprint
+      ) || null,
+    altClusterKey: normalizeString(source?.alt_cluster_key) || null,
+    altClusterSize: normalizeNumber(source?.alt_cluster_size, 0),
+    burstJoinCount: normalizeNumber(source?.burst_join_count, 0),
+    sameFingerprintCount: normalizeNumber(source?.same_fingerprint_count, 0),
+    similarNameCount: normalizeNumber(source?.similar_name_count, 0),
+    sameAgeBucketCount: normalizeNumber(source?.same_age_bucket_count, 0),
+    suspiciousNamePattern: Boolean(source?.suspicious_name_pattern),
+    repeatedCharPattern: Boolean(source?.repeated_char_pattern),
+    defaultAvatar: Boolean(source?.default_avatar),
+    accountAgeDays:
+      source?.account_age_days === null || source?.account_age_days === undefined
+        ? null
+        : normalizeNumber(source?.account_age_days, 0),
+    ageBucket: normalizeString(source?.age_bucket) || null,
+    digitRatio: normalizeNumber(source?.digit_ratio, 0),
+    underscoreRatio: normalizeNumber(source?.underscore_ratio, 0),
+    clusterMembers: normalizeJsonRecordArray(source?.cluster_members),
+    suspicionFlags: normalizeStringArray(source?.suspicion_flags),
+    riskEvaluatedAt:
+      normalizeString(source?.risk_last_evaluated_at || source?.risk_evaluated_at) ||
+      null,
+    lastJoinRiskScore: normalizeNumber(
+      source?.last_join_risk_score,
+      normalizeNumber(source?.risk_score, 0)
+    ),
+    lastJoinRiskLevel:
+      normalizeLower(source?.last_join_risk_level || source?.risk_level) || "low",
+    lastJoinFingerprint:
+      normalizeString(
+        source?.last_join_fingerprint ||
+          source?.join_fingerprint ||
+          source?.fingerprint
+      ) || null,
+    altNotes: normalizeString(source?.alt_notes) || null,
   };
 }
 
@@ -1206,6 +1440,7 @@ export async function GET(request: Request, context: RouteContext) {
     );
     const latestActivity = latestBy(activity, "created_at");
     const latestJoin = latestBy(joins, "joined_at");
+    const altRisk = buildAltRiskSnapshot(member, latestJoin);
 
     const flaggedCount = verificationFlags.filter((row) => row.flagged).length;
     const maxFlagScore = Math.max(
@@ -1322,6 +1557,33 @@ export async function GET(request: Request, context: RouteContext) {
 
       owner_warn_count: warnCount,
 
+      owner_alt_risk_score: altRisk.score,
+      owner_alt_risk_level: altRisk.level,
+      owner_alt_risk_label: formatAltRiskLabel(altRisk.level),
+      owner_alt_risk_reasons: altRisk.reasons,
+      owner_fingerprint: altRisk.fingerprint,
+      owner_alt_cluster_key: altRisk.altClusterKey,
+      owner_alt_cluster_size: altRisk.altClusterSize,
+      owner_burst_join_count: altRisk.burstJoinCount,
+      owner_same_fingerprint_count: altRisk.sameFingerprintCount,
+      owner_similar_name_count: altRisk.similarNameCount,
+      owner_same_age_bucket_count: altRisk.sameAgeBucketCount,
+      owner_suspicious_name_pattern: altRisk.suspiciousNamePattern,
+      owner_repeated_char_pattern: altRisk.repeatedCharPattern,
+      owner_default_avatar: altRisk.defaultAvatar,
+      owner_account_age_days: altRisk.accountAgeDays,
+      owner_age_bucket: altRisk.ageBucket,
+      owner_digit_ratio: altRisk.digitRatio,
+      owner_underscore_ratio: altRisk.underscoreRatio,
+      owner_alt_cluster_members: altRisk.clusterMembers,
+      owner_suspicion_flags: altRisk.suspicionFlags,
+      owner_risk_evaluated_at: altRisk.riskEvaluatedAt,
+      owner_last_join_risk_score: altRisk.lastJoinRiskScore,
+      owner_last_join_risk_level: altRisk.lastJoinRiskLevel,
+      owner_last_join_fingerprint: altRisk.lastJoinFingerprint,
+      owner_alt_notes: altRisk.altNotes,
+      owner_alt_risk_source: altRisk.source,
+
       category_color: category?.color || null,
       category_description: category?.description || null,
       category_button_label: category?.button_label || null,
@@ -1415,6 +1677,8 @@ export async function GET(request: Request, context: RouteContext) {
           latestActivityAt,
           recommendedActions,
           sla: slaState,
+          altRisk,
+          altRiskLabel: formatAltRiskLabel(altRisk.level),
         },
         counts: {
           notes: noteCount,
