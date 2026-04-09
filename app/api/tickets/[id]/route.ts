@@ -281,6 +281,12 @@ type MemberJoinRow = {
   suspicion_flags?: string[] | null;
   risk_evaluated_at?: string | null;
   join_fingerprint?: string | null;
+
+  // ✅ Added so TypeScript matches the alt-risk snapshot logic
+  last_join_risk_score?: number | null;
+  last_join_risk_level?: string | null;
+  last_join_fingerprint?: string | null;
+  alt_notes?: string | null;
 };
 
 type ActivityFeedRow = {
@@ -636,6 +642,19 @@ function mapJoin(row: MemberJoinRow): MemberJoinRow {
     suspicion_flags: normalizeStringArray(row?.suspicion_flags),
     risk_evaluated_at: row?.risk_evaluated_at || null,
     join_fingerprint: normalizeString(row?.join_fingerprint) || null,
+
+    // ✅ Normalize the legacy/derived last-join fields too
+    last_join_risk_score: normalizeNumber(
+      row?.last_join_risk_score,
+      normalizeNumber(row?.risk_score, 0)
+    ),
+    last_join_risk_level:
+      normalizeLower(row?.last_join_risk_level || row?.risk_level) || null,
+    last_join_fingerprint:
+      normalizeString(
+        row?.last_join_fingerprint || row?.join_fingerprint || row?.fingerprint
+      ) || null,
+    alt_notes: normalizeString(row?.alt_notes) || null,
   };
 }
 
@@ -707,10 +726,10 @@ function buildAltRiskSnapshot(
   member: GuildMemberRow | null,
   latestJoin: MemberJoinRow | null
 ) {
-  const source = hasAltRiskData(member)
-    ? member
+  const source: AltRiskSourceRow | null = hasAltRiskData(member)
+    ? (member as AltRiskSourceRow)
     : hasAltRiskData(latestJoin)
-      ? latestJoin
+      ? (latestJoin as AltRiskSourceRow)
       : null;
 
   const sourceLabel = hasAltRiskData(member)
