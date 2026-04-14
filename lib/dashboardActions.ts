@@ -188,7 +188,9 @@ function withActor(input?: TicketActionBaseInput) {
   };
 }
 
-function buildQuery(params: Record<string, string | number | boolean | null | undefined>): string {
+function buildQuery(
+  params: Record<string, string | number | boolean | null | undefined>
+): string {
   const search = new URLSearchParams();
 
   for (const [key, value] of Object.entries(params)) {
@@ -234,9 +236,14 @@ function normalizeQueueTicket(ticket: DashboardQueueTicket): DashboardQueueTicke
       normalizeNullable(ticket?.assigned_to) ??
       normalizeNullable(ticket?.claimed_by) ??
       null,
-    status: status || normalizeString(ticket?.status || ticket?.ticket_status) || null,
+    status:
+      status ||
+      normalizeString(ticket?.status || ticket?.ticket_status) ||
+      null,
     ticket_status:
-      status || normalizeString(ticket?.ticket_status || ticket?.status) || null,
+      status ||
+      normalizeString(ticket?.ticket_status || ticket?.status) ||
+      null,
     is_claimed: isClaimed,
     is_unclaimed: isUnclaimed,
     priority: normalizeNullable(ticket?.priority) ?? "medium",
@@ -250,11 +257,11 @@ function normalizeQueueResponse(
   payload: DashboardQueueResponse | null | undefined
 ): DashboardQueueResponse {
   const queue = Array.isArray(payload?.queue)
-    ? payload!.queue.map(normalizeQueueTicket)
+    ? payload.queue.map(normalizeQueueTicket)
     : undefined;
 
   const tickets = Array.isArray(payload?.tickets)
-    ? payload!.tickets.map(normalizeQueueTicket)
+    ? payload.tickets.map(normalizeQueueTicket)
     : undefined;
 
   return {
@@ -506,6 +513,26 @@ export async function syncActiveTicketsAction(
       ...withActor(input),
     },
     wait: longWaitOptions(options),
+  });
+}
+
+export async function syncSingleTicketAction(
+  input: {
+    channelId: string;
+    requestedBy?: string | null;
+    staffId?: string | null;
+    dryRun?: boolean;
+  },
+  options?: WaitForBotCommandOptions
+): Promise<WaitForBotCommandResult> {
+  return queueAction({
+    url: "/api/tickets/sync-one",
+    body: {
+      channelId: String(input.channelId).trim(),
+      dryRun: Boolean(input?.dryRun),
+      ...withActor(input),
+    },
+    wait: mediumWaitOptions(options),
   });
 }
 
