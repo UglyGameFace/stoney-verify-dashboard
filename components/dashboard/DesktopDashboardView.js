@@ -8,12 +8,28 @@ function DesktopKpiStrip({
 }) {
   const items = [
     {
-      key: "openTickets",
+      key: "queueTotal",
       label: "Active Queue",
-      value: Number(counts?.openTickets || 0),
+      value: Number(counts?.queueTotal ?? counts?.openTickets || 0),
       helper: "Open + claimed tickets",
-      action: () => jumpToTickets?.({ status: "active" }),
+      action: () => jumpToTickets?.({ status: "queue" }),
       tone: "green",
+    },
+    {
+      key: "queueUnclaimed",
+      label: "Unclaimed",
+      value: Number(counts?.queueUnclaimed || 0),
+      helper: "Needs a staff claim",
+      action: () => jumpToTickets?.({ status: "unclaimed" }),
+      tone: "amber",
+    },
+    {
+      key: "queueClaimed",
+      label: "Claimed",
+      value: Number(counts?.queueClaimed || 0),
+      helper: "Actively assigned",
+      action: () => jumpToTickets?.({ status: "claimed" }),
+      tone: "blue",
     },
     {
       key: "warnsToday",
@@ -40,11 +56,19 @@ function DesktopKpiStrip({
       tone: "pink",
     },
     {
+      key: "queueOverdue",
+      label: "Overdue Queue",
+      value: Number(counts?.queueOverdue || 0),
+      helper: "Needs response now",
+      action: () => jumpToTickets?.({ status: "queue" }),
+      tone: "pink",
+    },
+    {
       key: "pendingVerification",
       label: "Pending Verify",
       value: Number(intelligence?.pendingVerification || 0),
       helper: "Queue pressure",
-      action: () => jumpToTickets?.({ status: "active" }),
+      action: () => jumpToTickets?.({ status: "queue" }),
       tone: "purple",
     },
     {
@@ -98,7 +122,7 @@ function DesktopKpiStrip({
       <style jsx>{`
         .desktop-kpi-strip {
           display: grid;
-          grid-template-columns: repeat(6, minmax(0, 1fr));
+          grid-template-columns: repeat(9, minmax(0, 1fr));
           gap: 12px;
           margin-bottom: 18px;
         }
@@ -198,7 +222,7 @@ function DesktopKpiStrip({
           color: var(--purple, #b26dff);
         }
 
-        @media (max-width: 1499px) {
+        @media (max-width: 1799px) {
           .desktop-kpi-strip {
             grid-template-columns: repeat(3, minmax(0, 1fr));
           }
@@ -385,10 +409,12 @@ function DesktopTicketsHeader({
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
         >
-          <option value="active">Active (Open + Claimed)</option>
+          <option value="queue">Full Queue (Open + Claimed)</option>
+          <option value="unclaimed">Unclaimed Only</option>
+          <option value="claimed">Claimed Only</option>
+          <option value="my_claimed">My Claimed Tickets</option>
           <option value="all">All statuses</option>
           <option value="open_only">Open Only</option>
-          <option value="claimed">Claimed Only</option>
           <option value="closed">Closed</option>
           <option value="deleted">Deleted</option>
         </select>
@@ -573,6 +599,38 @@ export default function DesktopDashboardView({
     return "desktop-members-item-half";
   }
 
+  const ticketTitle =
+    statusFilter === "closed"
+      ? "Closed Ticket History"
+      : statusFilter === "deleted"
+        ? "Deleted Ticket History"
+        : statusFilter === "all"
+          ? "Ticket History & Queue"
+          : statusFilter === "claimed"
+            ? "Claimed Ticket Queue"
+            : statusFilter === "unclaimed"
+              ? "Unclaimed Ticket Queue"
+              : statusFilter === "my_claimed"
+                ? "My Claimed Tickets"
+                : statusFilter === "open_only"
+                  ? "Open Ticket Queue"
+                  : "Active Ticket Queue";
+
+  const ticketSubtitle =
+    statusFilter === "closed"
+      ? "Closed tickets remain visible here so staff can review and reopen when needed."
+      : statusFilter === "deleted"
+        ? "Deleted ticket records remain visible here for audit and historical review."
+        : statusFilter === "all"
+          ? "Active and historical tickets together for review, auditing, and reopen workflows."
+          : statusFilter === "claimed"
+            ? "Tickets currently assigned to staff and actively being worked."
+            : statusFilter === "unclaimed"
+              ? "Tickets waiting for a staff member to claim and begin handling."
+              : statusFilter === "my_claimed"
+                ? "Tickets currently assigned to the selected staff member."
+                : "Smoke-tested live moderation queue with fast filtering, repair controls, and cleaner action density.";
+
   return (
     <div className="desktop-dashboard-shell">
       {activeTab === "home" ? (
@@ -600,28 +658,8 @@ export default function DesktopDashboardView({
       {activeTab === "tickets" ? (
         <section className="desktop-tab-section">
           <DesktopPageShell
-            title={
-              statusFilter === "closed"
-                ? "Closed Ticket History"
-                : statusFilter === "deleted"
-                  ? "Deleted Ticket History"
-                  : statusFilter === "all"
-                    ? "Ticket History & Queue"
-                    : statusFilter === "claimed"
-                      ? "Claimed Ticket Queue"
-                      : statusFilter === "open_only"
-                        ? "Open Ticket Queue"
-                        : "Active Ticket Queue"
-            }
-            subtitle={
-              statusFilter === "closed"
-                ? "Closed tickets remain visible here so staff can review and reopen when needed."
-                : statusFilter === "deleted"
-                  ? "Deleted ticket records remain visible here for audit and historical review."
-                  : statusFilter === "all"
-                    ? "Active and historical tickets together for review, auditing, and reopen workflows."
-                    : "Smoke-tested live moderation queue with fast filtering, repair controls, and cleaner action density."
-            }
+            title={ticketTitle}
+            subtitle={ticketSubtitle}
             tone="tickets"
           >
             <DesktopTicketsHeader
