@@ -4,7 +4,6 @@ import { requireStaffSessionForRoute } from "@/lib/auth-server";
 import {
   buildRouteJson,
   getActorId,
-  missingFieldRouteResponse,
   parseRouteBody,
   readBoolean,
   readString,
@@ -15,6 +14,20 @@ import {
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+function missingFieldRouteResponse(
+  field: string,
+  refreshedTokens: RefreshedTokens | null
+) {
+  return buildRouteJson(
+    {
+      ok: false,
+      error: `Missing ${field}`,
+    },
+    400,
+    refreshedTokens
+  );
+}
 
 export async function POST(req: NextRequest) {
   let refreshedTokens: RefreshedTokens | null = null;
@@ -38,6 +51,9 @@ export async function POST(req: NextRequest) {
       ["forceTranscript", "force_transcript"],
       false
     );
+    const staffId = readString(body, ["staffId", "staff_id"], actorId);
+    const requestedBy =
+      readString(body, ["requestedBy", "requested_by"]) || actorId;
 
     if (!channelId) {
       return missingFieldRouteResponse("channelId", refreshedTokens);
@@ -61,8 +77,10 @@ export async function POST(req: NextRequest) {
         ghost,
         forceTranscript,
         reason,
-        staffId: actorId,
-        requestedBy: actorId,
+        staffId,
+        requestedBy,
+        effectiveStaffId: actorId,
+        effectiveRequestedBy: actorId,
       },
       200,
       refreshedTokens
