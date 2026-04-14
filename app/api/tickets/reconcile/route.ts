@@ -1,52 +1,40 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
+import { NextRequest } from "next/server";
+import { requireStaffSessionForRoute } from "@/lib/auth-server";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { env } from "@/lib/env";
+import {
+  buildRouteJson,
+  getActorId,
+  parseRouteBody,
+  readBoolean,
+  readString,
+  toErrorMessage,
+  unauthorizedRouteResponse,
+  type RefreshedTokens,
+} from "@/lib/ticketActionRoute";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function getActorId(session: any): string | null {
-  const candidates = [
-    session?.user?.id,
-    session?.user?.user_id,
-    session?.user?.discord_id,
-    session?.discordUser?.id,
-  ];
-
-  for (const value of candidates) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-
-  if (typeof candidates[0] === "number") {
-    return String(candidates[0]);
-  }
-
-  return null;
-}
-
-function parseDateMs(value: unknown): number {
-  const ms = new Date(String(value || "")).getTime();
-  return Number.isFinite(ms) ? ms : 0;
+function normalizeString(value: unknown): string {
+  return String(value ?? "").trim();
 }
 
 function normalizeStatus(value: unknown): string {
-  return String(value || "").trim().toLowerCase();
+  return normalizeString(value).toLowerCase();
 }
 
 function hasUsableChannel(ticket: any): boolean {
   return Boolean(
-    String(ticket?.channel_id || ticket?.discord_thread_id || "").trim()
+    normalizeString(ticket?.channel_id || ticket?.discord_thread_id)
   );
 }
 
 function hasTranscriptEvidence(ticket: any): boolean {
   return Boolean(
-    String(ticket?.transcript_url || "").trim() ||
-      String(ticket?.transcript_message_id || "").trim() ||
-      String(ticket?.transcript_channel_id || "").trim()
+    normalizeString(ticket?.transcript_url) ||
+      normalizeString(ticket?.transcript_message_id) ||
+      normalizeString(ticket?.transcript_channel_id)
   );
 }
 
@@ -69,7 +57,6 @@ function buildTicketPatch(
   const hasTranscript = hasTranscriptEvidence(ticket);
   const hasEvidence = hasClosedEvidence(ticket);
 
-  // Normalize already-deleted rows
   if (status === "deleted") {
     const patch: Record<string, unknown> = {};
     if (!ticket?.deleted_at) patch.deleted_at = now;
@@ -77,7 +64,6 @@ function buildTicketPatch(
     return Object.keys(patch).length ? patch : null;
   }
 
-  // Normalize already-closed rows
   if (status === "closed") {
     const patch: Record<string, unknown> = {};
     if (!ticket?.closed_at) patch.closed_at = now;
@@ -85,7 +71,6 @@ function buildTicketPatch(
     return Object.keys(patch).length ? patch : null;
   }
 
-  // Transcript evidence should never leave a ticket looking open forever
   if (
     includeTranscriptBackfill &&
     (status === "open" || status === "claimed") &&
@@ -101,14 +86,13 @@ function buildTicketPatch(
     };
   }
 
-  // Dead open/claimed rows with no usable channel should be closed during reconcile
   if (
     includeOpenWithMissingChannel &&
     missingChannel &&
     (status === "open" || status === "claimed")
   ) {
     return {
-      status: hasTranscript ? "closed" : "closed",
+      status: "closed",
       updated_at: now,
       closed_at: ticket?.closed_at || now,
       closed_reason:
@@ -119,7 +103,6 @@ function buildTicketPatch(
     };
   }
 
-  // Rows with no channel but already carrying closure evidence should at least be normalized
   if (missingChannel && hasEvidence && status !== "closed" && status !== "deleted") {
     return {
       status: ticket?.deleted_at ? "deleted" : "closed",
@@ -154,49 +137,51 @@ function summarizeCandidate(ticket: any, patch: Record<string, unknown> | null) 
   };
 }
 
-export async function POST(req: NextRequest) {
-  try {
-    const { session, refreshedTokens } = await requireStaffSessionForRoute();
-    const actorId = getActorId(session);
+function missingGuildIdResponse(refreshedTokens: RefreshedTokens | null) {
+  return buildRouteJson(
+    {
+      ok: false,
+      error: "Missing guild id",
+    },
+    500,
+    refreshedTokens
+  );
+}
 
+export async function POST(req: NextRequest) {
+  let refreshedTokens: RefreshedTokens | null = null;
+
+  try {
+    const auth = await requireStaffSessionForRoute();
+    refreshedTokens = auth?.refreshedTokens ?? null;
+
+    const actorId = getActorId(auth?.session);
     if (!actorId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Unauthorized",
-        },
-        {
-          status: 401,
-          headers: {
-            "Cache-Control": "no-store, max-age=0",
-          },
-        }
-      );
+      return unauthorizedRouteResponse(refreshedTokens);
     }
 
-    const body = await req.json().catch(() => ({}));
-    const includeOpenWithMissingChannel = Boolean(
-      body?.includeOpenWithMissingChannel ?? true
-    );
-    const includeTranscriptBackfill = Boolean(
-      body?.includeTranscriptBackfill ?? true
-    );
-    const dryRun = Boolean(body?.dryRun);
+    const body = await parseRouteBody(req);
 
-    const guildId = String(env.guildId || "").trim();
+    const includeOpenWithMissingChannel = readBoolean(
+      body,
+      ["includeOpenWithMissingChannel", "include_open_with_missing_channel"],
+      true
+    );
+
+    const includeTranscriptBackfill = readBoolean(
+      body,
+      ["includeTranscriptBackfill", "include_transcript_backfill"],
+      true
+    );
+
+    const dryRun = readBoolean(body, ["dryRun", "dry_run"], false);
+
+    const requestedBy =
+      readString(body, ["requestedBy", "requested_by"], actorId) || actorId;
+
+    const guildId = normalizeString(env.guildId);
     if (!guildId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Missing guild id",
-        },
-        {
-          status: 500,
-          headers: {
-            "Cache-Control": "no-store, max-age=0",
-          },
-        }
-      );
+      return missingGuildIdResponse(refreshedTokens);
     }
 
     const supabase = createServerSupabase();
@@ -209,18 +194,7 @@ export async function POST(req: NextRequest) {
       .limit(500);
 
     if (ticketsError) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: ticketsError.message || "Failed to load tickets",
-        },
-        {
-          status: 500,
-          headers: {
-            "Cache-Control": "no-store, max-age=0",
-          },
-        }
-      );
+      throw new Error(ticketsError.message || "Failed to load tickets");
     }
 
     const rows = Array.isArray(tickets) ? tickets : [];
@@ -240,7 +214,7 @@ export async function POST(req: NextRequest) {
 
     if (!dryRun) {
       for (const entry of candidates) {
-        const ticketId = String(entry.ticket?.id || "").trim();
+        const ticketId = normalizeString(entry.ticket?.id);
         if (!ticketId) continue;
 
         const { error: updateError } = await supabase
@@ -273,7 +247,7 @@ export async function POST(req: NextRequest) {
       return !hasUsableChannel(ticket) && (status === "closed" || status === "deleted");
     }).length;
 
-    const response = NextResponse.json(
+    return buildRouteJson(
       {
         ok: true,
         dryRun,
@@ -281,35 +255,27 @@ export async function POST(req: NextRequest) {
         hidden,
         updated,
         removed: 0,
+        includeOpenWithMissingChannel,
+        includeTranscriptBackfill,
+        requestedBy,
+        effectiveRequestedBy: actorId,
         tickets: candidates.map(({ ticket, patch }) =>
           summarizeCandidate(ticket, patch)
         ),
       },
-      {
-        status: 200,
-        headers: {
-          "Cache-Control": "no-store, max-age=0",
-        },
-      }
+      200,
+      refreshedTokens
     );
-
-    applyAuthCookies(response, refreshedTokens);
-    return response;
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to reconcile tickets";
+    const message = toErrorMessage(error);
 
-    return NextResponse.json(
+    return buildRouteJson(
       {
         ok: false,
         error: message,
       },
-      {
-        status: message === "Unauthorized" ? 401 : 500,
-        headers: {
-          "Cache-Control": "no-store, max-age=0",
-        },
-      }
+      message === "Unauthorized" ? 401 : 500,
+      refreshedTokens
     );
   }
 }
