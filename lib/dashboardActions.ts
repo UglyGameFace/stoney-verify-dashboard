@@ -4,18 +4,6 @@ import {
   type WaitForBotCommandResult,
 } from "@/lib/waitForBotCommand";
 
-type QueueResponse = {
-  ok?: boolean;
-  queued?: boolean;
-  command?: {
-    id?: string;
-    status?: string;
-    error?: string;
-    result?: unknown;
-  };
-  error?: string;
-};
-
 type JsonObject = Record<string, unknown>;
 
 type TicketActionBaseInput = {
@@ -29,9 +17,76 @@ type QueueAndWaitConfig = {
   wait?: WaitForBotCommandOptions;
 };
 
+export type DashboardQueueTicket = {
+  id?: string | number | null;
+  guild_id?: string | null;
+  channel_id?: string | null;
+  discord_thread_id?: string | null;
+  channel_name?: string | null;
+  ticket_number?: number | null;
+  title?: string | null;
+  category?: string | null;
+  category_id?: string | null;
+  status?: string | null;
+  ticket_status?: string | null;
+  priority?: string | null;
+  user_id?: string | null;
+  username?: string | null;
+  claimed_by?: string | null;
+  claimed_by_id?: string | number | null;
+  assigned_to?: string | null;
+  assigned_to_id?: string | number | null;
+  assigned_to_name?: string | null;
+  claimed_by_name?: string | null;
+  is_unclaimed?: boolean | null;
+  is_claimed?: boolean | null;
+  is_ghost?: boolean | null;
+  source?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  closed_at?: string | null;
+  deleted_at?: string | null;
+  [key: string]: unknown;
+};
+
+export type DashboardQueueResponse = {
+  ok: boolean;
+  queue?: DashboardQueueTicket[];
+  tickets?: DashboardQueueTicket[];
+  total?: number;
+  unclaimed?: number;
+  claimed?: number;
+  staff_id?: string;
+  staff_name?: string;
+  error?: string;
+};
+
 function normalizeNullable(value: unknown): string | null {
   const text = String(value ?? "").trim();
   return text || null;
+}
+
+function normalizeString(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function normalizeBoolean(value: unknown): boolean {
+  return value === true;
+}
+
+function normalizeNumber(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === "string" && error.trim()) {
+    return error.trim();
+  }
+  return fallback;
 }
 
 async function postJson<T>(url: string, body: JsonObject): Promise<T> {
@@ -48,7 +103,33 @@ async function postJson<T>(url: string, body: JsonObject): Promise<T> {
 
   if (!res.ok) {
     throw new Error(
-      (data as any)?.error || `Request failed for ${url} (${res.status})`
+      (data as { error?: string } | null)?.error ||
+        `Request failed for ${url} (${res.status})`
+    );
+  }
+
+  if (!data) {
+    throw new Error(`Invalid JSON response from ${url}`);
+  }
+
+  return data;
+}
+
+async function getJson<T>(url: string): Promise<T> {
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Cache-Control": "no-store, max-age=0",
+    },
+    cache: "no-store",
+  });
+
+  const data = (await res.json().catch(() => null)) as T | null;
+
+  if (!res.ok) {
+    throw new Error(
+      (data as { error?: string } | null)?.error ||
+        `Request failed for ${url} (${res.status})`
     );
   }
 
@@ -104,6 +185,88 @@ function withActor(input?: TicketActionBaseInput) {
       normalizeNullable(input?.requestedBy) ??
       normalizeNullable(input?.staffId),
     staffId: normalizeNullable(input?.staffId),
+  };
+}
+
+function buildQuery(params: Record<string, string | number | boolean | null | undefined>): string {
+  const search = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value === null || value === undefined) continue;
+    const text = String(value).trim();
+    if (!text) continue;
+    search.set(key, text);
+  }
+
+  const query = search.toString();
+  return query ? `?${query}` : "";
+}
+
+function normalizeQueueTicket(ticket: DashboardQueueTicket): DashboardQueueTicket {
+  const claimedById =
+    normalizeNullable(ticket?.claimed_by_id) ??
+    normalizeNullable(ticket?.assigned_to_id) ??
+    normalizeNullable(ticket?.assigned_to) ??
+    normalizeNullable(ticket?.claimed_by);
+
+  const status =
+    normalizeString(ticket?.status || ticket?.ticket_status).toLowerCase();
+
+  const isClaimed =
+    normalizeBoolean(ticket?.is_claimed) ||
+    status === "claimed" ||
+    Boolean(claimedById);
+
+  const isUnclaimed =
+    normalizeBoolean(ticket?.is_unclaimed) ||
+    (status === "open" && !claimedById);
+
+  return {
+    ...ticket,
+    claimed_by_id: claimedById,
+    assigned_to_id: claimedById,
+    claimed_by:
+      normalizeNullable(ticket?.claimed_by) ??
+      normalizeNullable(ticket?.assigned_to_name) ??
+      normalizeNullable(ticket?.assigned_to) ??
+      null,
+    assigned_to:
+      normalizeNullable(ticket?.assigned_to) ??
+      normalizeNullable(ticket?.claimed_by) ??
+      null,
+    status: status || normalizeString(ticket?.status || ticket?.ticket_status) || null,
+    ticket_status:
+      status || normalizeString(ticket?.ticket_status || ticket?.status) || null,
+    is_claimed: isClaimed,
+    is_unclaimed: isUnclaimed,
+    priority: normalizeNullable(ticket?.priority) ?? "medium",
+    channel_id:
+      normalizeNullable(ticket?.channel_id) ??
+      normalizeNullable(ticket?.discord_thread_id),
+  };
+}
+
+function normalizeQueueResponse(
+  payload: DashboardQueueResponse | null | undefined
+): DashboardQueueResponse {
+  const queue = Array.isArray(payload?.queue)
+    ? payload!.queue.map(normalizeQueueTicket)
+    : undefined;
+
+  const tickets = Array.isArray(payload?.tickets)
+    ? payload!.tickets.map(normalizeQueueTicket)
+    : undefined;
+
+  return {
+    ok: payload?.ok === true,
+    queue,
+    tickets,
+    total: normalizeNumber(payload?.total, 0),
+    unclaimed: normalizeNumber(payload?.unclaimed, 0),
+    claimed: normalizeNumber(payload?.claimed, 0),
+    staff_id: normalizeNullable(payload?.staff_id) ?? undefined,
+    staff_name: normalizeNullable(payload?.staff_name) ?? undefined,
+    error: normalizeNullable(payload?.error) ?? undefined,
   };
 }
 
@@ -277,6 +440,8 @@ export async function reconcileTicketsAction(
     requestedBy?: string | null;
     staffId?: string | null;
     includeOpenWithMissingChannel?: boolean;
+    includeTranscriptBackfill?: boolean;
+    dryRun?: boolean;
   }
 ): Promise<{
   ok: boolean;
@@ -290,6 +455,10 @@ export async function reconcileTicketsAction(
     includeOpenWithMissingChannel: Boolean(
       input?.includeOpenWithMissingChannel
     ),
+    includeTranscriptBackfill: Boolean(
+      input?.includeTranscriptBackfill
+    ),
+    dryRun: Boolean(input?.dryRun),
     ...withActor(input),
   });
 }
@@ -340,6 +509,56 @@ export async function syncActiveTicketsAction(
   });
 }
 
+export async function getTicketQueueAction(input: {
+  guildId: string;
+}): Promise<DashboardQueueResponse> {
+  const payload = await getJson<DashboardQueueResponse>(
+    `/api/tickets/queue${buildQuery({
+      guildId: input.guildId,
+    })}`
+  );
+
+  return normalizeQueueResponse(payload);
+}
+
+export async function getUnclaimedTicketsAction(input: {
+  guildId: string;
+}): Promise<DashboardQueueResponse> {
+  const payload = await getJson<DashboardQueueResponse>(
+    `/api/tickets/unclaimed${buildQuery({
+      guildId: input.guildId,
+    })}`
+  );
+
+  return normalizeQueueResponse(payload);
+}
+
+export async function getClaimedTicketsAction(input: {
+  guildId: string;
+}): Promise<DashboardQueueResponse> {
+  const payload = await getJson<DashboardQueueResponse>(
+    `/api/tickets/claimed${buildQuery({
+      guildId: input.guildId,
+    })}`
+  );
+
+  return normalizeQueueResponse(payload);
+}
+
+export async function getMyClaimedTicketsAction(input: {
+  guildId: string;
+  staffId: string;
+}): Promise<DashboardQueueResponse> {
+  const payload = await getJson<DashboardQueueResponse>(
+    `/api/tickets/my-claimed${buildQuery({
+      guildId: input.guildId,
+      staffId: input.staffId,
+    })}`
+  );
+
+  return normalizeQueueResponse(payload);
+}
+
 export function getTicketTranscriptState(ticket: {
   transcript_url?: string | null;
   transcript_message_id?: string | null;
@@ -363,8 +582,8 @@ export function getTicketTranscriptState(ticket: {
     transcriptState: hasTranscript
       ? "available"
       : status === "deleted" || status === "closed"
-      ? "expected_missing"
-      : "not_ready",
+        ? "expected_missing"
+        : "not_ready",
   } as const;
 }
 
@@ -383,10 +602,10 @@ export async function copyTextToClipboard(
   try {
     await navigator.clipboard.writeText(text);
     return { ok: true };
-  } catch {
+  } catch (error) {
     return {
       ok: false,
-      error: "Clipboard copy failed.",
+      error: getErrorMessage(error, "Clipboard copy failed."),
     };
   }
 }
