@@ -13,6 +13,7 @@ import { sortTickets } from "@/lib/priority";
 import {
   reconcileTicketsAction,
   purgeStaleTicketsAction,
+  syncActiveTicketsAction,
 } from "@/lib/dashboardActions";
 import { useDashboardPreferences } from "@/lib/useDashboardPreferences";
 
@@ -254,6 +255,19 @@ function isTicketUnclaimed(ticket) {
   const status = String(ticket?.status || ticket?.ticket_status || "").toLowerCase();
   if (status !== "open") return false;
   return !getClaimedById(ticket);
+}
+
+function isTicketOverdue(ticket) {
+  if (ticket?.overdue === true) return true;
+
+  const createdAtMs = new Date(
+    String(ticket?.created_at || ticket?.updated_at || "")
+  ).getTime();
+
+  if (!Number.isFinite(createdAtMs) || createdAtMs <= 0) return false;
+
+  const ageMs = Date.now() - createdAtMs;
+  return ageMs >= 60 * 60 * 1000;
 }
 
 function statusMatchesFilter(ticket, filterValue, currentStaffId = null) {
@@ -1023,6 +1037,45 @@ export default function DashboardClient({
     [refresh, shouldPauseRefresh]
   );
 
+  const handleSyncActiveTickets = useCallback(
+    async ({
+      dryRun = false,
+      includeClosedVisibleChannels = true,
+    } = {}) => {
+      setIsMaintaining(true);
+      setMaintenanceError("");
+      setMaintenanceMessage("");
+
+      try {
+        const result = await syncActiveTicketsAction({
+          requestedBy: currentStaffId,
+          staffId: currentStaffId,
+          dryRun,
+          includeClosedVisibleChannels,
+        });
+
+        const summary = result?.command?.result || result?.result || null;
+
+        setMaintenanceMessage(
+          dryRun
+            ? "Ticket sync preview queued successfully."
+            : summary
+              ? "Active ticket sync finished successfully."
+              : "Active ticket sync queued successfully."
+        );
+
+        await refresh({ silent: true, force: true, reason: "sync-active" });
+      } catch (err) {
+        setMaintenanceError(
+          err?.message || "Failed to sync active tickets."
+        );
+      } finally {
+        setIsMaintaining(false);
+      }
+    },
+    [currentStaffId, refresh]
+  );
+
   const handleReconcileTickets = useCallback(
     async ({
       includeOpenWithMissingChannel = true,
@@ -1308,6 +1361,27 @@ export default function DashboardClient({
   const safeRaids = safeArray(data?.raids);
   const safeFraud = safeArray(data?.fraud || data?.fraudFlagsList);
 
+  const enhancedCounts = useMemo(() => {
+    const queueRows = safeTickets.filter((ticket) =>
+      statusMatchesFilter(ticket, "queue", currentStaffId)
+    );
+    const unclaimedRows = safeTickets.filter((ticket) =>
+      statusMatchesFilter(ticket, "unclaimed", currentStaffId)
+    );
+    const claimedRows = safeTickets.filter((ticket) =>
+      statusMatchesFilter(ticket, "claimed", currentStaffId)
+    );
+    const overdueRows = queueRows.filter((ticket) => isTicketOverdue(ticket));
+
+    return {
+      ...counts,
+      queueTotal: queueRows.length,
+      queueUnclaimed: unclaimedRows.length,
+      queueClaimed: claimedRows.length,
+      queueOverdue: overdueRows.length,
+    };
+  }, [counts, safeTickets, currentStaffId]);
+
   const intelligence = useMemo(
     () => buildModeratorIntelligence({
       ...data,
@@ -1516,7 +1590,7 @@ export default function DashboardClient({
       <div className="metrics-grid">
         <ClickableStatCard
           title="Open Tickets"
-          value={counts.openTickets}
+          value={enhancedCounts.queueTotal}
           subtitle="Tap to open queue"
           onClick={() => jumpToTickets({ status: "queue" })}
         />
@@ -1829,6 +1903,21 @@ export default function DashboardClient({
             style={{ width: "auto", minWidth: 140 }}
             disabled={isMaintaining}
             onClick={() =>
+              handleSyncActiveTickets({
+                dryRun: false,
+                includeClosedVisibleChannels: true,
+              })
+            }
+          >
+            {isMaintaining ? "Working..." : "Sync Active"}
+          </button>
+
+          <button
+            type="button"
+            className="button ghost"
+            style={{ width: "auto", minWidth: 140 }}
+            disabled={isMaintaining}
+            onClick={() =>
               handleReconcileTickets({
                 includeOpenWithMissingChannel: true,
                 includeTranscriptBackfill: true,
@@ -1897,7 +1986,7 @@ export default function DashboardClient({
 
             <DesktopDashboardView
               activeTab={activeTab}
-              counts={counts}
+              counts={enhancedCounts}
               safeEvents={safeEvents}
               safeWarns={safeWarns}
               safeRaids={safeRaids}
@@ -2020,6 +2109,21 @@ export default function DashboardClient({
                       }
                     >
                       Refresh Queue
+                    </button>
+
+                    <button
+                      type="button"
+                      className="button ghost"
+                      style={{ width: "auto", minWidth: 140 }}
+                      disabled={isMaintaining}
+                      onClick={() =>
+                        handleSyncActiveTickets({
+                          dryRun: false,
+                          includeClosedVisibleChannels: true,
+                        })
+                      }
+                    >
+                      {isMaintaining ? "Working..." : "Sync Active"}
                     </button>
 
                     <button
