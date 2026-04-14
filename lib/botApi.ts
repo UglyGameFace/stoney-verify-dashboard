@@ -4,6 +4,49 @@ export type BotApiResult<T = unknown> = {
   [key: string]: T | boolean | string | undefined
 }
 
+export type BotTicketSummary = {
+  channel_id: string
+  channel_name: string
+  guild_id: string
+  mention: string
+  category_id?: string | null
+  category_name?: string | null
+}
+
+export type BotQueueTicket = {
+  id?: string | number | null
+  guild_id: string
+  channel_id: string
+  channel_name: string
+  ticket_number?: number | null
+  title: string
+  category: string
+  status: string
+  priority: string
+  user_id: string
+  username: string
+  claimed_by: string
+  claimed_by_id?: string | number | null
+  is_unclaimed: boolean
+  is_claimed: boolean
+  is_ghost: boolean
+  source: string
+  created_at?: string | null
+  updated_at?: string | null
+  closed_at?: string | null
+  deleted_at?: string | null
+}
+
+export type BotQueueResult = {
+  queue?: BotQueueTicket[]
+  tickets?: BotQueueTicket[]
+  total?: number
+  unclaimed?: number
+  claimed?: number
+  staff_id?: string
+  staff_name?: string
+}
+
 const BOT_API_BASE =
   process.env.BOT_API_BASE_URL ||
   process.env.NEXT_PUBLIC_BOT_API_BASE_URL ||
@@ -32,6 +75,20 @@ function buildHeaders(): HeadersInit {
   }
 
   return headers
+}
+
+function buildQuery(params: Record<string, string | number | boolean | null | undefined>): string {
+  const search = new URLSearchParams()
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value === null || value === undefined) continue
+    const text = String(value).trim()
+    if (!text) continue
+    search.set(key, text)
+  }
+
+  const query = search.toString()
+  return query ? `?${query}` : ""
 }
 
 async function postJson<T = unknown>(
@@ -117,14 +174,7 @@ export async function botCreateTicket(input: {
     created?: boolean
     duplicate?: boolean
     existing_ticket?: unknown
-    ticket?: {
-      channel_id: string
-      channel_name: string
-      guild_id: string
-      mention: string
-      category_id?: string | null
-      category_name?: string | null
-    }
+    ticket?: BotTicketSummary
   }>("/ticket/create", {
     guild_id: input.guildId,
     user_id: input.userId,
@@ -174,9 +224,15 @@ export async function botDeleteTicket(input: {
 
 export async function botReopenTicket(input: {
   channelId: string
+  actorId?: string
+  staffId?: string
+  reason?: string
 }) {
   return postJson("/ticket/reopen", {
     channel_id: input.channelId,
+    actor_id: input.actorId ?? null,
+    staff_id: input.staffId ?? null,
+    reason: input.reason ?? null,
   })
 }
 
@@ -187,6 +243,98 @@ export async function botAssignTicket(input: {
   return postJson("/ticket/assign", {
     channel_id: input.channelId,
     staff_id: input.staffId,
+  })
+}
+
+export async function botGetTicketQueue(input: {
+  guildId: string
+}) {
+  return getJson<BotQueueResult>(
+    `/tickets/queue${buildQuery({
+      guild_id: input.guildId,
+    })}`
+  )
+}
+
+export async function botGetUnclaimedTickets(input: {
+  guildId: string
+}) {
+  return getJson<BotQueueResult>(
+    `/tickets/unclaimed${buildQuery({
+      guild_id: input.guildId,
+    })}`
+  )
+}
+
+export async function botGetClaimedTickets(input: {
+  guildId: string
+}) {
+  return getJson<BotQueueResult>(
+    `/tickets/claimed${buildQuery({
+      guild_id: input.guildId,
+    })}`
+  )
+}
+
+export async function botGetMyClaimedTickets(input: {
+  guildId: string
+  staffId: string
+}) {
+  return getJson<BotQueueResult>(
+    `/tickets/my-claimed${buildQuery({
+      guild_id: input.guildId,
+      staff_id: input.staffId,
+    })}`
+  )
+}
+
+export async function botSyncActiveTickets(input: {
+  guildId: string
+  includeClosedVisibleChannels?: boolean
+  dryRun?: boolean
+}) {
+  return postJson<{
+    summary?: {
+      guild_id: string
+      categories_scanned: number
+      channels_scanned: number
+      matched_ticket_channels: number
+      inserted: number
+      updated: number
+      unchanged: number
+      skipped: number
+      errors: number
+      rows: Array<Record<string, unknown>>
+      dry_run: boolean
+    }
+  }>("/tickets/sync-active", {
+    guild_id: input.guildId,
+    include_closed_visible_channels: Boolean(input.includeClosedVisibleChannels ?? true),
+    dry_run: Boolean(input.dryRun ?? false),
+  })
+}
+
+export async function botSyncOneTicket(input: {
+  channelId: string
+  dryRun?: boolean
+}) {
+  return postJson<{
+    summary?: {
+      guild_id: string
+      categories_scanned: number
+      channels_scanned: number
+      matched_ticket_channels: number
+      inserted: number
+      updated: number
+      unchanged: number
+      skipped: number
+      errors: number
+      rows: Array<Record<string, unknown>>
+      dry_run: boolean
+    }
+  }>("/tickets/sync-one", {
+    channel_id: input.channelId,
+    dry_run: Boolean(input.dryRun ?? false),
   })
 }
 
