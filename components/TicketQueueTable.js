@@ -64,6 +64,7 @@ function badgeClass(value) {
   if (v === "question") return "badge";
   if (v === "custom") return "badge";
   if (v === "support") return "badge low";
+  if (v === "ghost") return "badge";
 
   if (v === "verified") return "badge claimed";
   if (v === "pending") return "badge open";
@@ -98,7 +99,9 @@ function isGhost(ticket) {
 }
 
 function getStatus(ticket) {
-  return String(ticket?.status || "unknown").toLowerCase().trim();
+  return String(ticket?.status || ticket?.ticket_status || "unknown")
+    .toLowerCase()
+    .trim();
 }
 
 function getPriority(ticket) {
@@ -166,6 +169,7 @@ function deriveFallbackCategoryFromTicket(ticket) {
     if (value === "appeal") return "Appeal";
     if (value === "partnership") return "Partnership";
     if (value === "question") return "Question";
+    if (value === "ghost") return "Ghost";
 
     return titleize(value);
   }
@@ -177,6 +181,7 @@ function deriveFallbackCategoryFromTicket(ticket) {
   if (title.includes("support")) return "Support";
   if (title.includes("partner")) return "Partnership";
   if (title.includes("question")) return "Question";
+  if (title.includes("ghost")) return "Ghost";
 
   return "Support";
 }
@@ -301,6 +306,8 @@ function getEntryMethodLabel(ticket) {
   const raw =
     String(ticket?.owner_entry_method || "").trim() ||
     String(ticket?.owner_verification_source || "").trim() ||
+    String(ticket?.entry_method || "").trim() ||
+    String(ticket?.source || "").trim() ||
     "";
   return raw ? titleize(raw) : "Unknown";
 }
@@ -315,6 +322,9 @@ function getQueueIntel(ticket) {
   if (inviter) pieces.push(`Invited by ${inviter}`);
   if (voucher) pieces.push(`Vouched by ${voucher}`);
   if (approver) pieces.push(`Approved by ${approver}`);
+
+  if (ticket?.is_unclaimed) pieces.push("Waiting for claim");
+  if (ticket?.is_claimed) pieces.push("Assigned to staff");
 
   return pieces;
 }
@@ -344,7 +354,16 @@ function getRecommendedActions(ticket) {
   if (Array.isArray(ticket?.recommended_actions)) {
     return ticket.recommended_actions.filter(Boolean);
   }
-  return [];
+
+  const actions = [];
+
+  if (ticket?.is_unclaimed) actions.push("Claim this ticket");
+  if (normalizeText(ticket?.priority) === "urgent") actions.push("Handle urgently");
+  if (ticket?.overdue) actions.push("Respond immediately");
+  if (Number(ticket?.note_count || 0) <= 0) actions.push("Add staff notes");
+  if (hasMissingChannel(ticket)) actions.push("Repair missing channel link");
+
+  return actions;
 }
 
 function getLatestActivityLabel(ticket) {
@@ -362,7 +381,7 @@ function getLatestActivityTime(ticket) {
 
 function countByStatus(tickets, status) {
   return tickets.filter(
-    (ticket) => String(ticket?.status || "").toLowerCase() === status
+    (ticket) => String(ticket?.status || ticket?.ticket_status || "").toLowerCase() === status
   ).length;
 }
 
@@ -396,9 +415,11 @@ function countHighRisk(tickets) {
 
 function countUnassigned(tickets) {
   return tickets.filter((ticket) => {
+    if (ticket?.is_unclaimed === true) return true;
     const claimed = String(ticket?.claimed_by || "").trim();
     const assigned = String(ticket?.assigned_to || "").trim();
-    return !claimed && !assigned;
+    const claimedById = String(ticket?.claimed_by_id ?? "").trim();
+    return !claimed && !assigned && !claimedById;
   }).length;
 }
 
@@ -433,11 +454,35 @@ function getQueueHeading(tickets, explicitMode) {
     statuses.length > 0 &&
     statuses.every((status) => status === "open" || status === "claimed");
 
-  if (explicitMode === "active" || (!explicitMode && activeOnly)) {
+  if (explicitMode === "queue" || explicitMode === "active" || (!explicitMode && activeOnly)) {
     return {
       title: "Active Ticket Queue",
       subtitle:
-        "Live active tickets with risk, verification context, urgency, and next-action intelligence",
+        "Live active tickets with assignment state, urgency, and next-action intelligence",
+    };
+  }
+
+  if (explicitMode === "unclaimed") {
+    return {
+      title: "Unclaimed Ticket Queue",
+      subtitle:
+        "Tickets waiting for a staff member to claim and begin handling",
+    };
+  }
+
+  if (explicitMode === "claimed") {
+    return {
+      title: "Claimed Ticket Queue",
+      subtitle:
+        "Tickets currently assigned to staff and actively being worked",
+    };
+  }
+
+  if (explicitMode === "my_claimed" || explicitMode === "my-claimed") {
+    return {
+      title: "My Claimed Tickets",
+      subtitle:
+        "Tickets currently assigned to the selected staff member",
     };
   }
 
@@ -445,13 +490,6 @@ function getQueueHeading(tickets, explicitMode) {
     return {
       title: "Open Ticket Queue",
       subtitle: "Showing only open tickets that still need staff action",
-    };
-  }
-
-  if (explicitMode === "claimed") {
-    return {
-      title: "Claimed Ticket Queue",
-      subtitle: "Showing claimed tickets currently being handled by staff",
     };
   }
 
@@ -610,12 +648,14 @@ function TicketHeaderBadges({ ticket }) {
         alignItems: "center",
       }}
     >
-      <span className={badgeClass(status)}>{safeText(ticket.status)}</span>
+      <span className={badgeClass(status)}>{safeText(ticket.status || ticket.ticket_status)}</span>
       <span className={badgeClass(ticket.priority)}>
         {safeText(ticket.priority)}
       </span>
       <span className={badgeClass(verification)}>{verification}</span>
       <span className={badgeClass(risk.toLowerCase())}>{risk}</span>
+      {ticket?.is_unclaimed ? <span className="badge open">Unclaimed</span> : null}
+      {ticket?.is_claimed ? <span className="badge claimed">Claimed</span> : null}
       {ticket?.overdue ? <span className="badge danger">Overdue</span> : null}
       {ghost ? <span className="badge">Ghost</span> : null}
       {missingChannel ? <span className="badge danger">Missing Channel</span> : null}
@@ -726,6 +766,16 @@ function TicketExpandedDetails({ ticket, currentStaffId, onRefresh }) {
         <MiniField
           label="Updated"
           value={timeAgo(ticket.updated_at || ticket.created_at)}
+        />
+        <MiniField
+          label="Queue State"
+          value={
+            ticket?.is_unclaimed
+              ? "Unclaimed"
+              : ticket?.is_claimed
+              ? "Claimed"
+              : safeText(ticket.status || ticket.ticket_status)
+          }
         />
         <MiniField
           label="Invited By"
@@ -889,6 +939,16 @@ function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
               value={String(Number(ticket?.owner_ticket_total || 0))}
             />
             <MetaBlock
+              label="Queue State"
+              value={
+                ticket?.is_unclaimed
+                  ? "Unclaimed"
+                  : ticket?.is_claimed
+                  ? "Claimed"
+                  : safeText(ticket.status || ticket.ticket_status)
+              }
+            />
+            <MetaBlock
               label="Invited By"
               value={safeText(ticket?.owner_invited_by_name)}
             />
@@ -962,10 +1022,11 @@ export default function TicketQueueTable({
   createTicketTargetName = "",
   queueMode = "",
 }) {
-  const stats = useMemo(() => getSummaryStats(tickets), [tickets]);
+  const normalizedTickets = Array.isArray(tickets) ? tickets : [];
+  const stats = useMemo(() => getSummaryStats(normalizedTickets), [normalizedTickets]);
   const heading = useMemo(
-    () => getQueueHeading(tickets, queueMode),
-    [tickets, queueMode]
+    () => getQueueHeading(normalizedTickets, queueMode),
+    [normalizedTickets, queueMode]
   );
   const [expandedDesktopId, setExpandedDesktopId] = useState(null);
 
@@ -1002,7 +1063,7 @@ export default function TicketQueueTable({
           }}
         >
           <div className="muted" style={{ fontSize: 14 }}>
-            {tickets.length} ticket{tickets.length === 1 ? "" : "s"}
+            {normalizedTickets.length} ticket{normalizedTickets.length === 1 ? "" : "s"}
           </div>
 
           {createTicketUserId ? (
@@ -1058,16 +1119,16 @@ export default function TicketQueueTable({
         />
       </div>
 
-      {!tickets.length ? (
+      {!normalizedTickets.length ? (
         <div className="empty-state">
           No tickets match the current filters.
         </div>
       ) : null}
 
-      {!!tickets.length ? (
+      {!!normalizedTickets.length ? (
         <>
           <div className="ticket-mobile-list queue-mobile-stack">
-            {tickets.map((ticket) => (
+            {normalizedTickets.map((ticket) => (
               <MobileTicketCard
                 key={ticket.id}
                 ticket={ticket}
@@ -1093,7 +1154,7 @@ export default function TicketQueueTable({
                 </thead>
 
                 <tbody>
-                  {tickets.map((ticket) => {
+                  {normalizedTickets.map((ticket) => {
                     const channelId = getChannelId(ticket);
                     const status = getStatus(ticket);
                     const missingChannel = hasMissingChannel(ticket);
@@ -1122,7 +1183,7 @@ export default function TicketQueueTable({
                                   }}
                                 >
                                   <span className={badgeClass(status)}>
-                                    {safeText(ticket.status)}
+                                    {safeText(ticket.status || ticket.ticket_status)}
                                   </span>
                                   <span className={badgeClass(ticket.priority)}>
                                     {safeText(ticket.priority)}
@@ -1133,6 +1194,12 @@ export default function TicketQueueTable({
                                   <span className={badgeClass(getRiskLevel(ticket).toLowerCase())}>
                                     {getRiskLevel(ticket)}
                                   </span>
+                                  {ticket?.is_unclaimed ? (
+                                    <span className="badge open">Unclaimed</span>
+                                  ) : null}
+                                  {ticket?.is_claimed ? (
+                                    <span className="badge claimed">Claimed</span>
+                                  ) : null}
                                   {ticket?.overdue ? (
                                     <span className="badge danger">Overdue</span>
                                   ) : null}
@@ -1194,7 +1261,7 @@ export default function TicketQueueTable({
                           <td>
                             <div className="queue-status-stack">
                               <span className={badgeClass(status)}>
-                                {safeText(ticket.status)}
+                                {safeText(ticket.status || ticket.ticket_status)}
                               </span>
                               <span className={badgeClass(ticket.priority)}>
                                 {safeText(ticket.priority)}
