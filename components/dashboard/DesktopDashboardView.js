@@ -10,7 +10,7 @@ function DesktopKpiStrip({
     {
       key: "queueTotal",
       label: "Active Queue",
-      value: Number(counts?.queueTotal ?? counts?.openTickets || 0),
+      value: Number((counts?.queueTotal ?? counts?.openTickets) || 0),
       helper: "Open + claimed tickets",
       action: () => jumpToTickets?.({ status: "queue" }),
       tone: "green",
