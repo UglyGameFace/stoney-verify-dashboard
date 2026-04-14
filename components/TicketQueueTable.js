@@ -709,6 +709,22 @@ function RecommendedActions({ ticket }) {
   );
 }
 
+function getTicketRowKey(ticket, index = 0) {
+  return (
+    String(ticket?.id || "").trim() ||
+    String(ticket?.channel_id || ticket?.discord_thread_id || "").trim() ||
+    [
+      String(ticket?.user_id || "").trim(),
+      String(ticket?.category_id || "").trim(),
+      String(ticket?.matched_category_id || "").trim(),
+      String(ticket?.category || "").trim(),
+      String(ticket?.status || ticket?.ticket_status || "").trim(),
+      String(ticket?.created_at || "").trim(),
+      String(index),
+    ].join("::")
+  );
+}
+
 function TicketExpandedDetails({ ticket, currentStaffId, onRefresh }) {
   const channelId = getChannelId(ticket);
   const ghost = isGhost(ticket);
@@ -773,8 +789,8 @@ function TicketExpandedDetails({ ticket, currentStaffId, onRefresh }) {
             ticket?.is_unclaimed
               ? "Unclaimed"
               : ticket?.is_claimed
-              ? "Claimed"
-              : safeText(ticket.status || ticket.ticket_status)
+                ? "Claimed"
+                : safeText(ticket.status || ticket.ticket_status)
           }
         />
         <MiniField
@@ -944,8 +960,8 @@ function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
                 ticket?.is_unclaimed
                   ? "Unclaimed"
                   : ticket?.is_claimed
-                  ? "Claimed"
-                  : safeText(ticket.status || ticket.ticket_status)
+                    ? "Claimed"
+                    : safeText(ticket.status || ticket.ticket_status)
               }
             />
             <MetaBlock
@@ -1128,9 +1144,9 @@ export default function TicketQueueTable({
       {!!normalizedTickets.length ? (
         <>
           <div className="ticket-mobile-list queue-mobile-stack">
-            {normalizedTickets.map((ticket) => (
+            {normalizedTickets.map((ticket, index) => (
               <MobileTicketCard
-                key={ticket.id}
+                key={getTicketRowKey(ticket, index)}
                 ticket={ticket}
                 currentStaffId={currentStaffId}
                 onRefresh={onRefresh}
@@ -1154,14 +1170,15 @@ export default function TicketQueueTable({
                 </thead>
 
                 <tbody>
-                  {normalizedTickets.map((ticket) => {
+                  {normalizedTickets.map((ticket, index) => {
+                    const ticketKey = getTicketRowKey(ticket, index);
                     const channelId = getChannelId(ticket);
                     const status = getStatus(ticket);
                     const missingChannel = hasMissingChannel(ticket);
-                    const isExpanded = expandedDesktopId === ticket.id;
+                    const isExpanded = expandedDesktopId === ticketKey;
 
                     return (
-                      <React.Fragment key={ticket.id}>
+                      <React.Fragment key={ticketKey}>
                         <tr
                           style={
                             missingChannel
@@ -1245,7 +1262,7 @@ export default function TicketQueueTable({
                               </div>
 
                               <div className="muted" style={{ fontSize: 12, lineHeight: 1.35 }}>
-                                {getLatestActivityLabel(ticket)}
+                                {truncateText(getLatestActivityLabel(ticket), 120)}
                               </div>
 
                               <div className="queue-actions-list" style={{ marginTop: 8 }}>
@@ -1300,7 +1317,7 @@ export default function TicketQueueTable({
                                 type="button"
                                 className="button ghost"
                                 style={{ width: "auto", minWidth: 118 }}
-                                onClick={() => toggleDesktopTicket(ticket.id)}
+                                onClick={() => toggleDesktopTicket(ticketKey)}
                               >
                                 {isExpanded ? "Hide Tools" : "Open Tools"}
                               </button>
@@ -1551,7 +1568,7 @@ export default function TicketQueueTable({
           overflow: hidden;
           border-radius: 22px;
           padding: 14px;
-          color: var(--text-strong, #f8fafc);
+          color: var(--text-strong, #f8fafc) !important;
           border: 1px solid rgba(255, 255, 255, 0.08);
           background:
             radial-gradient(circle at top right, rgba(93,255,141,0.08), transparent 36%),
@@ -1562,6 +1579,11 @@ export default function TicketQueueTable({
             0 14px 30px rgba(0,0,0,0.24),
             0 0 0 1px rgba(255,255,255,0.02) inset;
           -webkit-tap-highlight-color: transparent;
+        }
+
+        .ticket-mobile-card.premium,
+        .ticket-mobile-card.premium * {
+          color: inherit;
         }
 
         .ticket-mobile-card.premium::before {
@@ -1581,6 +1603,19 @@ export default function TicketQueueTable({
         .ticket-mobile-card.premium > * {
           position: relative;
           z-index: 1;
+        }
+
+        .ticket-mobile-card.premium :global(.card),
+        .ticket-mobile-card.premium :global(table),
+        .ticket-mobile-card.premium :global(thead),
+        .ticket-mobile-card.premium :global(tbody),
+        .ticket-mobile-card.premium :global(tr),
+        .ticket-mobile-card.premium :global(td),
+        .ticket-mobile-card.premium :global(th),
+        .ticket-mobile-card.premium :global(button),
+        .ticket-mobile-card.premium :global(a) {
+          background-color: transparent !important;
+          box-shadow: none;
         }
 
         .ticket-mobile-card.expanded {
@@ -1640,6 +1675,7 @@ export default function TicketQueueTable({
           font-size: 13px;
           overflow-wrap: anywhere;
           line-height: 1.35;
+          color: var(--muted, #9fb0c3);
         }
 
         .queue-ticket-time {
@@ -1647,6 +1683,7 @@ export default function TicketQueueTable({
           white-space: nowrap;
           flex-shrink: 0;
           text-align: right;
+          color: var(--muted, #9fb0c3);
         }
 
         .queue-category-wrap {
@@ -1656,7 +1693,7 @@ export default function TicketQueueTable({
           border: 1px solid rgba(255,255,255,0.06);
           background:
             radial-gradient(circle at top right, rgba(255,255,255,0.04), transparent 42%),
-            rgba(255,255,255,0.02);
+            rgba(255,255,255,0.02) !important;
         }
 
         .queue-card-footer-row {
@@ -1679,9 +1716,11 @@ export default function TicketQueueTable({
           padding: 10px 12px;
           border-radius: 14px;
           border: 1px solid rgba(255,255,255,0.06);
-          background: rgba(255,255,255,0.025);
+          background:
+            radial-gradient(circle at top right, rgba(255,255,255,0.04), transparent 42%),
+            rgba(255,255,255,0.025) !important;
           min-width: 0;
-          color: var(--text, #dbe4ee);
+          color: var(--text, #dbe4ee) !important;
         }
 
         .ticket-mobile-meta-item.full {
@@ -1692,7 +1731,7 @@ export default function TicketQueueTable({
           font-size: 11px;
           text-transform: uppercase;
           letter-spacing: 0.08em;
-          color: var(--muted, #9fb0c3);
+          color: var(--muted, #9fb0c3) !important;
         }
 
         .ticket-desktop-expanded {
@@ -1771,6 +1810,33 @@ export default function TicketQueueTable({
         }
 
         @media (max-width: 1023px) {
+          .ticket-mobile-list {
+            display: grid !important;
+            gap: 14px;
+          }
+
+          .ticket-mobile-card.premium {
+            width: 100%;
+            margin: 0;
+          }
+
+          .queue-summary-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .ticket-mobile-meta {
+            grid-template-columns: 1fr;
+          }
+
+          .queue-card-topline {
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          .queue-ticket-time {
+            text-align: left;
+          }
+
           :global(.table-wrap),
           :global(table),
           :global(thead),
