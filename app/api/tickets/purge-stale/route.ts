@@ -1,45 +1,38 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
+import { NextRequest } from "next/server";
+import { requireStaffSessionForRoute } from "@/lib/auth-server";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { env } from "@/lib/env";
+import {
+  buildRouteJson,
+  getActorId,
+  parseRouteBody,
+  readBoolean,
+  readString,
+  toErrorMessage,
+  unauthorizedRouteResponse,
+  type RefreshedTokens,
+} from "@/lib/ticketActionRoute";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function getActorId(session: any): string | null {
-  const candidates = [
-    session?.user?.id,
-    session?.user?.user_id,
-    session?.user?.discord_id,
-    session?.discordUser?.id,
-  ];
-
-  for (const value of candidates) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-
-  if (typeof candidates[0] === "number") {
-    return String(candidates[0]);
-  }
-
-  return null;
+function normalizeString(value: unknown): string {
+  return String(value ?? "").trim();
 }
 
 function parseDateMs(value: unknown): number {
-  const ms = new Date(String(value || "")).getTime();
+  const ms = new Date(normalizeString(value)).getTime();
   return Number.isFinite(ms) ? ms : 0;
 }
 
 function isClosedLikeStatus(status: unknown): boolean {
-  const value = String(status || "").trim().toLowerCase();
+  const value = normalizeString(status).toLowerCase();
   return value === "closed" || value === "deleted";
 }
 
 function hasUsableChannel(ticket: any): boolean {
   return Boolean(
-    String(ticket?.channel_id || ticket?.discord_thread_id || "").trim()
+    normalizeString(ticket?.channel_id || ticket?.discord_thread_id)
   );
 }
 
@@ -62,49 +55,62 @@ function isPurgeCandidate(ticket: any, olderThanMinutes: number): boolean {
   return ageMs >= olderThanMinutes * 60 * 1000;
 }
 
-export async function POST(req: NextRequest) {
-  try {
-    const { session, refreshedTokens } = await requireStaffSessionForRoute();
-    const actorId = getActorId(session);
+function summarizeCandidate(ticket: any) {
+  return {
+    id: ticket?.id || null,
+    channel_id: ticket?.channel_id || null,
+    discord_thread_id: ticket?.discord_thread_id || null,
+    status: ticket?.status || null,
+    title: ticket?.title || ticket?.channel_name || null,
+    username: ticket?.username || null,
+    updated_at: ticket?.updated_at || null,
+    closed_at: ticket?.closed_at || null,
+    deleted_at: ticket?.deleted_at || null,
+    is_ghost: ticket?.is_ghost === true,
+  };
+}
 
+function missingGuildIdResponse(refreshedTokens: RefreshedTokens | null) {
+  return buildRouteJson(
+    {
+      ok: false,
+      error: "Missing guild id",
+    },
+    500,
+    refreshedTokens
+  );
+}
+
+export async function POST(req: NextRequest) {
+  let refreshedTokens: RefreshedTokens | null = null;
+
+  try {
+    const auth = await requireStaffSessionForRoute();
+    refreshedTokens = auth?.refreshedTokens ?? null;
+
+    const actorId = getActorId(auth?.session);
     if (!actorId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Unauthorized",
-        },
-        {
-          status: 401,
-          headers: {
-            "Cache-Control": "no-store, max-age=0",
-          },
-        }
-      );
+      return unauthorizedRouteResponse(refreshedTokens);
     }
 
-    const body = await req.json().catch(() => ({}));
-    const dryRun = Boolean(body?.dryRun);
+    const body = await parseRouteBody(req);
 
-    const rawOlderThan = Number(body?.olderThanMinutes);
+    const dryRun = readBoolean(body, ["dryRun", "dry_run"], false);
+    const requestedBy =
+      readString(body, ["requestedBy", "requested_by"], actorId) || actorId;
+
+    const olderThanRaw = Number(
+      readString(body, ["olderThanMinutes", "older_than_minutes"], "5")
+    );
+
     const olderThanMinutes =
-      Number.isFinite(rawOlderThan) && rawOlderThan > 0
-        ? Math.max(1, Math.floor(rawOlderThan))
+      Number.isFinite(olderThanRaw) && olderThanRaw > 0
+        ? Math.max(1, Math.floor(olderThanRaw))
         : 5;
 
-    const guildId = String(env.guildId || "").trim();
+    const guildId = normalizeString(env.guildId);
     if (!guildId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Missing guild id",
-        },
-        {
-          status: 500,
-          headers: {
-            "Cache-Control": "no-store, max-age=0",
-          },
-        }
-      );
+      return missingGuildIdResponse(refreshedTokens);
     }
 
     const supabase = createServerSupabase();
@@ -117,18 +123,7 @@ export async function POST(req: NextRequest) {
       .limit(500);
 
     if (ticketsError) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: ticketsError.message || "Failed to load tickets",
-        },
-        {
-          status: 500,
-          headers: {
-            "Cache-Control": "no-store, max-age=0",
-          },
-        }
-      );
+      throw new Error(ticketsError.message || "Failed to load tickets");
     }
 
     const rows = Array.isArray(tickets) ? tickets : [];
@@ -140,7 +135,7 @@ export async function POST(req: NextRequest) {
 
     if (!dryRun && candidates.length > 0) {
       const ids = candidates
-        .map((ticket) => String(ticket?.id || "").trim())
+        .map((ticket) => normalizeString(ticket?.id))
         .filter(Boolean);
 
       if (ids.length > 0) {
@@ -150,18 +145,7 @@ export async function POST(req: NextRequest) {
           .in("id", ids);
 
         if (deleteError) {
-          return NextResponse.json(
-            {
-              ok: false,
-              error: deleteError.message || "Failed to purge stale tickets",
-            },
-            {
-              status: 500,
-              headers: {
-                "Cache-Control": "no-store, max-age=0",
-              },
-            }
-          );
+          throw new Error(deleteError.message || "Failed to purge stale tickets");
         }
 
         removed = Number(count || 0);
@@ -177,50 +161,30 @@ export async function POST(req: NextRequest) {
       related_id: actorId,
     });
 
-    const response = NextResponse.json(
+    return buildRouteJson(
       {
         ok: true,
         dryRun,
         scanned: rows.length,
         removed,
-        candidates: candidates.map((ticket) => ({
-          id: ticket?.id || null,
-          channel_id: ticket?.channel_id || null,
-          discord_thread_id: ticket?.discord_thread_id || null,
-          status: ticket?.status || null,
-          title: ticket?.title || ticket?.channel_name || null,
-          username: ticket?.username || null,
-          updated_at: ticket?.updated_at || null,
-          closed_at: ticket?.closed_at || null,
-          deleted_at: ticket?.deleted_at || null,
-          is_ghost: ticket?.is_ghost === true,
-        })),
+        olderThanMinutes,
+        requestedBy,
+        effectiveRequestedBy: actorId,
+        candidates: candidates.map((ticket) => summarizeCandidate(ticket)),
       },
-      {
-        status: 200,
-        headers: {
-          "Cache-Control": "no-store, max-age=0",
-        },
-      }
+      200,
+      refreshedTokens
     );
-
-    applyAuthCookies(response, refreshedTokens);
-    return response;
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to purge stale tickets";
+    const message = toErrorMessage(error);
 
-    return NextResponse.json(
+    return buildRouteJson(
       {
         ok: false,
         error: message,
       },
-      {
-        status: message === "Unauthorized" ? 401 : 500,
-        headers: {
-          "Cache-Control": "no-store, max-age=0",
-        },
-      }
+      message === "Unauthorized" ? 401 : 500,
+      refreshedTokens
     );
   }
 }
