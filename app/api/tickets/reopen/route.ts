@@ -4,7 +4,6 @@ import { requireStaffSessionForRoute } from "@/lib/auth-server";
 import {
   buildRouteJson,
   getActorId,
-  missingFieldRouteResponse,
   parseRouteBody,
   readString,
   toErrorMessage,
@@ -14,6 +13,20 @@ import {
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+function missingFieldRouteResponse(
+  field: string,
+  refreshedTokens: RefreshedTokens | null
+) {
+  return buildRouteJson(
+    {
+      ok: false,
+      error: `Missing ${field}`,
+    },
+    400,
+    refreshedTokens
+  );
+}
 
 export async function POST(req: NextRequest) {
   let refreshedTokens: RefreshedTokens | null = null;
@@ -30,12 +43,13 @@ export async function POST(req: NextRequest) {
     const body = await parseRouteBody(req);
 
     const channelId = readString(body, ["channelId", "channel_id"]);
+    const staffId = readString(body, ["staffId", "staff_id"], actorId);
     const requestedBy =
-      readString(body, ["requestedBy", "requested_by", "actorId", "actor_id"]) ||
-      actorId;
-    const staffId =
-      readString(body, ["staffId", "staff_id"]) ||
-      actorId;
+      readString(
+        body,
+        ["requestedBy", "requested_by", "actorId", "actor_id"],
+        actorId
+      ) || actorId;
 
     if (!channelId) {
       return missingFieldRouteResponse("channelId", refreshedTokens);
@@ -52,8 +66,8 @@ export async function POST(req: NextRequest) {
         queued: true,
         command,
         channelId,
-        requestedBy,
         staffId,
+        requestedBy,
         effectiveRequestedBy: actorId,
       },
       200,
