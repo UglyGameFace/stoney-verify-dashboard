@@ -30,6 +30,12 @@ export async function POST(req: NextRequest) {
     const body = await parseRouteBody(req);
 
     const channelId = readString(body, ["channelId", "channel_id"]);
+    const requestedBy =
+      readString(body, ["requestedBy", "requested_by", "actorId", "actor_id"]) ||
+      actorId;
+    const staffId =
+      readString(body, ["staffId", "staff_id"]) ||
+      actorId;
 
     if (!channelId) {
       return missingFieldRouteResponse("channelId", refreshedTokens);
@@ -46,7 +52,9 @@ export async function POST(req: NextRequest) {
         queued: true,
         command,
         channelId,
-        requestedBy: actorId,
+        requestedBy,
+        staffId,
+        effectiveRequestedBy: actorId,
       },
       200,
       refreshedTokens
