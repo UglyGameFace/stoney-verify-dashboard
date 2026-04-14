@@ -13,6 +13,7 @@ import {
   deleteTicketAction,
   getTicketTranscriptState,
   reopenTicketAction,
+  syncSingleTicketAction,
 } from "@/lib/dashboardActions";
 
 type TicketCategory = {
@@ -90,10 +91,12 @@ type ActionState =
   | "closing"
   | "reopening"
   | "deleting"
-  | "saving-category";
+  | "saving-category"
+  | "syncing-ticket";
 
 type PanelName =
   | "workflow"
+  | "repair"
   | "category"
   | "transcript"
   | "close"
@@ -338,6 +341,7 @@ export default function TicketControls({
       claimedById === normalizeString(currentStaffId);
 
     const transcript = getTicketTranscriptState(ticket);
+    const missingChannel = !getChannelId(ticket);
 
     return {
       ghost,
@@ -347,6 +351,7 @@ export default function TicketControls({
       claimed,
       unclaimed,
       mine,
+      missingChannel,
       claimedById,
       transcriptUrl: normalizeString(transcript.transcriptUrl),
       transcriptMessageId: normalizeString(transcript.transcriptMessageId),
@@ -362,7 +367,8 @@ export default function TicketControls({
       claimedBy: getClaimedByLabel(ticket),
       queueStateLabel: getQueueStateLabel(ticket),
       riskLevel: normalizeString(ticket?.risk_level) || "unknown",
-      latestActivityTitle: normalizeString(ticket?.latest_activity_title) || "No recent activity",
+      latestActivityTitle:
+        normalizeString(ticket?.latest_activity_title) || "No recent activity",
       latestActivityAt: normalizeString(ticket?.latest_activity_at),
       noteCount: Number(ticket?.note_count ?? 0),
       priority: normalizeString(ticket?.priority) || "medium",
@@ -387,6 +393,7 @@ export default function TicketControls({
 
   const [openPanels, setOpenPanels] = useState<Record<PanelName, boolean>>({
     workflow: true,
+    repair: false,
     category: false,
     transcript: false,
     close: false,
@@ -404,6 +411,7 @@ export default function TicketControls({
     setOpenPanels((prev) => ({
       ...prev,
       workflow: true,
+      repair: derived.missingChannel,
       category: false,
       transcript: derived.hasTranscript || derived.closed || derived.deleted,
       close: false,
@@ -417,6 +425,7 @@ export default function TicketControls({
     derived.hasTranscript,
     derived.closed,
     derived.deleted,
+    derived.missingChannel,
   ]);
 
   useEffect(() => {
@@ -475,6 +484,7 @@ export default function TicketControls({
   const closeDisabled = busy || !channelId || derived.deleted || derived.closed;
   const reopenDisabled = busy || !channelId || derived.deleted || derived.open;
   const deleteDisabled = busy || !channelId || derived.deleted;
+  const syncDisabled = busy || !channelId;
   const saveCategoryDisabled =
     busy || !ticket?.id || !selectedCategoryId || loadingCategories;
 
@@ -565,6 +575,41 @@ export default function TicketControls({
       await afterChange(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to assign ticket.");
+    } finally {
+      setActionState("idle");
+    }
+  }
+
+  async function handleSyncOne(dryRun: boolean) {
+    if (!channelId) {
+      setError("Missing channel ID.");
+      return;
+    }
+
+    clearFeedback();
+    setActionState("syncing-ticket");
+
+    try {
+      const result = await syncSingleTicketAction({
+        channelId,
+        dryRun,
+        staffId: currentStaffId ?? null,
+        requestedBy: currentStaffId ?? null,
+      });
+
+      if (!result.ok) {
+        throw new Error(result.command?.error || "Failed to sync ticket.");
+      }
+
+      setMessage(
+        dryRun
+          ? "Ticket sync preview completed."
+          : "Ticket sync completed."
+      );
+
+      await afterChange(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to sync ticket.");
     } finally {
       setActionState("idle");
     }
@@ -732,7 +777,7 @@ export default function TicketControls({
           <div style={{ minWidth: 0, flex: 1 }}>
             <div className="ticket-controls-header-title">Ticket Actions</div>
             <div className="muted ticket-controls-header-copy">
-              Queue ownership, closure, reopening, category correction,
+              Queue ownership, repair/sync, closure, reopening, category correction,
               transcript exports, and deletion without repeating the whole ticket
               summary again.
             </div>
@@ -759,6 +804,9 @@ export default function TicketControls({
             ) : (
               <span className="badge">No Transcript</span>
             )}
+            {derived.missingChannel ? (
+              <span className="badge danger">Missing Channel</span>
+            ) : null}
             {normalizeBoolean(ticket.category_override) ? (
               <span className="badge medium">Manual Category</span>
             ) : null}
@@ -779,6 +827,15 @@ export default function TicketControls({
                 : derived.claimed
                   ? "Claim Locked"
                   : "Assign / Claim"}
+          </button>
+
+          <button
+            type="button"
+            className="button ghost"
+            disabled={syncDisabled}
+            onClick={() => openPanel("repair")}
+          >
+            {actionState === "syncing-ticket" ? "Syncing..." : "Repair / Sync"}
           </button>
 
           <button
@@ -958,6 +1015,92 @@ export default function TicketControls({
             </a>
           ) : null}
         </div>
+      </ActionAccordion>
+
+      <ActionAccordion
+        title="Repair / Sync Ticket"
+        subtitle="Re-sync this single ticket row against live Discord state without touching the whole queue."
+        badge={
+          derived.missingChannel ? (
+            <span className="badge danger">Needs Repair</span>
+          ) : (
+            <span className="badge claimed">Ready</span>
+          )
+        }
+        open={openPanels.repair}
+        onToggle={() => togglePanel("repair")}
+      >
+        <div className="ticket-controls-info-grid" style={{ marginBottom: 12 }}>
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Channel ID</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(channelId, "Missing")}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Queue State</div>
+            <div className="ticket-controls-mini-value">
+              {derived.queueStateLabel}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Current Status</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(ticket.status, "unknown")}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Missing Channel</div>
+            <div className="ticket-controls-mini-value">
+              {derived.missingChannel ? "Yes" : "No"}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Transcript State</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(derived.transcriptState)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Closed / Deleted</div>
+            <div className="ticket-controls-mini-value">
+              {derived.deleted ? "Deleted" : derived.closed ? "Closed" : "Active"}
+            </div>
+          </div>
+        </div>
+
+        <div className="ticket-controls-actions">
+          <button
+            type="button"
+            className="button ghost"
+            disabled={syncDisabled}
+            onClick={() => void handleSyncOne(true)}
+          >
+            {actionState === "syncing-ticket" ? "Working..." : "Preview Sync"}
+          </button>
+
+          <button
+            type="button"
+            className="button primary"
+            disabled={syncDisabled}
+            onClick={() => void handleSyncOne(false)}
+          >
+            {actionState === "syncing-ticket" ? "Syncing..." : "Sync This Ticket"}
+          </button>
+        </div>
+
+        {!channelId ? (
+          <div className="warning-banner">
+            This row is missing a live Discord channel ID, so single-ticket sync
+            cannot run until the row is repaired or reconciled from a source that
+            still knows the channel.
+          </div>
+        ) : null}
       </ActionAccordion>
 
       <ActionAccordion
@@ -1423,7 +1566,7 @@ export default function TicketControls({
 
         .ticket-primary-actions {
           display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
+          grid-template-columns: repeat(5, minmax(0, 1fr));
           gap: 10px;
         }
 
