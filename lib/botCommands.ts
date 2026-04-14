@@ -44,6 +44,36 @@ function requireEnv(name: string, value: string | undefined): string {
   return out;
 }
 
+function normalizeString(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function normalizeNullable(value: unknown): string | null {
+  const out = normalizeString(value);
+  return out || null;
+}
+
+function normalizeBoolean(value: unknown, fallback = false): boolean {
+  if (typeof value === "boolean") return value;
+  if (value === null || value === undefined) return fallback;
+
+  const text = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "y", "on"].includes(text)) return true;
+  if (["0", "false", "no", "n", "off"].includes(text)) return false;
+
+  return fallback;
+}
+
+function normalizeStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+
+  const cleaned = value
+    .map((item) => normalizeString(item))
+    .filter(Boolean);
+
+  return cleaned.length ? cleaned : null;
+}
+
 function getGuildId(): string {
   return requireEnv(
     "DISCORD_GUILD_ID or GUILD_ID or NEXT_PUBLIC_DISCORD_GUILD_ID",
@@ -82,16 +112,16 @@ async function insertCommand(
   payload: Record<string, Json>,
   requestedBy?: string | null
 ): Promise<BotCommandRow> {
-  const supabase = getSupabase();
+  const sb = getSupabase();
   const guildId = getGuildId();
 
-  const { data, error } = await supabase
+  const { data, error } = await sb
     .from("bot_commands")
     .insert({
       guild_id: guildId,
       action,
       payload,
-      requested_by: requestedBy ?? null,
+      requested_by: normalizeNullable(requestedBy),
     })
     .select("*")
     .single();
@@ -127,30 +157,35 @@ export async function queueCreateTicket(input: {
   entryReason?: string | null;
   approvalReason?: string | null;
 }) {
+  const userId = normalizeString(input.userId);
+  if (!userId) {
+    throw new Error("Missing userId");
+  }
+
   return insertCommand(
     "create_ticket",
     {
-      user_id: String(input.userId),
-      category: input.category ?? "support",
-      priority: input.priority ?? "medium",
-      opening_message: input.openingMessage ?? "",
-      ghost: Boolean(input.ghost),
-      allow_duplicate: Boolean(input.allowDuplicate),
-      parent_category_id: input.parentCategoryId ?? null,
-      staff_role_ids: input.staffRoleIds ?? null,
-      entry_method: input.entryMethod ?? null,
-      verification_source: input.verificationSource ?? null,
-      source_ticket_id: input.sourceTicketId ?? null,
-      verification_ticket_id: input.verificationTicketId ?? null,
-      invited_by: input.invitedBy ?? null,
-      invited_by_name: input.invitedByName ?? null,
-      invite_code: input.inviteCode ?? null,
-      vouched_by: input.vouchedBy ?? null,
-      vouched_by_name: input.vouchedByName ?? null,
-      approved_by: input.approvedBy ?? null,
-      approved_by_name: input.approvedByName ?? null,
-      entry_reason: input.entryReason ?? null,
-      approval_reason: input.approvalReason ?? null,
+      user_id: userId,
+      category: normalizeString(input.category) || "support",
+      priority: normalizeString(input.priority) || "medium",
+      opening_message: normalizeString(input.openingMessage),
+      ghost: normalizeBoolean(input.ghost, false),
+      allow_duplicate: normalizeBoolean(input.allowDuplicate, false),
+      parent_category_id: normalizeNullable(input.parentCategoryId),
+      staff_role_ids: normalizeStringArray(input.staffRoleIds),
+      entry_method: normalizeNullable(input.entryMethod),
+      verification_source: normalizeNullable(input.verificationSource),
+      source_ticket_id: normalizeNullable(input.sourceTicketId),
+      verification_ticket_id: normalizeNullable(input.verificationTicketId),
+      invited_by: normalizeNullable(input.invitedBy),
+      invited_by_name: normalizeNullable(input.invitedByName),
+      invite_code: normalizeNullable(input.inviteCode),
+      vouched_by: normalizeNullable(input.vouchedBy),
+      vouched_by_name: normalizeNullable(input.vouchedByName),
+      approved_by: normalizeNullable(input.approvedBy),
+      approved_by_name: normalizeNullable(input.approvedByName),
+      entry_reason: normalizeNullable(input.entryReason),
+      approval_reason: normalizeNullable(input.approvalReason),
     },
     input.requestedBy
   );
@@ -162,12 +197,17 @@ export async function queueCloseTicket(input: {
   staffId?: string | null;
   requestedBy?: string | null;
 }) {
+  const channelId = normalizeString(input.channelId);
+  if (!channelId) {
+    throw new Error("Missing channelId");
+  }
+
   return insertCommand(
     "close_ticket",
     {
-      channel_id: String(input.channelId),
-      reason: input.reason ?? "Resolved",
-      staff_id: input.staffId ?? null,
+      channel_id: channelId,
+      reason: normalizeString(input.reason) || "Resolved",
+      staff_id: normalizeNullable(input.staffId),
     },
     input.requestedBy
   );
@@ -181,14 +221,19 @@ export async function queueDeleteTicket(input: {
   staffId?: string | null;
   requestedBy?: string | null;
 }) {
+  const channelId = normalizeString(input.channelId);
+  if (!channelId) {
+    throw new Error("Missing channelId");
+  }
+
   return insertCommand(
     "delete_ticket",
     {
-      channel_id: String(input.channelId),
-      ghost: Boolean(input.ghost),
-      force_transcript: Boolean(input.forceTranscript),
-      reason: input.reason ?? "Deleted from dashboard",
-      staff_id: input.staffId ?? null,
+      channel_id: channelId,
+      ghost: normalizeBoolean(input.ghost, false),
+      force_transcript: normalizeBoolean(input.forceTranscript, false),
+      reason: normalizeString(input.reason) || "Deleted from dashboard",
+      staff_id: normalizeNullable(input.staffId),
     },
     input.requestedBy
   );
@@ -198,10 +243,15 @@ export async function queueReopenTicket(input: {
   channelId: string;
   requestedBy?: string | null;
 }) {
+  const channelId = normalizeString(input.channelId);
+  if (!channelId) {
+    throw new Error("Missing channelId");
+  }
+
   return insertCommand(
     "reopen_ticket",
     {
-      channel_id: String(input.channelId),
+      channel_id: channelId,
     },
     input.requestedBy
   );
@@ -212,11 +262,22 @@ export async function queueAssignTicket(input: {
   staffId: string;
   requestedBy?: string | null;
 }) {
+  const channelId = normalizeString(input.channelId);
+  const staffId = normalizeString(input.staffId);
+
+  if (!channelId) {
+    throw new Error("Missing channelId");
+  }
+
+  if (!staffId) {
+    throw new Error("Missing staffId");
+  }
+
   return insertCommand(
     "assign_ticket",
     {
-      channel_id: String(input.channelId),
-      staff_id: String(input.staffId),
+      channel_id: channelId,
+      staff_id: staffId,
     },
     input.requestedBy
   );
@@ -238,10 +299,15 @@ export async function queueSyncRoleMembers(input: {
   roleId: string;
   requestedBy?: string | null;
 }) {
+  const roleId = normalizeString(input.roleId);
+  if (!roleId) {
+    throw new Error("Missing roleId");
+  }
+
   return insertCommand(
     "sync_role_members",
     {
-      role_id: String(input.roleId),
+      role_id: roleId,
     },
     input.requestedBy
   );
@@ -255,9 +321,11 @@ export async function queueSyncActiveTickets(input?: {
   return insertCommand(
     "sync_active_tickets",
     {
-      include_closed_visible_channels:
-        input?.includeClosedVisibleChannels ?? true,
-      dry_run: Boolean(input?.dryRun),
+      include_closed_visible_channels: normalizeBoolean(
+        input?.includeClosedVisibleChannels,
+        true
+      ),
+      dry_run: normalizeBoolean(input?.dryRun, false),
     },
     input?.requestedBy
   );
@@ -272,29 +340,52 @@ export async function queuePortalTicketReply(input: {
   messageId?: string | null;
   requestedBy?: string | null;
 }) {
+  const ticketId = normalizeString(input.ticketId);
+  const channelId = normalizeString(input.channelId);
+  const userId = normalizeString(input.userId);
+  const content = normalizeString(input.content);
+
+  if (!ticketId) {
+    throw new Error("Missing ticketId");
+  }
+  if (!channelId) {
+    throw new Error("Missing channelId");
+  }
+  if (!userId) {
+    throw new Error("Missing userId");
+  }
+  if (!content) {
+    throw new Error("Missing content");
+  }
+
   return insertCommand(
     "portal_ticket_reply",
     {
-      ticket_id: String(input.ticketId),
-      channel_id: String(input.channelId),
-      user_id: String(input.userId),
-      username: input.username ?? null,
-      content: String(input.content),
-      message_id: input.messageId ?? null,
+      ticket_id: ticketId,
+      channel_id: channelId,
+      user_id: userId,
+      username: normalizeNullable(input.username),
+      content,
+      message_id: normalizeNullable(input.messageId),
     },
-    input.requestedBy ?? input.userId
+    input.requestedBy ?? userId
   );
 }
 
 export async function getBotCommand(
   commandId: string
 ): Promise<BotCommandRow | null> {
-  const supabase = getSupabase();
+  const id = normalizeString(commandId);
+  if (!id) {
+    throw new Error("Missing commandId");
+  }
 
-  const { data, error } = await supabase
+  const sb = getSupabase();
+
+  const { data, error } = await sb
     .from("bot_commands")
     .select("*")
-    .eq("id", commandId)
+    .eq("id", id)
     .maybeSingle();
 
   if (error) {
