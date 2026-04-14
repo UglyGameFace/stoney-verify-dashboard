@@ -35,6 +35,7 @@ type TicketLike = {
   channel_name?: string | null;
   title?: string | null;
   username?: string | null;
+  user_id?: string | null;
   category?: string | null;
   category_id?: string | null;
   category_override?: boolean | null;
@@ -42,7 +43,11 @@ type TicketLike = {
   category_set_at?: string | null;
   status?: string | null;
   assigned_to?: string | null;
+  assigned_to_id?: string | null;
+  assigned_to_name?: string | null;
   claimed_by?: string | null;
+  claimed_by_id?: string | null;
+  claimed_by_name?: string | null;
   closed_by?: string | null;
   closed_reason?: string | null;
   closed_at?: string | null;
@@ -59,6 +64,17 @@ type TicketLike = {
   matched_intake_type?: string | null;
   matched_category_reason?: string | null;
   matched_category_score?: number | null;
+  is_claimed?: boolean | null;
+  is_unclaimed?: boolean | null;
+  owner_display_name?: string | null;
+  owner_username?: string | null;
+  owner_user_id?: string | null;
+  risk_level?: string | null;
+  note_count?: number | null;
+  latest_activity_title?: string | null;
+  latest_activity_at?: string | null;
+  overdue?: boolean | null;
+  priority?: string | null;
 };
 
 type TicketControlsProps = {
@@ -97,6 +113,10 @@ function normalizeString(value: unknown): string {
   return String(value ?? "").trim();
 }
 
+function normalizeStatus(value: unknown): string {
+  return normalizeString(value).toLowerCase();
+}
+
 function safeText(value: unknown, fallback = "—"): string {
   const text = String(value ?? "").trim();
   return text || fallback;
@@ -110,23 +130,23 @@ function formatDateTime(value?: string | null): string {
 }
 
 function isClosed(status?: string | null): boolean {
-  return String(status || "").toLowerCase() === "closed";
+  return normalizeStatus(status) === "closed";
 }
 
 function isDeleted(status?: string | null): boolean {
-  return String(status || "").toLowerCase() === "deleted";
+  return normalizeStatus(status) === "deleted";
 }
 
 function isOpen(status?: string | null): boolean {
-  return String(status || "").toLowerCase() === "open";
+  return normalizeStatus(status) === "open";
 }
 
 function isClaimed(status?: string | null): boolean {
-  return String(status || "").toLowerCase() === "claimed";
+  return normalizeStatus(status) === "claimed";
 }
 
 function getStatusTone(status?: string | null): string {
-  const value = String(status || "").toLowerCase();
+  const value = normalizeStatus(status);
   if (value === "open") return "open";
   if (value === "claimed") return "claimed";
   if (value === "closed") return "medium";
@@ -183,6 +203,66 @@ function buildTranscriptExportUrl(
   const base = `/api/tickets/${encodeURIComponent(ticketId)}/transcript`;
   if (!format || format === "html") return base;
   return `${base}?format=${format}`;
+}
+
+function getClaimedById(ticket: TicketLike): string {
+  return normalizeString(
+    ticket.claimed_by_id ||
+      ticket.assigned_to_id ||
+      ticket.assigned_to ||
+      ticket.claimed_by
+  );
+}
+
+function getClaimedByLabel(ticket: TicketLike): string {
+  return (
+    normalizeString(ticket.claimed_by_name) ||
+    normalizeString(ticket.assigned_to_name) ||
+    normalizeString(ticket.claimed_by) ||
+    normalizeString(ticket.assigned_to) ||
+    "Unclaimed"
+  );
+}
+
+function getOwnerLabel(ticket: TicketLike): string {
+  return (
+    normalizeString(ticket.owner_display_name) ||
+    normalizeString(ticket.username) ||
+    normalizeString(ticket.owner_username) ||
+    normalizeString(ticket.title) ||
+    normalizeString(ticket.user_id) ||
+    normalizeString(ticket.owner_user_id) ||
+    "Unknown member"
+  );
+}
+
+function ticketIsClaimed(ticket: TicketLike): boolean {
+  if (ticket.is_claimed === true) return true;
+  if (isClaimed(ticket.status)) return true;
+  return Boolean(getClaimedById(ticket));
+}
+
+function ticketIsUnclaimed(ticket: TicketLike): boolean {
+  if (ticket.is_unclaimed === true) return true;
+  if (!isOpen(ticket.status)) return false;
+  return !getClaimedById(ticket);
+}
+
+function getQueueStateLabel(ticket: TicketLike): string {
+  if (ticketIsUnclaimed(ticket)) return "Unclaimed";
+  if (ticketIsClaimed(ticket)) return "Claimed";
+  if (isClosed(ticket.status)) return "Closed";
+  if (isDeleted(ticket.status)) return "Deleted";
+  if (isOpen(ticket.status)) return "Open";
+  return safeText(ticket.status, "unknown");
+}
+
+function getRiskTone(value?: string | null): string {
+  const risk = normalizeString(value).toLowerCase();
+  if (risk === "high") return "danger";
+  if (risk === "medium") return "medium";
+  if (risk === "low") return "claimed";
+  return "";
 }
 
 function ActionAccordion({
@@ -249,7 +329,13 @@ export default function TicketControls({
     const closed = isClosed(ticket.status);
     const deleted = isDeleted(ticket.status);
     const open = isOpen(ticket.status);
-    const claimed = isClaimed(ticket.status);
+    const claimed = ticketIsClaimed(ticket);
+    const unclaimed = ticketIsUnclaimed(ticket);
+    const claimedById = getClaimedById(ticket);
+    const mine =
+      Boolean(currentStaffId) &&
+      claimed &&
+      claimedById === normalizeString(currentStaffId);
 
     const transcript = getTicketTranscriptState(ticket);
 
@@ -259,6 +345,9 @@ export default function TicketControls({
       deleted,
       open,
       claimed,
+      unclaimed,
+      mine,
+      claimedById,
       transcriptUrl: normalizeString(transcript.transcriptUrl),
       transcriptMessageId: normalizeString(transcript.transcriptMessageId),
       transcriptChannelId: normalizeString(transcript.transcriptChannelId),
@@ -269,16 +358,17 @@ export default function TicketControls({
       currentCategoryReason: getCurrentCategoryReason(ticket),
       currentCategoryScore: Number(ticket?.matched_category_score ?? 0),
       currentIntakeType: normalizeString(ticket?.matched_intake_type) || "—",
-      ownerLabel:
-        normalizeString(ticket?.username) ||
-        normalizeString(ticket?.title) ||
-        "Unknown member",
-      claimedBy:
-        normalizeString(ticket?.claimed_by) ||
-        normalizeString(ticket?.assigned_to) ||
-        "Unclaimed",
+      ownerLabel: getOwnerLabel(ticket),
+      claimedBy: getClaimedByLabel(ticket),
+      queueStateLabel: getQueueStateLabel(ticket),
+      riskLevel: normalizeString(ticket?.risk_level) || "unknown",
+      latestActivityTitle: normalizeString(ticket?.latest_activity_title) || "No recent activity",
+      latestActivityAt: normalizeString(ticket?.latest_activity_at),
+      noteCount: Number(ticket?.note_count ?? 0),
+      priority: normalizeString(ticket?.priority) || "medium",
+      overdue: ticket?.overdue === true,
     };
-  }, [ticket]);
+  }, [ticket, currentStaffId]);
 
   const [actionState, setActionState] = useState<ActionState>("idle");
   const [error, setError] = useState("");
@@ -377,7 +467,11 @@ export default function TicketControls({
   const busy = actionState !== "idle";
 
   const assignDisabled =
-    busy || !channelId || !currentStaffId || derived.deleted;
+    busy ||
+    !channelId ||
+    !currentStaffId ||
+    derived.deleted ||
+    (derived.claimed && !derived.mine);
   const closeDisabled = busy || !channelId || derived.deleted || derived.closed;
   const reopenDisabled = busy || !channelId || derived.deleted || derived.open;
   const deleteDisabled = busy || !channelId || derived.deleted;
@@ -442,6 +536,11 @@ export default function TicketControls({
       return;
     }
 
+    if (derived.claimed && !derived.mine) {
+      setError("This ticket is already claimed by another staff member.");
+      return;
+    }
+
     clearFeedback();
     setActionState("assigning");
 
@@ -456,7 +555,13 @@ export default function TicketControls({
         throw new Error(result.command?.error || "Failed to assign ticket.");
       }
 
-      setMessage(derived.claimed ? "Ticket re-assigned." : "Ticket assigned.");
+      setMessage(
+        derived.mine
+          ? "Ticket is already assigned to you."
+          : derived.claimed
+            ? "Ticket assignment refreshed."
+            : "Ticket assigned."
+      );
       await afterChange(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to assign ticket.");
@@ -637,6 +742,17 @@ export default function TicketControls({
             <span className={`badge ${getStatusTone(ticket.status)}`}>
               {safeText(ticket.status, "unknown")}
             </span>
+            <span className={`badge ${derived.unclaimed ? "open" : derived.claimed ? "claimed" : ""}`}>
+              {derived.queueStateLabel}
+            </span>
+            <span className={`badge ${getRiskTone(derived.riskLevel)}`}>
+              {safeText(derived.riskLevel)}
+            </span>
+            <span className={`badge ${getStatusTone(derived.priority)}`}>
+              {safeText(derived.priority)}
+            </span>
+            {derived.overdue ? <span className="badge danger">Overdue</span> : null}
+            {derived.mine ? <span className="badge claimed">Mine</span> : null}
             {derived.ghost ? <span className="badge">Ghost</span> : null}
             {derived.hasTranscript ? (
               <span className="badge claimed">Transcript</span>
@@ -658,9 +774,11 @@ export default function TicketControls({
           >
             {actionState === "assigning"
               ? "Assigning..."
-              : derived.claimed
-                ? "Re-Assign"
-                : "Assign / Claim"}
+              : derived.mine
+                ? "Assigned To You"
+                : derived.claimed
+                  ? "Claim Locked"
+                  : "Assign / Claim"}
           </button>
 
           <button
@@ -715,6 +833,20 @@ export default function TicketControls({
           </div>
 
           <div className="member-detail-item">
+            <div className="ticket-info-label">Claimed By ID</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(derived.claimedById, "—")}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Queue State</div>
+            <div className="ticket-controls-mini-value">
+              {derived.queueStateLabel}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
             <div className="ticket-info-label">Channel ID</div>
             <div className="ticket-controls-mini-value">
               {safeText(channelId, "Missing")}
@@ -729,6 +861,20 @@ export default function TicketControls({
           </div>
 
           <div className="member-detail-item">
+            <div className="ticket-info-label">Priority</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(derived.priority)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Risk Level</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(derived.riskLevel)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
             <div className="ticket-info-label">Source</div>
             <div className="ticket-controls-mini-value">
               {safeText(ticket.source)}
@@ -739,6 +885,27 @@ export default function TicketControls({
             <div className="ticket-info-label">Ghost Ticket</div>
             <div className="ticket-controls-mini-value">
               {derived.ghost ? "Yes" : "No"}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Latest Activity</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(derived.latestActivityTitle)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Latest Activity At</div>
+            <div className="ticket-controls-mini-value">
+              {formatDateTime(derived.latestActivityAt)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Note Count</div>
+            <div className="ticket-controls-mini-value">
+              {String(derived.noteCount)}
             </div>
           </div>
 
@@ -765,6 +932,18 @@ export default function TicketControls({
               onClick={() => void handleCopy(channelId, "Channel ID copied.")}
             >
               Copy Channel ID
+            </button>
+          ) : null}
+
+          {derived.claimedById ? (
+            <button
+              type="button"
+              className="button ghost"
+              onClick={() =>
+                void handleCopy(derived.claimedById, "Claimed-by ID copied.")
+              }
+            >
+              Copy Claimed-By ID
             </button>
           ) : null}
 
