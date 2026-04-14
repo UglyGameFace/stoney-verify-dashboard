@@ -225,17 +225,52 @@ function getMemberDisplay(member) {
 
 function getTicketStatusCount(tickets, status) {
   return safeArray(tickets).filter(
-    (t) => String(t?.status || "").toLowerCase() === status
+    (t) => String(t?.status || t?.ticket_status || "").toLowerCase() === status
   ).length;
 }
 
-function statusMatchesFilter(ticket, filterValue) {
-  const status = String(ticket?.status || "").toLowerCase();
+function getClaimedById(ticket) {
+  const value =
+    ticket?.claimed_by_id ??
+    ticket?.assigned_to_id ??
+    ticket?.assigned_to ??
+    ticket?.claimed_by ??
+    "";
+
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text;
+}
+
+function isTicketClaimed(ticket) {
+  if (ticket?.is_claimed === true) return true;
+  const status = String(ticket?.status || ticket?.ticket_status || "").toLowerCase();
+  if (status === "claimed") return true;
+  return Boolean(getClaimedById(ticket));
+}
+
+function isTicketUnclaimed(ticket) {
+  if (ticket?.is_unclaimed === true) return true;
+  const status = String(ticket?.status || ticket?.ticket_status || "").toLowerCase();
+  if (status !== "open") return false;
+  return !getClaimedById(ticket);
+}
+
+function statusMatchesFilter(ticket, filterValue, currentStaffId = null) {
+  const status = String(ticket?.status || ticket?.ticket_status || "").toLowerCase();
+  const claimedById = getClaimedById(ticket);
+  const currentStaffIdText = String(currentStaffId || "").trim();
 
   if (filterValue === "all") return true;
   if (filterValue === "active") return status === "open" || status === "claimed";
+  if (filterValue === "queue") return status === "open" || status === "claimed";
   if (filterValue === "open_only") return status === "open";
-  if (filterValue === "claimed") return status === "claimed";
+  if (filterValue === "unclaimed") return isTicketUnclaimed(ticket);
+  if (filterValue === "claimed") return isTicketClaimed(ticket);
+  if (filterValue === "my_claimed") {
+    if (!currentStaffIdText) return false;
+    return isTicketClaimed(ticket) && claimedById === currentStaffIdText;
+  }
   if (filterValue === "closed") return status === "closed";
   if (filterValue === "deleted") return status === "deleted";
 
@@ -722,7 +757,7 @@ function ticketDedupKey(ticket) {
       String(ticket?.category_id || "").trim(),
       String(ticket?.matched_category_id || "").trim(),
       String(ticket?.category || "").trim(),
-      String(ticket?.status || "").trim(),
+      String(ticket?.status || ticket?.ticket_status || "").trim(),
       String(ticket?.created_at || "").trim(),
     ].join("::")
   );
@@ -768,7 +803,7 @@ export default function DashboardClient({
   const [isModalPaused, setIsModalPaused] = useState(false);
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("active");
+  const [statusFilter, setStatusFilter] = useState("queue");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [sortBy, setSortBy] = useState("priority_desc");
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState(null);
@@ -1244,7 +1279,9 @@ export default function DashboardClient({
     }
 
     return sortTickets(
-      safeTickets.filter((ticket) => isActiveTicketStatus(ticket?.status)),
+      safeTickets.filter((ticket) =>
+        isActiveTicketStatus(ticket?.status || ticket?.ticket_status)
+      ),
       "priority_desc"
     );
   }, [data?.activeTickets, safeTickets]);
@@ -1260,7 +1297,7 @@ export default function DashboardClient({
 
     return sortTickets(
       safeTickets.filter((ticket) => {
-        const status = String(ticket?.status || "").toLowerCase();
+        const status = String(ticket?.status || ticket?.ticket_status || "").toLowerCase();
         return status === "closed" || status === "deleted";
       }),
       "updated_desc"
@@ -1282,11 +1319,23 @@ export default function DashboardClient({
   const filteredTickets = useMemo(() => {
     let rows = [...safeTickets];
 
-    if (statusFilter === "active") {
+    if (statusFilter === "queue" || statusFilter === "active") {
       rows = [...safeActiveTickets];
     } else if (statusFilter === "closed" || statusFilter === "deleted") {
       rows = safeClosedTickets.filter((ticket) =>
-        statusMatchesFilter(ticket, statusFilter)
+        statusMatchesFilter(ticket, statusFilter, currentStaffId)
+      );
+    } else if (statusFilter === "unclaimed") {
+      rows = safeTickets.filter((ticket) =>
+        statusMatchesFilter(ticket, "unclaimed", currentStaffId)
+      );
+    } else if (statusFilter === "claimed") {
+      rows = safeTickets.filter((ticket) =>
+        statusMatchesFilter(ticket, "claimed", currentStaffId)
+      );
+    } else if (statusFilter === "my_claimed") {
+      rows = safeTickets.filter((ticket) =>
+        statusMatchesFilter(ticket, "my_claimed", currentStaffId)
       );
     }
 
@@ -1310,6 +1359,8 @@ export default function DashboardClient({
           t.matched_category_slug,
           t.matched_intake_type,
           t.claimed_by,
+          t.claimed_by_id,
+          t.assigned_to,
           t.channel_id,
           t.discord_thread_id,
           t.closed_reason,
@@ -1323,10 +1374,14 @@ export default function DashboardClient({
     if (
       statusFilter !== "all" &&
       statusFilter !== "active" &&
+      statusFilter !== "queue" &&
       statusFilter !== "closed" &&
-      statusFilter !== "deleted"
+      statusFilter !== "deleted" &&
+      statusFilter !== "unclaimed" &&
+      statusFilter !== "claimed" &&
+      statusFilter !== "my_claimed"
     ) {
-      rows = rows.filter((t) => statusMatchesFilter(t, statusFilter));
+      rows = rows.filter((t) => statusMatchesFilter(t, statusFilter, currentStaffId));
     }
 
     if (priorityFilter !== "all") {
@@ -1345,6 +1400,7 @@ export default function DashboardClient({
     statusFilter,
     priorityFilter,
     sortBy,
+    currentStaffId,
   ]);
 
   const homeSummary = useMemo(() => {
@@ -1357,7 +1413,7 @@ export default function DashboardClient({
   }, [safeEvents, safeWarns, safeRaids, safeFraud]);
 
   const jumpToTickets = useCallback(
-    ({ status = "active", priority = "all", query = "" } = {}) => {
+    ({ status = "queue", priority = "all", query = "" } = {}) => {
       setStatusFilter(status);
       setPriorityFilter(priority);
       setSelectedCategoryFilter(null);
@@ -1408,14 +1464,14 @@ export default function DashboardClient({
   const handleFindTicketsByCategory = useCallback((category) => {
     setSelectedCategoryFilter(category || null);
     setSearch("");
-    setStatusFilter("active");
+    setStatusFilter("queue");
     setPriorityFilter("all");
     handleTabChange("tickets", { resetToTop: true });
   }, [handleTabChange]);
 
   const clearTicketFilters = useCallback(() => {
     setSearch("");
-    setStatusFilter("active");
+    setStatusFilter("queue");
     setPriorityFilter("all");
     setSelectedCategoryFilter(null);
   }, []);
@@ -1450,7 +1506,7 @@ export default function DashboardClient({
         intelligence={intelligence}
         expanded={expandedPanels.intelligence}
         onToggle={() => togglePanel("intelligence")}
-        onJumpToTickets={() => jumpToTickets({ status: "active" })}
+        onJumpToTickets={() => jumpToTickets({ status: "queue" })}
         onJumpToWarns={() => jumpToPanel("warns")}
         onJumpToRaids={() => jumpToPanel("raids")}
         onJumpToFraud={() => jumpToPanel("fraud")}
@@ -1462,7 +1518,7 @@ export default function DashboardClient({
           title="Open Tickets"
           value={counts.openTickets}
           subtitle="Tap to open queue"
-          onClick={() => jumpToTickets({ status: "active" })}
+          onClick={() => jumpToTickets({ status: "queue" })}
         />
         <ClickableStatCard
           title="Warns Today"
@@ -1512,7 +1568,7 @@ export default function DashboardClient({
               type="button"
               className="button ghost"
               style={{ width: "auto", minWidth: 120 }}
-              onClick={() => jumpToTickets({ status: "active" })}
+              onClick={() => jumpToTickets({ status: "queue" })}
             >
               Open Tickets
             </button>
@@ -1941,7 +1997,7 @@ export default function DashboardClient({
                   <div>
                     <h2 style={{ margin: 0 }}>Ticket Queue</h2>
                     <div className="muted" style={{ marginTop: 6 }}>
-                      Live moderation queue with repair, transcript, and filtering controls
+                      Live moderation queue with claim-state, repair, transcript, and filtering controls
                     </div>
                   </div>
 
@@ -2047,10 +2103,12 @@ export default function DashboardClient({
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value)}
                   >
-                    <option value="active">Active (Open + Claimed)</option>
+                    <option value="queue">Full Queue (Open + Claimed)</option>
+                    <option value="unclaimed">Unclaimed Only</option>
+                    <option value="claimed">Claimed Only</option>
+                    <option value="my_claimed">My Claimed Tickets</option>
                     <option value="all">All statuses</option>
                     <option value="open_only">Open Only</option>
-                    <option value="claimed">Claimed Only</option>
                     <option value="closed">Closed</option>
                     <option value="deleted">Deleted</option>
                   </select>
