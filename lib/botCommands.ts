@@ -18,6 +18,7 @@ export type BotCommandAction =
   | "reconcile_departed_members"
   | "sync_role_members"
   | "sync_active_tickets"
+  | "sync_single_ticket"
   | "portal_ticket_reply";
 
 export type BotCommandRow = {
@@ -45,7 +46,15 @@ function requireEnv(name: string, value: string | undefined): string {
 }
 
 function normalizeString(value: unknown): string {
-  return String(value ?? "").trim();
+  if (typeof value === "string") {
+    return value.trim();
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value).trim();
+  }
+
+  return "";
 }
 
 function normalizeNullable(value: unknown): string | null {
@@ -328,6 +337,26 @@ export async function queueSyncActiveTickets(input?: {
       dry_run: normalizeBoolean(input?.dryRun, false),
     },
     input?.requestedBy
+  );
+}
+
+export async function queueSyncSingleTicket(input: {
+  channelId: string;
+  requestedBy?: string | null;
+  dryRun?: boolean;
+}) {
+  const channelId = normalizeString(input.channelId);
+  if (!channelId) {
+    throw new Error("Missing channelId");
+  }
+
+  return insertCommand(
+    "sync_single_ticket",
+    {
+      channel_id: channelId,
+      dry_run: normalizeBoolean(input?.dryRun, false),
+    },
+    input.requestedBy
   );
 }
 
