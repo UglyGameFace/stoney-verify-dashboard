@@ -1,31 +1,21 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { queueCreateTicket } from "@/lib/botCommands";
 import { requireStaffSessionForRoute } from "@/lib/auth-server";
 import { insertMemberEvent } from "@/lib/memberEventWrites";
 import { env } from "@/lib/env";
+import {
+  buildRouteJson,
+  getActorId,
+  parseRouteBody,
+  readBoolean,
+  readString,
+  toErrorMessage,
+  unauthorizedRouteResponse,
+  type RefreshedTokens,
+} from "@/lib/ticketActionRoute";
 
 export const dynamic = "force-dynamic";
-
-function getActorId(session: any): string | null {
-  const candidates = [
-    session?.user?.discord_id,
-    session?.user?.id,
-    session?.user?.user_id,
-    session?.discordUser?.id,
-  ];
-
-  for (const value of candidates) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-
-  if (typeof candidates[0] === "number") {
-    return String(candidates[0]);
-  }
-
-  return null;
-}
+export const revalidate = 0;
 
 function getActorName(session: any): string {
   return (
@@ -41,134 +31,127 @@ function normalizeNullable(value: unknown): string | null {
   return text || null;
 }
 
+function readStringArray(
+  body: Record<string, unknown>,
+  keys: string[]
+): string[] | null {
+  for (const key of keys) {
+    const value = body?.[key];
+    if (!Array.isArray(value)) continue;
+
+    const cleaned = value
+      .map((item) => String(item ?? "").trim())
+      .filter(Boolean);
+
+    return cleaned.length ? cleaned : null;
+  }
+
+  return null;
+}
+
+function missingFieldRouteResponse(
+  field: string,
+  refreshedTokens: RefreshedTokens | null
+) {
+  return buildRouteJson(
+    {
+      ok: false,
+      error: `Missing ${field}`,
+    },
+    400,
+    refreshedTokens
+  );
+}
+
 export async function POST(req: NextRequest) {
+  let refreshedTokens: RefreshedTokens | null = null;
+
   try {
-    const session = await requireStaffSessionForRoute();
-    const actorId = getActorId(session);
-    const actorName = getActorName(session);
+    const auth = await requireStaffSessionForRoute();
+    refreshedTokens = auth?.refreshedTokens ?? null;
+
+    const actorId = getActorId(auth?.session);
+    const actorName = getActorName(auth?.session);
     const guildId = env.guildId || "";
 
     if (!actorId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Unauthorized",
-        },
-        { status: 401 }
-      );
+      return unauthorizedRouteResponse(refreshedTokens);
     }
 
-    const body = await req.json();
+    const body = await parseRouteBody(req);
 
-    const userId =
-      typeof body?.userId === "string" && body.userId.trim()
-        ? body.userId.trim()
-        : typeof body?.user_id === "string" && body.user_id.trim()
-        ? body.user_id.trim()
-        : "";
-
-    const category =
-      typeof body?.category === "string" && body.category.trim()
-        ? body.category.trim()
-        : "support";
-
-    const openingMessage =
-      typeof body?.openingMessage === "string"
-        ? body.openingMessage
-        : typeof body?.opening_message === "string"
-        ? body.opening_message
-        : "";
-
-    const priority =
-      typeof body?.priority === "string" && body.priority.trim()
-        ? body.priority.trim()
-        : "medium";
-
-    const parentCategoryId =
-      typeof body?.parentCategoryId === "string" && body.parentCategoryId.trim()
-        ? body.parentCategoryId.trim()
-        : typeof body?.parent_category_id === "string" &&
-          body.parent_category_id.trim()
-        ? body.parent_category_id.trim()
-        : null;
-
-    const staffRoleIds = Array.isArray(body?.staffRoleIds)
-      ? body.staffRoleIds
-          .map((x: unknown) => String(x).trim())
-          .filter(Boolean)
-      : Array.isArray(body?.staff_role_ids)
-      ? body.staff_role_ids
-          .map((x: unknown) => String(x).trim())
-          .filter(Boolean)
-      : null;
-
-    const allowDuplicate = Boolean(
-      body?.allowDuplicate ?? body?.allow_duplicate
+    const userId = readString(body, ["userId", "user_id"]);
+    const category = readString(body, ["category"], "support");
+    const openingMessage = readString(
+      body,
+      ["openingMessage", "opening_message"],
+      ""
+    );
+    const priority = readString(body, ["priority"], "medium");
+    const parentCategoryId = readString(
+      body,
+      ["parentCategoryId", "parent_category_id"],
+      ""
+    );
+    const allowDuplicate = readBoolean(
+      body,
+      ["allowDuplicate", "allow_duplicate"],
+      false
     );
 
+    const staffRoleIds = readStringArray(body, [
+      "staffRoleIds",
+      "staff_role_ids",
+    ]);
+
     const entryMethod =
-      normalizeNullable(body?.entryMethod) ||
-      normalizeNullable(body?.entry_method);
+      readString(body, ["entryMethod", "entry_method"], "") || null;
 
     const verificationSource =
-      normalizeNullable(body?.verificationSource) ||
-      normalizeNullable(body?.verification_source);
+      readString(body, ["verificationSource", "verification_source"], "") || null;
 
     const sourceTicketId =
-      normalizeNullable(body?.sourceTicketId) ||
-      normalizeNullable(body?.source_ticket_id);
+      readString(body, ["sourceTicketId", "source_ticket_id"], "") || null;
 
     const verificationTicketId =
-      normalizeNullable(body?.verificationTicketId) ||
-      normalizeNullable(body?.verification_ticket_id) ||
-      sourceTicketId;
+      readString(
+        body,
+        ["verificationTicketId", "verification_ticket_id"],
+        ""
+      ) ||
+      sourceTicketId ||
+      null;
 
     const invitedBy =
-      normalizeNullable(body?.invitedBy) ||
-      normalizeNullable(body?.invited_by);
+      readString(body, ["invitedBy", "invited_by"], "") || null;
 
     const invitedByName =
-      normalizeNullable(body?.invitedByName) ||
-      normalizeNullable(body?.invited_by_name);
+      readString(body, ["invitedByName", "invited_by_name"], "") || null;
 
     const inviteCode =
-      normalizeNullable(body?.inviteCode) ||
-      normalizeNullable(body?.invite_code);
+      readString(body, ["inviteCode", "invite_code"], "") || null;
 
     const vouchedBy =
-      normalizeNullable(body?.vouchedBy) ||
-      normalizeNullable(body?.vouched_by);
+      readString(body, ["vouchedBy", "vouched_by"], "") || null;
 
     const vouchedByName =
-      normalizeNullable(body?.vouchedByName) ||
-      normalizeNullable(body?.vouched_by_name);
+      readString(body, ["vouchedByName", "vouched_by_name"], "") || null;
 
     const approvedBy =
-      normalizeNullable(body?.approvedBy) ||
-      normalizeNullable(body?.approved_by) ||
-      actorId;
+      readString(body, ["approvedBy", "approved_by"], "") || actorId;
 
     const approvedByName =
-      normalizeNullable(body?.approvedByName) ||
-      normalizeNullable(body?.approved_by_name) ||
+      readString(body, ["approvedByName", "approved_by_name"], "") ||
       actorName;
 
     const entryReason =
-      normalizeNullable(body?.entryReason) ||
-      normalizeNullable(body?.entry_reason);
+      readString(body, ["entryReason", "entry_reason"], "") || null;
 
     const approvalReason =
-      normalizeNullable(body?.approvalReason) ||
-      normalizeNullable(body?.approval_reason);
+      readString(body, ["approvalReason", "approval_reason"], "") || null;
 
     if (!userId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Missing userId",
-        },
-        { status: 400 }
-      );
+      return missingFieldRouteResponse("userId", refreshedTokens);
     }
 
     const command = await queueCreateTicket({
@@ -179,7 +162,7 @@ export async function POST(req: NextRequest) {
       ghost: false,
       allowDuplicate,
       requestedBy: actorId,
-      parentCategoryId,
+      parentCategoryId: normalizeNullable(parentCategoryId),
       staffRoleIds,
       entryMethod,
       verificationSource,
@@ -220,25 +203,41 @@ export async function POST(req: NextRequest) {
           approved_by: approvedBy,
           approved_by_name: approvedByName,
           command_id: command?.id || null,
+          allow_duplicate: allowDuplicate,
+          parent_category_id: normalizeNullable(parentCategoryId),
+          staff_role_ids: staffRoleIds || [],
         },
       });
     }
 
-    return NextResponse.json({
-      ok: true,
-      queued: true,
-      command,
-    });
+    return buildRouteJson(
+      {
+        ok: true,
+        queued: true,
+        command,
+        userId,
+        category,
+        priority,
+        openingMessage,
+        allowDuplicate,
+        requestedBy: actorId,
+        effectiveRequestedBy: actorId,
+        approvedBy,
+        approvedByName,
+      },
+      200,
+      refreshedTokens
+    );
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unexpected server error";
+    const message = toErrorMessage(error);
 
-    return NextResponse.json(
+    return buildRouteJson(
       {
         ok: false,
         error: message,
       },
-      { status: message === "Unauthorized" ? 401 : 500 }
+      message === "Unauthorized" ? 401 : 500,
+      refreshedTokens
     );
   }
 }
