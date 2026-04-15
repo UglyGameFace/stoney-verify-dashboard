@@ -9,7 +9,14 @@ import { env } from "@/lib/env";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type RefreshedTokens = unknown;
+type RefreshedTokens = {
+  access_token: string;
+  token_type?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+} | null;
+
 type JsonRecord = Record<string, unknown>;
 
 type SessionLike = {
@@ -343,7 +350,7 @@ function getActorIdentity(session: SessionLike | null | undefined) {
 function buildJsonResponse(
   payload: Record<string, unknown>,
   status = 200,
-  refreshedTokens: RefreshedTokens | null = null
+  refreshedTokens: RefreshedTokens = null
 ) {
   const response = NextResponse.json(payload, {
     status,
@@ -359,7 +366,7 @@ function buildJsonResponse(
 function buildErrorResponse(
   message: string,
   status = 400,
-  refreshedTokens: RefreshedTokens | null = null
+  refreshedTokens: RefreshedTokens = null
 ) {
   return buildJsonResponse({ error: message }, status, refreshedTokens);
 }
