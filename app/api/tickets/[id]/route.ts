@@ -110,7 +110,6 @@ type GuildMemberRow = {
   approved_by_name?: string | null;
   verification_ticket_id?: string | null;
   source_ticket_id?: string | null;
-
   risk_score?: number | null;
   risk_level?: string | null;
   risk_reasons?: string[] | null;
@@ -259,7 +258,6 @@ type MemberJoinRow = {
   approved_by_name?: string | null;
   join_note?: string | null;
   source_ticket_id?: string | null;
-
   risk_score?: number | null;
   risk_level?: string | null;
   risk_reasons?: string[] | null;
@@ -281,8 +279,6 @@ type MemberJoinRow = {
   suspicion_flags?: string[] | null;
   risk_evaluated_at?: string | null;
   join_fingerprint?: string | null;
-
-  // ✅ Added so TypeScript matches the alt-risk snapshot logic
   last_join_risk_score?: number | null;
   last_join_risk_level?: string | null;
   last_join_fingerprint?: string | null;
@@ -387,12 +383,10 @@ function parseDateMs(value: unknown): number {
     const ms = value.getTime();
     return Number.isFinite(ms) ? ms : 0;
   }
-
   if (typeof value === "string" || typeof value === "number") {
     const ms = new Date(value).getTime();
     return Number.isFinite(ms) ? ms : 0;
   }
-
   return 0;
 }
 
@@ -465,7 +459,6 @@ function mapGuildMember(row: GuildMemberRow | null): GuildMemberRow | null {
     role_state: row?.role_state || "unknown",
     role_state_reason: row?.role_state_reason || "",
     is_bot: Boolean(row?.is_bot),
-
     risk_score: normalizeNumber(row?.risk_score, 0),
     risk_level: normalizeLower(row?.risk_level) || null,
     risk_reasons: normalizeStringArray(row?.risk_reasons),
@@ -617,7 +610,6 @@ function mapJoin(row: MemberJoinRow): MemberJoinRow {
     approved_by_name: row?.approved_by_name || null,
     join_note: row?.join_note || null,
     source_ticket_id: row?.source_ticket_id || null,
-
     risk_score: normalizeNumber(row?.risk_score, 0),
     risk_level: normalizeLower(row?.risk_level) || null,
     risk_reasons: normalizeStringArray(row?.risk_reasons),
@@ -642,8 +634,6 @@ function mapJoin(row: MemberJoinRow): MemberJoinRow {
     suspicion_flags: normalizeStringArray(row?.suspicion_flags),
     risk_evaluated_at: row?.risk_evaluated_at || null,
     join_fingerprint: normalizeString(row?.join_fingerprint) || null,
-
-    // ✅ Normalize the legacy/derived last-join fields too
     last_join_risk_score: normalizeNumber(
       row?.last_join_risk_score,
       normalizeNumber(row?.risk_score, 0)
@@ -699,7 +689,6 @@ function getActorIdentity(session: SessionLike | null | undefined) {
 
 function hasAltRiskData(row: AltRiskSourceRow | null | undefined): boolean {
   if (!row) return false;
-
   if (normalizeString(row?.risk_level)) return true;
   if (normalizeString(row?.fingerprint)) return true;
   if (normalizeString(row?.alt_cluster_key)) return true;
@@ -708,13 +697,11 @@ function hasAltRiskData(row: AltRiskSourceRow | null | undefined): boolean {
   if (normalizeNumber(row?.risk_score, -1) >= 0) return true;
   if (normalizeNumber(row?.alt_cluster_size, 0) > 0) return true;
   if (normalizeStringArray(row?.risk_reasons).length > 0) return true;
-
   return false;
 }
 
 function formatAltRiskLabel(level: unknown): string {
   const clean = normalizeLower(level);
-
   if (clean === "critical") return "Critical Alt Risk";
   if (clean === "high") return "High Alt Risk";
   if (clean === "medium") return "Medium Alt Risk";
@@ -772,8 +759,7 @@ function buildAltRiskSnapshot(
     clusterMembers: normalizeJsonRecordArray(source?.cluster_members),
     suspicionFlags: normalizeStringArray(source?.suspicion_flags),
     riskEvaluatedAt:
-      normalizeString(source?.risk_last_evaluated_at || source?.risk_evaluated_at) ||
-      null,
+      normalizeString(source?.risk_last_evaluated_at || source?.risk_evaluated_at) || null,
     lastJoinRiskScore: normalizeNumber(
       source?.last_join_risk_score,
       normalizeNumber(source?.risk_score, 0)
@@ -1343,90 +1329,98 @@ export async function GET(request: Request, context: RouteContext) {
     const ticketUserId = normalizeString(ticket?.user_id);
     const ticketChannelId = normalizeString(ticket?.channel_id || ticket?.discord_thread_id);
 
-    const [memberRowsRes, joinsRes, memberEventsRes, flagsRes, tokensRes, vcRes, warnsRes, activityRes] =
-      await Promise.all([
-        ticketUserId
-          ? supabase
-              .from("guild_members")
-              .select("*")
-              .eq("guild_id", env.guildId || "")
-              .eq("user_id", ticketUserId)
-              .limit(1)
-          : Promise.resolve({ data: [], error: null }),
-        ticketUserId
-          ? supabase
-              .from("member_joins")
-              .select("*")
-              .eq("guild_id", env.guildId || "")
-              .eq("user_id", ticketUserId)
-              .order("joined_at", { ascending: false })
-              .limit(20)
-          : Promise.resolve({ data: [], error: null }),
-        ticketUserId
-          ? supabase
-              .from("member_events")
-              .select("*")
-              .eq("guild_id", env.guildId || "")
-              .eq("user_id", ticketUserId)
-              .order("created_at", { ascending: false })
-              .limit(50)
-          : Promise.resolve({ data: [], error: null }),
-        ticketUserId
-          ? supabase
-              .from("verification_flags")
-              .select("*")
-              .eq("guild_id", env.guildId || "")
-              .eq("user_id", ticketUserId)
-              .order("created_at", { ascending: false })
-              .limit(50)
-          : Promise.resolve({ data: [], error: null }),
-        ticketUserId
-          ? supabase
-              .from("verification_tokens")
-              .select("*")
-              .eq("guild_id", env.guildId || "")
-              .or(`requester_id.eq.${ticketUserId},user_id.eq.${ticketUserId},approved_user_id.eq.${ticketUserId}`)
-              .order("created_at", { ascending: false })
-              .limit(60)
-          : Promise.resolve({ data: [], error: null }),
-        ticketUserId
-          ? supabase
-              .from("vc_verify_sessions")
-              .select("*")
-              .eq("guild_id", env.guildId || "")
-              .or(`owner_id.eq.${ticketUserId},requester_id.eq.${ticketUserId}`)
-              .order("created_at", { ascending: false })
-              .limit(40)
-          : Promise.resolve({ data: [], error: null }),
-        ticketUserId
-          ? supabase
-              .from("warns")
-              .select("*")
-              .eq("guild_id", env.guildId || "")
-              .eq("user_id", ticketUserId)
-              .order("created_at", { ascending: false })
-              .limit(30)
-          : Promise.resolve({ data: [], error: null }),
-        ticketUserId
-          ? supabase
-              .from("activity_feed_events")
-              .select("*")
-              .eq("guild_id", env.guildId || "")
-              .or(
-                ticketChannelId
-                  ? `ticket_id.eq.${ticketId},channel_id.eq.${ticketChannelId},target_user_id.eq.${ticketUserId}`
-                  : `ticket_id.eq.${ticketId},target_user_id.eq.${ticketUserId}`
-              )
-              .order("created_at", { ascending: false })
-              .limit(100)
-          : supabase
-              .from("activity_feed_events")
-              .select("*")
-              .eq("guild_id", env.guildId || "")
-              .eq("ticket_id", ticketId)
-              .order("created_at", { ascending: false })
-              .limit(100),
-      ]);
+    const [
+      memberRowsRes,
+      joinsRes,
+      memberEventsRes,
+      flagsRes,
+      tokensRes,
+      vcRes,
+      warnsRes,
+      activityRes,
+    ] = await Promise.all([
+      ticketUserId
+        ? supabase
+            .from("guild_members")
+            .select("*")
+            .eq("guild_id", env.guildId || "")
+            .eq("user_id", ticketUserId)
+            .limit(1)
+        : Promise.resolve({ data: [], error: null }),
+      ticketUserId
+        ? supabase
+            .from("member_joins")
+            .select("*")
+            .eq("guild_id", env.guildId || "")
+            .eq("user_id", ticketUserId)
+            .order("joined_at", { ascending: false })
+            .limit(20)
+        : Promise.resolve({ data: [], error: null }),
+      ticketUserId
+        ? supabase
+            .from("member_events")
+            .select("*")
+            .eq("guild_id", env.guildId || "")
+            .eq("user_id", ticketUserId)
+            .order("created_at", { ascending: false })
+            .limit(50)
+        : Promise.resolve({ data: [], error: null }),
+      ticketUserId
+        ? supabase
+            .from("verification_flags")
+            .select("*")
+            .eq("guild_id", env.guildId || "")
+            .eq("user_id", ticketUserId)
+            .order("created_at", { ascending: false })
+            .limit(50)
+        : Promise.resolve({ data: [], error: null }),
+      ticketUserId
+        ? supabase
+            .from("verification_tokens")
+            .select("*")
+            .eq("guild_id", env.guildId || "")
+            .or(`requester_id.eq.${ticketUserId},user_id.eq.${ticketUserId},approved_user_id.eq.${ticketUserId}`)
+            .order("created_at", { ascending: false })
+            .limit(60)
+        : Promise.resolve({ data: [], error: null }),
+      ticketUserId
+        ? supabase
+            .from("vc_verify_sessions")
+            .select("*")
+            .eq("guild_id", env.guildId || "")
+            .or(`owner_id.eq.${ticketUserId},requester_id.eq.${ticketUserId}`)
+            .order("created_at", { ascending: false })
+            .limit(40)
+        : Promise.resolve({ data: [], error: null }),
+      ticketUserId
+        ? supabase
+            .from("warns")
+            .select("*")
+            .eq("guild_id", env.guildId || "")
+            .eq("user_id", ticketUserId)
+            .order("created_at", { ascending: false })
+            .limit(30)
+        : Promise.resolve({ data: [], error: null }),
+      ticketUserId
+        ? supabase
+            .from("activity_feed_events")
+            .select("*")
+            .eq("guild_id", env.guildId || "")
+            .or(
+              ticketChannelId
+                ? `ticket_id.eq.${ticketId},channel_id.eq.${ticketChannelId},target_user_id.eq.${ticketUserId}`
+                : `ticket_id.eq.${ticketId},target_user_id.eq.${ticketUserId}`
+            )
+            .order("created_at", { ascending: false })
+            .limit(100)
+        : supabase
+            .from("activity_feed_events")
+            .select("*")
+            .eq("guild_id", env.guildId || "")
+            .eq("ticket_id", ticketId)
+            .order("created_at", { ascending: false })
+            .limit(100),
+    ]);
 
     const member = mapGuildMember((safeArray<GuildMemberRow>(memberRowsRes.data || [])[0] || null) as GuildMemberRow | null);
     const messages = safeArray<TicketMessageRow>(messagesRes.data).map(mapTicketMessage);
@@ -1544,7 +1538,6 @@ export async function GET(request: Request, context: RouteContext) {
       owner_approved_by: member?.approved_by || latestJoin?.approved_by || null,
       owner_approved_by_name:
         member?.approved_by_name || latestJoin?.approved_by_name || null,
-
       owner_verification_label: verificationLabel,
       owner_flag_count: flaggedCount,
       owner_latest_flag_score: normalizeNumber(latestFlag?.score, 0),
@@ -1553,7 +1546,6 @@ export async function GET(request: Request, context: RouteContext) {
         ? latestFlag.reasons
         : [],
       owner_max_flag_score: maxFlagScore,
-
       owner_token_count: verificationTokens.length,
       owner_latest_token_status: latestToken?.status || null,
       owner_latest_token_decision: latestToken?.decision || null,
@@ -1563,7 +1555,6 @@ export async function GET(request: Request, context: RouteContext) {
         latestToken?.submitted_at ||
         latestToken?.created_at ||
         null,
-
       owner_vc_count: vcSessions.length,
       owner_latest_vc_status: latestVc?.status || null,
       owner_latest_vc_at:
@@ -1573,9 +1564,7 @@ export async function GET(request: Request, context: RouteContext) {
         latestVc?.canceled_at ||
         latestVc?.created_at ||
         null,
-
       owner_warn_count: warnCount,
-
       owner_alt_risk_score: altRisk.score,
       owner_alt_risk_level: altRisk.level,
       owner_alt_risk_label: formatAltRiskLabel(altRisk.level),
@@ -1602,40 +1591,32 @@ export async function GET(request: Request, context: RouteContext) {
       owner_last_join_fingerprint: altRisk.lastJoinFingerprint,
       owner_alt_notes: altRisk.altNotes,
       owner_alt_risk_source: altRisk.source,
-
       category_color: category?.color || null,
       category_description: category?.description || null,
       category_button_label: category?.button_label || null,
-
       note_count: noteCount,
       latest_note_at: latestNote?.created_at || null,
       latest_note_staff_id: latestNote?.staff_id || null,
       latest_note_staff_name: latestNote?.staff_name || null,
-
       message_count: messageCount,
       latest_message_at: messages.length
         ? messages[messages.length - 1]?.created_at || null
         : null,
-
       latest_activity_at: latestActivityAt,
       latest_activity_title: latestActivity?.title || latestActivity?.event_type || null,
       latest_activity_type: latestActivity?.event_type || null,
-
       sla_status: slaState.sla_status,
       overdue: slaState.overdue,
       minutes_overdue: slaState.minutes_overdue,
       minutes_until_deadline: slaState.minutes_until_deadline,
-
       risk_level: riskLevel,
       recommended_actions: recommendedActions,
-
       transcript_state: transcriptState,
       transcript_available:
         Boolean(normalizeString(ticket?.transcript_url)) ||
         Boolean(normalizeString(ticket?.transcript_message_id)) ||
         Boolean(normalizeString(ticket?.transcript_channel_id)),
       transcript_exports: buildTranscriptExports(ticketId),
-
       can_assign: !normalizeLower(ticket?.status).includes("deleted"),
       can_close:
         normalizeLower(ticket?.status) !== "closed" &&
