@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 type Dict = Record<string, unknown>;
 
@@ -163,7 +163,7 @@ function DetailCard({
   full = false,
 }: {
   label: string;
-  value: React.ReactNode;
+  value: ReactNode;
   full?: boolean;
 }) {
   return (
