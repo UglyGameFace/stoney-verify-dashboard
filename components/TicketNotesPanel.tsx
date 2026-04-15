@@ -4,10 +4,19 @@ import { useMemo, useState } from "react";
 
 type NoteRow = {
   id?: string | number | null;
+  ticket_id?: string | null;
   staff_id?: string | null;
   staff_name?: string | null;
   content?: string | null;
   created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type NotesApiResponse = {
+  ok?: boolean;
+  error?: string;
+  note?: NoteRow | null;
+  notes?: NoteRow[];
 };
 
 type TicketNotesPanelProps = {
@@ -22,6 +31,8 @@ type QuickTemplate = {
   label: string;
   value: string;
 };
+
+const MAX_NOTE_LENGTH = 4000;
 
 function safeText(value: unknown, fallback = "—"): string {
   const text = String(value ?? "").trim();
@@ -186,6 +197,12 @@ export default function TicketNotesPanel({
     const content = String(draft || "").trim();
     if (!content) return;
 
+    if (content.length > MAX_NOTE_LENGTH) {
+      setError(`Note is too long. Maximum ${MAX_NOTE_LENGTH} characters.`);
+      setMessage("");
+      return;
+    }
+
     setSaving(true);
     setError("");
     setMessage("");
@@ -200,9 +217,7 @@ export default function TicketNotesPanel({
         body: JSON.stringify({ content }),
       });
 
-      const json = (await res.json().catch(() => null)) as
-        | { error?: string }
-        | null;
+      const json = (await res.json().catch(() => null)) as NotesApiResponse | null;
 
       if (!res.ok) {
         throw new Error(json?.error || "Failed to save internal note.");
@@ -316,6 +331,12 @@ export default function TicketNotesPanel({
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Add internal note..."
         />
+
+        <div className="notes-compose-meta">
+          <div className="muted" style={{ fontSize: 12 }}>
+            {draft.trim().length}/{MAX_NOTE_LENGTH}
+          </div>
+        </div>
 
         <div className="notes-template-row">
           {quickTemplates.map((template) => (
@@ -516,6 +537,11 @@ export default function TicketNotesPanel({
           letter-spacing: 0.08em;
           text-transform: uppercase;
           color: var(--muted, #9fb0c3);
+        }
+
+        .notes-compose-meta {
+          display: flex;
+          justify-content: flex-end;
         }
 
         .notes-template-row {
