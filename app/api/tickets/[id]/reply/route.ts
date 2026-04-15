@@ -9,6 +9,7 @@ export const revalidate = 0;
 const MAX_MESSAGE_LENGTH = 4000;
 const DISCORD_MESSAGE_LIMIT = 2000;
 const MAX_ATTACHMENTS = 10;
+const CLOSED_STATUSES = new Set(["closed", "deleted"]);
 
 type RefreshedTokens = unknown;
 
@@ -44,6 +45,10 @@ type TicketRow = {
   channel_id?: string | null;
   discord_thread_id?: string | null;
   channel_name?: string | null;
+  status?: string | null;
+  claimed_by?: string | null;
+  assigned_to?: string | null;
+  updated_at?: string | null;
 };
 
 type TicketMessageRow = {
@@ -153,7 +158,23 @@ function mapTicketMessage(row: TicketMessageRow) {
   };
 }
 
-async function fetchTicketOrNull(supabase: ReturnType<typeof createServerSupabase>, ticketId: string) {
+function getTicketChannelId(ticket: TicketRow | null | undefined): string {
+  return normalizeString(ticket?.channel_id || ticket?.discord_thread_id);
+}
+
+function getTicketStatus(ticket: TicketRow | null | undefined): string {
+  return normalizeString(ticket?.status).toLowerCase();
+}
+
+function ticketIsReplyable(ticket: TicketRow | null | undefined): boolean {
+  const status = getTicketStatus(ticket);
+  return !CLOSED_STATUSES.has(status);
+}
+
+async function fetchTicketOrNull(
+  supabase: ReturnType<typeof createServerSupabase>,
+  ticketId: string
+) {
   const { data, error } = await supabase
     .from("tickets")
     .select("*")
@@ -219,7 +240,7 @@ async function postDiscordMessage(channelId: string, content: string) {
   const token = process.env.DISCORD_TOKEN || env?.discordToken || "";
 
   if (!token || !channelId || !content) {
-    return { ok: false, error: "Missing Discord token, channel, or content." };
+    return { ok: false as const, error: "Missing Discord token, channel, or content." };
   }
 
   try {
@@ -240,15 +261,15 @@ async function postDiscordMessage(channelId: string, content: string) {
 
     if (!response.ok) {
       return {
-        ok: false,
+        ok: false as const,
         error: normalizeString(json?.message) || `Discord API error ${response.status}`,
       };
     }
 
-    return { ok: true, data: json as DiscordMessageResponse };
+    return { ok: true as const, data: json as DiscordMessageResponse };
   } catch (error) {
     return {
-      ok: false,
+      ok: false as const,
       error: error instanceof Error ? error.message : "Failed to reach Discord API.",
     };
   }
@@ -262,7 +283,7 @@ async function mirrorReplyToDiscord(args: {
 }) {
   const { ticket, actorName, message, attachments } = args;
 
-  const channelId = normalizeString(ticket?.channel_id || ticket?.discord_thread_id);
+  const channelId = getTicketChannelId(ticket);
   if (!channelId) {
     return {
       mirroredToDiscord: false,
@@ -315,7 +336,7 @@ async function insertDashboardStaffMessages(
   discordMessages: DiscordMessageResponse[]
 ) {
   const guildId = normalizeString(ticket?.guild_id || env?.guildId || "");
-  const channelId = normalizeString(ticket?.channel_id || ticket?.discord_thread_id);
+  const channelId = getTicketChannelId(ticket);
 
   if (!guildId || !channelId || !safeArray(discordMessages).length) return;
 
@@ -377,8 +398,9 @@ async function createActivityFeedEvent(
   const metadata = {
     ticket_id: ticket?.id || null,
     ticket_number: ticket?.ticket_number || null,
-    channel_id: ticket?.channel_id || ticket?.discord_thread_id || null,
+    channel_id: getTicketChannelId(ticket) || null,
     channel_name: ticket?.channel_name || null,
+    ticket_status: ticket?.status || null,
     attachment_count: attachments.length,
     attachments,
     mirrored_to_discord: mirroredToDiscord,
@@ -397,7 +419,7 @@ async function createActivityFeedEvent(
       actor_name: actorName || null,
       target_user_id: normalizeString(ticket?.user_id) || null,
       target_name: normalizeString(ticket?.username) || null,
-      channel_id: ticket?.channel_id || ticket?.discord_thread_id || null,
+      channel_id: getTicketChannelId(ticket) || null,
       channel_name: ticket?.channel_name || null,
       ticket_id: ticket?.id || null,
       related_table: "ticket_messages",
@@ -414,6 +436,7 @@ async function createActivityFeedEvent(
         ticket?.username,
         ticket?.user_id,
         ticket?.channel_name,
+        ticket?.status,
         message,
       ]
         .filter(Boolean)
@@ -425,17 +448,30 @@ async function createActivityFeedEvent(
   }
 }
 
-async function bumpTicketUpdatedAt(
+async function bumpTicketFreshness(
   supabase: ReturnType<typeof createServerSupabase>,
-  ticketId: string
+  ticket: TicketRow
 ) {
+  const ticketId = normalizeString(ticket?.id);
+  if (!ticketId) return;
+
   try {
     await supabase
       .from("tickets")
-      .update({ updated_at: new Date().toISOString() })
+      .update({
+        updated_at: new Date().toISOString(),
+        last_activity_at: new Date().toISOString(),
+      })
       .eq("id", ticketId);
   } catch {
-    // best-effort only
+    try {
+      await supabase
+        .from("tickets")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", ticketId);
+    } catch {
+      // best-effort only
+    }
   }
 }
 
@@ -488,6 +524,14 @@ export async function POST(
       );
     }
 
+    if (!ticketIsReplyable(ticket)) {
+      return buildJsonResponse(
+        { error: `Cannot reply to a ${getTicketStatus(ticket) || "closed"} ticket.` },
+        409,
+        refreshedTokens
+      );
+    }
+
     const { actorId, actorName } = getActorIdentity(session as SessionLike);
 
     const { data, error } = await supabase
@@ -520,7 +564,7 @@ export async function POST(
     });
 
     await Promise.allSettled([
-      bumpTicketUpdatedAt(supabase, ticketId),
+      bumpTicketFreshness(supabase, ticket),
       createAuditEvent(supabase, ticketId, actorName, truncateText(message, 180)),
       createActivityFeedEvent(
         supabase,
