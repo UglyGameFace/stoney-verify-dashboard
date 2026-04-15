@@ -1,20 +1,6 @@
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
-import {
-  assignTicketAction,
-  closeTicketAction,
-  copyTextToClipboard,
-  deleteTicketAction,
-  getTicketTranscriptState,
-  reopenTicketAction,
-  syncSingleTicketAction,
-} from "@/lib/dashboardActions";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 type TicketCategory = {
   id?: string;
@@ -54,6 +40,7 @@ type TicketLike = {
   closed_at?: string | null;
   deleted_at?: string | null;
   deleted_by?: string | null;
+  deleted_by_name?: string | null;
   transcript_url?: string | null;
   transcript_message_id?: string | null;
   transcript_channel_id?: string | null;
@@ -87,26 +74,25 @@ type TicketControlsProps = {
 
 type ActionState =
   | "idle"
-  | "assigning"
+  | "claiming"
+  | "unclaiming"
   | "closing"
   | "reopening"
   | "deleting"
   | "saving-category"
-  | "syncing-ticket";
+  | "syncing-ticket"
+  | "transferring";
 
 type PanelName =
   | "workflow"
   | "repair"
   | "category"
+  | "transfer"
   | "transcript"
   | "close"
   | "delete";
 
 const MOBILE_LAYOUT_MAX_WIDTH = 1023;
-
-function getChannelId(ticket: TicketLike): string {
-  return String(ticket.channel_id || ticket.discord_thread_id || "").trim();
-}
 
 function normalizeBoolean(value: unknown): boolean {
   return value === true;
@@ -154,7 +140,38 @@ function getStatusTone(status?: string | null): string {
   if (value === "claimed") return "claimed";
   if (value === "closed") return "medium";
   if (value === "deleted") return "danger";
+  if (value === "high") return "danger";
+  if (value === "urgent") return "danger";
+  if (value === "medium") return "medium";
+  if (value === "low") return "claimed";
   return "";
+}
+
+function sortCategories(categories: TicketCategory[]): TicketCategory[] {
+  return [...categories].sort((a, b) => {
+    const sortA = Number(a?.sort_order ?? 9999);
+    const sortB = Number(b?.sort_order ?? 9999);
+
+    if (sortA !== sortB) return sortA - sortB;
+    if (Boolean(b?.is_default) !== Boolean(a?.is_default)) {
+      return b?.is_default ? 1 : -1;
+    }
+
+    return String(a?.name || "").localeCompare(String(b?.name || ""));
+  });
+}
+
+function buildTranscriptExportUrl(
+  ticketId: string,
+  format?: "html" | "txt" | "json"
+): string {
+  const base = `/api/tickets/${encodeURIComponent(ticketId)}/transcript`;
+  if (!format || format === "html") return base;
+  return `${base}?format=${format}`;
+}
+
+function getChannelId(ticket: TicketLike): string {
+  return String(ticket.channel_id || ticket.discord_thread_id || "").trim();
 }
 
 function getCurrentCategoryId(ticket: TicketLike): string {
@@ -183,29 +200,6 @@ function getCurrentCategorySlug(ticket: TicketLike): string {
     normalizeString(ticket.category) ||
     "—"
   );
-}
-
-function sortCategories(categories: TicketCategory[]): TicketCategory[] {
-  return [...categories].sort((a, b) => {
-    const sortA = Number(a?.sort_order ?? 9999);
-    const sortB = Number(b?.sort_order ?? 9999);
-
-    if (sortA !== sortB) return sortA - sortB;
-    if (Boolean(b?.is_default) !== Boolean(a?.is_default)) {
-      return b?.is_default ? 1 : -1;
-    }
-
-    return String(a?.name || "").localeCompare(String(b?.name || ""));
-  });
-}
-
-function buildTranscriptExportUrl(
-  ticketId: string,
-  format?: "html" | "txt" | "json"
-): string {
-  const base = `/api/tickets/${encodeURIComponent(ticketId)}/transcript`;
-  if (!format || format === "html") return base;
-  return `${base}?format=${format}`;
 }
 
 function getClaimedById(ticket: TicketLike): string {
@@ -260,12 +254,28 @@ function getQueueStateLabel(ticket: TicketLike): string {
   return safeText(ticket.status, "unknown");
 }
 
-function getRiskTone(value?: string | null): string {
-  const risk = normalizeString(value).toLowerCase();
-  if (risk === "high") return "danger";
-  if (risk === "medium") return "medium";
-  if (risk === "low") return "claimed";
-  return "";
+function getTranscriptState(ticket: TicketLike) {
+  const transcriptUrl = normalizeString(ticket.transcript_url);
+  const transcriptMessageId = normalizeString(ticket.transcript_message_id);
+  const transcriptChannelId = normalizeString(ticket.transcript_channel_id);
+  const hasTranscript = Boolean(
+    transcriptUrl || transcriptMessageId || transcriptChannelId
+  );
+
+  const status = normalizeStatus(ticket.status);
+  const transcriptState = hasTranscript
+    ? "available"
+    : status === "closed" || status === "deleted"
+      ? "expected_missing"
+      : "not_ready";
+
+  return {
+    transcriptUrl,
+    transcriptMessageId,
+    transcriptChannelId,
+    hasTranscript,
+    transcriptState,
+  };
 }
 
 function ActionAccordion({
@@ -318,6 +328,37 @@ function ActionAccordion({
   );
 }
 
+async function copyTextToClipboard(value: string) {
+  const clean = normalizeString(value);
+  if (!clean) return { ok: false as const, error: "Nothing to copy." };
+
+  try {
+    await navigator.clipboard.writeText(clean);
+    return { ok: true as const };
+  } catch {
+    return { ok: false as const, error: "Could not copy to clipboard." };
+  }
+}
+
+async function postJson(url: string, body?: Record<string, unknown>) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store, max-age=0",
+    },
+    body: JSON.stringify(body || {}),
+  });
+
+  const json = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(json?.error || `Request failed (${res.status}).`);
+  }
+
+  return json;
+}
+
 export default function TicketControls({
   ticket,
   currentStaffId,
@@ -340,7 +381,7 @@ export default function TicketControls({
       claimed &&
       claimedById === normalizeString(currentStaffId);
 
-    const transcript = getTicketTranscriptState(ticket);
+    const transcript = getTranscriptState(ticket);
     const missingChannel = !getChannelId(ticket);
 
     return {
@@ -353,9 +394,9 @@ export default function TicketControls({
       mine,
       missingChannel,
       claimedById,
-      transcriptUrl: normalizeString(transcript.transcriptUrl),
-      transcriptMessageId: normalizeString(transcript.transcriptMessageId),
-      transcriptChannelId: normalizeString(transcript.transcriptChannelId),
+      transcriptUrl: transcript.transcriptUrl,
+      transcriptMessageId: transcript.transcriptMessageId,
+      transcriptChannelId: transcript.transcriptChannelId,
       hasTranscript: transcript.hasTranscript,
       transcriptState: transcript.transcriptState,
       currentCategoryName: getCurrentCategoryName(ticket),
@@ -384,6 +425,8 @@ export default function TicketControls({
   const [deleteReason, setDeleteReason] = useState("Deleted from dashboard");
   const [forceTranscript, setForceTranscript] = useState(false);
   const [closeReason, setCloseReason] = useState("Resolved");
+  const [transferReason, setTransferReason] = useState("Transferred by staff");
+  const [transferTarget, setTransferTarget] = useState("");
 
   const [categories, setCategories] = useState<TicketCategory[]>([]);
   const [loadingCategories, setLoadingCategories] = useState(false);
@@ -395,6 +438,7 @@ export default function TicketControls({
     workflow: true,
     repair: false,
     category: false,
+    transfer: false,
     transcript: false,
     close: false,
     delete: false,
@@ -407,12 +451,15 @@ export default function TicketControls({
     setForceTranscript(false);
     setCloseReason(normalizeString(ticket?.closed_reason) || "Resolved");
     setDeleteReason("Deleted from dashboard");
+    setTransferReason("Transferred by staff");
+    setTransferTarget("");
 
     setOpenPanels((prev) => ({
       ...prev,
       workflow: true,
       repair: derived.missingChannel,
       category: false,
+      transfer: false,
       transcript: derived.hasTranscript || derived.closed || derived.deleted,
       close: false,
       delete: false,
@@ -475,18 +522,28 @@ export default function TicketControls({
 
   const busy = actionState !== "idle";
 
-  const assignDisabled =
+  const claimDisabled =
     busy ||
-    !channelId ||
+    !ticketId ||
     !currentStaffId ||
     derived.deleted ||
     (derived.claimed && !derived.mine);
-  const closeDisabled = busy || !channelId || derived.deleted || derived.closed;
-  const reopenDisabled = busy || !channelId || derived.deleted || derived.open;
-  const deleteDisabled = busy || !channelId || derived.deleted;
+
+  const unclaimDisabled =
+    busy ||
+    !ticketId ||
+    !currentStaffId ||
+    derived.deleted ||
+    !derived.claimed;
+
+  const closeDisabled = busy || !ticketId || derived.deleted || derived.closed;
+  const reopenDisabled = busy || !ticketId || derived.deleted || derived.open;
+  const deleteDisabled = busy || !ticketId || derived.deleted;
   const syncDisabled = busy || !channelId;
   const saveCategoryDisabled =
     busy || !ticket?.id || !selectedCategoryId || loadingCategories;
+  const transferDisabled =
+    busy || !ticketId || derived.deleted || derived.closed || !transferTarget.trim();
 
   const selectedCategory = useMemo(
     () =>
@@ -533,16 +590,12 @@ export default function TicketControls({
       return;
     }
 
-    setError(
-      "error" in result && result.error
-        ? result.error
-        : "Could not copy to clipboard."
-    );
+    setError(result.error || "Could not copy to clipboard.");
   }
 
-  async function handleAssign() {
-    if (!channelId || !currentStaffId) {
-      setError("Missing channel ID or current staff ID.");
+  async function handleClaim() {
+    if (!ticketId || !currentStaffId) {
+      setError("Missing ticket ID or current staff ID.");
       return;
     }
 
@@ -552,29 +605,40 @@ export default function TicketControls({
     }
 
     clearFeedback();
-    setActionState("assigning");
+    setActionState("claiming");
 
     try {
-      const result = await assignTicketAction({
-        channelId,
-        staffId: currentStaffId,
-        requestedBy: currentStaffId,
-      });
-
-      if (!result.ok) {
-        throw new Error(result.command?.error || "Failed to assign ticket.");
-      }
-
+      await postJson(`/api/tickets/${encodeURIComponent(ticketId)}/claim`);
       setMessage(
         derived.mine
           ? "Ticket is already assigned to you."
           : derived.claimed
-            ? "Ticket assignment refreshed."
-            : "Ticket assigned."
+            ? "Ticket claim refreshed."
+            : "Ticket claimed."
       );
       await afterChange(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to assign ticket.");
+      setError(err instanceof Error ? err.message : "Failed to claim ticket.");
+    } finally {
+      setActionState("idle");
+    }
+  }
+
+  async function handleUnclaim() {
+    if (!ticketId || !currentStaffId) {
+      setError("Missing ticket ID or current staff ID.");
+      return;
+    }
+
+    clearFeedback();
+    setActionState("unclaiming");
+
+    try {
+      await postJson(`/api/tickets/${encodeURIComponent(ticketId)}/unclaim`);
+      setMessage("Ticket unclaimed.");
+      await afterChange(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to unclaim ticket.");
     } finally {
       setActionState("idle");
     }
@@ -590,21 +654,15 @@ export default function TicketControls({
     setActionState("syncing-ticket");
 
     try {
-      const result = await syncSingleTicketAction({
-        channelId,
-        dryRun,
-        staffId: currentStaffId ?? null,
-        requestedBy: currentStaffId ?? null,
+      await postJson("/api/tickets/sync-one", {
+        channel_id: channelId,
+        dry_run: dryRun,
+        requested_by: currentStaffId ?? null,
+        staff_id: currentStaffId ?? null,
       });
 
-      if (!result.ok) {
-        throw new Error(result.command?.error || "Failed to sync ticket.");
-      }
-
       setMessage(
-        dryRun
-          ? "Ticket sync preview completed."
-          : "Ticket sync completed."
+        dryRun ? "Ticket sync preview completed." : "Ticket sync completed."
       );
 
       await afterChange(true);
@@ -616,8 +674,8 @@ export default function TicketControls({
   }
 
   async function handleClose() {
-    if (!channelId) {
-      setError("Missing channel ID.");
+    if (!ticketId) {
+      setError("Missing ticket ID.");
       return;
     }
 
@@ -625,16 +683,9 @@ export default function TicketControls({
     setActionState("closing");
 
     try {
-      const result = await closeTicketAction({
-        channelId,
+      await postJson(`/api/tickets/${encodeURIComponent(ticketId)}/close`, {
         reason: closeReason.trim() || "Resolved",
-        staffId: currentStaffId ?? null,
-        requestedBy: currentStaffId ?? null,
       });
-
-      if (!result.ok) {
-        throw new Error(result.command?.error || "Failed to close ticket.");
-      }
 
       setMessage("Ticket closed.");
       setOpenPanels((prev) => ({
@@ -651,8 +702,8 @@ export default function TicketControls({
   }
 
   async function handleReopen() {
-    if (!channelId) {
-      setError("Missing channel ID.");
+    if (!ticketId) {
+      setError("Missing ticket ID.");
       return;
     }
 
@@ -660,16 +711,7 @@ export default function TicketControls({
     setActionState("reopening");
 
     try {
-      const result = await reopenTicketAction({
-        channelId,
-        staffId: currentStaffId ?? null,
-        requestedBy: currentStaffId ?? null,
-      });
-
-      if (!result.ok) {
-        throw new Error(result.command?.error || "Failed to reopen ticket.");
-      }
-
+      await postJson(`/api/tickets/${encodeURIComponent(ticketId)}/reopen`);
       setMessage("Ticket reopened.");
       await afterChange(true);
     } catch (err) {
@@ -680,8 +722,8 @@ export default function TicketControls({
   }
 
   async function handleDelete() {
-    if (!channelId) {
-      setError("Missing channel ID.");
+    if (!ticketId) {
+      setError("Missing ticket ID.");
       return;
     }
 
@@ -689,25 +731,16 @@ export default function TicketControls({
     setActionState("deleting");
 
     try {
-      const result = await deleteTicketAction({
-        channelId,
-        ghost: derived.ghost,
-        forceTranscript: derived.ghost ? forceTranscript : true,
+      await postJson(`/api/tickets/${encodeURIComponent(ticketId)}/delete`, {
         reason: deleteReason.trim() || "Deleted from dashboard",
-        staffId: currentStaffId ?? null,
-        requestedBy: currentStaffId ?? null,
       });
-
-      if (!result.ok) {
-        throw new Error(result.command?.error || "Failed to delete ticket.");
-      }
 
       setMessage(
         derived.ghost
           ? forceTranscript
-            ? "Ghost ticket deleted with transcript."
+            ? "Ghost ticket deleted with transcript metadata recorded."
             : "Ghost ticket deleted."
-          : "Ticket deleted after transcript posted."
+          : "Ticket deleted."
       );
 
       setOpenPanels((prev) => ({
@@ -718,6 +751,40 @@ export default function TicketControls({
       await afterChange(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete ticket.");
+    } finally {
+      setActionState("idle");
+    }
+  }
+
+  async function handleTransfer() {
+    if (!ticketId) {
+      setError("Missing ticket ID.");
+      return;
+    }
+
+    if (!transferTarget.trim()) {
+      setError("Enter the target staff ID.");
+      return;
+    }
+
+    clearFeedback();
+    setActionState("transferring");
+
+    try {
+      await postJson(`/api/tickets/${encodeURIComponent(ticketId)}/transfer`, {
+        assigned_to: transferTarget.trim(),
+        reason: transferReason.trim() || "Transferred by staff",
+      });
+
+      setMessage("Ticket transferred.");
+      setTransferTarget("");
+      setOpenPanels((prev) => ({
+        ...prev,
+        transfer: false,
+      }));
+      await afterChange(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to transfer ticket.");
     } finally {
       setActionState("idle");
     }
@@ -777,7 +844,7 @@ export default function TicketControls({
           <div style={{ minWidth: 0, flex: 1 }}>
             <div className="ticket-controls-header-title">Ticket Actions</div>
             <div className="muted ticket-controls-header-copy">
-              Queue ownership, repair/sync, closure, reopening, category correction,
+              Queue ownership, transfer, repair/sync, closure, reopening, category correction,
               transcript exports, and deletion without repeating the whole ticket
               summary again.
             </div>
@@ -790,7 +857,7 @@ export default function TicketControls({
             <span className={`badge ${derived.unclaimed ? "open" : derived.claimed ? "claimed" : ""}`}>
               {derived.queueStateLabel}
             </span>
-            <span className={`badge ${getRiskTone(derived.riskLevel)}`}>
+            <span className={`badge ${getStatusTone(derived.riskLevel)}`}>
               {safeText(derived.riskLevel)}
             </span>
             <span className={`badge ${getStatusTone(derived.priority)}`}>
@@ -817,16 +884,34 @@ export default function TicketControls({
           <button
             type="button"
             className="button primary"
-            disabled={assignDisabled}
-            onClick={handleAssign}
+            disabled={claimDisabled}
+            onClick={handleClaim}
           >
-            {actionState === "assigning"
-              ? "Assigning..."
+            {actionState === "claiming"
+              ? "Claiming..."
               : derived.mine
                 ? "Assigned To You"
                 : derived.claimed
                   ? "Claim Locked"
-                  : "Assign / Claim"}
+                  : "Claim"}
+          </button>
+
+          <button
+            type="button"
+            className="button ghost"
+            disabled={unclaimDisabled}
+            onClick={handleUnclaim}
+          >
+            {actionState === "unclaiming" ? "Unclaiming..." : "Unclaim"}
+          </button>
+
+          <button
+            type="button"
+            className="button ghost"
+            disabled={busy || derived.deleted || derived.closed}
+            onClick={() => openPanel("transfer")}
+          >
+            Transfer
           </button>
 
           <button
@@ -877,16 +962,12 @@ export default function TicketControls({
         <div className="ticket-controls-info-grid">
           <div className="member-detail-item">
             <div className="ticket-info-label">Member</div>
-            <div className="ticket-controls-mini-value">
-              {derived.ownerLabel}
-            </div>
+            <div className="ticket-controls-mini-value">{derived.ownerLabel}</div>
           </div>
 
           <div className="member-detail-item">
             <div className="ticket-info-label">Claimed By</div>
-            <div className="ticket-controls-mini-value">
-              {derived.claimedBy}
-            </div>
+            <div className="ticket-controls-mini-value">{derived.claimedBy}</div>
           </div>
 
           <div className="member-detail-item">
@@ -898,9 +979,7 @@ export default function TicketControls({
 
           <div className="member-detail-item">
             <div className="ticket-info-label">Queue State</div>
-            <div className="ticket-controls-mini-value">
-              {derived.queueStateLabel}
-            </div>
+            <div className="ticket-controls-mini-value">{derived.queueStateLabel}</div>
           </div>
 
           <div className="member-detail-item">
@@ -919,23 +998,17 @@ export default function TicketControls({
 
           <div className="member-detail-item">
             <div className="ticket-info-label">Priority</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(derived.priority)}
-            </div>
+            <div className="ticket-controls-mini-value">{safeText(derived.priority)}</div>
           </div>
 
           <div className="member-detail-item">
             <div className="ticket-info-label">Risk Level</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(derived.riskLevel)}
-            </div>
+            <div className="ticket-controls-mini-value">{safeText(derived.riskLevel)}</div>
           </div>
 
           <div className="member-detail-item">
             <div className="ticket-info-label">Source</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(ticket.source)}
-            </div>
+            <div className="ticket-controls-mini-value">{safeText(ticket.source)}</div>
           </div>
 
           <div className="member-detail-item">
@@ -961,9 +1034,7 @@ export default function TicketControls({
 
           <div className="member-detail-item">
             <div className="ticket-info-label">Note Count</div>
-            <div className="ticket-controls-mini-value">
-              {String(derived.noteCount)}
-            </div>
+            <div className="ticket-controls-mini-value">{String(derived.noteCount)}</div>
           </div>
 
           <div className="member-detail-item">
@@ -1247,6 +1318,55 @@ export default function TicketControls({
       </ActionAccordion>
 
       <ActionAccordion
+        title="Transfer Ticket"
+        subtitle="Move ownership fast by staff ID without forcing people through the queue again."
+        badge={<span className="badge open">Route Ready</span>}
+        open={openPanels.transfer}
+        onToggle={() => togglePanel("transfer")}
+      >
+        <div className="ticket-controls-info-grid" style={{ marginBottom: 12 }}>
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Current Owner</div>
+            <div className="ticket-controls-mini-value">
+              {derived.claimedBy}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Current Owner ID</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(derived.claimedById, "Unclaimed")}
+            </div>
+          </div>
+        </div>
+
+        <input
+          className="input"
+          value={transferTarget}
+          onChange={(e) => setTransferTarget(e.target.value)}
+          placeholder="Target staff ID"
+        />
+
+        <input
+          className="input"
+          value={transferReason}
+          onChange={(e) => setTransferReason(e.target.value)}
+          placeholder="Reason for transfer"
+        />
+
+        <div className="ticket-controls-actions">
+          <button
+            type="button"
+            className="button primary"
+            disabled={transferDisabled}
+            onClick={handleTransfer}
+          >
+            {actionState === "transferring" ? "Transferring..." : "Transfer"}
+          </button>
+        </div>
+      </ActionAccordion>
+
+      <ActionAccordion
         title="Transcript & Lifecycle"
         subtitle="Transcript links, exports, and lifecycle timestamps without repeating the hero area."
         badge={
@@ -1316,7 +1436,7 @@ export default function TicketControls({
           <div className="member-detail-item">
             <div className="ticket-info-label">Deleted By</div>
             <div className="ticket-controls-mini-value">
-              {safeText(ticket.deleted_by)}
+              {safeText(ticket.deleted_by_name || ticket.deleted_by)}
             </div>
           </div>
 
@@ -1486,11 +1606,11 @@ export default function TicketControls({
               checked={forceTranscript}
               onChange={(e) => setForceTranscript(e.target.checked)}
             />
-            <span>Post transcript before deleting this ghost ticket</span>
+            <span>Record transcript intent before deleting this ghost ticket</span>
           </label>
         ) : (
           <div className="info-banner">
-            Transcript posting is automatically required for normal tickets.
+            Transcript posting is handled by the normal close/delete workflow.
           </div>
         )}
 
@@ -1566,7 +1686,7 @@ export default function TicketControls({
 
         .ticket-primary-actions {
           display: grid;
-          grid-template-columns: repeat(5, minmax(0, 1fr));
+          grid-template-columns: repeat(7, minmax(0, 1fr));
           gap: 10px;
         }
 
