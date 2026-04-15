@@ -2,20 +2,21 @@
 
 import { useMemo, useState } from "react";
 
+type Attachment = {
+  name?: string | null;
+  url?: string | null;
+};
+
 type MessageRow = {
   id?: string | number | null;
-  source?: string | null;
-  role?: string | null;
-  author_name?: string | null;
+  ticket_id?: string | null;
   author_id?: string | null;
-  username?: string | null;
+  author_name?: string | null;
   content?: string | null;
+  message_type?: string | null;
   created_at?: string | null;
-  attachments?: Array<{
-    name?: string | null;
-    url?: string | null;
-  }> | null;
-  metadata?: Record<string, unknown> | null;
+  attachments?: Attachment[] | null;
+  source?: string | null;
 };
 
 type TicketMessageListProps = {
@@ -48,26 +49,29 @@ function safeMessages(value: unknown): MessageRow[] {
   return Array.isArray(value) ? (value as MessageRow[]) : [];
 }
 
-function getMessageTone(message: MessageRow): "staff" | "member" | "system" {
-  const role = normalizeText(message?.role);
+function safeAttachments(value: unknown): Attachment[] {
+  return Array.isArray(value) ? (value as Attachment[]) : [];
+}
+
+function getMessageBucket(message: MessageRow): Exclude<FilterMode, "all" | "with_attachments"> {
+  const type = normalizeText(message?.message_type);
   const source = normalizeText(message?.source);
-  const author = normalizeText(message?.author_name || message?.username);
+  const author = normalizeText(message?.author_name);
 
   if (
-    role.includes("staff") ||
-    source.includes("staff") ||
+    type === "staff" ||
     source.includes("dashboard") ||
-    source.includes("moderator")
+    source.includes("staff") ||
+    author.includes("staff")
   ) {
     return "staff";
   }
 
   if (
-    role.includes("member") ||
-    role.includes("user") ||
-    source.includes("member") ||
-    source.includes("discord_user") ||
-    author.includes("member")
+    type === "user" ||
+    type === "member" ||
+    source.includes("discord") ||
+    source.includes("member")
   ) {
     return "member";
   }
@@ -75,37 +79,25 @@ function getMessageTone(message: MessageRow): "staff" | "member" | "system" {
   return "system";
 }
 
-function getMessageAuthor(message: MessageRow): string {
-  return (
-    safeText(message?.author_name, "") ||
-    safeText(message?.username, "") ||
-    safeText(message?.author_id, "") ||
-    "Unknown"
-  );
+function getMessageTone(message: MessageRow): "staff" | "member" | "system" {
+  const bucket = getMessageBucket(message);
+  if (bucket === "staff") return "staff";
+  if (bucket === "member") return "member";
+  return "system";
 }
 
-function getMessageSource(message: MessageRow): string {
-  return safeText(message?.source, "system");
+function getMessageIcon(message: MessageRow): string {
+  const tone = getMessageTone(message);
+  if (tone === "staff") return "🛠️";
+  if (tone === "member") return "💬";
+  return "🧩";
 }
 
-function getAttachmentList(message: MessageRow) {
-  return Array.isArray(message?.attachments) ? message.attachments : [];
-}
-
-function getAttachmentCount(messages: MessageRow[]): number {
-  return messages.reduce((count, message) => {
-    return count + getAttachmentList(message).length;
-  }, 0);
-}
-
-function MessagePill({
-  children,
-  tone = "neutral",
-}: {
-  children: React.ReactNode;
-  tone?: "neutral" | "staff" | "member" | "system";
-}) {
-  return <span className={`message-list-pill ${tone}`}>{children}</span>;
+function truncateText(value: unknown, max = 120): string {
+  const text = safeText(value, "");
+  if (!text) return "";
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
 export default function TicketMessageList({
@@ -117,18 +109,6 @@ export default function TicketMessageList({
   const cleanedMessages = useMemo(() => safeMessages(messages), [messages]);
 
   const stats = useMemo(() => {
-    const staff = cleanedMessages.filter(
-      (message) => getMessageTone(message) === "staff"
-    ).length;
-
-    const member = cleanedMessages.filter(
-      (message) => getMessageTone(message) === "member"
-    ).length;
-
-    const system = cleanedMessages.filter(
-      (message) => getMessageTone(message) === "system"
-    ).length;
-
     const latest = [...cleanedMessages].sort((a, b) => {
       const aTime = new Date(String(a?.created_at || "")).getTime() || 0;
       const bTime = new Date(String(b?.created_at || "")).getTime() || 0;
@@ -137,11 +117,12 @@ export default function TicketMessageList({
 
     return {
       total: cleanedMessages.length,
-      staff,
-      member,
-      system,
-      attachments: getAttachmentCount(cleanedMessages),
       latestAt: latest?.created_at || null,
+      staff: cleanedMessages.filter((message) => getMessageBucket(message) === "staff").length,
+      member: cleanedMessages.filter((message) => getMessageBucket(message) === "member").length,
+      attachments: cleanedMessages.filter(
+        (message) => safeAttachments(message?.attachments).length > 0
+      ).length,
     };
   }, [cleanedMessages]);
 
@@ -149,25 +130,27 @@ export default function TicketMessageList({
     const query = normalizeText(search);
 
     return cleanedMessages.filter((message) => {
-      const tone = getMessageTone(message);
-      const attachments = getAttachmentList(message);
+      const bucket = getMessageBucket(message);
+      const hasAttachments = safeAttachments(message?.attachments).length > 0;
 
-      if (filterMode === "staff" && tone !== "staff") return false;
-      if (filterMode === "member" && tone !== "member") return false;
-      if (filterMode === "system" && tone !== "system") return false;
-      if (filterMode === "with_attachments" && attachments.length === 0) {
-        return false;
-      }
+      if (filterMode === "staff" && bucket !== "staff") return false;
+      if (filterMode === "member" && bucket !== "member") return false;
+      if (filterMode === "system" && bucket !== "system") return false;
+      if (filterMode === "with_attachments" && !hasAttachments) return false;
 
       if (!query) return true;
 
       const haystack = [
         message?.author_name,
         message?.author_id,
-        message?.username,
-        message?.source,
-        message?.role,
         message?.content,
+        message?.message_type,
+        message?.source,
+        message?.created_at,
+        ...safeAttachments(message?.attachments).flatMap((attachment) => [
+          attachment?.name,
+          attachment?.url,
+        ]),
       ]
         .map((value) => safeText(value, ""))
         .join(" ")
@@ -178,40 +161,13 @@ export default function TicketMessageList({
   }, [cleanedMessages, filterMode, search]);
 
   return (
-    <div className="card ticket-message-panel">
-      <div
-        className="row"
-        style={{
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          gap: 12,
-          flexWrap: "wrap",
-          marginBottom: 14,
-        }}
-      >
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <h2 style={{ marginTop: 0, marginBottom: 6 }}>Transcript Messages</h2>
-          <div className="muted" style={{ overflowWrap: "anywhere" }}>
-            Full ticket conversation history from dashboard, member, and system
-            sources.
-          </div>
-        </div>
-
-        <div className="message-list-pills">
-          <MessagePill tone="system">{stats.total} total</MessagePill>
-          <MessagePill tone="staff">{stats.staff} staff</MessagePill>
-          <MessagePill tone="member">{stats.member} member</MessagePill>
-          <MessagePill tone="system">{stats.system} system</MessagePill>
-          <MessagePill tone="system">{stats.attachments} attachments</MessagePill>
-        </div>
-      </div>
-
+    <div className="message-list-shell">
       <div className="message-toolbar">
         <input
           className="input"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search transcript..."
+          placeholder="Search messages..."
         />
 
         <select
@@ -220,27 +176,42 @@ export default function TicketMessageList({
           onChange={(e) => setFilterMode(e.target.value as FilterMode)}
         >
           <option value="all">All Messages</option>
-          <option value="staff">Staff Only</option>
-          <option value="member">Member Only</option>
-          <option value="system">System Only</option>
+          <option value="staff">Staff Replies</option>
+          <option value="member">Member Messages</option>
+          <option value="system">System / Other</option>
           <option value="with_attachments">With Attachments</option>
         </select>
       </div>
 
       <div className="message-stats-grid">
         <div className="message-stat-card">
-          <div className="message-stat-label">Visible Messages</div>
+          <div className="message-stat-label">Visible</div>
           <div className="message-stat-value">{filteredMessages.length}</div>
         </div>
 
         <div className="message-stat-card">
-          <div className="message-stat-label">Latest Message</div>
-          <div className="message-stat-value">{formatDateTime(stats.latestAt)}</div>
+          <div className="message-stat-label">Total</div>
+          <div className="message-stat-value">{stats.total}</div>
         </div>
 
         <div className="message-stat-card">
-          <div className="message-stat-label">Attachment Count</div>
+          <div className="message-stat-label">Staff</div>
+          <div className="message-stat-value">{stats.staff}</div>
+        </div>
+
+        <div className="message-stat-card">
+          <div className="message-stat-label">Member</div>
+          <div className="message-stat-value">{stats.member}</div>
+        </div>
+
+        <div className="message-stat-card">
+          <div className="message-stat-label">Attachments</div>
           <div className="message-stat-value">{stats.attachments}</div>
+        </div>
+
+        <div className="message-stat-card">
+          <div className="message-stat-label">Latest</div>
+          <div className="message-stat-value">{formatDateTime(stats.latestAt)}</div>
         </div>
       </div>
 
@@ -255,74 +226,75 @@ export default function TicketMessageList({
 
         {filteredMessages.map((message, index) => {
           const tone = getMessageTone(message);
-          const attachments = getAttachmentList(message);
+          const attachments = safeAttachments(message?.attachments);
 
           return (
             <div
               key={String(message?.id || `${message?.created_at || "message"}-${index}`)}
-              className={`message-item-card ${tone}`}
+              className={`message-thread-card ${tone}`}
             >
-              <div
-                className="row"
-                style={{
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  gap: 10,
-                  flexWrap: "wrap",
-                }}
-              >
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div className="message-item-head">
-                    <div className="message-item-author">
-                      {getMessageAuthor(message)}
-                    </div>
-
-                    <MessagePill tone={tone}>
-                      {tone === "staff"
-                        ? "Staff"
-                        : tone === "member"
-                          ? "Member"
-                          : "System"}
-                    </MessagePill>
-
-                    <span className="message-item-source">
-                      {getMessageSource(message)}
-                    </span>
+              <div className="message-thread-head">
+                <div className="message-thread-head-left">
+                  <div className={`message-thread-icon ${tone}`}>
+                    {getMessageIcon(message)}
                   </div>
 
-                  <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                    {formatDateTime(message?.created_at)}
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="message-thread-author-row">
+                      <div className="message-thread-author">
+                        {safeText(message?.author_name || message?.author_id, "Unknown")}
+                      </div>
+                      <span className={`message-kind-pill ${tone}`}>
+                        {safeText(message?.message_type, tone)}
+                      </span>
+                      {attachments.length ? (
+                        <span className="message-kind-pill attachments">
+                          {attachments.length} attachment{attachments.length === 1 ? "" : "s"}
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="message-thread-meta">
+                      <span>{safeText(message?.source, "unknown")}</span>
+                      <span>•</span>
+                      <span>{formatDateTime(message?.created_at)}</span>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="message-item-body">
+              <div className="message-thread-body">
                 {safeText(message?.content, "No message content.")}
               </div>
 
               {attachments.length ? (
-                <div className="message-attachment-list">
-                  {attachments.map((attachment, attachmentIndex) => {
-                    const url = safeText(attachment?.url, "");
-                    const name =
-                      safeText(attachment?.name, "") ||
-                      `attachment-${attachmentIndex + 1}`;
+                <div className="message-attachment-block">
+                  <div className="message-attachment-title">Attachments</div>
+                  <div className="message-attachment-list">
+                    {attachments.map((attachment, attachmentIndex) => {
+                      const name = safeText(
+                        attachment?.name,
+                        truncateText(attachment?.url, 72) || `attachment-${attachmentIndex + 1}`
+                      );
+                      const url = safeText(attachment?.url, "");
 
-                    return (
-                      <a
-                        key={`${url}-${attachmentIndex}`}
-                        href={url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="message-attachment-chip"
-                      >
-                        <span className="message-attachment-index">
-                          #{attachmentIndex + 1}
-                        </span>
-                        <span className="message-attachment-name">{name}</span>
-                      </a>
-                    );
-                  })}
+                      return (
+                        <a
+                          key={`${url}-${attachmentIndex}`}
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="message-attachment-chip"
+                          title={url}
+                        >
+                          <span className="message-attachment-index">
+                            #{attachmentIndex + 1}
+                          </span>
+                          <span className="message-attachment-name">{name}</span>
+                        </a>
+                      );
+                    })}
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -331,61 +303,21 @@ export default function TicketMessageList({
       </div>
 
       <style jsx>{`
-        .ticket-message-panel {
-          background:
-            radial-gradient(circle at top right, rgba(99,213,255,0.06), transparent 28%),
-            radial-gradient(circle at bottom left, rgba(93,255,141,0.05), transparent 24%),
-            linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)),
-            linear-gradient(180deg, rgba(14, 25, 35, 0.98), rgba(7, 13, 21, 0.98));
-        }
-
-        .message-list-pills {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-          align-items: center;
-        }
-
-        .message-list-pill {
-          display: inline-flex;
-          align-items: center;
-          min-height: 30px;
-          padding: 6px 10px;
-          border-radius: 999px;
-          font-size: 12px;
-          font-weight: 700;
-          color: #f8fafc;
-          border: 1px solid rgba(255,255,255,0.08);
-          background: rgba(255,255,255,0.04);
-        }
-
-        .message-list-pill.staff {
-          border-color: rgba(93,255,141,0.24);
-          background: rgba(93,255,141,0.08);
-        }
-
-        .message-list-pill.member {
-          border-color: rgba(99,213,255,0.22);
-          background: rgba(99,213,255,0.08);
-        }
-
-        .message-list-pill.system {
-          border-color: rgba(255,255,255,0.12);
-          background: rgba(255,255,255,0.04);
+        .message-list-shell {
+          display: grid;
+          gap: 14px;
         }
 
         .message-toolbar {
           display: grid;
           grid-template-columns: minmax(0, 1fr) 220px;
           gap: 10px;
-          margin-bottom: 14px;
         }
 
         .message-stats-grid {
           display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
+          grid-template-columns: repeat(6, minmax(0, 1fr));
           gap: 10px;
-          margin-bottom: 14px;
         }
 
         .message-stat-card {
@@ -416,9 +348,9 @@ export default function TicketMessageList({
           gap: 12px;
         }
 
-        .message-item-card {
+        .message-thread-card {
           display: grid;
-          gap: 10px;
+          gap: 12px;
           padding: 14px;
           border-radius: 18px;
           border: 1px solid rgba(255,255,255,0.06);
@@ -427,41 +359,137 @@ export default function TicketMessageList({
             rgba(255,255,255,0.02);
         }
 
-        .message-item-card.staff {
-          border-color: rgba(93,255,141,0.16);
+        .message-thread-card.staff {
+          border-color: rgba(99,213,255,0.18);
         }
 
-        .message-item-card.member {
-          border-color: rgba(99,213,255,0.16);
+        .message-thread-card.member {
+          border-color: rgba(93,255,141,0.18);
         }
 
-        .message-item-card.system {
-          border-color: rgba(255,255,255,0.10);
+        .message-thread-card.system {
+          border-color: rgba(251,191,36,0.18);
         }
 
-        .message-item-head {
+        .message-thread-head {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+
+        .message-thread-head-left {
+          display: flex;
+          gap: 12px;
+          min-width: 0;
+          flex: 1;
+          align-items: flex-start;
+        }
+
+        .message-thread-icon {
+          width: 36px;
+          height: 36px;
+          border-radius: 999px;
+          display: grid;
+          place-items: center;
+          font-size: 15px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.04);
+          flex-shrink: 0;
+        }
+
+        .message-thread-icon.staff {
+          border-color: rgba(99,213,255,0.22);
+          background: rgba(99,213,255,0.08);
+        }
+
+        .message-thread-icon.member {
+          border-color: rgba(93,255,141,0.22);
+          background: rgba(93,255,141,0.08);
+        }
+
+        .message-thread-icon.system {
+          border-color: rgba(251,191,36,0.22);
+          background: rgba(251,191,36,0.08);
+        }
+
+        .message-thread-author-row {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+          flex-wrap: wrap;
+        }
+
+        .message-thread-author {
+          font-weight: 800;
+          color: var(--text-strong, #f8fafc);
+          overflow-wrap: anywhere;
+        }
+
+        .message-kind-pill {
+          display: inline-flex;
+          align-items: center;
+          border-radius: 999px;
+          padding: 4px 8px;
+          font-size: 11px;
+          font-weight: 700;
+          line-height: 1;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.04);
+          color: var(--text, #dbe4ee);
+        }
+
+        .message-kind-pill.staff {
+          border-color: rgba(99,213,255,0.22);
+          background: rgba(99,213,255,0.08);
+        }
+
+        .message-kind-pill.member {
+          border-color: rgba(93,255,141,0.22);
+          background: rgba(93,255,141,0.08);
+        }
+
+        .message-kind-pill.system {
+          border-color: rgba(251,191,36,0.22);
+          background: rgba(251,191,36,0.08);
+        }
+
+        .message-kind-pill.attachments {
+          border-color: rgba(168,85,247,0.22);
+          background: rgba(168,85,247,0.08);
+        }
+
+        .message-thread-meta {
+          margin-top: 4px;
           display: flex;
           gap: 8px;
           flex-wrap: wrap;
-          align-items: center;
-        }
-
-        .message-item-author {
-          font-weight: 800;
-          overflow-wrap: anywhere;
-        }
-
-        .message-item-source {
-          font-size: 12px;
           color: var(--muted, #9fb0c3);
-          overflow-wrap: anywhere;
+          font-size: 12px;
+          line-height: 1.4;
         }
 
-        .message-item-body {
+        .message-thread-body {
           white-space: pre-wrap;
           overflow-wrap: anywhere;
           line-height: 1.55;
           color: var(--text, #dbe4ee);
+        }
+
+        .message-attachment-block {
+          display: grid;
+          gap: 10px;
+          padding-top: 6px;
+          border-top: 1px solid rgba(255,255,255,0.06);
+        }
+
+        .message-attachment-title {
+          font-size: 12px;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: var(--muted, #9fb0c3);
         }
 
         .message-attachment-list {
@@ -477,8 +505,8 @@ export default function TicketMessageList({
           max-width: 100%;
           border-radius: 999px;
           padding: 7px 10px;
-          border: 1px solid rgba(99,213,255,0.14);
-          background: rgba(99,213,255,0.06);
+          border: 1px solid rgba(168,85,247,0.18);
+          background: rgba(168,85,247,0.08);
           color: var(--text, #dbe4ee);
           font-size: 12px;
           text-decoration: none;
@@ -493,8 +521,19 @@ export default function TicketMessageList({
           overflow-wrap: anywhere;
         }
 
+        @media (max-width: 980px) {
+          .message-stats-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+        }
+
         @media (max-width: 860px) {
-          .message-toolbar,
+          .message-toolbar {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        @media (max-width: 640px) {
           .message-stats-grid {
             grid-template-columns: 1fr;
           }
