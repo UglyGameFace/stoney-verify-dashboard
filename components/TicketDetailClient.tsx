@@ -303,7 +303,12 @@ function getAltField(
 
   for (const source of sources) {
     for (const key of keys) {
-      if (source && source[key] !== undefined && source[key] !== null && source[key] !== "") {
+      if (
+        source &&
+        source[key] !== undefined &&
+        source[key] !== null &&
+        source[key] !== ""
+      ) {
         return source[key];
       }
     }
@@ -353,7 +358,10 @@ function getSlaLabel(ticket: Dict): string {
   return status;
 }
 
-function transcriptExportUrl(ticketId: string, format?: "html" | "txt" | "json") {
+function transcriptExportUrl(
+  ticketId: string,
+  format?: "html" | "txt" | "json"
+) {
   const encoded = encodeURIComponent(ticketId);
   if (!format || format === "html") return `/api/tickets/${encoded}/transcript`;
   return `/api/tickets/${encoded}/transcript?format=${format}`;
