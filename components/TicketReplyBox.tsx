@@ -15,6 +15,17 @@ type ReplyResponse = {
   error?: string;
   mirroredToDiscord?: boolean;
   mirrorError?: string;
+  message?: {
+    id?: string | null;
+    ticket_id?: string | null;
+    author_id?: string | null;
+    author_name?: string | null;
+    content?: string | null;
+    message_type?: string | null;
+    attachments?: Attachment[] | null;
+    source?: string | null;
+    created_at?: string | null;
+  } | null;
 };
 
 type TicketReplyBoxProps = {
@@ -61,6 +72,18 @@ function isLikelyUrl(value: unknown): boolean {
   }
 }
 
+function parseAttachmentNameFromUrl(url: string, index: number): string {
+  try {
+    const parsed = new URL(url);
+    const pathname = parsed.pathname || "";
+    const tail = pathname.split("/").filter(Boolean).pop();
+    if (tail) return decodeURIComponent(tail);
+  } catch {
+    // ignore
+  }
+  return `attachment-${index + 1}`;
+}
+
 function parseAttachments(value: unknown): ParsedAttachments {
   const rows = String(value || "")
     .split("\n")
@@ -70,23 +93,25 @@ function parseAttachments(value: unknown): ParsedAttachments {
   const attachments: Attachment[] = [];
   const invalid: string[] = [];
 
-  rows.forEach((url, index) => {
+  rows.forEach((url) => {
     if (!isLikelyUrl(url)) {
       invalid.push(url);
       return;
     }
 
     attachments.push({
-      name: `attachment-${index + 1}`,
+      name: parseAttachmentNameFromUrl(url, attachments.length),
       url,
     });
   });
 
+  const keptAttachments = attachments.slice(0, MAX_ATTACHMENTS);
+
   return {
-    attachments: attachments.slice(0, MAX_ATTACHMENTS),
+    attachments: keptAttachments,
     invalid,
     totalEntered: rows.length,
-    trimmedCount: Math.max(0, attachments.length - MAX_ATTACHMENTS),
+    trimmedCount: Math.max(0, attachments.length - keptAttachments.length),
   };
 }
 
@@ -114,7 +139,7 @@ function AttachmentPreview({ attachments }: AttachmentPreviewProps) {
         <div key={`${item.url}-${index}`} className="attachment-preview-chip">
           <span className="attachment-preview-index">#{index + 1}</span>
           <span className="attachment-preview-url" title={item.url}>
-            {truncateText(item.url, 80)}
+            {truncateText(item.name || item.url, 80)}
           </span>
         </div>
       ))}
@@ -122,7 +147,10 @@ function AttachmentPreview({ attachments }: AttachmentPreviewProps) {
   );
 }
 
-export default function TicketReplyBox({ ticketId, onPosted }: TicketReplyBoxProps) {
+export default function TicketReplyBox({
+  ticketId,
+  onPosted,
+}: TicketReplyBoxProps) {
   const [message, setMessage] = useState<string>("");
   const [attachmentInput, setAttachmentInput] = useState<string>("");
   const [busy, setBusy] = useState<boolean>(false);
@@ -135,6 +163,7 @@ export default function TicketReplyBox({ ticketId, onPosted }: TicketReplyBoxPro
     [attachmentInput]
   );
 
+  const trimmedMessage = message.trim();
   const remainingCharacters = MAX_MESSAGE_LENGTH - message.length;
   const attachmentCount = parsedAttachments.attachments.length;
   const invalidAttachmentCount = parsedAttachments.invalid.length;
@@ -142,19 +171,24 @@ export default function TicketReplyBox({ ticketId, onPosted }: TicketReplyBoxPro
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const trimmedMessage = message.trim();
     if (!trimmedMessage) {
       setError("Reply message cannot be empty.");
+      setSuccess("");
+      setWarning("");
       return;
     }
 
     if (trimmedMessage.length > MAX_MESSAGE_LENGTH) {
       setError(`Reply is too long. Maximum ${MAX_MESSAGE_LENGTH} characters.`);
+      setSuccess("");
+      setWarning("");
       return;
     }
 
     if (invalidAttachmentCount > 0) {
       setError("One or more attachment URLs are invalid. Fix them before sending.");
+      setSuccess("");
+      setWarning("");
       return;
     }
 
@@ -171,7 +205,7 @@ export default function TicketReplyBox({ ticketId, onPosted }: TicketReplyBoxPro
           "Cache-Control": "no-store",
         },
         body: JSON.stringify({
-          message: trimmedMessage,
+          content: trimmedMessage,
           attachments: parsedAttachments.attachments,
         }),
       });
@@ -317,8 +351,8 @@ export default function TicketReplyBox({ ticketId, onPosted }: TicketReplyBoxPro
             className="button primary"
             disabled={
               busy ||
-              !message.trim() ||
-              message.trim().length > MAX_MESSAGE_LENGTH ||
+              !trimmedMessage ||
+              trimmedMessage.length > MAX_MESSAGE_LENGTH ||
               invalidAttachmentCount > 0
             }
             style={{ width: "auto", minWidth: 160 }}
