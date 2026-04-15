@@ -351,7 +351,7 @@ export default function TicketVerificationActions({
         throw new Error(json?.error || "Failed to link verification context.");
       }
 
-      setMessage(json?.message || "Verification context linked.");
+      setMessage((json as any)?.message || "Verification context linked.");
       await onChanged?.();
     } catch (err: unknown) {
       setError(getErrorMessage(err, "Failed to link verification context."));
