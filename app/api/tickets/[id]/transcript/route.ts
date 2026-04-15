@@ -92,6 +92,11 @@ type GuildMemberRow = {
   approved_by_name?: string | null;
 };
 
+type TicketMessageAttachment = {
+  name?: string | null;
+  url?: string | null;
+};
+
 type TicketMessageRow = {
   id?: string | null;
   ticket_id?: string | null;
@@ -99,7 +104,7 @@ type TicketMessageRow = {
   author_name?: string | null;
   content?: string | null;
   message_type?: string | null;
-  attachments?: Array<{ name?: string | null; url?: string | null }> | null;
+  attachments?: TicketMessageAttachment[] | null;
   source?: string | null;
   created_at?: string | null;
 };
@@ -272,8 +277,16 @@ function escapeHtml(value: unknown): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\\"/g, "&quot;")
+    .replace(/\\\"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function safeFileBase(value: string): string {
+  return normalizeString(value)
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
 }
 
 function buildJsonResponse(
@@ -284,6 +297,25 @@ function buildJsonResponse(
   const response = NextResponse.json(payload, {
     status,
     headers: {
+      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    },
+  });
+
+  applyAuthCookies(response, refreshedTokens);
+  return response;
+}
+
+function buildAttachmentResponse(
+  content: string,
+  contentType: string,
+  filename: string,
+  refreshedTokens: RefreshedTokens | null = null
+) {
+  const response = new NextResponse(content, {
+    status: 200,
+    headers: {
+      "Content-Type": contentType,
+      "Content-Disposition": `attachment; filename="${filename}"`,
       "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     },
   });
@@ -334,7 +366,7 @@ function mapTicketMessage(row: TicketMessageRow): TicketMessageRow {
     author_name: row?.author_name || "",
     content: row?.content || "",
     message_type: normalizeLower(row?.message_type || "staff") || "staff",
-    attachments: safeArray(row?.attachments),
+    attachments: safeArray<TicketMessageAttachment>(row?.attachments),
     source: row?.source || null,
     created_at: row?.created_at || null,
   };
@@ -561,7 +593,7 @@ function transcriptFileName(ticket: TicketRow): string {
       ? `ticket-${ticket.id}`
       : "ticket-transcript";
 
-  return base.replace(/[^a-zA-Z0-9._-]+/g, "-").toLowerCase();
+  return safeFileBase(base) || "ticket-transcript";
 }
 
 function buildTextTranscript(payload: TranscriptPayload): string {
@@ -578,6 +610,8 @@ function buildTextTranscript(payload: TranscriptPayload): string {
     messages,
     activity,
     workspace,
+    viewer,
+    exportedAt,
   } = payload;
 
   const lines: string[] = [];
@@ -600,6 +634,8 @@ function buildTextTranscript(payload: TranscriptPayload): string {
   lines.push(`Created: ${formatDateTime(ticket?.created_at)}`);
   lines.push(`Updated: ${formatDateTime(ticket?.updated_at)}`);
   lines.push(`Closed: ${formatDateTime(ticket?.closed_at)}`);
+  lines.push(`Exported By: ${normalizeString(viewer?.username) || "Staff"}`);
+  lines.push(`Exported At: ${formatDateTime(exportedAt)}`);
   lines.push("");
   lines.push("MEMBER CONTEXT");
   lines.push("-".repeat(44));
@@ -650,9 +686,7 @@ function buildTextTranscript(payload: TranscriptPayload): string {
       lines.push(row?.content || "");
       if (safeArray(row?.attachments).length) {
         lines.push("Attachments:");
-        safeArray<{ name?: string | null; url?: string | null }>(
-          row.attachments
-        ).forEach((attachment) => {
+        safeArray<TicketMessageAttachment>(row.attachments).forEach((attachment) => {
           const name = normalizeString(attachment?.name) || "attachment";
           const url = normalizeString(attachment?.url) || "";
           lines.push(`- ${name}: ${url}`);
@@ -766,6 +800,7 @@ function buildHtmlTranscript(payload: TranscriptPayload): string {
     activity,
     workspace,
     viewer,
+    exportedAt,
   } = payload;
 
   const ownerName =
@@ -823,7 +858,7 @@ function buildHtmlTranscript(payload: TranscriptPayload): string {
       <div class="meta full"><span class="label">Role State Reason</span><span>${escapeHtml(member?.role_state_reason || "—")}</span></div>
       <div class="meta full"><span class="label">Recommended Actions</span><span>${recommendedActions.length ? escapeHtml(recommendedActions.join(" • ")) : "None"}</span></div>
       <div class="meta"><span class="label">Exported By</span><span>${escapeHtml(viewer?.username || "Staff")}</span></div>
-      <div class="meta"><span class="label">Exported At</span><span>${escapeHtml(formatDateTime(new Date().toISOString()))}</span></div>
+      <div class="meta"><span class="label">Exported At</span><span>${escapeHtml(formatDateTime(exportedAt))}</span></div>
       <div class="meta"><span class="label">Ghost Ticket</span><span>${ticket?.is_ghost ? "yes" : "no"}</span></div>
     </div>
   `;
@@ -845,9 +880,7 @@ function buildHtmlTranscript(payload: TranscriptPayload): string {
           safeArray(row?.attachments).length
             ? `
           <div class="sublist">
-            ${safeArray<{ name?: string | null; url?: string | null }>(
-              row.attachments
-            )
+            ${safeArray<TicketMessageAttachment>(row.attachments)
               .map(
                 (attachment) =>
                   `<div>📎 <a href="${escapeHtml(attachment?.url || "")}" target="_blank" rel="noreferrer">${escapeHtml(attachment?.name || attachment?.url || "attachment")}</a></div>`
@@ -1020,7 +1053,7 @@ function buildHtmlTranscript(payload: TranscriptPayload): string {
     <section class="card hero">
       <div class="muted">Stoney Verify Ticket Transcript</div>
       <h1>${escapeHtml(ticket?.title || categoryName || "Ticket Transcript")}</h1>
-      <div class="muted">${escapeHtml(ownerName)} • ${escapeHtml(categoryName)} • exported ${escapeHtml(formatDateTime(new Date().toISOString()))}</div>
+      <div class="muted">${escapeHtml(ownerName)} • ${escapeHtml(categoryName)} • exported ${escapeHtml(formatDateTime(exportedAt))}</div>
       <div class="badges">
         ${renderBadge(ticket?.status || "unknown", normalizeLower(ticket?.status) === "closed" ? "warn" : normalizeLower(ticket?.status) === "claimed" ? "claimed" : normalizeLower(ticket?.status) === "open" ? "open" : "")}
         ${renderBadge(ticket?.priority || "medium", normalizeLower(ticket?.priority) === "urgent" || normalizeLower(ticket?.priority) === "high" ? "danger" : normalizeLower(ticket?.priority) === "medium" ? "warn" : "")}
@@ -1415,47 +1448,31 @@ export async function GET(request: Request, context: RouteContext) {
     const fileBase = transcriptFileName(ticket);
 
     if (format === "json") {
-      const response = new NextResponse(
+      return buildAttachmentResponse(
         JSON.stringify(transcriptPayload, null, 2),
-        {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json; charset=utf-8",
-            "Content-Disposition": `attachment; filename="${fileBase}.json"`,
-            "Cache-Control":
-              "no-store, no-cache, must-revalidate, max-age=0",
-          },
-        }
+        "application/json; charset=utf-8",
+        `${fileBase}.json`,
+        refreshedTokens
       );
-      applyAuthCookies(response, refreshedTokens);
-      return response;
     }
 
     if (format === "txt" || format === "text") {
       const text = buildTextTranscript(transcriptPayload);
-      const response = new NextResponse(text, {
-        status: 200,
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          "Content-Disposition": `attachment; filename="${fileBase}.txt"`,
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        },
-      });
-      applyAuthCookies(response, refreshedTokens);
-      return response;
+      return buildAttachmentResponse(
+        text,
+        "text/plain; charset=utf-8",
+        `${fileBase}.txt`,
+        refreshedTokens
+      );
     }
 
     const html = buildHtmlTranscript(transcriptPayload);
-    const response = new NextResponse(html, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/html; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${fileBase}.html"`,
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-      },
-    });
-    applyAuthCookies(response, refreshedTokens);
-    return response;
+    return buildAttachmentResponse(
+      html,
+      "text/html; charset=utf-8",
+      `${fileBase}.html`,
+      refreshedTokens
+    );
   } catch (error) {
     return buildJsonResponse(
       { error: error instanceof Error ? error.message : "Unauthorized" },
