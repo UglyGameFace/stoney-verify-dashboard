@@ -43,6 +43,34 @@ type TicketWorkspaceData = {
     minutes_overdue: number;
     minutes_until_deadline: number;
   };
+  altRisk?: {
+    source?: string;
+    score?: number;
+    level?: string;
+    reasons?: string[];
+    fingerprint?: string | null;
+    altClusterKey?: string | null;
+    altClusterSize?: number;
+    burstJoinCount?: number;
+    sameFingerprintCount?: number;
+    similarNameCount?: number;
+    sameAgeBucketCount?: number;
+    suspiciousNamePattern?: boolean;
+    repeatedCharPattern?: boolean;
+    defaultAvatar?: boolean;
+    accountAgeDays?: number | null;
+    ageBucket?: string | null;
+    digitRatio?: number;
+    underscoreRatio?: number;
+    clusterMembers?: Record<string, unknown>[];
+    suspicionFlags?: string[];
+    riskEvaluatedAt?: string | null;
+    lastJoinRiskScore?: number;
+    lastJoinRiskLevel?: string;
+    lastJoinFingerprint?: string | null;
+    altNotes?: string | null;
+  };
+  altRiskLabel?: string;
 };
 
 type TicketCounts = {
@@ -174,6 +202,34 @@ function buildFallbackTicketData(
         minutes_overdue: 0,
         minutes_until_deadline: 0,
       },
+      altRisk: {
+        source: "none",
+        score: 0,
+        level: "low",
+        reasons: [],
+        fingerprint: null,
+        altClusterKey: null,
+        altClusterSize: 0,
+        burstJoinCount: 0,
+        sameFingerprintCount: 0,
+        similarNameCount: 0,
+        sameAgeBucketCount: 0,
+        suspiciousNamePattern: false,
+        repeatedCharPattern: false,
+        defaultAvatar: false,
+        accountAgeDays: null,
+        ageBucket: null,
+        digitRatio: 0,
+        underscoreRatio: 0,
+        clusterMembers: [],
+        suspicionFlags: [],
+        riskEvaluatedAt: null,
+        lastJoinRiskScore: 0,
+        lastJoinRiskLevel: "low",
+        lastJoinFingerprint: null,
+        altNotes: null,
+      },
+      altRiskLabel: "Low Alt Risk",
     },
     counts: {
       notes: 0,
