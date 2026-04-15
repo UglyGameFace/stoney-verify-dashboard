@@ -1,42 +1,109 @@
-import { createServerSupabase } from "@/lib/supabase-server"
+import { createServerSupabase } from "@/lib/supabase-server";
 import {
   requireStaffSessionForRoute,
   applyAuthCookies,
-} from "@/lib/auth-server"
-import { env } from "@/lib/env"
+} from "@/lib/auth-server";
+import { env } from "@/lib/env";
 
-export const dynamic = "force-dynamic"
-export const revalidate = 0
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-function normalizeString(value) {
-  return String(value || "").trim()
+type RefreshedTokens = unknown;
+
+type SessionLike = {
+  user?: {
+    id?: string | null;
+    user_id?: string | null;
+    discord_id?: string | null;
+    username?: string | null;
+    name?: string | null;
+    display_name?: string | null;
+    global_name?: string | null;
+  } | null;
+  discordUser?: {
+    id?: string | null;
+    username?: string | null;
+  } | null;
+  staffUser?: {
+    id?: string | null;
+    user_id?: string | null;
+    discord_id?: string | null;
+    username?: string | null;
+    name?: string | null;
+    display_name?: string | null;
+    global_name?: string | null;
+  } | null;
+};
+
+type TicketRow = {
+  id?: string | null;
+  guild_id?: string | null;
+  user_id?: string | null;
+  username?: string | null;
+  title?: string | null;
+  status?: string | null;
+  channel_id?: string | null;
+  discord_thread_id?: string | null;
+  updated_at?: string | null;
+  closed_reason?: string | null;
+  closed_by?: string | null;
+  owner_display_name?: string | null;
+};
+
+type BotCommandInsertRow = {
+  id?: string | null;
+};
+
+type RequestBody = {
+  action?: string | null;
+  reason?: string | null;
+  role_id?: string | null;
+  staff_id?: string | null;
+};
+
+type JsonRecord = Record<string, unknown>;
+
+function normalizeString(value: unknown): string {
+  return String(value || "").trim();
 }
 
-function normalizeLower(value) {
-  return normalizeString(value).toLowerCase()
+function normalizeLower(value: unknown): string {
+  return normalizeString(value).toLowerCase();
 }
 
-function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {}
+function safeObject<T extends object = JsonRecord>(value: unknown): T {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as T)
+    : ({} as T);
 }
 
-function getSessionUser(session) {
-  return session?.user || session?.discordUser || session?.staffUser || null
+function getSessionUser(session: SessionLike | null | undefined) {
+  return session?.user || session?.discordUser || session?.staffUser || null;
 }
 
-function getStaffId(session) {
-  const user = getSessionUser(session)
+function getStaffId(session: SessionLike | null | undefined): string {
+  const user = getSessionUser(session);
+
   return normalizeString(
     user?.id ||
-      user?.user_id ||
-      user?.discord_id ||
+      (user as { user_id?: string | null })?.user_id ||
+      (user as { discord_id?: string | null })?.discord_id ||
       session?.discordUser?.id ||
       ""
-  )
+  );
 }
 
-function getStaffName(session) {
-  const user = getSessionUser(session)
+function getStaffName(session: SessionLike | null | undefined): string {
+  const user = getSessionUser(session) as
+    | {
+        global_name?: string | null;
+        display_name?: string | null;
+        username?: string | null;
+        name?: string | null;
+      }
+    | null
+    | undefined;
+
   return normalizeString(
     user?.global_name ||
       user?.display_name ||
@@ -45,112 +112,127 @@ function getStaffName(session) {
       session?.discordUser?.username ||
       env.defaultStaffName ||
       "Dashboard Staff"
-  )
+  );
 }
 
-function buildJsonResponse(data, status = 200, refreshedTokens = null) {
+function buildJsonResponse(
+  data: Record<string, unknown>,
+  status = 200,
+  refreshedTokens: RefreshedTokens | null = null
+) {
   const response = new Response(JSON.stringify(data), {
     status,
     headers: {
       "Content-Type": "application/json",
       "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     },
-  })
+  });
 
-  applyAuthCookies(response, refreshedTokens)
-  return response
+  applyAuthCookies(response, refreshedTokens);
+  return response;
 }
 
-function buildErrorResponse(message, status = 500, refreshedTokens = null) {
-  return buildJsonResponse({ error: message }, status, refreshedTokens)
+function buildErrorResponse(
+  message: string,
+  status = 500,
+  refreshedTokens: RefreshedTokens | null = null
+) {
+  return buildJsonResponse({ error: message }, status, refreshedTokens);
 }
 
-function buildCommandAction(action) {
+function buildCommandAction(action: string): string {
   switch (action) {
     case "approve":
-      return "approve_verification"
+      return "approve_verification";
     case "deny":
-      return "deny_verification"
+      return "deny_verification";
     case "remove_unverified":
-      return "remove_unverified_role"
+      return "remove_unverified_role";
     case "repost_verify_ui":
-      return "repost_verify_ui"
+      return "repost_verify_ui";
     default:
-      return ""
+      return "";
   }
 }
 
-function buildHumanMessage(action, username) {
+function buildHumanMessage(action: string, username: string): string {
   switch (action) {
     case "approve":
-      return `Verification approval queued for ${username || "member"}.`
+      return `Verification approval queued for ${username || "member"}.`;
     case "deny":
-      return `Verification denial queued for ${username || "member"}.`
+      return `Verification denial queued for ${username || "member"}.`;
     case "remove_unverified":
-      return `Unverified-role removal queued for ${username || "member"}.`
+      return `Unverified-role removal queued for ${username || "member"}.`;
     case "repost_verify_ui":
-      return `Verify UI repost queued for ${username || "member"}.`
+      return `Verify UI repost queued for ${username || "member"}.`;
     default:
-      return "Verification action queued."
+      return "Verification action queued.";
   }
 }
 
-function buildReason(action, requestedReason) {
-  const explicit = normalizeString(requestedReason)
-  if (explicit) return explicit
+function buildReason(action: string, requestedReason: unknown): string {
+  const explicit = normalizeString(requestedReason);
+  if (explicit) return explicit;
 
   switch (action) {
     case "deny":
-      return "Denied by staff review"
+      return "Denied by staff review";
     case "remove_unverified":
-      return "Unverified role cleanup requested by staff review"
+      return "Unverified role cleanup requested by staff review";
     case "repost_verify_ui":
-      return "Verify UI repost requested by staff review"
+      return "Verify UI repost requested by staff review";
     case "approve":
     default:
-      return "Approved by staff review"
+      return "Approved by staff review";
   }
 }
 
-function buildNoteLines({
-  action,
-  staffName,
-  staffId,
-  reason,
-  roleId,
-  extra,
+function buildNoteLines(args: {
+  action: string;
+  staffName: string;
+  staffId: string;
+  reason: string;
+  roleId: string;
+  extra: string[];
 }) {
   const lines = [
     "Verification action requested from dashboard.",
-    `Action: ${action}`,
-    `Staff: ${staffName} (${staffId})`,
-    `Reason: ${reason}`,
-  ]
+    `Action: ${args.action}`,
+    `Staff: ${args.staffName} (${args.staffId})`,
+    `Reason: ${args.reason}`,
+  ];
 
-  if (roleId) {
-    lines.push(`Role ID: ${roleId}`)
+  if (args.roleId) {
+    lines.push(`Role ID: ${args.roleId}`);
   }
 
-  if (Array.isArray(extra)) {
-    for (const item of extra) {
-      const line = normalizeString(item)
-      if (line) lines.push(line)
-    }
+  for (const item of args.extra) {
+    const line = normalizeString(item);
+    if (line) lines.push(line);
   }
 
-  return lines
+  return lines;
 }
 
-async function parseRequestBody(request) {
+async function parseRequestBody(request: Request): Promise<RequestBody> {
   try {
-    const body = await request.json()
-    return safeObject(body)
+    const body = await request.json();
+    return safeObject<RequestBody>(body);
   } catch {
-    return {}
+    return {};
   }
 }
 
-async function insertTicketNoteSafe(supabase, payload) {
+async function insertTicketNoteSafe(
+  supabase: ReturnType<typeof createServerSupabase>,
+  payload: {
+    ticket_id: string;
+    staff_id: string;
+    staff_name: string;
+    content: string;
+    created_at: string;
+  }
+): Promise<{ ok: true } | { ok: false; error: { message?: string } | null }> {
   const attempts = [
     {
       ticket_id: payload.ticket_id,
@@ -174,23 +256,39 @@ async function insertTicketNoteSafe(supabase, payload) {
       ticket_id: payload.ticket_id,
       content: payload.content,
     },
-  ]
+  ];
 
-  let lastError = null
+  let lastError: { message?: string } | null = null;
 
   for (const candidate of attempts) {
-    const { error } = await supabase.from("ticket_notes").insert(candidate)
+    const { error } = await supabase.from("ticket_notes").insert(candidate);
     if (!error) {
-      return { ok: true }
+      return { ok: true };
     }
-    lastError = error
+    lastError = error;
   }
 
-  return { ok: false, error: lastError }
+  return { ok: false, error: lastError };
 }
 
-async function insertActivityEventSafe(supabase, payload) {
-  const candidate = {
+async function insertActivityEventSafe(
+  supabase: ReturnType<typeof createServerSupabase>,
+  payload: {
+    guild_id: string;
+    title: string;
+    description: string;
+    event_type: string;
+    actor_user_id: string;
+    actor_name: string;
+    target_user_id: string | null;
+    target_name: string;
+    ticket_id: string;
+    channel_id: string | null;
+    metadata: JsonRecord;
+    created_at: string;
+  }
+): Promise<void> {
+  const baseCandidate = {
     guild_id: payload.guild_id,
     title: payload.title,
     description: payload.description,
@@ -205,105 +303,153 @@ async function insertActivityEventSafe(supabase, payload) {
     channel_id: payload.channel_id,
     metadata: payload.metadata || {},
     created_at: payload.created_at,
-  }
+  };
 
-  try {
-    await supabase.from("activity_feed_events").insert(candidate)
-  } catch {
-    // best-effort only
+  const attempts = [
+    baseCandidate,
+    { ...baseCandidate, metadata: undefined },
+    {
+      guild_id: payload.guild_id,
+      title: payload.title,
+      description: payload.description,
+      event_type: payload.event_type,
+      source: "dashboard_ticket_verify",
+      actor_user_id: payload.actor_user_id,
+      actor_name: payload.actor_name,
+      target_user_id: payload.target_user_id,
+      target_name: payload.target_name,
+      ticket_id: payload.ticket_id,
+      channel_id: payload.channel_id,
+      created_at: payload.created_at,
+    },
+    {
+      guild_id: payload.guild_id,
+      title: payload.title,
+      description: payload.description,
+      event_type: payload.event_type,
+      ticket_id: payload.ticket_id,
+      created_at: payload.created_at,
+    },
+  ];
+
+  for (const candidate of attempts) {
+    try {
+      const { error } = await supabase.from("activity_feed_events").insert(candidate);
+      if (!error) return;
+    } catch {
+      // best-effort only
+    }
   }
 }
 
-export async function POST(request, { params }) {
-  let refreshedTokens = null
+export async function POST(
+  request: Request,
+  context: { params: { id?: string } }
+) {
+  let refreshedTokens: RefreshedTokens | null = null;
 
   try {
-    const auth = await requireStaffSessionForRoute()
-    const session = auth?.session
-    refreshedTokens = auth?.refreshedTokens ?? null
+    const auth = await requireStaffSessionForRoute();
+    const session = auth?.session as SessionLike | undefined;
+    refreshedTokens = auth?.refreshedTokens ?? null;
 
-    const supabase = createServerSupabase()
-    const body = await parseRequestBody(request)
+    const supabase = createServerSupabase();
+    const body = await parseRequestBody(request);
 
-    const ticketId = normalizeString(params?.id)
+    const ticketId = normalizeString(context?.params?.id);
     if (!ticketId) {
-      return buildErrorResponse("Missing ticket id.", 400, refreshedTokens)
+      return buildErrorResponse("Missing ticket id.", 400, refreshedTokens);
     }
 
-    const action = normalizeLower(body?.action)
+    const action = normalizeLower(body?.action);
     const supportedActions = new Set([
       "approve",
       "deny",
       "remove_unverified",
       "repost_verify_ui",
-    ])
+    ]);
 
     if (!supportedActions.has(action)) {
       return buildErrorResponse(
         "Unsupported verification action.",
         400,
         refreshedTokens
-      )
+      );
     }
 
-    const staffId = normalizeString(body?.staff_id) || getStaffId(session)
-    const staffName = getStaffName(session)
-    const reason = buildReason(action, body?.reason)
-    const roleId = normalizeString(body?.role_id)
+    const staffId = normalizeString(body?.staff_id) || getStaffId(session);
+    const staffName = getStaffName(session);
+    const reason = buildReason(action, body?.reason);
+    const roleId = normalizeString(body?.role_id);
 
     if (!staffId) {
-      return buildErrorResponse("Missing staff identity.", 401, refreshedTokens)
+      return buildErrorResponse("Missing staff identity.", 401, refreshedTokens);
     }
 
     const { data: ticket, error: ticketError } = await supabase
       .from("tickets")
       .select("*")
       .eq("id", ticketId)
-      .single()
+      .single();
 
     if (ticketError || !ticket) {
       return buildErrorResponse(
         ticketError?.message || "Ticket not found.",
         404,
         refreshedTokens
-      )
+      );
     }
 
-    const guildId = normalizeString(env.guildId || env.discordGuildId || ticket?.guild_id || "")
+    const typedTicket = ticket as TicketRow;
+
+    const guildId = normalizeString(
+      env.guildId || env.discordGuildId || typedTicket?.guild_id || ""
+    );
     if (!guildId) {
       return buildErrorResponse(
         "Missing Discord guild id in environment.",
         500,
         refreshedTokens
-      )
+      );
     }
 
-    const userId = normalizeString(ticket?.user_id)
+    const ticketStatus = normalizeLower(typedTicket?.status);
+    if (ticketStatus === "deleted") {
+      return buildErrorResponse(
+        "Cannot run verification actions on a deleted ticket.",
+        409,
+        refreshedTokens
+      );
+    }
+
+    const userId = normalizeString(typedTicket?.user_id);
     if (!userId && action !== "repost_verify_ui") {
       return buildErrorResponse(
         "Ticket is missing user_id.",
         400,
         refreshedTokens
-      )
+      );
     }
 
-    const channelId = normalizeString(ticket?.channel_id || ticket?.discord_thread_id)
+    const channelId = normalizeString(
+      typedTicket?.channel_id || typedTicket?.discord_thread_id
+    );
     const username =
-      normalizeString(ticket?.username) ||
-      normalizeString(ticket?.owner_display_name) ||
-      normalizeString(ticket?.title) ||
-      "member"
+      normalizeString(typedTicket?.username) ||
+      normalizeString(typedTicket?.owner_display_name) ||
+      normalizeString(typedTicket?.title) ||
+      "member";
 
-    const commandAction = buildCommandAction(action)
+    const commandAction = buildCommandAction(action);
     if (!commandAction) {
       return buildErrorResponse(
         "Could not resolve verification command.",
         400,
         refreshedTokens
-      )
+      );
     }
 
-    const nowIso = new Date().toISOString()
+    const nowIso = new Date().toISOString();
 
     const noteLines = buildNoteLines({
       action,
@@ -316,7 +462,7 @@ export async function POST(request, { params }) {
         channelId ? `Channel ID: ${channelId}` : "",
         userId ? `User ID: ${userId}` : "",
       ],
-    })
+    });
 
     const noteResult = await insertTicketNoteSafe(supabase, {
       ticket_id: ticketId,
@@ -324,13 +470,13 @@ export async function POST(request, { params }) {
       staff_name: staffName,
       content: noteLines.join("\n"),
       created_at: nowIso,
-    })
+    });
 
-    let noteWarning = null
+    let noteWarning: string | null = null;
     if (!noteResult.ok) {
       noteWarning =
         noteResult?.error?.message ||
-        "Ticket note could not be saved, but verification continued."
+        "Ticket note could not be saved, but verification continued.";
     }
 
     const commandPayload = {
@@ -350,21 +496,23 @@ export async function POST(request, { params }) {
         source: "dashboard_ticket_verify",
       },
       created_at: nowIso,
-    }
+    };
 
     const { data: commandRow, error: commandError } = await supabase
       .from("bot_commands")
       .insert(commandPayload)
       .select("id")
-      .single()
+      .single();
 
     if (commandError) {
       return buildErrorResponse(
         commandError.message || "Failed to queue verification command.",
         500,
         refreshedTokens
-      )
+      );
     }
+
+    const command = commandRow as BotCommandInsertRow | null;
 
     if (action === "deny") {
       await supabase
@@ -375,7 +523,7 @@ export async function POST(request, { params }) {
           closed_by: staffId,
           updated_at: nowIso,
         })
-        .eq("id", ticketId)
+        .eq("id", ticketId);
     }
 
     if (action === "approve") {
@@ -384,7 +532,7 @@ export async function POST(request, { params }) {
         .update({
           updated_at: nowIso,
         })
-        .eq("id", ticketId)
+        .eq("id", ticketId);
     }
 
     await insertActivityEventSafe(supabase, {
@@ -406,33 +554,33 @@ export async function POST(request, { params }) {
       ticket_id: ticketId,
       channel_id: channelId || null,
       metadata: {
-        command_id: commandRow?.id || null,
+        command_id: command?.id || null,
         action,
         role_id: roleId || null,
       },
       created_at: nowIso,
-    })
+    });
 
     return buildJsonResponse(
       {
         ok: true,
         action,
         ticketId,
-        commandId: commandRow?.id || null,
+        commandId: command?.id || null,
         noteWarning,
         message: buildHumanMessage(action, username),
       },
       200,
       refreshedTokens
-    )
+    );
   } catch (error) {
-    const status =
-      error?.status || (error?.message === "Unauthorized" ? 401 : 500)
+    const err = error as { status?: number; message?: string } | undefined;
+    const status = err?.status || (err?.message === "Unauthorized" ? 401 : 500);
 
     return buildErrorResponse(
-      error?.message || "Verification route failed.",
+      err?.message || "Verification route failed.",
       status,
       refreshedTokens
-    )
+    );
   }
 }
