@@ -8,40 +8,72 @@ export const revalidate = 0;
 
 const MAX_NOTE_LENGTH = 4000;
 
-function normalizeString(value) {
+type RefreshedTokens = unknown;
+
+type SessionLike = {
+  user?: {
+    discord_id?: string | null;
+    id?: string | null;
+    username?: string | null;
+    name?: string | null;
+  } | null;
+  discordUser?: {
+    id?: string | null;
+    username?: string | null;
+  } | null;
+};
+
+type TicketRow = {
+  id?: string | null;
+  ticket_number?: number | null;
+  guild_id?: string | null;
+  user_id?: string | null;
+  username?: string | null;
+  channel_id?: string | null;
+  discord_thread_id?: string | null;
+  channel_name?: string | null;
+  status?: string | null;
+};
+
+type TicketNoteRow = {
+  id?: string | null;
+  ticket_id?: string | null;
+  staff_id?: string | null;
+  staff_name?: string | null;
+  content?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+function normalizeString(value: unknown): string {
   return String(value || "").trim();
 }
 
-function normalizeMultiline(value) {
+function normalizeMultiline(value: unknown): string {
   return String(value || "")
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
     .trim();
 }
 
-function truncateText(value, max = 180) {
+function truncateText(value: unknown, max = 180): string {
   const text = normalizeString(value);
   if (!text) return "";
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
-function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+function safeObject<T extends object = Record<string, unknown>>(value: unknown): T {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as T)
+    : ({} as T);
 }
 
-function mapNote(row) {
-  return {
-    id: row?.id || null,
-    ticket_id: row?.ticket_id || null,
-    staff_id: row?.staff_id || null,
-    staff_name: row?.staff_name || null,
-    content: row?.content || "",
-    created_at: row?.created_at || null,
-  };
-}
-
-function buildJsonResponse(payload, status = 200, refreshedTokens = null) {
+function buildJsonResponse(
+  payload: Record<string, unknown>,
+  status = 200,
+  refreshedTokens: RefreshedTokens | null = null
+) {
   const response = NextResponse.json(payload, {
     status,
     headers: {
@@ -53,7 +85,19 @@ function buildJsonResponse(payload, status = 200, refreshedTokens = null) {
   return response;
 }
 
-function getActorIdentity(session) {
+function mapNote(row: TicketNoteRow | null | undefined) {
+  return {
+    id: row?.id || null,
+    ticket_id: row?.ticket_id || null,
+    staff_id: row?.staff_id || null,
+    staff_name: row?.staff_name || null,
+    content: row?.content || "",
+    created_at: row?.created_at || null,
+    updated_at: row?.updated_at || null,
+  };
+}
+
+function getActorIdentity(session: SessionLike | null | undefined) {
   return {
     actorId:
       normalizeString(session?.user?.discord_id) ||
@@ -64,11 +108,15 @@ function getActorIdentity(session) {
       normalizeString(session?.user?.username) ||
       normalizeString(session?.discordUser?.username) ||
       normalizeString(session?.user?.name) ||
+      env?.defaultStaffName ||
       "Dashboard Staff",
   };
 }
 
-async function fetchTicketOrNull(supabase, ticketId) {
+async function fetchTicketOrNull(
+  supabase: ReturnType<typeof createServerSupabase>,
+  ticketId: string
+): Promise<TicketRow | null> {
   const { data, error } = await supabase
     .from("tickets")
     .select("*")
@@ -76,10 +124,16 @@ async function fetchTicketOrNull(supabase, ticketId) {
     .single();
 
   if (error || !data) return null;
-  return data;
+  return data as TicketRow;
 }
 
-async function createActivityFeedEvent(supabase, ticket, actorId, actorName, noteContent) {
+async function createActivityFeedEvent(
+  supabase: ReturnType<typeof createServerSupabase>,
+  ticket: TicketRow,
+  actorId: string | null,
+  actorName: string | null,
+  noteContent: string
+): Promise<void> {
   const guildId = normalizeString(ticket?.guild_id || env?.guildId || "");
   if (!guildId) return;
 
@@ -132,7 +186,11 @@ async function createActivityFeedEvent(supabase, ticket, actorId, actorName, not
   }
 }
 
-async function createAuditEvent(supabase, ticketId, actorName) {
+async function createAuditEvent(
+  supabase: ReturnType<typeof createServerSupabase>,
+  ticketId: string,
+  actorName: string | null
+): Promise<void> {
   try {
     await supabase.from("audit_events").insert({
       title: "Staff note added",
@@ -145,22 +203,40 @@ async function createAuditEvent(supabase, ticketId, actorName) {
   }
 }
 
-async function bumpTicketUpdatedAt(supabase, ticketId) {
+async function bumpTicketUpdatedAt(
+  supabase: ReturnType<typeof createServerSupabase>,
+  ticketId: string
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+
   try {
     await supabase
       .from("tickets")
-      .update({ updated_at: new Date().toISOString() })
+      .update({
+        updated_at: nowIso,
+        last_activity_at: nowIso,
+      })
       .eq("id", ticketId);
   } catch {
-    // best-effort only
+    try {
+      await supabase
+        .from("tickets")
+        .update({ updated_at: nowIso })
+        .eq("id", ticketId);
+    } catch {
+      // best-effort only
+    }
   }
 }
 
-export async function GET(_request, { params }) {
+export async function GET(
+  _request: Request,
+  context: { params: { id?: string } }
+) {
   try {
     const { refreshedTokens } = await requireStaffSessionForRoute();
     const supabase = createServerSupabase();
-    const ticketId = normalizeString(params?.id);
+    const ticketId = normalizeString(context?.params?.id);
 
     if (!ticketId) {
       return buildJsonResponse(
@@ -196,24 +272,27 @@ export async function GET(_request, { params }) {
     return buildJsonResponse(
       {
         ok: true,
-        notes: Array.isArray(data) ? data.map(mapNote) : [],
+        notes: Array.isArray(data) ? (data as TicketNoteRow[]).map(mapNote) : [],
       },
       200,
       refreshedTokens
     );
   } catch (error) {
     return buildJsonResponse(
-      { error: error?.message || "Unauthorized" },
-      error?.message === "Unauthorized" ? 401 : 500
+      { error: error instanceof Error ? error.message : "Unauthorized" },
+      error instanceof Error && error.message === "Unauthorized" ? 401 : 500
     );
   }
 }
 
-export async function POST(request, { params }) {
+export async function POST(
+  request: Request,
+  context: { params: { id?: string } }
+) {
   try {
     const { session, refreshedTokens } = await requireStaffSessionForRoute();
     const supabase = createServerSupabase();
-    const ticketId = normalizeString(params?.id);
+    const ticketId = normalizeString(context?.params?.id);
 
     if (!ticketId) {
       return buildJsonResponse(
@@ -223,7 +302,9 @@ export async function POST(request, { params }) {
       );
     }
 
-    const body = safeObject(await request.json().catch(() => ({})));
+    const body = safeObject<{ content?: string }>(
+      await request.json().catch(() => ({}))
+    );
     const content = normalizeMultiline(body?.content);
 
     if (!content) {
@@ -251,20 +332,47 @@ export async function POST(request, { params }) {
       );
     }
 
-    const { actorId, actorName } = getActorIdentity(session);
+    const { actorId, actorName } = getActorIdentity(session as SessionLike);
+
+    const nowIso = new Date().toISOString();
 
     const insertPayload = {
       ticket_id: ticketId,
       staff_id: actorId || "",
       staff_name: actorName,
       content,
+      created_at: nowIso,
+      updated_at: nowIso,
     };
 
-    const { data, error } = await supabase
-      .from("ticket_notes")
-      .insert(insertPayload)
-      .select("*")
-      .single();
+    let data: TicketNoteRow | null = null;
+    let error: { message?: string } | null = null;
+
+    try {
+      const response = await supabase
+        .from("ticket_notes")
+        .insert(insertPayload)
+        .select("*")
+        .single();
+
+      data = (response.data as TicketNoteRow | null) || null;
+      error = response.error;
+    } catch {
+      const fallbackResponse = await supabase
+        .from("ticket_notes")
+        .insert({
+          ticket_id: ticketId,
+          staff_id: actorId || "",
+          staff_name: actorName,
+          content,
+          created_at: nowIso,
+        })
+        .select("*")
+        .single();
+
+      data = (fallbackResponse.data as TicketNoteRow | null) || null;
+      error = fallbackResponse.error;
+    }
 
     if (error || !data) {
       return buildJsonResponse(
@@ -290,8 +398,8 @@ export async function POST(request, { params }) {
     );
   } catch (error) {
     return buildJsonResponse(
-      { error: error?.message || "Unauthorized" },
-      error?.message === "Unauthorized" ? 401 : 500
+      { error: error instanceof Error ? error.message : "Unauthorized" },
+      error instanceof Error && error.message === "Unauthorized" ? 401 : 500
     );
   }
 }
