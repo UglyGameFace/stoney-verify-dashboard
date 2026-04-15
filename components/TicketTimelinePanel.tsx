@@ -64,7 +64,8 @@ function getTimelineTone(
     blob.includes("approved") ||
     blob.includes("verified") ||
     blob.includes("claim") ||
-    blob.includes("assigned")
+    blob.includes("assigned") ||
+    blob.includes("transferred")
   ) {
     return "good";
   }
@@ -82,7 +83,8 @@ function getTimelineTone(
     blob.includes("closed") ||
     blob.includes("note") ||
     blob.includes("warn") ||
-    blob.includes("resubmit")
+    blob.includes("resubmit") ||
+    blob.includes("reopen")
   ) {
     return "warn";
   }
@@ -113,6 +115,8 @@ function getTimelineIcon(item: TimelineItemRow): string {
   if (blob.includes("vc")) return "🎙️";
   if (blob.includes("token")) return "🎟️";
   if (blob.includes("claim") || blob.includes("assigned")) return "👤";
+  if (blob.includes("transfer")) return "🔁";
+  if (blob.includes("reopen")) return "🔓";
   if (blob.includes("closed")) return "🔒";
   if (blob.includes("deleted")) return "🗑️";
   if (blob.includes("ticket")) return "🎫";
@@ -154,6 +158,7 @@ function getFilterBucket(item: TimelineItemRow): FilterMode {
     blob.includes("staff") ||
     blob.includes("claim") ||
     blob.includes("assigned") ||
+    blob.includes("transfer") ||
     blob.includes("close") ||
     blob.includes("reopen") ||
     blob.includes("delete")
