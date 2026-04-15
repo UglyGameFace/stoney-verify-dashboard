@@ -8,16 +8,13 @@ type SidebarLink = {
   href: string;
   label: string;
   icon: string;
-  match:
-    | "exact"
-    | "home-section"
-    | "startsWith";
+  match: "exact" | "home-section" | "startsWith" | "ticket-detail";
 };
 
 const links: SidebarLink[] = [
   { href: "/", label: "Dashboard", icon: "🏠", match: "exact" },
   { href: "/#overview", label: "Overview", icon: "📊", match: "home-section" },
-  { href: "/#tickets", label: "Tickets", icon: "🎫", match: "home-section" },
+  { href: "/#tickets", label: "Tickets", icon: "🎫", match: "ticket-detail" },
   { href: "/#members", label: "Members", icon: "👥", match: "home-section" },
   { href: "/#categories", label: "Categories", icon: "🧩", match: "home-section" },
   {
@@ -32,6 +29,10 @@ function normalizeString(value: unknown): string {
   return String(value || "").trim();
 }
 
+function isTicketDetailPath(pathname: string): boolean {
+  return pathname === "/tickets" || pathname.startsWith("/tickets/");
+}
+
 function isLinkActive(pathname: string, link: SidebarLink): boolean {
   if (link.match === "exact") {
     return pathname === link.href;
@@ -43,6 +44,10 @@ function isLinkActive(pathname: string, link: SidebarLink): boolean {
 
   if (link.match === "home-section") {
     return pathname === "/";
+  }
+
+  if (link.match === "ticket-detail") {
+    return pathname === "/" || isTicketDetailPath(pathname);
   }
 
   return false;
