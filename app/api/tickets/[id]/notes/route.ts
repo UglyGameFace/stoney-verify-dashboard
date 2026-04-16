@@ -8,7 +8,13 @@ export const revalidate = 0;
 
 const MAX_NOTE_LENGTH = 4000;
 
-type RefreshedTokens = unknown;
+type RefreshedTokens = {
+  access_token: string;
+  token_type?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+} | null;
 
 type SessionLike = {
   user?: {
@@ -72,7 +78,7 @@ function safeObject<T extends object = Record<string, unknown>>(value: unknown):
 function buildJsonResponse(
   payload: Record<string, unknown>,
   status = 200,
-  refreshedTokens: RefreshedTokens | null = null
+  refreshedTokens: RefreshedTokens = null
 ) {
   const response = NextResponse.json(payload, {
     status,
