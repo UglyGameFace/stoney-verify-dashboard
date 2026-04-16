@@ -101,6 +101,28 @@ type QueueMode =
   | "all"
   | string;
 
+type QueueFilter =
+  | "all"
+  | "needs-attention"
+  | "unclaimed"
+  | "mine"
+  | "verification"
+  | "overdue"
+  | "high-risk"
+  | "no-notes"
+  | "ghost"
+  | "missing-channel"
+  | "closed";
+
+type SortMode =
+  | "smart"
+  | "updated"
+  | "priority"
+  | "risk"
+  | "owner"
+  | "category"
+  | "status";
+
 type TicketQueueTableProps = {
   tickets?: TicketLike[];
   currentStaffId?: string | null;
@@ -430,6 +452,16 @@ function getClaimedByLabel(ticket: TicketLike): string {
   );
 }
 
+function getClaimedById(ticket: TicketLike): string {
+  return (
+    String(ticket?.claimed_by_id || "").trim() ||
+    String(ticket?.assigned_to_id || "").trim() ||
+    String(ticket?.claimed_by || "").trim() ||
+    String(ticket?.assigned_to || "").trim() ||
+    ""
+  );
+}
+
 function getVerificationLabel(ticket: TicketLike): string {
   return (
     String(ticket?.owner_verification_label || "").trim() ||
@@ -675,6 +707,129 @@ function getQueueHeading(tickets: TicketLike[], explicitMode: QueueMode) {
     title: "Filtered Ticket View",
     subtitle: `Showing the current filtered ticket set: ${label}`,
   };
+}
+
+function isClosedLike(ticket: TicketLike): boolean {
+  const status = getStatus(ticket);
+  return status === "closed" || status === "deleted";
+}
+
+function isVerificationLike(ticket: TicketLike): boolean {
+  const intake = getDisplayedIntakeType(ticket).toLowerCase();
+  const category = getDisplayedCategoryName(ticket).toLowerCase();
+  const verificationLabel = getVerificationLabel(ticket).toLowerCase();
+
+  return (
+    intake === "verification" ||
+    category.includes("verification") ||
+    verificationLabel === "pending" ||
+    verificationLabel === "needs review" ||
+    verificationLabel === "vc in progress"
+  );
+}
+
+function isHighRisk(ticket: TicketLike): boolean {
+  return normalizeText(ticket?.risk_level) === "high";
+}
+
+function hasNoNotes(ticket: TicketLike): boolean {
+  return Number(ticket?.note_count || 0) <= 0;
+}
+
+function isMine(ticket: TicketLike, currentStaffId?: string | null): boolean {
+  const me = String(currentStaffId || "").trim();
+  if (!me) return false;
+  return getClaimedById(ticket) === me;
+}
+
+function needsAttention(ticket: TicketLike, currentStaffId?: string | null): boolean {
+  if (isClosedLike(ticket)) return false;
+  if (ticket?.overdue) return true;
+  if (ticket?.is_unclaimed) return true;
+  if (isHighRisk(ticket)) return true;
+  if (isVerificationLike(ticket)) return true;
+  if (hasMissingChannel(ticket)) return true;
+  if (hasNoNotes(ticket)) return true;
+  if (isMine(ticket, currentStaffId)) return true;
+  return false;
+}
+
+function getSortWeight(ticket: TicketLike, currentStaffId?: string | null): number {
+  let score = 0;
+
+  if (isClosedLike(ticket)) score -= 500;
+  else score += 10;
+
+  if (ticket?.overdue) score += 120;
+  if (ticket?.is_unclaimed) score += 100;
+  if (isMine(ticket, currentStaffId)) score += 85;
+  if (isHighRisk(ticket)) score += 80;
+  if (isVerificationLike(ticket)) score += 70;
+  if (hasMissingChannel(ticket)) score += 60;
+  if (hasNoNotes(ticket)) score += 35;
+  if (isGhost(ticket)) score += 15;
+
+  const priority = getPriority(ticket);
+  if (priority === "urgent") score += 90;
+  else if (priority === "high") score += 50;
+  else if (priority === "medium") score += 20;
+
+  const warnCount = Number(ticket?.owner_warn_count || 0);
+  const flagCount = Number(ticket?.owner_flag_count || 0);
+  score += Math.min(warnCount, 5) * 8;
+  score += Math.min(flagCount, 5) * 10;
+
+  const matchedScore = getCategoryScore(ticket);
+  if (matchedScore <= 0) score += 10;
+
+  return score;
+}
+
+function getUpdatedTimeMs(ticket: TicketLike): number {
+  const raw = getLatestActivityTime(ticket) || ticket?.updated_at || ticket?.created_at || "";
+  const ms = new Date(String(raw)).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function matchesSearch(ticket: TicketLike, query: string): boolean {
+  const q = normalizeText(query);
+  if (!q) return true;
+
+  const haystack = [
+    ticket?.id,
+    ticket?.channel_id,
+    ticket?.discord_thread_id,
+    ticket?.channel_name,
+    ticket?.title,
+    ticket?.username,
+    ticket?.display_name,
+    ticket?.user_id,
+    ticket?.category,
+    ticket?.raw_category,
+    ticket?.matched_category_name,
+    ticket?.matched_category_slug,
+    ticket?.matched_intake_type,
+    ticket?.claimed_by_name,
+    ticket?.assigned_to_name,
+    ticket?.owner_display_name,
+    ticket?.owner_verification_label,
+    ticket?.verification_label,
+    ticket?.risk_level,
+    ticket?.owner_entry_method,
+    ticket?.owner_verification_source,
+    ticket?.owner_invited_by_name,
+    ticket?.owner_vouched_by_name,
+    ticket?.owner_approved_by_name,
+    ticket?.latest_activity_title,
+    ticket?.latest_activity_type,
+    ticket?.mod_suggestion,
+    ticket?.closed_reason,
+    ...(Array.isArray(ticket?.recommended_actions) ? ticket.recommended_actions : []),
+  ]
+    .map((value) => String(value || "").toLowerCase())
+    .join(" ");
+
+  return haystack.includes(q);
 }
 
 function SummaryChip({ label, value, tone = "default" }: SummaryChipProps) {
@@ -1185,6 +1340,28 @@ function MobileTicketCard({
   );
 }
 
+function FilterChip({
+  label,
+  active,
+  onClick,
+  tone = "default",
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  tone?: "default" | "open" | "claimed" | "warn" | "danger";
+}) {
+  return (
+    <button
+      type="button"
+      className={`queue-filter-chip ${active ? "active" : ""} ${tone}`}
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
+}
+
 export default function TicketQueueTable({
   tickets = [],
   currentStaffId = null,
@@ -1194,12 +1371,96 @@ export default function TicketQueueTable({
   queueMode = "",
 }: TicketQueueTableProps) {
   const normalizedTickets = Array.isArray(tickets) ? tickets : [];
-  const stats = useMemo(() => getSummaryStats(normalizedTickets), [normalizedTickets]);
   const heading = useMemo(
     () => getQueueHeading(normalizedTickets, queueMode),
     [normalizedTickets, queueMode]
   );
+
   const [expandedDesktopId, setExpandedDesktopId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [queueFilter, setQueueFilter] = useState<QueueFilter>("needs-attention");
+  const [sortMode, setSortMode] = useState<SortMode>("smart");
+
+  const processedTickets = useMemo(() => {
+    const filtered = normalizedTickets.filter((ticket) => {
+      if (!matchesSearch(ticket, search)) return false;
+
+      if (queueFilter === "all") return true;
+      if (queueFilter === "needs-attention") return needsAttention(ticket, currentStaffId);
+      if (queueFilter === "unclaimed") return ticket?.is_unclaimed === true || (!isClosedLike(ticket) && !getClaimedById(ticket));
+      if (queueFilter === "mine") return isMine(ticket, currentStaffId);
+      if (queueFilter === "verification") return isVerificationLike(ticket);
+      if (queueFilter === "overdue") return ticket?.overdue === true;
+      if (queueFilter === "high-risk") return isHighRisk(ticket);
+      if (queueFilter === "no-notes") return hasNoNotes(ticket);
+      if (queueFilter === "ghost") return isGhost(ticket);
+      if (queueFilter === "missing-channel") return hasMissingChannel(ticket);
+      if (queueFilter === "closed") return isClosedLike(ticket);
+
+      return true;
+    });
+
+    const sorted = [...filtered].sort((a, b) => {
+      if (sortMode === "smart") {
+        const scoreDiff = getSortWeight(b, currentStaffId) - getSortWeight(a, currentStaffId);
+        if (scoreDiff !== 0) return scoreDiff;
+
+        const timeDiff = getUpdatedTimeMs(b) - getUpdatedTimeMs(a);
+        if (timeDiff !== 0) return timeDiff;
+
+        return getOwnerName(a).localeCompare(getOwnerName(b));
+      }
+
+      if (sortMode === "updated") {
+        return getUpdatedTimeMs(b) - getUpdatedTimeMs(a);
+      }
+
+      if (sortMode === "priority") {
+        const rank = (ticket: TicketLike) => {
+          const p = getPriority(ticket);
+          if (p === "urgent") return 4;
+          if (p === "high") return 3;
+          if (p === "medium") return 2;
+          if (p === "low") return 1;
+          return 0;
+        };
+        const diff = rank(b) - rank(a);
+        if (diff !== 0) return diff;
+        return getUpdatedTimeMs(b) - getUpdatedTimeMs(a);
+      }
+
+      if (sortMode === "risk") {
+        const rank = (ticket: TicketLike) => {
+          const r = normalizeText(ticket?.risk_level);
+          if (r === "high") return 3;
+          if (r === "medium") return 2;
+          if (r === "low") return 1;
+          return 0;
+        };
+        const diff = rank(b) - rank(a);
+        if (diff !== 0) return diff;
+        return getUpdatedTimeMs(b) - getUpdatedTimeMs(a);
+      }
+
+      if (sortMode === "owner") {
+        return getOwnerName(a).localeCompare(getOwnerName(b));
+      }
+
+      if (sortMode === "category") {
+        return getDisplayedCategoryName(a).localeCompare(getDisplayedCategoryName(b));
+      }
+
+      if (sortMode === "status") {
+        return getStatus(a).localeCompare(getStatus(b));
+      }
+
+      return 0;
+    });
+
+    return sorted;
+  }, [normalizedTickets, search, queueFilter, sortMode, currentStaffId]);
+
+  const stats = useMemo(() => getSummaryStats(processedTickets), [processedTickets]);
 
   function toggleDesktopTicket(ticketId: string) {
     setExpandedDesktopId((prev) => (prev === ticketId ? null : ticketId));
@@ -1234,7 +1495,7 @@ export default function TicketQueueTable({
           }}
         >
           <div className="muted" style={{ fontSize: 14 }}>
-            {normalizedTickets.length} ticket{normalizedTickets.length === 1 ? "" : "s"}
+            {processedTickets.length} ticket{processedTickets.length === 1 ? "" : "s"}
           </div>
 
           {createTicketUserId ? (
@@ -1249,6 +1510,98 @@ export default function TicketQueueTable({
               }
             />
           ) : null}
+        </div>
+      </div>
+
+      <div className="queue-toolbar">
+        <div className="queue-toolbar-left">
+          <input
+            className="input queue-search-input"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search owner, ticket, category, user ID, activity, invite context..."
+          />
+
+          <select
+            className="input queue-sort-select"
+            value={sortMode}
+            onChange={(e) => setSortMode(e.target.value as SortMode)}
+          >
+            <option value="smart">Smart sort</option>
+            <option value="updated">Latest activity</option>
+            <option value="priority">Priority</option>
+            <option value="risk">Risk</option>
+            <option value="owner">Owner</option>
+            <option value="category">Category</option>
+            <option value="status">Status</option>
+          </select>
+        </div>
+
+        <div className="queue-filter-row">
+          <FilterChip
+            label="Needs Attention"
+            active={queueFilter === "needs-attention"}
+            onClick={() => setQueueFilter("needs-attention")}
+            tone="danger"
+          />
+          <FilterChip
+            label="All"
+            active={queueFilter === "all"}
+            onClick={() => setQueueFilter("all")}
+          />
+          <FilterChip
+            label="Unclaimed"
+            active={queueFilter === "unclaimed"}
+            onClick={() => setQueueFilter("unclaimed")}
+            tone="open"
+          />
+          <FilterChip
+            label="Mine"
+            active={queueFilter === "mine"}
+            onClick={() => setQueueFilter("mine")}
+            tone="claimed"
+          />
+          <FilterChip
+            label="Verification"
+            active={queueFilter === "verification"}
+            onClick={() => setQueueFilter("verification")}
+            tone="claimed"
+          />
+          <FilterChip
+            label="Overdue"
+            active={queueFilter === "overdue"}
+            onClick={() => setQueueFilter("overdue")}
+            tone="danger"
+          />
+          <FilterChip
+            label="High Risk"
+            active={queueFilter === "high-risk"}
+            onClick={() => setQueueFilter("high-risk")}
+            tone="danger"
+          />
+          <FilterChip
+            label="No Notes"
+            active={queueFilter === "no-notes"}
+            onClick={() => setQueueFilter("no-notes")}
+            tone="warn"
+          />
+          <FilterChip
+            label="Ghost"
+            active={queueFilter === "ghost"}
+            onClick={() => setQueueFilter("ghost")}
+            tone="warn"
+          />
+          <FilterChip
+            label="Missing Channel"
+            active={queueFilter === "missing-channel"}
+            onClick={() => setQueueFilter("missing-channel")}
+            tone="danger"
+          />
+          <FilterChip
+            label="Closed"
+            active={queueFilter === "closed"}
+            onClick={() => setQueueFilter("closed")}
+          />
         </div>
       </div>
 
@@ -1290,16 +1643,16 @@ export default function TicketQueueTable({
         />
       </div>
 
-      {!normalizedTickets.length ? (
+      {!processedTickets.length ? (
         <div className="empty-state">
-          No tickets match the current filters.
+          No tickets match the current search and filter settings.
         </div>
       ) : null}
 
-      {!!normalizedTickets.length ? (
+      {!!processedTickets.length ? (
         <>
           <div className="ticket-mobile-list queue-mobile-stack">
-            {normalizedTickets.map((ticket, index) => (
+            {processedTickets.map((ticket, index) => (
               <MobileTicketCard
                 key={getTicketRowKey(ticket, index)}
                 ticket={ticket}
@@ -1325,7 +1678,7 @@ export default function TicketQueueTable({
                 </thead>
 
                 <tbody>
-                  {normalizedTickets.map((ticket, index) => {
+                  {processedTickets.map((ticket, index) => {
                     const ticketKey = getTicketRowKey(ticket, index);
                     const channelId = getChannelId(ticket);
                     const status = getStatus(ticket);
@@ -1378,6 +1731,9 @@ export default function TicketQueueTable({
                                   {isGhost(ticket) ? <span className="badge">Ghost</span> : null}
                                   {missingChannel ? (
                                     <span className="badge danger">Missing Channel</span>
+                                  ) : null}
+                                  {isMine(ticket, currentStaffId) ? (
+                                    <span className="badge claimed">Mine</span>
                                   ) : null}
                                 </div>
 
@@ -1526,6 +1882,83 @@ export default function TicketQueueTable({
             linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
             linear-gradient(180deg, rgba(14, 25, 35, 0.98), rgba(7, 13, 21, 0.98));
           overflow: hidden;
+        }
+
+        .queue-toolbar {
+          display: grid;
+          gap: 12px;
+          margin-bottom: 14px;
+        }
+
+        .queue-toolbar-left {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 220px;
+          gap: 10px;
+        }
+
+        .queue-search-input,
+        .queue-sort-select {
+          min-width: 0;
+        }
+
+        .queue-filter-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .queue-filter-chip {
+          appearance: none;
+          border: 1px solid rgba(255,255,255,0.08);
+          background:
+            radial-gradient(circle at top right, rgba(255,255,255,0.04), transparent 45%),
+            rgba(255,255,255,0.03);
+          color: var(--text, #dbe4ee);
+          border-radius: 999px;
+          padding: 7px 12px;
+          font-size: 12px;
+          line-height: 1.1;
+          cursor: pointer;
+          transition: border-color 0.16s ease, transform 0.16s ease, background 0.16s ease;
+        }
+
+        .queue-filter-chip:hover {
+          transform: translateY(-1px);
+        }
+
+        .queue-filter-chip.active {
+          border-color: rgba(99,213,255,0.25);
+          background:
+            radial-gradient(circle at top right, rgba(99,213,255,0.1), transparent 45%),
+            rgba(99,213,255,0.08);
+        }
+
+        .queue-filter-chip.open.active {
+          border-color: rgba(96,165,250,0.24);
+          background:
+            radial-gradient(circle at top right, rgba(96,165,250,0.12), transparent 48%),
+            rgba(96,165,250,0.08);
+        }
+
+        .queue-filter-chip.claimed.active {
+          border-color: rgba(74,222,128,0.24);
+          background:
+            radial-gradient(circle at top right, rgba(74,222,128,0.12), transparent 48%),
+            rgba(74,222,128,0.08);
+        }
+
+        .queue-filter-chip.warn.active {
+          border-color: rgba(251,191,36,0.24);
+          background:
+            radial-gradient(circle at top right, rgba(251,191,36,0.12), transparent 48%),
+            rgba(251,191,36,0.08);
+        }
+
+        .queue-filter-chip.danger.active {
+          border-color: rgba(248,113,113,0.28);
+          background:
+            radial-gradient(circle at top right, rgba(248,113,113,0.12), transparent 48%),
+            rgba(248,113,113,0.08);
         }
 
         .queue-mobile-stack {
@@ -1990,6 +2423,10 @@ export default function TicketQueueTable({
 
           .queue-ticket-time {
             text-align: left;
+          }
+
+          .queue-toolbar-left {
+            grid-template-columns: 1fr;
           }
 
           :global(.table-wrap),
