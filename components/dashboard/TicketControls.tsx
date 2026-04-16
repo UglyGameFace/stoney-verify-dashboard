@@ -102,6 +102,8 @@ type ActionState =
   | "reopening"
   | "deleting"
   | "saving-category"
+  | "clearing-category"
+  | "linking-verification-context"
   | "syncing-ticket"
   | "transferring";
 
@@ -473,6 +475,13 @@ export default function TicketControls({
 
     const transcript = getTranscriptState(ticket);
     const missingChannel = !getChannelId(ticket);
+    const manualCategory = normalizeBoolean(ticket.category_override);
+    const currentIntakeType = titleize(ticket?.matched_intake_type) || "—";
+    const shouldOfferVerificationLink =
+      currentIntakeType.toLowerCase().includes("verification") ||
+      normalizeString(ticket?.matched_category_slug).toLowerCase().includes("verification") ||
+      normalizeString(ticket?.matched_category_name).toLowerCase().includes("verification") ||
+      normalizeString(ticket?.category).toLowerCase().includes("verification");
 
     return {
       ghost,
@@ -493,7 +502,7 @@ export default function TicketControls({
       currentCategorySlug: getCurrentCategorySlug(ticket),
       currentCategoryReason: getCurrentCategoryReason(ticket),
       currentCategoryScore: Number(ticket?.matched_category_score ?? 0),
-      currentIntakeType: titleize(ticket?.matched_intake_type) || "—",
+      currentIntakeType,
       ownerLabel: getOwnerLabel(ticket),
       claimedBy: getClaimedByLabel(ticket),
       queueStateLabel: getQueueStateLabel(ticket),
@@ -516,6 +525,8 @@ export default function TicketControls({
       roleState: normalizeString(ticket?.owner_role_state) || "unknown",
       latestNoteStaff: normalizeString(ticket?.latest_note_staff_name) || "—",
       latestNoteAt: normalizeString(ticket?.latest_note_at),
+      manualCategory,
+      shouldOfferVerificationLink,
     };
   }, [ticket, currentStaffId]);
 
@@ -644,6 +655,10 @@ export default function TicketControls({
   const syncDisabled = busy || !channelId;
   const saveCategoryDisabled =
     busy || !ticket?.id || !selectedCategoryId || loadingCategories;
+  const clearCategoryDisabled =
+    busy || !ticket?.id || !derived.manualCategory;
+  const linkVerificationContextDisabled =
+    busy || !ticket?.id || !derived.shouldOfferVerificationLink;
   const transferDisabled =
     busy || !ticketId || derived.deleted || derived.closed || !transferTarget.trim();
 
@@ -939,6 +954,95 @@ export default function TicketControls({
     }
   }
 
+  async function handleClearCategoryOverride() {
+    if (!ticket?.id) {
+      setError("Missing ticket ID.");
+      return;
+    }
+
+    clearFeedback();
+    setActionState("clearing-category");
+
+    try {
+      const res = await fetch(`/api/tickets/${ticket.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store, max-age=0",
+        },
+        body: JSON.stringify({
+          action: "clear-category-override",
+        }),
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(json?.error || "Failed to clear category override.");
+      }
+
+      setMessage("Manual category override cleared.");
+      await afterChange(true);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to clear category override."
+      );
+    } finally {
+      setActionState("idle");
+    }
+  }
+
+  async function handleLinkVerificationContext() {
+    if (!ticket?.id) {
+      setError("Missing ticket ID.");
+      return;
+    }
+
+    clearFeedback();
+    setActionState("linking-verification-context");
+
+    try {
+      const categoryToUse = selectedCategory || null;
+
+      const res = await fetch(`/api/tickets/${ticket.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store, max-age=0",
+        },
+        body: JSON.stringify({
+          action: "link-verification-context",
+          category_id: categoryToUse?.id || ticket.category_id || ticket.matched_category_id || null,
+          category:
+            categoryToUse?.slug ||
+            categoryToUse?.name ||
+            ticket.category ||
+            ticket.matched_category_slug ||
+            null,
+          verification_source: "dashboard_manual_category_override",
+          entry_method: "verification_ticket",
+          entry_reason: "Verification context linked from dashboard ticket controls.",
+          approval_reason: "Dashboard staff linked verification context after category review.",
+        }),
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(json?.error || "Failed to link verification context.");
+      }
+
+      setMessage("Verification context linked to this ticket/member.");
+      await afterChange(true);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to link verification context."
+      );
+    } finally {
+      setActionState("idle");
+    }
+  }
+
   return (
     <div className={`ticket-controls ${className}`}>
       <div className="ticket-controls-header-card">
@@ -982,9 +1086,11 @@ export default function TicketControls({
             {derived.missingChannel ? (
               <span className="badge danger">Missing Channel</span>
             ) : null}
-            {normalizeBoolean(ticket.category_override) ? (
+            {derived.manualCategory ? (
               <span className="badge medium">Manual Category</span>
-            ) : null}
+            ) : (
+              <span className="badge">Auto Category</span>
+            )}
           </div>
         </div>
 
@@ -1029,6 +1135,15 @@ export default function TicketControls({
             onClick={() => openPanel("repair")}
           >
             {actionState === "syncing-ticket" ? "Syncing..." : "Repair / Sync"}
+          </button>
+
+          <button
+            type="button"
+            className="button ghost"
+            disabled={busy || !ticketId}
+            onClick={() => openPanel("category")}
+          >
+            Category
           </button>
 
           <button
@@ -1382,9 +1497,9 @@ export default function TicketControls({
 
       <ActionAccordion
         title="Category Override"
-        subtitle="Correct a bad match without duplicating the full ticket summary."
+        subtitle="Correct a bad match, clear a manual override, or link verification context."
         badge={
-          ticket?.category_override ? (
+          derived.manualCategory ? (
             <span className="badge claimed">Manual Override</span>
           ) : (
             <span className="badge">Auto Match</span>
@@ -1519,6 +1634,38 @@ export default function TicketControls({
                   : "—"}
               </div>
             </div>
+          </div>
+        ) : null}
+
+        <div className="ticket-controls-actions">
+          <button
+            type="button"
+            className="button ghost"
+            disabled={clearCategoryDisabled}
+            onClick={handleClearCategoryOverride}
+          >
+            {actionState === "clearing-category"
+              ? "Clearing..."
+              : "Clear Override"}
+          </button>
+
+          <button
+            type="button"
+            className="button ghost"
+            disabled={linkVerificationContextDisabled}
+            onClick={handleLinkVerificationContext}
+          >
+            {actionState === "linking-verification-context"
+              ? "Linking..."
+              : "Link Verification Context"}
+          </button>
+        </div>
+
+        {derived.shouldOfferVerificationLink ? (
+          <div className="info-banner">
+            This category looks verification-related. If staff manually routed it
+            to verification, you can also link verification context so member/join
+            records stay consistent.
           </div>
         ) : null}
       </ActionAccordion>
@@ -1887,7 +2034,7 @@ export default function TicketControls({
 
         .ticket-primary-actions {
           display: grid;
-          grid-template-columns: repeat(7, minmax(0, 1fr));
+          grid-template-columns: repeat(8, minmax(0, 1fr));
           gap: 10px;
         }
 
