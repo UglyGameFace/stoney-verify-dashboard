@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
 import {
   requireStaffSessionForRoute,
@@ -8,7 +9,13 @@ import { env } from "@/lib/env";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type RefreshedTokens = unknown;
+type RefreshedTokens = {
+  access_token: string;
+  token_type?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+} | null;
 
 type SessionLike = {
   user?: {
@@ -118,12 +125,11 @@ function getStaffName(session: SessionLike | null | undefined): string {
 function buildJsonResponse(
   data: Record<string, unknown>,
   status = 200,
-  refreshedTokens: RefreshedTokens | null = null
-) {
-  const response = new Response(JSON.stringify(data), {
+  refreshedTokens: RefreshedTokens = null
+): NextResponse {
+  const response = NextResponse.json(data, {
     status,
     headers: {
-      "Content-Type": "application/json",
       "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     },
   });
@@ -135,8 +141,8 @@ function buildJsonResponse(
 function buildErrorResponse(
   message: string,
   status = 500,
-  refreshedTokens: RefreshedTokens | null = null
-) {
+  refreshedTokens: RefreshedTokens = null
+): NextResponse {
   return buildJsonResponse({ error: message }, status, refreshedTokens);
 }
 
@@ -346,12 +352,12 @@ export async function POST(
   request: Request,
   context: { params: { id?: string } }
 ) {
-  let refreshedTokens: RefreshedTokens | null = null;
+  let refreshedTokens: RefreshedTokens = null;
 
   try {
     const auth = await requireStaffSessionForRoute();
     const session = auth?.session as SessionLike | undefined;
-    refreshedTokens = auth?.refreshedTokens ?? null;
+    refreshedTokens = (auth?.refreshedTokens as RefreshedTokens) ?? null;
 
     const supabase = createServerSupabase();
     const body = await parseRequestBody(request);
