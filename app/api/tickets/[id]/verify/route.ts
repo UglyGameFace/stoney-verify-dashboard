@@ -479,9 +479,9 @@ export async function POST(
     });
 
     let noteWarning: string | null = null;
-    if (!noteResult.ok) {
+    if (noteResult.ok === false) {
       noteWarning =
-        noteResult?.error?.message ||
+        noteResult.error?.message ||
         "Ticket note could not be saved, but verification continued.";
     }
 
