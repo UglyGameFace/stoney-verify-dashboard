@@ -11,7 +11,13 @@ const DISCORD_MESSAGE_LIMIT = 2000;
 const MAX_ATTACHMENTS = 10;
 const CLOSED_STATUSES = new Set(["closed", "deleted"]);
 
-type RefreshedTokens = unknown;
+type RefreshedTokens = {
+  access_token: string;
+  token_type?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+} | null;
 
 type SessionLike = {
   user?: {
@@ -98,7 +104,7 @@ function truncateText(value: unknown, max = 240): string {
 function buildJsonResponse(
   payload: Record<string, unknown>,
   status = 200,
-  refreshedTokens: RefreshedTokens | null = null
+  refreshedTokens: RefreshedTokens = null
 ) {
   const response = NextResponse.json(payload, {
     status,
