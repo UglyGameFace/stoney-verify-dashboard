@@ -2,7 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { applyAuthCookies } from "@/lib/auth-server";
 
 export type RouteBody = Record<string, unknown>;
-export type RefreshedTokens = unknown;
+
+export type DiscordTokenPayload = {
+  access_token: string;
+  token_type?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+};
+
+export type RefreshedTokens = DiscordTokenPayload | null;
 
 function normalizeString(value: unknown): string {
   if (typeof value === "string") {
@@ -125,7 +134,7 @@ export function toErrorMessage(error: unknown): string {
 export function buildRouteJson(
   payload: Record<string, unknown>,
   status = 200,
-  refreshedTokens: RefreshedTokens | null = null
+  refreshedTokens: RefreshedTokens = null
 ): NextResponse {
   const response = NextResponse.json(payload, {
     status,
@@ -141,7 +150,7 @@ export function buildRouteJson(
 }
 
 export function unauthorizedRouteResponse(
-  refreshedTokens: RefreshedTokens | null = null
+  refreshedTokens: RefreshedTokens = null
 ): NextResponse {
   return buildRouteJson(
     {
@@ -155,7 +164,7 @@ export function unauthorizedRouteResponse(
 
 export function missingFieldRouteResponse(
   fieldName: string,
-  refreshedTokens: RefreshedTokens | null = null
+  refreshedTokens: RefreshedTokens = null
 ): NextResponse {
   return buildRouteJson(
     {
