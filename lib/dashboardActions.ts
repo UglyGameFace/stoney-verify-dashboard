@@ -42,6 +42,9 @@ export type DashboardQueueTicket = {
   is_claimed?: boolean | null;
   is_ghost?: boolean | null;
   source?: string | null;
+  transcript_url?: string | null;
+  transcript_message_id?: string | null;
+  transcript_channel_id?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   closed_at?: string | null;
@@ -59,6 +62,86 @@ export type DashboardQueueResponse = {
   staff_id?: string;
   staff_name?: string;
   error?: string;
+};
+
+type CreateTicketActionInput = {
+  userId: string;
+  category?: string;
+  openingMessage?: string;
+  priority?: string;
+  parentCategoryId?: string | null;
+  staffRoleIds?: string[] | null;
+  allowDuplicate?: boolean;
+  requestedBy?: string | null;
+  staffId?: string | null;
+};
+
+type CloseTicketActionInput = {
+  channelId: string;
+  reason?: string;
+  requestedBy?: string | null;
+  staffId?: string | null;
+};
+
+type DeleteTicketActionInput = {
+  channelId: string;
+  ghost?: boolean;
+  forceTranscript?: boolean;
+  reason?: string;
+  requestedBy?: string | null;
+  staffId?: string | null;
+};
+
+type ReopenTicketActionInput = {
+  channelId: string;
+  requestedBy?: string | null;
+  staffId?: string | null;
+};
+
+type AssignTicketActionInput = {
+  channelId: string;
+  staffId: string;
+  requestedBy?: string | null;
+};
+
+type SyncMembersActionInput = {
+  requestedBy?: string | null;
+  staffId?: string | null;
+};
+
+type SyncRoleMembersActionInput = {
+  roleId: string;
+  requestedBy?: string | null;
+  staffId?: string | null;
+};
+
+type ReconcileTicketsActionInput = {
+  requestedBy?: string | null;
+  staffId?: string | null;
+  includeOpenWithMissingChannel?: boolean;
+  includeTranscriptBackfill?: boolean;
+  dryRun?: boolean;
+};
+
+type PurgeStaleTicketsActionInput = {
+  requestedBy?: string | null;
+  staffId?: string | null;
+  dryRun?: boolean;
+  olderThanMinutes?: number;
+};
+
+type SyncActiveTicketsActionInput = {
+  requestedBy?: string | null;
+  staffId?: string | null;
+  dryRun?: boolean;
+  includeClosedVisibleChannels?: boolean;
+};
+
+type SyncSingleTicketActionInput = {
+  channelId: string;
+  requestedBy?: string | null;
+  staffId?: string | null;
+  dryRun?: boolean;
 };
 
 function normalizeNullable(value: unknown): string | null {
@@ -94,6 +177,7 @@ async function postJson<T>(url: string, body: JsonObject): Promise<T> {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "Cache-Control": "no-store, max-age=0",
     },
     cache: "no-store",
     body: JSON.stringify(body),
@@ -278,17 +362,7 @@ function normalizeQueueResponse(
 }
 
 export async function createTicketAction(
-  input: {
-    userId: string;
-    category?: string;
-    openingMessage?: string;
-    priority?: string;
-    parentCategoryId?: string | null;
-    staffRoleIds?: string[] | null;
-    allowDuplicate?: boolean;
-    requestedBy?: string | null;
-    staffId?: string | null;
-  },
+  input: CreateTicketActionInput,
   options?: WaitForBotCommandOptions
 ): Promise<WaitForBotCommandResult> {
   return queueAction({
@@ -310,12 +384,7 @@ export async function createTicketAction(
 }
 
 export async function closeTicketAction(
-  input: {
-    channelId: string;
-    reason?: string;
-    requestedBy?: string | null;
-    staffId?: string | null;
-  },
+  input: CloseTicketActionInput,
   options?: WaitForBotCommandOptions
 ): Promise<WaitForBotCommandResult> {
   return queueAction({
@@ -330,14 +399,7 @@ export async function closeTicketAction(
 }
 
 export async function deleteTicketAction(
-  input: {
-    channelId: string;
-    ghost?: boolean;
-    forceTranscript?: boolean;
-    reason?: string;
-    requestedBy?: string | null;
-    staffId?: string | null;
-  },
+  input: DeleteTicketActionInput,
   options?: WaitForBotCommandOptions
 ): Promise<WaitForBotCommandResult> {
   return queueAction({
@@ -354,11 +416,7 @@ export async function deleteTicketAction(
 }
 
 export async function reopenTicketAction(
-  input: {
-    channelId: string;
-    requestedBy?: string | null;
-    staffId?: string | null;
-  },
+  input: ReopenTicketActionInput,
   options?: WaitForBotCommandOptions
 ): Promise<WaitForBotCommandResult> {
   return queueAction({
@@ -372,11 +430,7 @@ export async function reopenTicketAction(
 }
 
 export async function assignTicketAction(
-  input: {
-    channelId: string;
-    staffId: string;
-    requestedBy?: string | null;
-  },
+  input: AssignTicketActionInput,
   options?: WaitForBotCommandOptions
 ): Promise<WaitForBotCommandResult> {
   return queueAction({
@@ -393,10 +447,7 @@ export async function assignTicketAction(
 }
 
 export async function syncMembersAction(
-  input?: {
-    requestedBy?: string | null;
-    staffId?: string | null;
-  },
+  input?: SyncMembersActionInput,
   options?: WaitForBotCommandOptions
 ): Promise<WaitForBotCommandResult> {
   return queueAction({
@@ -409,10 +460,7 @@ export async function syncMembersAction(
 }
 
 export async function reconcileDepartedMembersAction(
-  input?: {
-    requestedBy?: string | null;
-    staffId?: string | null;
-  },
+  input?: SyncMembersActionInput,
   options?: WaitForBotCommandOptions
 ): Promise<WaitForBotCommandResult> {
   return queueAction({
@@ -425,11 +473,7 @@ export async function reconcileDepartedMembersAction(
 }
 
 export async function syncRoleMembersAction(
-  input: {
-    roleId: string;
-    requestedBy?: string | null;
-    staffId?: string | null;
-  },
+  input: SyncRoleMembersActionInput,
   options?: WaitForBotCommandOptions
 ): Promise<WaitForBotCommandResult> {
   return queueAction({
@@ -443,13 +487,7 @@ export async function syncRoleMembersAction(
 }
 
 export async function reconcileTicketsAction(
-  input?: {
-    requestedBy?: string | null;
-    staffId?: string | null;
-    includeOpenWithMissingChannel?: boolean;
-    includeTranscriptBackfill?: boolean;
-    dryRun?: boolean;
-  }
+  input?: ReconcileTicketsActionInput
 ): Promise<{
   ok: boolean;
   scanned: number;
@@ -471,12 +509,7 @@ export async function reconcileTicketsAction(
 }
 
 export async function purgeStaleTicketsAction(
-  input?: {
-    requestedBy?: string | null;
-    staffId?: string | null;
-    dryRun?: boolean;
-    olderThanMinutes?: number;
-  }
+  input?: PurgeStaleTicketsActionInput
 ): Promise<{
   ok: boolean;
   dryRun: boolean;
@@ -495,12 +528,7 @@ export async function purgeStaleTicketsAction(
 }
 
 export async function syncActiveTicketsAction(
-  input?: {
-    requestedBy?: string | null;
-    staffId?: string | null;
-    dryRun?: boolean;
-    includeClosedVisibleChannels?: boolean;
-  },
+  input?: SyncActiveTicketsActionInput,
   options?: WaitForBotCommandOptions
 ): Promise<WaitForBotCommandResult> {
   return queueAction({
@@ -517,12 +545,7 @@ export async function syncActiveTicketsAction(
 }
 
 export async function syncSingleTicketAction(
-  input: {
-    channelId: string;
-    requestedBy?: string | null;
-    staffId?: string | null;
-    dryRun?: boolean;
-  },
+  input: SyncSingleTicketActionInput,
   options?: WaitForBotCommandOptions
 ): Promise<WaitForBotCommandResult> {
   return queueAction({
