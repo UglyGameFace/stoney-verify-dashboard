@@ -23,11 +23,14 @@ type TicketLike = {
   title?: string | null;
   username?: string | null;
   user_id?: string | null;
+
   category?: string | null;
+  raw_category?: string | null;
   category_id?: string | null;
   category_override?: boolean | null;
   category_set_by?: string | null;
   category_set_at?: string | null;
+
   status?: string | null;
   assigned_to?: string | null;
   assigned_to_id?: string | null;
@@ -35,34 +38,53 @@ type TicketLike = {
   claimed_by?: string | null;
   claimed_by_id?: string | null;
   claimed_by_name?: string | null;
+
   closed_by?: string | null;
   closed_reason?: string | null;
   closed_at?: string | null;
   deleted_at?: string | null;
   deleted_by?: string | null;
   deleted_by_name?: string | null;
+
   transcript_url?: string | null;
   transcript_message_id?: string | null;
   transcript_channel_id?: string | null;
+
   source?: string | null;
   is_ghost?: boolean | null;
+
   matched_category_id?: string | null;
   matched_category_name?: string | null;
   matched_category_slug?: string | null;
   matched_intake_type?: string | null;
   matched_category_reason?: string | null;
   matched_category_score?: number | null;
+
   is_claimed?: boolean | null;
   is_unclaimed?: boolean | null;
+
   owner_display_name?: string | null;
   owner_username?: string | null;
   owner_user_id?: string | null;
+  owner_verification_label?: string | null;
+  owner_entry_method?: string | null;
+  owner_invited_by_name?: string | null;
+  owner_vouched_by_name?: string | null;
+  owner_approved_by_name?: string | null;
+  owner_ticket_total?: number | null;
+  owner_warn_count?: number | null;
+  owner_flag_count?: number | null;
+  owner_role_state?: string | null;
+
   risk_level?: string | null;
   note_count?: number | null;
   latest_activity_title?: string | null;
   latest_activity_at?: string | null;
+  latest_note_staff_name?: string | null;
+  latest_note_at?: string | null;
   overdue?: boolean | null;
   priority?: string | null;
+  recommended_actions?: string[] | null;
 };
 
 type TicketControlsProps = {
@@ -93,6 +115,17 @@ type PanelName =
   | "delete";
 
 const MOBILE_LAYOUT_MAX_WIDTH = 1023;
+const PLACEHOLDER_CATEGORY_VALUES = new Set([
+  "",
+  "uncategorized",
+  "unknown",
+  "none",
+  "null",
+  "undefined",
+  "no-categories",
+  "no categories",
+  "general",
+]);
 
 function normalizeBoolean(value: unknown): boolean {
   return value === true;
@@ -109,6 +142,16 @@ function normalizeStatus(value: unknown): string {
 function safeText(value: unknown, fallback = "—"): string {
   const text = String(value ?? "").trim();
   return text || fallback;
+}
+
+function titleize(value: unknown): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return raw
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
 function formatDateTime(value?: string | null): string {
@@ -134,6 +177,10 @@ function isClaimed(status?: string | null): boolean {
   return normalizeStatus(status) === "claimed";
 }
 
+function isPlaceholderCategory(value: unknown): boolean {
+  return PLACEHOLDER_CATEGORY_VALUES.has(normalizeStatus(value));
+}
+
 function getStatusTone(status?: string | null): string {
   const value = normalizeStatus(status);
   if (value === "open") return "open";
@@ -144,6 +191,11 @@ function getStatusTone(status?: string | null): string {
   if (value === "urgent") return "danger";
   if (value === "medium") return "medium";
   if (value === "low") return "claimed";
+  if (value === "verified") return "claimed";
+  if (value === "pending") return "open";
+  if (value === "needs review") return "danger";
+  if (value === "denied") return "danger";
+  if (value === "verification") return "claimed";
   return "";
 }
 
@@ -183,23 +235,35 @@ function getCurrentCategoryId(ticket: TicketLike): string {
 }
 
 function getCurrentCategoryName(ticket: TicketLike): string {
-  return (
-    normalizeString(ticket.matched_category_name) ||
-    normalizeString(ticket.category) ||
-    "Uncategorized"
-  );
+  const matchedName = normalizeString(ticket.matched_category_name);
+  const matchedSlug = normalizeString(ticket.matched_category_slug);
+  const category = normalizeString(ticket.category);
+  const rawCategory = normalizeString(ticket.raw_category);
+
+  if (matchedName && !isPlaceholderCategory(matchedName)) return titleize(matchedName);
+  if (matchedSlug && !isPlaceholderCategory(matchedSlug)) return titleize(matchedSlug);
+  if (category && !isPlaceholderCategory(category)) return titleize(category);
+  if (rawCategory && !isPlaceholderCategory(rawCategory)) return titleize(rawCategory);
+
+  const intake = normalizeString(ticket.matched_intake_type);
+  if (intake) return titleize(intake);
+
+  return "Support";
 }
 
 function getCurrentCategoryReason(ticket: TicketLike): string {
-  return normalizeString(ticket.matched_category_reason) || "No match reason";
+  const reason = normalizeString(ticket.matched_category_reason);
+  if (!reason) return "No match reason";
+  if (normalizeStatus(reason) === "no-categories") return "No match reason";
+  return reason;
 }
 
 function getCurrentCategorySlug(ticket: TicketLike): string {
-  return (
+  const slug =
     normalizeString(ticket.matched_category_slug) ||
     normalizeString(ticket.category) ||
-    "—"
-  );
+    "";
+  return slug ? titleize(slug) : "—";
 }
 
 function getClaimedById(ticket: TicketLike): string {
@@ -230,6 +294,18 @@ function getOwnerLabel(ticket: TicketLike): string {
     normalizeString(ticket.user_id) ||
     normalizeString(ticket.owner_user_id) ||
     "Unknown member"
+  );
+}
+
+function getVerificationLabel(ticket: TicketLike): string {
+  return normalizeString(ticket.owner_verification_label) || "Unknown";
+}
+
+function getEntryMethodLabel(ticket: TicketLike): string {
+  return (
+    titleize(ticket.owner_entry_method) ||
+    titleize(ticket.source) ||
+    "Unknown"
   );
 }
 
@@ -276,6 +352,20 @@ function getTranscriptState(ticket: TicketLike) {
     hasTranscript,
     transcriptState,
   };
+}
+
+function getRecommendedActions(ticket: TicketLike): string[] {
+  if (Array.isArray(ticket.recommended_actions)) {
+    return ticket.recommended_actions.filter(Boolean);
+  }
+
+  const actions: string[] = [];
+  if (ticket.is_unclaimed === true) actions.push("Claim this ticket");
+  if (ticket.overdue === true) actions.push("Respond immediately");
+  if (normalizeStatus(ticket.priority) === "urgent") actions.push("Handle urgently");
+  if (Number(ticket.note_count || 0) <= 0) actions.push("Add internal note");
+  if (!getChannelId(ticket)) actions.push("Repair missing channel");
+  return actions;
 }
 
 function ActionAccordion({
@@ -403,10 +493,12 @@ export default function TicketControls({
       currentCategorySlug: getCurrentCategorySlug(ticket),
       currentCategoryReason: getCurrentCategoryReason(ticket),
       currentCategoryScore: Number(ticket?.matched_category_score ?? 0),
-      currentIntakeType: normalizeString(ticket?.matched_intake_type) || "—",
+      currentIntakeType: titleize(ticket?.matched_intake_type) || "—",
       ownerLabel: getOwnerLabel(ticket),
       claimedBy: getClaimedByLabel(ticket),
       queueStateLabel: getQueueStateLabel(ticket),
+      verificationLabel: getVerificationLabel(ticket),
+      entryMethodLabel: getEntryMethodLabel(ticket),
       riskLevel: normalizeString(ticket?.risk_level) || "unknown",
       latestActivityTitle:
         normalizeString(ticket?.latest_activity_title) || "No recent activity",
@@ -414,6 +506,16 @@ export default function TicketControls({
       noteCount: Number(ticket?.note_count ?? 0),
       priority: normalizeString(ticket?.priority) || "medium",
       overdue: ticket?.overdue === true,
+      recommendedActions: getRecommendedActions(ticket),
+      warnCount: Number(ticket?.owner_warn_count ?? 0),
+      flagCount: Number(ticket?.owner_flag_count ?? 0),
+      priorTickets: Number(ticket?.owner_ticket_total ?? 0),
+      invitedBy: normalizeString(ticket?.owner_invited_by_name) || "—",
+      vouchedBy: normalizeString(ticket?.owner_vouched_by_name) || "—",
+      approvedBy: normalizeString(ticket?.owner_approved_by_name) || "—",
+      roleState: normalizeString(ticket?.owner_role_state) || "unknown",
+      latestNoteStaff: normalizeString(ticket?.latest_note_staff_name) || "—",
+      latestNoteAt: normalizeString(ticket?.latest_note_at),
     };
   }, [ticket, currentStaffId]);
 
@@ -844,9 +946,8 @@ export default function TicketControls({
           <div style={{ minWidth: 0, flex: 1 }}>
             <div className="ticket-controls-header-title">Ticket Actions</div>
             <div className="muted ticket-controls-header-copy">
-              Queue ownership, transfer, repair/sync, closure, reopening, category correction,
-              transcript exports, and deletion without repeating the whole ticket
-              summary again.
+              Claim, transfer, sync, close, reopen, delete, transcript export,
+              and category correction in one fast workflow.
             </div>
           </div>
 
@@ -854,8 +955,15 @@ export default function TicketControls({
             <span className={`badge ${getStatusTone(ticket.status)}`}>
               {safeText(ticket.status, "unknown")}
             </span>
-            <span className={`badge ${derived.unclaimed ? "open" : derived.claimed ? "claimed" : ""}`}>
+            <span
+              className={`badge ${
+                derived.unclaimed ? "open" : derived.claimed ? "claimed" : ""
+              }`}
+            >
               {derived.queueStateLabel}
+            </span>
+            <span className={`badge ${getStatusTone(derived.verificationLabel)}`}>
+              {safeText(derived.verificationLabel)}
             </span>
             <span className={`badge ${getStatusTone(derived.riskLevel)}`}>
               {safeText(derived.riskLevel)}
@@ -953,8 +1061,8 @@ export default function TicketControls({
       </div>
 
       <ActionAccordion
-        title="Workflow"
-        subtitle="Only the action-critical ticket state staff need here."
+        title="Workflow Snapshot"
+        subtitle="The minimum context staff need before taking action."
         badge={<span className="badge open">Live</span>}
         open={openPanels.workflow}
         onToggle={() => togglePanel("workflow")}
@@ -979,7 +1087,23 @@ export default function TicketControls({
 
           <div className="member-detail-item">
             <div className="ticket-info-label">Queue State</div>
-            <div className="ticket-controls-mini-value">{derived.queueStateLabel}</div>
+            <div className="ticket-controls-mini-value">
+              {derived.queueStateLabel}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Verification</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(derived.verificationLabel)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Entry Method</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(derived.entryMethodLabel)}
+            </div>
           </div>
 
           <div className="member-detail-item">
@@ -998,17 +1122,72 @@ export default function TicketControls({
 
           <div className="member-detail-item">
             <div className="ticket-info-label">Priority</div>
-            <div className="ticket-controls-mini-value">{safeText(derived.priority)}</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(derived.priority)}
+            </div>
           </div>
 
           <div className="member-detail-item">
             <div className="ticket-info-label">Risk Level</div>
-            <div className="ticket-controls-mini-value">{safeText(derived.riskLevel)}</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(derived.riskLevel)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Warn Count</div>
+            <div className="ticket-controls-mini-value">
+              {String(derived.warnCount)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Flag Count</div>
+            <div className="ticket-controls-mini-value">
+              {String(derived.flagCount)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Past Tickets</div>
+            <div className="ticket-controls-mini-value">
+              {String(derived.priorTickets)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Role State</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(derived.roleState)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Invited By</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(derived.invitedBy)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Vouched By</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(derived.vouchedBy)}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
+            <div className="ticket-info-label">Approved By</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(derived.approvedBy)}
+            </div>
           </div>
 
           <div className="member-detail-item">
             <div className="ticket-info-label">Source</div>
-            <div className="ticket-controls-mini-value">{safeText(ticket.source)}</div>
+            <div className="ticket-controls-mini-value">
+              {safeText(ticket.source)}
+            </div>
           </div>
 
           <div className="member-detail-item">
@@ -1033,8 +1212,21 @@ export default function TicketControls({
           </div>
 
           <div className="member-detail-item">
+            <div className="ticket-info-label">Latest Note</div>
+            <div className="ticket-controls-mini-value">
+              {derived.latestNoteStaff === "—" && !derived.latestNoteAt
+                ? "—"
+                : `${safeText(derived.latestNoteStaff)} • ${formatDateTime(
+                    derived.latestNoteAt
+                  )}`}
+            </div>
+          </div>
+
+          <div className="member-detail-item">
             <div className="ticket-info-label">Note Count</div>
-            <div className="ticket-controls-mini-value">{String(derived.noteCount)}</div>
+            <div className="ticket-controls-mini-value">
+              {String(derived.noteCount)}
+            </div>
           </div>
 
           <div className="member-detail-item">
@@ -1048,6 +1240,21 @@ export default function TicketControls({
             <div className="ticket-info-label">Deleted At</div>
             <div className="ticket-controls-mini-value">
               {formatDateTime(ticket.deleted_at)}
+            </div>
+          </div>
+
+          <div className="member-detail-item full-width">
+            <div className="ticket-info-label">Recommended Actions</div>
+            <div className="ticket-controls-action-pills">
+              {derived.recommendedActions.length ? (
+                derived.recommendedActions.map((action) => (
+                  <span key={action} className="ticket-mini-pill">
+                    {action}
+                  </span>
+                ))
+              ) : (
+                <span className="ticket-controls-mini-value">No suggestions.</span>
+              )}
             </div>
           </div>
         </div>
@@ -1090,7 +1297,7 @@ export default function TicketControls({
 
       <ActionAccordion
         title="Repair / Sync Ticket"
-        subtitle="Re-sync this single ticket row against live Discord state without touching the whole queue."
+        subtitle="Re-sync this single ticket row against live Discord state."
         badge={
           derived.missingChannel ? (
             <span className="badge danger">Needs Repair</span>
@@ -1168,8 +1375,7 @@ export default function TicketControls({
         {!channelId ? (
           <div className="warning-banner">
             This row is missing a live Discord channel ID, so single-ticket sync
-            cannot run until the row is repaired or reconciled from a source that
-            still knows the channel.
+            cannot run until the row is repaired or reconciled.
           </div>
         ) : null}
       </ActionAccordion>
@@ -1319,7 +1525,7 @@ export default function TicketControls({
 
       <ActionAccordion
         title="Transfer Ticket"
-        subtitle="Move ownership fast by staff ID without forcing people through the queue again."
+        subtitle="Move ownership fast by staff ID."
         badge={<span className="badge open">Route Ready</span>}
         open={openPanels.transfer}
         onToggle={() => togglePanel("transfer")}
@@ -1327,9 +1533,7 @@ export default function TicketControls({
         <div className="ticket-controls-info-grid" style={{ marginBottom: 12 }}>
           <div className="member-detail-item">
             <div className="ticket-info-label">Current Owner</div>
-            <div className="ticket-controls-mini-value">
-              {derived.claimedBy}
-            </div>
+            <div className="ticket-controls-mini-value">{derived.claimedBy}</div>
           </div>
 
           <div className="member-detail-item">
@@ -1368,7 +1572,7 @@ export default function TicketControls({
 
       <ActionAccordion
         title="Transcript & Lifecycle"
-        subtitle="Transcript links, exports, and lifecycle timestamps without repeating the hero area."
+        subtitle="Transcript links, exports, and lifecycle state."
         badge={
           derived.hasTranscript ? (
             <span className="badge claimed">Available</span>
@@ -1496,10 +1700,7 @@ export default function TicketControls({
               type="button"
               className="button ghost"
               onClick={() =>
-                void handleCopy(
-                  derived.transcriptUrl,
-                  "Transcript link copied."
-                )
+                void handleCopy(derived.transcriptUrl, "Transcript link copied.")
               }
             >
               Copy Transcript Link
@@ -1547,7 +1748,7 @@ export default function TicketControls({
 
       <ActionAccordion
         title="Close Ticket"
-        subtitle="Resolve the ticket while preserving the ticket record."
+        subtitle="Resolve the ticket while preserving the record."
         badge={<span className="badge medium">Resolve</span>}
         open={openPanels.close}
         onToggle={() => togglePanel("close")}
@@ -1820,6 +2021,31 @@ export default function TicketControls({
           text-underline-offset: 2px;
         }
 
+        .ticket-controls-action-pills {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .ticket-mini-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          border-radius: 999px;
+          padding: 6px 10px;
+          border: 1px solid rgba(99, 213, 255, 0.14);
+          background:
+            radial-gradient(circle at top right, rgba(99, 213, 255, 0.1), transparent 42%),
+            rgba(99, 213, 255, 0.05);
+          font-size: 12px;
+          line-height: 1.2;
+          color: var(--text, #dbe4ee);
+        }
+
+        .full-width {
+          grid-column: 1 / -1;
+        }
+
         @media (max-width: ${MOBILE_LAYOUT_MAX_WIDTH}px) {
           .ticket-primary-actions {
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1840,6 +2066,10 @@ export default function TicketControls({
             width: 100%;
             min-width: 0;
             text-align: center;
+          }
+
+          .full-width {
+            grid-column: auto;
           }
         }
 
