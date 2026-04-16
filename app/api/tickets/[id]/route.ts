@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
 import {
   requireStaffSessionForRoute,
@@ -15,7 +16,13 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type JsonRecord = Record<string, unknown>;
-type RefreshedTokens = unknown;
+type RefreshedTokens = {
+  access_token: string;
+  token_type?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+} | null;
 
 type RouteContext = {
   params: {
@@ -404,12 +411,11 @@ function truncateText(value: unknown, max = 220): string {
 function buildJsonResponse(
   payload: Record<string, unknown>,
   status = 200,
-  refreshedTokens: RefreshedTokens | null = null
-): Response {
-  const response = new Response(JSON.stringify(payload), {
+  refreshedTokens: RefreshedTokens = null
+): NextResponse {
+  const response = NextResponse.json(payload, {
     status,
     headers: {
-      "Content-Type": "application/json",
       "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     },
   });
@@ -421,8 +427,8 @@ function buildJsonResponse(
 function buildErrorResponse(
   message: string,
   status = 500,
-  refreshedTokens: RefreshedTokens | null = null
-): Response {
+  refreshedTokens: RefreshedTokens = null
+): NextResponse {
   return buildJsonResponse({ error: message }, status, refreshedTokens);
 }
 
