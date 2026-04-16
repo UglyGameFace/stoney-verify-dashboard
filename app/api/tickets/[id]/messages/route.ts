@@ -10,7 +10,13 @@ const MAX_MESSAGE_LENGTH = 4000;
 const MAX_ATTACHMENTS = 10;
 const CLOSED_STATUSES = new Set(["closed", "deleted"]);
 
-type RefreshedTokens = unknown;
+type RefreshedTokens = {
+  access_token: string;
+  token_type?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+} | null;
 
 type SessionLike = {
   user?: {
@@ -93,7 +99,7 @@ function truncateText(value: unknown, max = 240): string {
 function buildJsonResponse(
   payload: Record<string, unknown>,
   status = 200,
-  refreshedTokens: RefreshedTokens | null = null
+  refreshedTokens: RefreshedTokens = null
 ) {
   const response = NextResponse.json(payload, {
     status,
@@ -346,9 +352,12 @@ export async function POST(
       return buildJsonResponse({ error: "Missing ticket id." }, 400, refreshedTokens);
     }
 
-    const body = safeObject<{ content?: string; message?: string; message_type?: string; attachments?: AttachmentInput[] }>(
-      await request.json().catch(() => ({}))
-    );
+    const body = safeObject<{
+      content?: string;
+      message?: string;
+      message_type?: string;
+      attachments?: AttachmentInput[];
+    }>(await request.json().catch(() => ({})));
 
     const content = normalizeMultiline(body?.content || body?.message);
     const messageType = normalizeString(body?.message_type || "staff").toLowerCase() || "staff";
