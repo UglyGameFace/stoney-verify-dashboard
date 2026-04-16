@@ -10,7 +10,13 @@ import { enrichTicketWithMatchedCategory } from "@/lib/ticketCategoryMatching";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type RefreshedTokens = unknown;
+type RefreshedTokens = {
+  access_token: string;
+  token_type?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+} | null;
 
 type RouteContext = {
   params: {
@@ -277,7 +283,7 @@ function escapeHtml(value: unknown): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\\\"/g, "&quot;")
+    .replace(/\\"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
 
@@ -292,7 +298,7 @@ function safeFileBase(value: string): string {
 function buildJsonResponse(
   payload: Record<string, unknown>,
   status = 200,
-  refreshedTokens: RefreshedTokens | null = null
+  refreshedTokens: RefreshedTokens = null
 ) {
   const response = NextResponse.json(payload, {
     status,
@@ -309,7 +315,7 @@ function buildAttachmentResponse(
   content: string,
   contentType: string,
   filename: string,
-  refreshedTokens: RefreshedTokens | null = null
+  refreshedTokens: RefreshedTokens = null
 ) {
   const response = new NextResponse(content, {
     status: 200,
