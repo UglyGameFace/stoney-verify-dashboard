@@ -108,6 +108,12 @@ function formatRatio(value: unknown): string {
   return `${Math.round(num * 100)}%`;
 }
 
+function formatScore(value: unknown): string {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  return String(num);
+}
+
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -144,6 +150,9 @@ function badgeClass(value: unknown): string {
   if (v === "medium alt risk") return "badge medium";
   if (v === "low alt risk") return "badge low";
   if (v === "unknown alt risk") return "badge";
+
+  if (v === "manual category") return "badge medium";
+  if (v === "auto category") return "badge claimed";
 
   return "badge";
 }
@@ -704,8 +713,23 @@ export default function TicketDetailClient({
     String(ticket?.transcript_url || "").trim() ||
     transcriptExportUrl(String(ticket.id || ticketId), "html");
 
+  const matchedKeywords = normalizeStringList(ticket?.matched_category_keywords);
+  const matchedCategoryName = safeText(ticket?.matched_category_name, "");
+  const matchedCategorySlug = safeText(ticket?.matched_category_slug, "");
+  const matchedIntakeType = safeText(ticket?.matched_intake_type, "");
+  const matchedCategoryReason = safeText(ticket?.matched_category_reason, "");
+  const rawCategory = safeText(ticket?.raw_category, "");
+  const finalCategoryLabel = safeText(
+    category?.name || ticket?.matched_category_name || ticket?.category,
+    "uncategorized"
+  );
+  const finalCategorySlug = safeText(ticket?.category, "");
+  const isManualCategory = Boolean(ticket?.category_override);
+  const matchScoreLabel = formatScore(ticket?.matched_category_score);
+
   const quickJumps: QuickJumpItem[] = [
     { href: "#workspace-summary", label: "Summary" },
+    { href: "#category-routing", label: "Routing" },
     { href: "#member-context", label: "Member" },
     { href: "#verification-context", label: "Verification" },
     { href: "#alt-risk", label: "Alt Risk" },
@@ -737,12 +761,7 @@ export default function TicketDetailClient({
               <div className="muted ticket-hero-subtitle">
                 <span>{ownerName}</span>
                 <span>•</span>
-                <span>
-                  {safeText(
-                    category?.name || ticket?.matched_category_name || ticket?.category,
-                    "uncategorized"
-                  )}
-                </span>
+                <span>{finalCategoryLabel}</span>
                 <span>•</span>
                 <span>
                   {safeText(
@@ -767,9 +786,11 @@ export default function TicketDetailClient({
               {altRiskLabel}
             </span>
             {ticket?.overdue ? <span className="badge danger">Overdue</span> : null}
-            {ticket?.category_override ? (
+            {isManualCategory ? (
               <span className="badge medium">Manual Category</span>
-            ) : null}
+            ) : (
+              <span className="badge claimed">Auto Category</span>
+            )}
           </div>
         </div>
 
@@ -830,6 +851,18 @@ export default function TicketDetailClient({
           <WorkspacePill
             label={`SLA: ${getSlaLabel(ticket)}`}
             tone={ticket?.overdue ? "danger" : "info"}
+          />
+          <WorkspacePill
+            label={`Category: ${finalCategoryLabel}`}
+            tone="info"
+          />
+          <WorkspacePill
+            label={`Routing: ${isManualCategory ? "Manual" : "Automatic"}`}
+            tone={isManualCategory ? "warn" : "good"}
+          />
+          <WorkspacePill
+            label={`Match Score: ${matchScoreLabel}`}
+            tone="neutral"
           />
           <WorkspacePill
             label={`Messages: ${Number(counts?.messages || messages.length || 0)}`}
@@ -992,6 +1025,62 @@ export default function TicketDetailClient({
                   {recommendedActions.map((action: string) => (
                     <div key={action} className="recommended-action-chip">
                       {action}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            id="category-routing"
+            title="Category Routing"
+            subtitle="Why this ticket landed in its current category, and whether staff overrode it."
+            right={
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <span className={badgeClass(isManualCategory ? "manual category" : "auto category")}>
+                  {isManualCategory ? "Manual Category" : "Auto Category"}
+                </span>
+                <span className="badge">{`Score ${matchScoreLabel}`}</span>
+              </div>
+            }
+          >
+            <div className="ticket-info-grid">
+              <MetaCard label="Final Category" value={finalCategoryLabel} />
+              <MetaCard label="Final Category Slug" value={safeText(finalCategorySlug)} />
+              <MetaCard label="Matched Category" value={safeText(matchedCategoryName)} />
+              <MetaCard label="Matched Slug" value={safeText(matchedCategorySlug)} />
+              <MetaCard label="Intake Type" value={safeText(matchedIntakeType)} />
+              <MetaCard label="Raw Submitted Category" value={safeText(rawCategory)} />
+              <MetaCard label="Match Score" value={matchScoreLabel} />
+              <MetaCard
+                label="Manual Override"
+                value={isManualCategory ? "Yes" : "No"}
+              />
+              <MetaCard
+                label="Matched Category ID"
+                value={safeText(ticket?.matched_category_id)}
+              />
+              <MetaCard
+                label="Category Record ID"
+                value={safeText(ticket?.category_id)}
+              />
+              <MetaCard
+                label="Match Reason"
+                value={safeText(matchedCategoryReason, "No routing reason saved.")}
+                full
+              />
+            </div>
+
+            <div className="ticket-detail-section">
+              <div className="ticket-detail-section-title">Matched Keywords</div>
+              {!matchedKeywords.length ? (
+                <div className="muted">No matched keywords were saved for this ticket.</div>
+              ) : (
+                <div className="recommended-action-list">
+                  {matchedKeywords.map((keyword) => (
+                    <div key={keyword} className="recommended-action-chip">
+                      {keyword}
                     </div>
                   ))}
                 </div>
