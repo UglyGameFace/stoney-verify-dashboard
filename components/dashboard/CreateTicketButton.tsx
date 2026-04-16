@@ -8,6 +8,25 @@ type CategoryOption = {
   label: string;
 };
 
+type CreateTicketResult = {
+  ok?: boolean;
+  command?: {
+    error?: string | null;
+    result?: {
+      created?: boolean;
+      duplicate?: boolean;
+      existing_ticket?: {
+        discord_thread_id?: string;
+        title?: string;
+      };
+      ticket?: {
+        channel_name?: string;
+        mention?: string;
+      };
+    };
+  };
+};
+
 type CreateTicketButtonProps = {
   userId: string;
   currentStaffId?: string | null;
@@ -38,6 +57,11 @@ function inputClass() {
 
 function panelClass() {
   return "rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4";
+}
+
+function safeText(value: unknown, fallback = ""): string {
+  const text = String(value ?? "").trim();
+  return text || fallback;
 }
 
 export default function CreateTicketButton({
@@ -76,6 +100,7 @@ export default function CreateTicketButton({
   async function handleCreate() {
     if (!userId.trim()) {
       setError("Missing user ID.");
+      setMessage("");
       return;
     }
 
@@ -84,7 +109,7 @@ export default function CreateTicketButton({
     setMessage("");
 
     try {
-      const result = await createTicketAction(
+      const result = (await createTicketAction(
         {
           userId: userId.trim(),
           category,
@@ -98,20 +123,13 @@ export default function CreateTicketButton({
           timeoutMs: 60_000,
           intervalMs: 1_500,
         }
-      );
+      )) as CreateTicketResult;
 
-      if (!result.ok) {
-        throw new Error(result.command?.error || "Failed to create ticket.");
+      if (!result?.ok) {
+        throw new Error(result?.command?.error || "Failed to create ticket.");
       }
 
-      const commandResult = result.command?.result as
-        | {
-            created?: boolean;
-            duplicate?: boolean;
-            existing_ticket?: { discord_thread_id?: string; title?: string };
-            ticket?: { channel_name?: string; mention?: string };
-          }
-        | undefined;
+      const commandResult = result.command?.result;
 
       if (commandResult?.duplicate) {
         setMessage("User already has an open ticket.");
@@ -129,7 +147,7 @@ export default function CreateTicketButton({
       if (onCreated) {
         await onCreated();
       }
-    } catch (err) {
+    } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to create ticket.");
     } finally {
       setBusy(false);
@@ -229,13 +247,13 @@ export default function CreateTicketButton({
 
       {!!message && (
         <div className="rounded-2xl border border-emerald-800 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-300">
-          {message}
+          {safeText(message)}
         </div>
       )}
 
       {!!error && (
         <div className="rounded-2xl border border-red-800 bg-red-950/30 px-3 py-2 text-sm text-red-300">
-          {error}
+          {safeText(error)}
         </div>
       )}
     </div>
