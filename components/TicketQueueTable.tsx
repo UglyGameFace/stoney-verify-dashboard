@@ -6,6 +6,150 @@ import { timeAgo } from "@/lib/format";
 import TicketControls from "./dashboard/TicketControls";
 import CreateTicketButton from "./dashboard/CreateTicketButton";
 
+type TicketLike = {
+  id?: string | null;
+  channel_id?: string | null;
+  discord_thread_id?: string | null;
+  channel_name?: string | null;
+  title?: string | null;
+  username?: string | null;
+  display_name?: string | null;
+  user_id?: string | null;
+
+  category?: string | null;
+  raw_category?: string | null;
+  category_id?: string | null;
+  matched_category_id?: string | null;
+  matched_category_name?: string | null;
+  matched_category_slug?: string | null;
+  matched_intake_type?: string | null;
+  matched_category_reason?: string | null;
+  matched_category_score?: number | null;
+  category_override?: boolean | null;
+
+  status?: string | null;
+  ticket_status?: string | null;
+  priority?: string | null;
+
+  claimed_by?: string | null;
+  claimed_by_id?: string | null;
+  claimed_by_name?: string | null;
+  assigned_to?: string | null;
+  assigned_to_id?: string | null;
+  assigned_to_name?: string | null;
+
+  owner_display_name?: string | null;
+  owner_avatar_url?: string | null;
+  avatar_url?: string | null;
+
+  owner_verification_label?: string | null;
+  verification_label?: string | null;
+
+  risk_level?: string | null;
+
+  owner_entry_method?: string | null;
+  owner_verification_source?: string | null;
+  entry_method?: string | null;
+  source?: string | null;
+
+  owner_invited_by_name?: string | null;
+  owner_vouched_by_name?: string | null;
+  owner_approved_by_name?: string | null;
+
+  owner_ticket_total?: number | null;
+  owner_warn_count?: number | null;
+  owner_flag_count?: number | null;
+
+  latest_activity_title?: string | null;
+  latest_activity_type?: string | null;
+  latest_activity_at?: string | null;
+  latest_note_at?: string | null;
+  latest_note_staff_name?: string | null;
+
+  note_count?: number | null;
+
+  mod_suggestion?: string | null;
+  closed_reason?: string | null;
+
+  updated_at?: string | null;
+  created_at?: string | null;
+
+  overdue?: boolean | null;
+  minutes_overdue?: number | null;
+  minutes_until_deadline?: number | null;
+  sla_status?: string | null;
+
+  is_ghost?: boolean | null;
+  is_unclaimed?: boolean | null;
+  is_claimed?: boolean | null;
+  recommended_actions?: string[] | null;
+
+  [key: string]: unknown;
+};
+
+type QueueMode =
+  | ""
+  | "queue"
+  | "active"
+  | "unclaimed"
+  | "claimed"
+  | "my_claimed"
+  | "my-claimed"
+  | "open_only"
+  | "closed"
+  | "deleted"
+  | "all"
+  | string;
+
+type TicketQueueTableProps = {
+  tickets?: TicketLike[];
+  currentStaffId?: string | null;
+  onRefresh?: () => Promise<void> | void;
+  createTicketUserId?: string | number | null;
+  createTicketTargetName?: string;
+  queueMode?: QueueMode;
+};
+
+type SummaryChipProps = {
+  label: string;
+  value: string | number;
+  tone?: "default" | "open" | "claimed" | "warn" | "danger";
+};
+
+type MetaBlockProps = {
+  label: string;
+  value: React.ReactNode;
+  full?: boolean;
+};
+
+type MiniFieldProps = {
+  label: string;
+  value: React.ReactNode;
+  full?: boolean;
+};
+
+type AvatarBubbleProps = {
+  ticket: TicketLike;
+  size?: number;
+};
+
+type CategoryDisplayProps = {
+  ticket: TicketLike;
+  compact?: boolean;
+};
+
+type TicketExpandedDetailsProps = {
+  ticket: TicketLike;
+  currentStaffId?: string | null;
+  onRefresh?: () => Promise<void> | void;
+};
+
+type MobileTicketCardProps = {
+  ticket: TicketLike;
+  currentStaffId?: string | null;
+  onRefresh?: () => Promise<void> | void;
+};
+
 const PLACEHOLDER_CATEGORY_VALUES = new Set([
   "",
   "uncategorized",
@@ -18,23 +162,23 @@ const PLACEHOLDER_CATEGORY_VALUES = new Set([
   "general",
 ]);
 
-function normalizeText(value) {
+function normalizeText(value: unknown): string {
   return String(value || "").trim().toLowerCase();
 }
 
-function safeText(value, fallback = "—") {
+function safeText(value: unknown, fallback = "—"): string {
   const text = String(value ?? "").trim();
   return text || fallback;
 }
 
-function truncateText(value, max = 120) {
+function truncateText(value: unknown, max = 120): string {
   const text = String(value || "").trim();
   if (!text) return "";
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
-function titleize(value) {
+function titleize(value: unknown): string {
   const raw = String(value || "").trim();
   if (!raw) return "";
   return raw
@@ -44,7 +188,7 @@ function titleize(value) {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
-function badgeClass(value) {
+function badgeClass(value: unknown): string {
   const v = String(value || "").toLowerCase().trim();
 
   if (v === "open") return "badge open";
@@ -86,33 +230,33 @@ function badgeClass(value) {
   return "badge";
 }
 
-function getChannelId(ticket) {
+function getChannelId(ticket: TicketLike): string {
   return String(ticket?.channel_id || ticket?.discord_thread_id || "").trim();
 }
 
-function hasMissingChannel(ticket) {
+function hasMissingChannel(ticket: TicketLike): boolean {
   return !getChannelId(ticket);
 }
 
-function isGhost(ticket) {
+function isGhost(ticket: TicketLike): boolean {
   return ticket?.is_ghost === true;
 }
 
-function getStatus(ticket) {
+function getStatus(ticket: TicketLike): string {
   return String(ticket?.status || ticket?.ticket_status || "unknown")
     .toLowerCase()
     .trim();
 }
 
-function getPriority(ticket) {
+function getPriority(ticket: TicketLike): string {
   return String(ticket?.priority || "medium").toLowerCase().trim();
 }
 
-function isPlaceholderCategory(value) {
+function isPlaceholderCategory(value: unknown): boolean {
   return PLACEHOLDER_CATEGORY_VALUES.has(normalizeText(value));
 }
 
-function normalizeIntakeType(value) {
+function normalizeIntakeType(value: unknown): string {
   const v = normalizeText(value);
 
   if (!v) return "";
@@ -127,12 +271,12 @@ function normalizeIntakeType(value) {
   return v;
 }
 
-function getDisplayIntakeLabel(value) {
+function getDisplayIntakeLabel(value: unknown): string {
   const intake = normalizeIntakeType(value);
   return intake ? titleize(intake) : "";
 }
 
-function deriveFallbackCategoryFromTicket(ticket) {
+function deriveFallbackCategoryFromTicket(ticket: TicketLike): string {
   const raw = [
     ticket?.category,
     ticket?.raw_category,
@@ -186,7 +330,7 @@ function deriveFallbackCategoryFromTicket(ticket) {
   return "Support";
 }
 
-function getDisplayedCategoryName(ticket) {
+function getDisplayedCategoryName(ticket: TicketLike): string {
   const matchedName = String(ticket?.matched_category_name || "").trim();
   const matchedSlug = String(ticket?.matched_category_slug || "").trim();
   const rawCategory = String(ticket?.category || "").trim();
@@ -211,7 +355,7 @@ function getDisplayedCategoryName(ticket) {
   return deriveFallbackCategoryFromTicket(ticket);
 }
 
-function getDisplayedIntakeType(ticket) {
+function getDisplayedIntakeType(ticket: TicketLike): string {
   const intake = getDisplayIntakeLabel(
     ticket?.matched_intake_type || ticket?.category || ticket?.raw_category || ""
   );
@@ -220,7 +364,7 @@ function getDisplayedIntakeType(ticket) {
   return intake;
 }
 
-function getCategoryReason(ticket) {
+function getCategoryReason(ticket: TicketLike): string {
   const reason = String(ticket?.matched_category_reason || "").trim();
   if (!reason) return "";
 
@@ -231,12 +375,12 @@ function getCategoryReason(ticket) {
   return reason;
 }
 
-function getCategoryScore(ticket) {
+function getCategoryScore(ticket: TicketLike): number {
   const score = Number(ticket?.matched_category_score || 0);
   return Number.isFinite(score) ? score : 0;
 }
 
-function hasMatchedCategory(ticket) {
+function hasMatchedCategory(ticket: TicketLike): boolean {
   const matchedName = String(ticket?.matched_category_name || "").trim();
   const matchedSlug = String(ticket?.matched_category_slug || "").trim();
 
@@ -246,7 +390,7 @@ function hasMatchedCategory(ticket) {
   );
 }
 
-function getOwnerName(ticket) {
+function getOwnerName(ticket: TicketLike): string {
   return (
     String(ticket?.owner_display_name || "").trim() ||
     String(ticket?.display_name || "").trim() ||
@@ -256,19 +400,19 @@ function getOwnerName(ticket) {
   );
 }
 
-function getOwnerAvatar(ticket) {
+function getOwnerAvatar(ticket: TicketLike): string {
   const url = String(ticket?.owner_avatar_url || ticket?.avatar_url || "").trim();
   return url || "";
 }
 
-function getOwnerInitials(ticket) {
+function getOwnerInitials(ticket: TicketLike): string {
   const source = getOwnerName(ticket);
   const parts = source.split(/\s+/).filter(Boolean).slice(0, 2);
   if (!parts.length) return "?";
   return parts.map((part) => part.charAt(0).toUpperCase()).join("");
 }
 
-function getTicketTitle(ticket) {
+function getTicketTitle(ticket: TicketLike): string {
   return (
     String(ticket?.title || "").trim() ||
     String(ticket?.channel_name || "").trim() ||
@@ -276,7 +420,7 @@ function getTicketTitle(ticket) {
   );
 }
 
-function getClaimedByLabel(ticket) {
+function getClaimedByLabel(ticket: TicketLike): string {
   return (
     String(ticket?.claimed_by_name || "").trim() ||
     String(ticket?.assigned_to_name || "").trim() ||
@@ -286,7 +430,7 @@ function getClaimedByLabel(ticket) {
   );
 }
 
-function getVerificationLabel(ticket) {
+function getVerificationLabel(ticket: TicketLike): string {
   return (
     String(ticket?.owner_verification_label || "").trim() ||
     String(ticket?.verification_label || "").trim() ||
@@ -294,7 +438,7 @@ function getVerificationLabel(ticket) {
   );
 }
 
-function getRiskLevel(ticket) {
+function getRiskLevel(ticket: TicketLike): string {
   const level = normalizeText(ticket?.risk_level);
   if (level === "high") return "High Risk";
   if (level === "medium") return "Medium Risk";
@@ -302,7 +446,7 @@ function getRiskLevel(ticket) {
   return "Unknown";
 }
 
-function getEntryMethodLabel(ticket) {
+function getEntryMethodLabel(ticket: TicketLike): string {
   const raw =
     String(ticket?.owner_entry_method || "").trim() ||
     String(ticket?.owner_verification_source || "").trim() ||
@@ -312,8 +456,8 @@ function getEntryMethodLabel(ticket) {
   return raw ? titleize(raw) : "Unknown";
 }
 
-function getQueueIntel(ticket) {
-  const pieces = [];
+function getQueueIntel(ticket: TicketLike): string[] {
+  const pieces: string[] = [];
 
   const inviter = String(ticket?.owner_invited_by_name || "").trim();
   const voucher = String(ticket?.owner_vouched_by_name || "").trim();
@@ -329,7 +473,7 @@ function getQueueIntel(ticket) {
   return pieces;
 }
 
-function getSlaStatusLabel(ticket) {
+function getSlaStatusLabel(ticket: TicketLike): string {
   if (ticket?.overdue) {
     const minutes = Number(ticket?.minutes_overdue || 0);
     if (minutes > 0) return `${minutes}m overdue`;
@@ -350,12 +494,12 @@ function getSlaStatusLabel(ticket) {
   return titleize(status);
 }
 
-function getRecommendedActions(ticket) {
+function getRecommendedActions(ticket: TicketLike): string[] {
   if (Array.isArray(ticket?.recommended_actions)) {
     return ticket.recommended_actions.filter(Boolean);
   }
 
-  const actions = [];
+  const actions: string[] = [];
 
   if (ticket?.is_unclaimed) actions.push("Claim this ticket");
   if (normalizeText(ticket?.priority) === "urgent") actions.push("Handle urgently");
@@ -366,7 +510,7 @@ function getRecommendedActions(ticket) {
   return actions;
 }
 
-function getLatestActivityLabel(ticket) {
+function getLatestActivityLabel(ticket: TicketLike): string {
   const title =
     String(ticket?.latest_activity_title || "").trim() ||
     String(ticket?.latest_activity_type || "").trim();
@@ -375,27 +519,30 @@ function getLatestActivityLabel(ticket) {
   return titleize(title);
 }
 
-function getLatestActivityTime(ticket) {
-  return ticket?.latest_activity_at || ticket?.updated_at || ticket?.created_at || null;
+function getLatestActivityTime(ticket: TicketLike): string | null {
+  return (ticket?.latest_activity_at ||
+    ticket?.updated_at ||
+    ticket?.created_at ||
+    null) as string | null;
 }
 
-function countByStatus(tickets, status) {
+function countByStatus(tickets: TicketLike[], status: string): number {
   return tickets.filter(
     (ticket) => String(ticket?.status || ticket?.ticket_status || "").toLowerCase() === status
   ).length;
 }
 
-function countByPriority(tickets, priority) {
+function countByPriority(tickets: TicketLike[], priority: string): number {
   return tickets.filter(
     (ticket) => String(ticket?.priority || "").toLowerCase() === priority
   ).length;
 }
 
-function countMatchedCategories(tickets) {
+function countMatchedCategories(tickets: TicketLike[]): number {
   return tickets.filter((ticket) => hasMatchedCategory(ticket)).length;
 }
 
-function countVerificationLike(tickets) {
+function countVerificationLike(tickets: TicketLike[]): number {
   return tickets.filter((ticket) => {
     const intake = getDisplayedIntakeType(ticket).toLowerCase();
     const category = getDisplayedCategoryName(ticket).toLowerCase();
@@ -403,17 +550,17 @@ function countVerificationLike(tickets) {
   }).length;
 }
 
-function countOverdue(tickets) {
+function countOverdue(tickets: TicketLike[]): number {
   return tickets.filter((ticket) => Boolean(ticket?.overdue)).length;
 }
 
-function countHighRisk(tickets) {
+function countHighRisk(tickets: TicketLike[]): number {
   return tickets.filter(
     (ticket) => normalizeText(ticket?.risk_level) === "high"
   ).length;
 }
 
-function countUnassigned(tickets) {
+function countUnassigned(tickets: TicketLike[]): number {
   return tickets.filter((ticket) => {
     if (ticket?.is_unclaimed === true) return true;
     const claimed = String(ticket?.claimed_by || "").trim();
@@ -423,11 +570,11 @@ function countUnassigned(tickets) {
   }).length;
 }
 
-function countNoNotes(tickets) {
+function countNoNotes(tickets: TicketLike[]): number {
   return tickets.filter((ticket) => Number(ticket?.note_count || 0) <= 0).length;
 }
 
-function getSummaryStats(tickets) {
+function getSummaryStats(tickets: TicketLike[]) {
   return {
     total: tickets.length,
     open: countByStatus(tickets, "open"),
@@ -447,7 +594,7 @@ function getSummaryStats(tickets) {
   };
 }
 
-function getQueueHeading(tickets, explicitMode) {
+function getQueueHeading(tickets: TicketLike[], explicitMode: QueueMode) {
   const rows = Array.isArray(tickets) ? tickets : [];
   const statuses = [...new Set(rows.map((ticket) => getStatus(ticket)).filter(Boolean))];
   const activeOnly =
@@ -530,7 +677,7 @@ function getQueueHeading(tickets, explicitMode) {
   };
 }
 
-function SummaryChip({ label, value, tone = "default" }) {
+function SummaryChip({ label, value, tone = "default" }: SummaryChipProps) {
   return (
     <div className={`queue-summary-chip ${tone}`}>
       <span className="queue-summary-chip-label">{label}</span>
@@ -539,7 +686,7 @@ function SummaryChip({ label, value, tone = "default" }) {
   );
 }
 
-function MetaBlock({ label, value, full = false }) {
+function MetaBlock({ label, value, full = false }: MetaBlockProps) {
   return (
     <div className={`ticket-mobile-meta-item ${full ? "full" : ""}`}>
       <span className="ticket-mobile-meta-label">{label}</span>
@@ -548,7 +695,7 @@ function MetaBlock({ label, value, full = false }) {
   );
 }
 
-function MiniField({ label, value, full = false }) {
+function MiniField({ label, value, full = false }: MiniFieldProps) {
   return (
     <div className={`ticket-info-item ${full ? "full" : ""}`}>
       <span className="ticket-info-label">{label}</span>
@@ -557,7 +704,7 @@ function MiniField({ label, value, full = false }) {
   );
 }
 
-function AvatarBubble({ ticket, size = 42 }) {
+function AvatarBubble({ ticket, size = 42 }: AvatarBubbleProps) {
   const avatar = getOwnerAvatar(ticket);
   const initials = getOwnerInitials(ticket);
 
@@ -583,7 +730,7 @@ function AvatarBubble({ ticket, size = 42 }) {
   );
 }
 
-function CategoryDisplay({ ticket, compact = false }) {
+function CategoryDisplay({ ticket, compact = false }: CategoryDisplayProps) {
   const categoryName = getDisplayedCategoryName(ticket);
   const intakeType = getDisplayedIntakeType(ticket);
   const reason = getCategoryReason(ticket);
@@ -632,7 +779,7 @@ function CategoryDisplay({ ticket, compact = false }) {
   );
 }
 
-function TicketHeaderBadges({ ticket }) {
+function TicketHeaderBadges({ ticket }: { ticket: TicketLike }) {
   const status = getStatus(ticket);
   const missingChannel = hasMissingChannel(ticket);
   const ghost = isGhost(ticket);
@@ -663,7 +810,7 @@ function TicketHeaderBadges({ ticket }) {
   );
 }
 
-function QueueIntelStrip({ ticket }) {
+function QueueIntelStrip({ ticket }: { ticket: TicketLike }) {
   const intel = getQueueIntel(ticket);
   const noteCount = Number(ticket?.note_count || 0);
   const priorTotal = Number(ticket?.owner_ticket_total || 0);
@@ -691,7 +838,7 @@ function QueueIntelStrip({ ticket }) {
   );
 }
 
-function RecommendedActions({ ticket }) {
+function RecommendedActions({ ticket }: { ticket: TicketLike }) {
   const actions = getRecommendedActions(ticket);
 
   if (!actions.length) {
@@ -709,7 +856,7 @@ function RecommendedActions({ ticket }) {
   );
 }
 
-function getTicketRowKey(ticket, index = 0) {
+function getTicketRowKey(ticket: TicketLike, index = 0): string {
   return (
     String(ticket?.id || "").trim() ||
     String(ticket?.channel_id || ticket?.discord_thread_id || "").trim() ||
@@ -725,7 +872,11 @@ function getTicketRowKey(ticket, index = 0) {
   );
 }
 
-function TicketExpandedDetails({ ticket, currentStaffId, onRefresh }) {
+function TicketExpandedDetails({
+  ticket,
+  currentStaffId,
+  onRefresh,
+}: TicketExpandedDetailsProps) {
   const channelId = getChannelId(ticket);
   const ghost = isGhost(ticket);
 
@@ -868,7 +1019,11 @@ function TicketExpandedDetails({ ticket, currentStaffId, onRefresh }) {
   );
 }
 
-function MobileTicketCard({ ticket, currentStaffId, onRefresh }) {
+function MobileTicketCard({
+  ticket,
+  currentStaffId,
+  onRefresh,
+}: MobileTicketCardProps) {
   const [expanded, setExpanded] = useState(false);
   const channelId = getChannelId(ticket);
 
@@ -1037,16 +1192,16 @@ export default function TicketQueueTable({
   createTicketUserId = null,
   createTicketTargetName = "",
   queueMode = "",
-}) {
+}: TicketQueueTableProps) {
   const normalizedTickets = Array.isArray(tickets) ? tickets : [];
   const stats = useMemo(() => getSummaryStats(normalizedTickets), [normalizedTickets]);
   const heading = useMemo(
     () => getQueueHeading(normalizedTickets, queueMode),
     [normalizedTickets, queueMode]
   );
-  const [expandedDesktopId, setExpandedDesktopId] = useState(null);
+  const [expandedDesktopId, setExpandedDesktopId] = useState<string | null>(null);
 
-  function toggleDesktopTicket(ticketId) {
+  function toggleDesktopTicket(ticketId: string) {
     setExpandedDesktopId((prev) => (prev === ticketId ? null : ticketId));
   }
 
