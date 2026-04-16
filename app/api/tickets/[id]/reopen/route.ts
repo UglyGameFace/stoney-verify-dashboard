@@ -6,7 +6,13 @@ import { env } from "@/lib/env";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type RefreshedTokens = unknown;
+type RefreshedTokens = {
+  access_token: string;
+  token_type?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+} | null;
 
 type SessionLike = {
   user?: {
@@ -49,7 +55,7 @@ function normalizeString(value: unknown): string {
 function buildJsonResponse(
   payload: Record<string, unknown>,
   status = 200,
-  refreshedTokens: RefreshedTokens | null = null
+  refreshedTokens: RefreshedTokens = null
 ) {
   const response = NextResponse.json(payload, {
     status,
@@ -270,6 +276,8 @@ export async function POST(
       );
     }
 
+    const nowIso = new Date().toISOString();
+
     const { data: updatedTicket, error: updateError } = await supabase
       .from("tickets")
       .update({
@@ -278,9 +286,9 @@ export async function POST(
         closed_reason: null,
         closed_at: null,
         deleted_at: null,
-        reopened_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        last_activity_at: new Date().toISOString(),
+        reopened_at: nowIso,
+        updated_at: nowIso,
+        last_activity_at: nowIso,
       })
       .eq("id", ticketId)
       .select("*")
