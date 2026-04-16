@@ -208,7 +208,9 @@ function getDiscordDefaultAvatarIndex(user: DiscordUser): number {
     }
 
     const snowflake = BigInt(String(user?.id || "0"));
-    return Number((snowflake >> 22n) % 6n);
+    const shifted = snowflake >> BigInt(22);
+    const bucket = shifted % BigInt(6);
+    return Number(bucket);
   } catch {
     return 0;
   }
