@@ -36,7 +36,7 @@ const MOBILE_TABS = ["home", "tickets", "members", "categories"];
 const STALE_VISIBLE_REFRESH_MS = 45_000;
 const BACKUP_REFRESH_INTERVAL_MS = 90_000;
 const RESUME_PENDING_REFRESH_CHECK_MS = 1500;
-const MOBILE_NAV_RESERVED_PX = 108;
+const MOBILE_NAV_RESERVED_PX = 84;
 const REALTIME_DEBOUNCE_MS = 1250;
 const DESKTOP_LAYOUT_MIN_WIDTH = 1024;
 
@@ -1854,7 +1854,7 @@ export default function DashboardClient({
   const commonRefreshCard = (
     <div
       className="card dashboard-refresh-card"
-      style={{ marginBottom: 16, padding: 12 }}
+      style={{ marginBottom: 14, padding: 12 }}
     >
       <div
         style={{
@@ -1949,7 +1949,7 @@ export default function DashboardClient({
           ...themeVars,
           paddingBottom: isDesktopLayout
             ? 32
-            : `calc(${MOBILE_NAV_RESERVED_PX}px + env(safe-area-inset-bottom, 0px))`,
+            : `calc(${MOBILE_NAV_RESERVED_PX}px + env(safe-area-inset-bottom, 0px) + 8px)`,
         }}
       >
         {isDesktopLayout ? (
@@ -2038,25 +2038,25 @@ export default function DashboardClient({
             {commonRefreshCard}
 
             {error ? (
-              <div className="error-banner" style={{ marginBottom: 16 }}>
+              <div className="error-banner" style={{ marginBottom: 14 }}>
                 {error}
               </div>
             ) : null}
 
             {maintenanceError ? (
-              <div className="error-banner" style={{ marginBottom: 16 }}>
+              <div className="error-banner" style={{ marginBottom: 14 }}>
                 {maintenanceError}
               </div>
             ) : null}
 
             {maintenanceMessage ? (
-              <div className="info-banner" style={{ marginBottom: 16 }}>
+              <div className="info-banner" style={{ marginBottom: 14 }}>
                 {maintenanceMessage}
               </div>
             ) : null}
 
             {isRefreshing ? (
-              <div className="info-banner" style={{ marginBottom: 16 }}>
+              <div className="info-banner" style={{ marginBottom: 14 }}>
                 Refreshing dashboard…
               </div>
             ) : null}
@@ -2380,7 +2380,7 @@ export default function DashboardClient({
         .profile-scroll-safe-zone {
           position: relative;
           z-index: 1;
-          padding-bottom: 12px;
+          padding-bottom: 8px;
         }
 
         .mobile-tab-panel {
@@ -2390,6 +2390,7 @@ export default function DashboardClient({
 
         .mobile-tab-panel.active {
           display: block;
+          padding-bottom: 8px;
         }
 
         .intelligence-grid {
@@ -2439,6 +2440,15 @@ export default function DashboardClient({
         @media (max-width: 1023px) {
           .desktop-only-nav {
             display: none;
+          }
+
+          .dashboard-refresh-card {
+            margin-bottom: 12px !important;
+            padding: 10px !important;
+          }
+
+          .dashboard-refresh-actions {
+            width: 100%;
           }
         }
       `}</style>
