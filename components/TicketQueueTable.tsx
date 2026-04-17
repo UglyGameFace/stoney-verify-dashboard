@@ -1466,6 +1466,26 @@ export default function TicketQueueTable({
     setExpandedDesktopId((prev) => (prev === ticketId ? null : ticketId));
   }
 
+  const summaryNodes = (
+    <>
+      <SummaryChip label="Total" value={stats.total} />
+      <SummaryChip label="Open" value={stats.open} tone="open" />
+      <SummaryChip label="Claimed" value={stats.claimed} tone="claimed" />
+      <SummaryChip label="Closed" value={stats.closed} />
+      <SummaryChip label="Deleted" value={stats.deleted} />
+      <SummaryChip label="Urgent" value={stats.urgent} tone="danger" />
+      <SummaryChip label="High" value={stats.high} tone="warn" />
+      <SummaryChip label="Overdue" value={stats.overdue} tone={stats.overdue ? "danger" : "default"} />
+      <SummaryChip label="High Risk" value={stats.highRisk} tone={stats.highRisk ? "danger" : "default"} />
+      <SummaryChip label="Unassigned" value={stats.unassigned} tone={stats.unassigned ? "warn" : "default"} />
+      <SummaryChip label="Matched" value={stats.matched} tone={stats.matched ? "claimed" : "default"} />
+      <SummaryChip label="Verification" value={stats.verificationLike} tone={stats.verificationLike ? "open" : "default"} />
+      <SummaryChip label="No Notes" value={stats.noNotes} tone={stats.noNotes ? "warn" : "default"} />
+      <SummaryChip label="Missing Channel" value={stats.missingChannel} tone={stats.missingChannel ? "danger" : "default"} />
+      <SummaryChip label="Ghost" value={stats.ghosts} tone={stats.ghosts ? "warn" : "default"} />
+    </>
+  );
+
   return (
     <div className="card queue-shell" id="tickets">
       <div
@@ -1605,42 +1625,12 @@ export default function TicketQueueTable({
         </div>
       </div>
 
+      <div className="queue-summary-scroll">
+        {summaryNodes}
+      </div>
+
       <div className="queue-summary-grid" style={{ marginBottom: 14 }}>
-        <SummaryChip label="Total" value={stats.total} />
-        <SummaryChip label="Open" value={stats.open} tone="open" />
-        <SummaryChip label="Claimed" value={stats.claimed} tone="claimed" />
-        <SummaryChip label="Closed" value={stats.closed} />
-        <SummaryChip label="Deleted" value={stats.deleted} />
-        <SummaryChip label="Urgent" value={stats.urgent} tone="danger" />
-        <SummaryChip label="High" value={stats.high} tone="warn" />
-        <SummaryChip label="Overdue" value={stats.overdue} tone={stats.overdue ? "danger" : "default"} />
-        <SummaryChip label="High Risk" value={stats.highRisk} tone={stats.highRisk ? "danger" : "default"} />
-        <SummaryChip label="Unassigned" value={stats.unassigned} tone={stats.unassigned ? "warn" : "default"} />
-        <SummaryChip
-          label="Matched"
-          value={stats.matched}
-          tone={stats.matched ? "claimed" : "default"}
-        />
-        <SummaryChip
-          label="Verification"
-          value={stats.verificationLike}
-          tone={stats.verificationLike ? "open" : "default"}
-        />
-        <SummaryChip
-          label="No Notes"
-          value={stats.noNotes}
-          tone={stats.noNotes ? "warn" : "default"}
-        />
-        <SummaryChip
-          label="Missing Channel"
-          value={stats.missingChannel}
-          tone={stats.missingChannel ? "danger" : "default"}
-        />
-        <SummaryChip
-          label="Ghost"
-          value={stats.ghosts}
-          tone={stats.ghosts ? "warn" : "default"}
-        />
+        {summaryNodes}
       </div>
 
       {!processedTickets.length ? (
@@ -1874,7 +1864,7 @@ export default function TicketQueueTable({
         </>
       ) : null}
 
-      <style jsx>{`
+      <style jsx global>{`
         .queue-shell {
           background:
             radial-gradient(circle at top right, rgba(93, 255, 141, 0.08), transparent 26%),
@@ -1908,18 +1898,24 @@ export default function TicketQueueTable({
         }
 
         .queue-filter-chip {
-          appearance: none;
+          appearance: none !important;
+          -webkit-appearance: none !important;
+          -moz-appearance: none !important;
           border: 1px solid rgba(255,255,255,0.08);
           background:
             radial-gradient(circle at top right, rgba(255,255,255,0.04), transparent 45%),
             rgba(255,255,255,0.03);
           color: var(--text, #dbe4ee);
           border-radius: 999px;
-          padding: 7px 12px;
+          padding: 9px 14px;
+          min-height: 40px;
           font-size: 12px;
+          font-weight: 700;
           line-height: 1.1;
           cursor: pointer;
           transition: border-color 0.16s ease, transform 0.16s ease, background 0.16s ease;
+          white-space: nowrap;
+          flex: 0 0 auto;
         }
 
         .queue-filter-chip:hover {
@@ -1964,6 +1960,10 @@ export default function TicketQueueTable({
         .queue-mobile-stack {
           display: grid;
           gap: 12px;
+        }
+
+        .queue-summary-scroll {
+          display: none;
         }
 
         .queue-summary-grid {
@@ -2014,11 +2014,14 @@ export default function TicketQueueTable({
         }
 
         .queue-summary-chip-label {
+          display: block;
           font-size: 12px;
           color: var(--muted);
+          line-height: 1.1;
         }
 
         .queue-summary-chip-value {
+          display: block;
           font-size: 20px;
           font-weight: 800;
           color: var(--text-strong);
@@ -2193,17 +2196,11 @@ export default function TicketQueueTable({
           z-index: 1;
         }
 
-        .ticket-mobile-card.premium :global(.card),
-        .ticket-mobile-card.premium :global(table),
-        .ticket-mobile-card.premium :global(thead),
-        .ticket-mobile-card.premium :global(tbody),
-        .ticket-mobile-card.premium :global(tr),
-        .ticket-mobile-card.premium :global(td),
-        .ticket-mobile-card.premium :global(th),
-        .ticket-mobile-card.premium :global(button),
-        .ticket-mobile-card.premium :global(a) {
-          background-color: transparent !important;
-          box-shadow: none;
+        .ticket-mobile-card.premium .button,
+        .ticket-mobile-card.premium .input,
+        .ticket-mobile-card.premium select,
+        .ticket-mobile-card.premium textarea {
+          background-color: transparent;
         }
 
         .ticket-mobile-card.expanded {
@@ -2408,8 +2405,45 @@ export default function TicketQueueTable({
             margin: 0;
           }
 
+          .queue-toolbar-left {
+            grid-template-columns: 1fr;
+          }
+
+          .queue-filter-row {
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding-bottom: 4px;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+          }
+
+          .queue-filter-row::-webkit-scrollbar {
+            display: none;
+          }
+
           .queue-summary-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+            display: none;
+          }
+
+          .queue-summary-scroll {
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding-bottom: 6px;
+            margin-bottom: 14px;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+          }
+
+          .queue-summary-scroll::-webkit-scrollbar {
+            display: none;
+          }
+
+          .queue-summary-scroll .queue-summary-chip {
+            min-width: 110px;
+            flex: 0 0 auto;
           }
 
           .ticket-mobile-meta {
@@ -2425,17 +2459,13 @@ export default function TicketQueueTable({
             text-align: left;
           }
 
-          .queue-toolbar-left {
-            grid-template-columns: 1fr;
-          }
-
-          :global(.table-wrap),
-          :global(table),
-          :global(thead),
-          :global(tbody),
-          :global(tr),
-          :global(td),
-          :global(th) {
+          .table-wrap,
+          table,
+          thead,
+          tbody,
+          tr,
+          td,
+          th {
             background: transparent !important;
           }
         }
@@ -2447,6 +2477,10 @@ export default function TicketQueueTable({
 
           .ticket-desktop-table {
             display: block;
+          }
+
+          .queue-summary-scroll {
+            display: none;
           }
         }
 
