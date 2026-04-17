@@ -180,11 +180,6 @@ function normalizeBoolean(value: unknown): boolean {
   return clean === "true" || clean === "1" || clean === "yes" || clean === "on";
 }
 
-function normalizeNumber(value: unknown, fallback = 0): number {
-  const num = Number(value);
-  return Number.isFinite(num) ? num : fallback;
-}
-
 function safeArray<T = unknown>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
