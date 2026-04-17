@@ -24,26 +24,42 @@ const CATEGORY_PRESETS = [
         "Identity verification, secure uploads, VC verification, and verification-related issues.",
       intake_type: "verification",
       match_keywords:
-        "verification, verify, verify issue, verification issue, id verify, secure upload, vc verify, face check",
+        "verification, verify, verification issue, id verification, secure upload, vc verify, verify in vc, face check, selfie, approval, verification pending",
       button_label: "Verification",
       sort_order: "1",
       is_default: false,
     },
   },
   {
-    key: "support",
-    label: "General Support",
+    key: "account-access",
+    label: "Account / Access",
     values: {
-      name: "Support",
+      name: "Account / Access",
       color: "#5ea4ff",
       description:
-        "General support questions, help requests, and non-specialized assistance.",
-      intake_type: "general",
+        "Login issues, hacked accounts, email changes, password resets, and access problems.",
+      intake_type: "custom",
       match_keywords:
-        "support, help, general support, assistance, question, issue",
-      button_label: "Support",
-      sort_order: "50",
-      is_default: true,
+        "account, account access, login, sign in, email, password, 2fa, locked out, hacked, compromised, cannot login, cant login, access issue",
+      button_label: "Account / Access",
+      sort_order: "2",
+      is_default: false,
+    },
+  },
+  {
+    key: "payments-refunds",
+    label: "Payments / Refunds",
+    values: {
+      name: "Payments / Refunds",
+      color: "#ffb24d",
+      description:
+        "Payments, receipts, invoices, refunds, chargebacks, and order issues.",
+      intake_type: "custom",
+      match_keywords:
+        "payment, paid, purchase, refund, chargeback, receipt, invoice, order, checkout, price, pricing, order status, didn't receive, did not receive",
+      button_label: "Payments / Refunds",
+      sort_order: "3",
+      is_default: false,
     },
   },
   {
@@ -56,9 +72,9 @@ const CATEGORY_PRESETS = [
         "Ban appeals, timeout appeals, punishment reviews, and moderation reconsideration.",
       intake_type: "appeal",
       match_keywords:
-        "appeal, appeals, ban appeal, timeout appeal, punishment appeal, muted, banned",
+        "appeal, appeals, ban appeal, timeout appeal, punishment appeal, muted, banned, unban, kick appeal, warn appeal",
       button_label: "Appeals",
-      sort_order: "20",
+      sort_order: "4",
       is_default: false,
     },
   },
@@ -69,12 +85,44 @@ const CATEGORY_PRESETS = [
       name: "Reports",
       color: "#ff6b6b",
       description:
-        "User reports, abuse reports, scam reports, harassment, or incidents requiring staff attention.",
+        "User reports, abuse reports, scam reports, harassment, threats, or incidents requiring staff attention.",
       intake_type: "report",
       match_keywords:
-        "report, reports, incident, scam, abuse, harassment, threat, rule break",
+        "report, reports, incident, scam, abuse, harassment, threat, rule break, rulebreak, impersonation, spam, raid",
       button_label: "Reports",
-      sort_order: "30",
+      sort_order: "5",
+      is_default: false,
+    },
+  },
+  {
+    key: "staff-complaint",
+    label: "Staff Complaint",
+    values: {
+      name: "Staff Complaint",
+      color: "#ff7f7f",
+      description:
+        "Complaints or escalation requests involving staff or moderator behavior.",
+      intake_type: "report",
+      match_keywords:
+        "staff complaint, staff issue, staff abuse, bad staff, mod complaint, moderator report, admin report, abusive mod, staff report",
+      button_label: "Staff Complaint",
+      sort_order: "6",
+      is_default: false,
+    },
+  },
+  {
+    key: "technical-support",
+    label: "Technical Support",
+    values: {
+      name: "Bug / Technical Support",
+      color: "#53c1ff",
+      description:
+        "Site bugs, bot issues, broken panels, failed uploads, and technical problems.",
+      intake_type: "custom",
+      match_keywords:
+        "bug, broken, not working, error, glitch, failed, technical support, site issue, dashboard issue, upload failed, command bug, bot issue",
+      button_label: "Technical Support",
+      sort_order: "7",
       is_default: false,
     },
   },
@@ -85,13 +133,125 @@ const CATEGORY_PRESETS = [
       name: "COD Services",
       color: "#8d7dff",
       description:
-        "Older Call of Duty services including challenge lobbies, unlock all, recoveries, and legacy COD help.",
+        "Call of Duty services including challenge lobbies, unlock all, recoveries, zombies rank, and legacy COD help.",
       intake_type: "custom",
       match_keywords:
-        "cod, call of duty, cod services, cod recovery, recovery, recoveries, challenge lobby, challenge lobbies, modded lobby, modded lobbies, unlock all, prestige, rank unlock, account recovery, old cod, older cod, legacy cod, bo1, bo2, bo3, black ops 1, black ops 2, black ops 3, mw2, mw3, modern warfare 2, modern warfare 3, waw, world at war, zombies rank, camo unlock, camo service, bot lobby",
+        "cod, call of duty, cod services, cod recovery, recovery, recoveries, challenge lobby, challenge lobbies, modded lobby, modded lobbies, unlock all, prestige, rank unlock, account recovery, old cod, older cod, legacy cod, bo1, bo2, bo3, bo6, black ops 1, black ops 2, black ops 3, black ops 6, mw2, mw3, modern warfare 2, modern warfare 3, waw, world at war, zombies rank, camo unlock, camo service, bot lobby, ranked play, warzone",
       button_label: "COD Services",
+      sort_order: "8",
+      is_default: false,
+    },
+  },
+  {
+    key: "service-request",
+    label: "Service Request",
+    values: {
+      name: "Service Requests",
+      color: "#7e8bff",
+      description:
+        "General service requests, boosts, carries, recoveries, and fulfillment questions outside COD-specific requests.",
+      intake_type: "custom",
+      match_keywords:
+        "service, services, service request, boosting, boost, carry, carries, recovery service, unlock service, rank help",
+      button_label: "Service Request",
+      sort_order: "9",
+      is_default: false,
+    },
+  },
+  {
+    key: "vouch-referral",
+    label: "Vouch / Referral",
+    values: {
+      name: "Vouch / Invite / Referral",
+      color: "#52d0a8",
+      description:
+        "Invite credit, referral rewards, vouch issues, and who-invited-who questions.",
+      intake_type: "custom",
+      match_keywords:
+        "vouch, vouched, voucher, invite, invited, invite credit, referral, referrer, who invited me, invite reward",
+      button_label: "Vouch / Referral",
       sort_order: "10",
       is_default: false,
+    },
+  },
+  {
+    key: "giveaway-reward",
+    label: "Giveaway / Reward",
+    values: {
+      name: "Giveaway / Reward Issues",
+      color: "#ffd166",
+      description:
+        "Giveaway prizes, missing rewards, winner disputes, and reward claims.",
+      intake_type: "custom",
+      match_keywords:
+        "giveaway, reward, prize, claim prize, missing prize, didn't get prize, did not get prize, winner issue, reward issue",
+      button_label: "Giveaway / Reward",
+      sort_order: "11",
+      is_default: false,
+    },
+  },
+  {
+    key: "content-media",
+    label: "Content / Media",
+    values: {
+      name: "Content / Media Requests",
+      color: "#ff9f6e",
+      description:
+        "Graphics, thumbnails, banners, media edits, and promo content requests.",
+      intake_type: "custom",
+      match_keywords:
+        "content, media, graphic, graphics, design, editing, video, thumbnail, banner, promo art, content request",
+      button_label: "Content / Media",
+      sort_order: "12",
+      is_default: false,
+    },
+  },
+  {
+    key: "partnership",
+    label: "Partnership",
+    values: {
+      name: "Partnerships",
+      color: "#c084fc",
+      description:
+        "Partnerships, sponsors, collaborations, and promotions.",
+      intake_type: "partnership",
+      match_keywords:
+        "partnership, partner, collab, collaboration, sponsor, promotion, promo",
+      button_label: "Partnership",
+      sort_order: "13",
+      is_default: false,
+    },
+  },
+  {
+    key: "question",
+    label: "Question",
+    values: {
+      name: "Questions",
+      color: "#7dd3fc",
+      description:
+        "General questions and how-to requests.",
+      intake_type: "question",
+      match_keywords:
+        "question, questions, help question, how to, how do i",
+      button_label: "Question",
+      sort_order: "14",
+      is_default: false,
+    },
+  },
+  {
+    key: "support",
+    label: "General Support",
+    values: {
+      name: "Support",
+      color: "#5ea4ff",
+      description:
+        "General support questions, help requests, and fallback assistance.",
+      intake_type: "general",
+      match_keywords:
+        "support, help, general support, assistance",
+      button_label: "Support",
+      sort_order: "999",
+      is_default: true,
     },
   },
 ];
@@ -164,6 +324,8 @@ function looksLikeCodCategoryDraft(draft) {
     "waw",
     "older cod",
     "old cod",
+    "warzone",
+    "bo6",
   ].some((term) => haystack.includes(term));
 }
 
@@ -189,9 +351,11 @@ function codKeywordSuggestions() {
     "bo1",
     "bo2",
     "bo3",
+    "bo6",
     "black ops 1",
     "black ops 2",
     "black ops 3",
+    "black ops 6",
     "mw2",
     "mw3",
     "modern warfare 2",
@@ -202,6 +366,8 @@ function codKeywordSuggestions() {
     "camo unlock",
     "camo service",
     "bot lobby",
+    "ranked play",
+    "warzone",
   ];
 }
 
@@ -857,13 +1023,18 @@ export default function CategoryManager({
     setMessage("");
 
     try {
-      const res = await fetch(`/api/ticket-categories/${id}`, {
+      const res = await fetch("/api/ticket-categories", {
         method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
       });
 
       const json = await res.json().catch(() => null);
       if (!res.ok) {
-        throw new Error(json?.error || "Failed to delete category.");
+        throw new Error(
+          json?.error ||
+            "Failed to delete category."
+        );
       }
 
       flashMessage("Category deleted.");
@@ -887,10 +1058,10 @@ export default function CategoryManager({
     setMessage("");
 
     try {
-      const res = await fetch(`/api/ticket-categories/${id}`, {
+      const res = await fetch("/api/ticket-categories", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, id }),
       });
 
       const json = await res.json().catch(() => null);
@@ -957,8 +1128,8 @@ export default function CategoryManager({
             className="muted"
             style={{ marginTop: 6, fontSize: 13, lineHeight: 1.5 }}
           >
-            Define what each ticket type is for, how it should appear, and make
-            category matching stronger with cleaner aliases.
+            Define what each ticket type is for, how it should appear, and keep
+            Discord intake and dashboard categories in sync.
           </div>
         </div>
 
