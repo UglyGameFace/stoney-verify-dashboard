@@ -260,8 +260,10 @@ export default function MobileBottomNav({
           display: flex;
           align-items: flex-end;
           justify-content: center;
-          padding: 12px 10px
-            calc(12px + env(safe-area-inset-bottom, 0px) + 84px);
+          padding:
+            10px
+            10px
+            calc(10px + env(safe-area-inset-bottom, 0px) + 72px);
         }
 
         .sv-mobile-actions-sheet {
@@ -270,7 +272,7 @@ export default function MobileBottomNav({
           overflow-y: auto;
           -webkit-overflow-scrolling: touch;
           overscroll-behavior: contain;
-          border-radius: 22px;
+          border-radius: 20px;
           background:
             radial-gradient(circle at top right, rgba(93, 255, 141, 0.08), transparent 30%),
             radial-gradient(circle at bottom left, rgba(99, 213, 255, 0.08), transparent 28%),
@@ -283,8 +285,8 @@ export default function MobileBottomNav({
         }
 
         .sv-mobile-actions-handle {
-          width: 54px;
-          height: 6px;
+          width: 52px;
+          height: 5px;
           border-radius: 999px;
           margin: 0 auto 14px;
           background: rgba(255, 255, 255, 0.16);
@@ -315,8 +317,8 @@ export default function MobileBottomNav({
         .sv-mobile-actions-close {
           all: unset;
           box-sizing: border-box;
-          min-height: 40px;
-          padding: 0 14px;
+          min-height: 38px;
+          padding: 0 13px;
           border-radius: 14px;
           border: 1px solid rgba(255, 255, 255, 0.08);
           background: rgba(255, 255, 255, 0.03);
@@ -336,7 +338,7 @@ export default function MobileBottomNav({
         .sv-mobile-actions-item {
           all: unset;
           box-sizing: border-box;
-          min-height: 58px;
+          min-height: 56px;
           border-radius: 16px;
           display: flex;
           align-items: center;
@@ -385,9 +387,9 @@ export default function MobileBottomNav({
           position: fixed;
           left: 50%;
           transform: translateX(-50%);
-          bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+          bottom: calc(4px + env(safe-area-inset-bottom, 0px));
           z-index: 9999;
-          width: min(calc(100vw - 18px), 430px);
+          width: min(calc(100vw - 14px), 430px);
           pointer-events: none;
         }
 
@@ -395,7 +397,7 @@ export default function MobileBottomNav({
           pointer-events: auto;
           box-sizing: border-box;
           width: 100%;
-          border-radius: 18px;
+          border-radius: 16px;
           background:
             radial-gradient(circle at top right, rgba(93, 255, 141, 0.05), transparent 34%),
             radial-gradient(circle at bottom left, rgba(99, 213, 255, 0.05), transparent 28%),
@@ -409,21 +411,21 @@ export default function MobileBottomNav({
           display: grid;
           grid-template-columns: repeat(${totalNavItems || 1}, minmax(0, 1fr));
           align-items: stretch;
-          gap: 6px;
-          padding: 6px;
+          gap: 5px;
+          padding: 5px;
         }
 
         .sv-mobile-nav-item {
           all: unset;
           box-sizing: border-box;
           min-width: 0;
-          height: 58px;
-          border-radius: 14px;
+          height: 54px;
+          border-radius: 13px;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 5px;
+          gap: 4px;
           cursor: pointer;
           user-select: none;
           -webkit-tap-highlight-color: transparent;
@@ -457,18 +459,18 @@ export default function MobileBottomNav({
         }
 
         .sv-mobile-nav-icon {
-          width: 17px;
-          height: 17px;
+          width: 16px;
+          height: 16px;
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          flex: 0 0 17px;
+          flex: 0 0 16px;
           line-height: 0;
         }
 
         .sv-mobile-nav-icon :global(svg) {
-          width: 17px;
-          height: 17px;
+          width: 16px;
+          height: 16px;
           display: block;
           fill: none;
           stroke: currentColor;
@@ -492,17 +494,17 @@ export default function MobileBottomNav({
 
         @media (max-width: 380px) {
           .sv-mobile-nav-wrap {
-            width: min(calc(100vw - 12px), 420px);
+            width: min(calc(100vw - 10px), 420px);
           }
 
           .sv-mobile-nav-shell {
-            gap: 5px;
-            padding: 5px;
+            gap: 4px;
+            padding: 4px;
           }
 
           .sv-mobile-nav-item {
-            height: 56px;
-            border-radius: 13px;
+            height: 52px;
+            border-radius: 12px;
           }
 
           .sv-mobile-nav-text,
