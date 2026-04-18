@@ -8,6 +8,7 @@
 // ============================================================
 
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { getSession } from "@/lib/auth-server";
 import { derivePriority, sortTickets } from "@/lib/priority";
@@ -828,9 +829,9 @@ function sanitizeUserTicket(ticket: AnyRecord, staffLookup: Record<string, AnyRe
   };
 }
 
-async function loadMemberRow(supabase: AnyRecord, guildId: string, discordId: string): Promise<AnyRecord | null> {
+async function loadMemberRow(supabase: SupabaseClient, guildId: string, discordId: string): Promise<AnyRecord | null> {
   return safeSupabaseSingle<AnyRecord>(() =>
-    (supabase as AnyRecord)
+    supabase
       .from("guild_members")
       .select("*")
       .eq("guild_id", guildId)
@@ -840,7 +841,7 @@ async function loadMemberRow(supabase: AnyRecord, guildId: string, discordId: st
 }
 
 async function loadMemberLookupByIds(
-  supabase: AnyRecord,
+  supabase: SupabaseClient,
   guildId: string,
   userIds: unknown
 ): Promise<Record<string, AnyRecord>> {
@@ -848,7 +849,7 @@ async function loadMemberLookupByIds(
   if (!ids.length) return {};
 
   const rows = await safeSupabaseRows<AnyRecord>(() =>
-    (supabase as AnyRecord)
+    supabase
       .from("guild_members")
       .select("*")
       .eq("guild_id", guildId)
@@ -864,9 +865,9 @@ async function loadMemberLookupByIds(
   return out;
 }
 
-async function loadTicketCategories(supabase: AnyRecord, guildId: string): Promise<CategorySummary[]> {
+async function loadTicketCategories(supabase: SupabaseClient, guildId: string): Promise<CategorySummary[]> {
   const rows = await safeSupabaseRows<AnyRecord>(() =>
-    (supabase as AnyRecord)
+    supabase
       .from("ticket_categories")
       .select("*")
       .eq("guild_id", guildId)
@@ -877,9 +878,9 @@ async function loadTicketCategories(supabase: AnyRecord, guildId: string): Promi
   return rows.map(sanitizeCategory);
 }
 
-async function loadVerificationFlags(supabase: AnyRecord, guildId: string, discordId: string): Promise<VerificationFlagSummary[]> {
+async function loadVerificationFlags(supabase: SupabaseClient, guildId: string, discordId: string): Promise<VerificationFlagSummary[]> {
   const rows = await safeSupabaseRows<AnyRecord>(() =>
-    (supabase as AnyRecord)
+    supabase
       .from("verification_flags")
       .select("*")
       .eq("guild_id", guildId)
@@ -891,9 +892,9 @@ async function loadVerificationFlags(supabase: AnyRecord, guildId: string, disco
   return rows.map(sanitizeVerificationFlag);
 }
 
-async function loadVerificationTokens(supabase: AnyRecord, guildId: string, discordId: string): Promise<VerificationTokenSummary[]> {
+async function loadVerificationTokens(supabase: SupabaseClient, guildId: string, discordId: string): Promise<VerificationTokenSummary[]> {
   const rows = await safeSupabaseRows<AnyRecord>(() =>
-    (supabase as AnyRecord)
+    supabase
       .from("verification_tokens")
       .select("*")
       .eq("guild_id", guildId)
@@ -905,12 +906,12 @@ async function loadVerificationTokens(supabase: AnyRecord, guildId: string, disc
   return rows.map(sanitizeVerificationToken);
 }
 
-async function loadRawVcSessions(supabase: AnyRecord, discordId: string): Promise<AnyRecord[]> {
+async function loadRawVcSessions(supabase: SupabaseClient, discordId: string): Promise<AnyRecord[]> {
   const numericId = normalizeNumber(discordId, 0);
   if (!numericId) return [];
 
   return safeSupabaseRows<AnyRecord>(() =>
-    (supabase as AnyRecord)
+    supabase
       .from("vc_verify_sessions")
       .select("*")
       .or(`owner_id.eq.${numericId},requester_id.eq.${numericId}`)
@@ -919,9 +920,9 @@ async function loadRawVcSessions(supabase: AnyRecord, discordId: string): Promis
   );
 }
 
-async function loadJoinHistory(supabase: AnyRecord, guildId: string, discordId: string): Promise<JoinHistorySummary[]> {
+async function loadJoinHistory(supabase: SupabaseClient, guildId: string, discordId: string): Promise<JoinHistorySummary[]> {
   const rows = await safeSupabaseRows<AnyRecord>(() =>
-    (supabase as AnyRecord)
+    supabase
       .from("member_joins")
       .select("*")
       .eq("guild_id", guildId)
@@ -933,9 +934,9 @@ async function loadJoinHistory(supabase: AnyRecord, guildId: string, discordId: 
   return rows.map(sanitizeJoinRow);
 }
 
-async function loadMemberEvents(supabase: AnyRecord, guildId: string, discordId: string): Promise<MemberEventSummary[]> {
+async function loadMemberEvents(supabase: SupabaseClient, guildId: string, discordId: string): Promise<MemberEventSummary[]> {
   const rows = await safeSupabaseRows<AnyRecord>(() =>
-    (supabase as AnyRecord)
+    supabase
       .from("member_events")
       .select("*")
       .eq("guild_id", guildId)
@@ -947,9 +948,9 @@ async function loadMemberEvents(supabase: AnyRecord, guildId: string, discordId:
   return rows.map(sanitizeMemberEventRow);
 }
 
-async function loadRecentTickets(supabase: AnyRecord, guildId: string, discordId: string): Promise<AnyRecord[]> {
+async function loadRecentTickets(supabase: SupabaseClient, guildId: string, discordId: string): Promise<AnyRecord[]> {
   return safeSupabaseRows<AnyRecord>(() =>
-    (supabase as AnyRecord)
+    supabase
       .from("tickets")
       .select("*")
       .eq("guild_id", guildId)
@@ -960,13 +961,13 @@ async function loadRecentTickets(supabase: AnyRecord, guildId: string, discordId
 }
 
 async function loadActivityFeedEvents(
-  supabase: AnyRecord,
+  supabase: SupabaseClient,
   guildId: string,
   discordId: string,
   ticketIds: string[] = []
 ): Promise<AnyRecord[]> {
   const byUser = await safeSupabaseRows<AnyRecord>(() =>
-    (supabase as AnyRecord)
+    supabase
       .from("activity_feed_events")
       .select("*")
       .eq("guild_id", guildId)
@@ -979,7 +980,7 @@ async function loadActivityFeedEvents(
   const cleanTicketIds = dedupeStrings(ticketIds);
   if (cleanTicketIds.length) {
     byTicket = await safeSupabaseRows<AnyRecord>(() =>
-      (supabase as AnyRecord)
+      supabase
         .from("activity_feed_events")
         .select("*")
         .eq("guild_id", guildId)
@@ -1151,7 +1152,7 @@ function buildVerificationTokenEvents(tokens: VerificationTokenSummary[]): Activ
         created_at: row.submitted_at,
         updated_at: row.submitted_at,
         actor_id: row?.requester_id || null,
-        actor_name: row?.raw?.requester_display_name as string || row?.raw?.requester_username as string || "Member",
+        actor_name: (row?.raw?.requester_display_name as string) || (row?.raw?.requester_username as string) || "Member",
         ticket_id: null,
         metadata: {
           token: row?.token || null,
@@ -1928,7 +1929,7 @@ export async function GET(): Promise<NextResponse> {
       );
     }
 
-    const supabase = createServerSupabase() as unknown as AnyRecord;
+    const supabase = createServerSupabase();
 
     const [
       memberRowRaw,
