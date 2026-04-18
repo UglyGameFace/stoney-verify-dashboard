@@ -1,9 +1,12 @@
 // ============================================================
 // File: components/TicketQueueTable.tsx
 // Purpose:
-//   Unified ticket queue renderer with cleaner visual hierarchy,
-//   more stable badge/color behavior, better mobile consistency,
-//   and stronger avatar fallbacks for tickets missing avatar_url.
+//   Simpler, cleaner ticket queue renderer with:
+//   - stable category colors
+//   - no meaningless "Unknown" chips
+//   - Discord default avatar fallback
+//   - much quieter mobile cards
+//   - one consistent visual system for mobile + desktop
 // ============================================================
 
 "use client";
@@ -26,14 +29,10 @@ type TicketLike = {
 
   category?: string | null;
   raw_category?: string | null;
-  category_id?: string | null;
-  matched_category_id?: string | null;
   matched_category_name?: string | null;
   matched_category_slug?: string | null;
   matched_intake_type?: string | null;
   matched_category_reason?: string | null;
-  matched_category_score?: number | null;
-  category_override?: boolean | null;
 
   status?: string | null;
   ticket_status?: string | null;
@@ -52,12 +51,11 @@ type TicketLike = {
 
   owner_verification_label?: string | null;
   verification_label?: string | null;
-
   risk_level?: string | null;
 
   owner_entry_method?: string | null;
-  owner_verification_source?: string | null;
   owner_join_source?: string | null;
+  owner_verification_source?: string | null;
   entry_method?: string | null;
   join_source?: string | null;
   source?: string | null;
@@ -65,6 +63,7 @@ type TicketLike = {
   owner_invited_by_name?: string | null;
   owner_vouched_by_name?: string | null;
   owner_approved_by_name?: string | null;
+  owner_role_state?: string | null;
 
   owner_ticket_total?: number | null;
   prior_ticket_total?: number | null;
@@ -93,9 +92,8 @@ type TicketLike = {
   is_ghost?: boolean | null;
   is_unclaimed?: boolean | null;
   is_claimed?: boolean | null;
-  recommended_actions?: string[] | null;
 
-  owner_role_state?: string | null;
+  recommended_actions?: string[] | null;
 
   [key: string]: unknown;
 };
@@ -114,28 +112,6 @@ type QueueMode =
   | "all"
   | string;
 
-type QueueFilter =
-  | "all"
-  | "needs-attention"
-  | "unclaimed"
-  | "mine"
-  | "verification"
-  | "overdue"
-  | "high-risk"
-  | "no-notes"
-  | "ghost"
-  | "missing-channel"
-  | "closed";
-
-type SortMode =
-  | "smart"
-  | "updated"
-  | "priority"
-  | "risk"
-  | "owner"
-  | "category"
-  | "status";
-
 type QueueRenderMode = "full" | "embedded";
 
 type TicketQueueTableProps = {
@@ -148,58 +124,6 @@ type TicketQueueTableProps = {
   renderMode?: QueueRenderMode;
 };
 
-type SummaryChipProps = {
-  label: string;
-  value: string | number;
-  tone?: "default" | "open" | "claimed" | "warn" | "danger";
-};
-
-type MetaBlockProps = {
-  label: string;
-  value: React.ReactNode;
-  full?: boolean;
-};
-
-type MiniFieldProps = {
-  label: string;
-  value: React.ReactNode;
-  full?: boolean;
-};
-
-type AvatarBubbleProps = {
-  ticket: TicketLike;
-  size?: number;
-};
-
-type CategoryDisplayProps = {
-  ticket: TicketLike;
-  compact?: boolean;
-};
-
-type TicketExpandedDetailsProps = {
-  ticket: TicketLike;
-  currentStaffId?: string | null;
-  onRefresh?: () => Promise<void> | void;
-};
-
-type MobileTicketCardProps = {
-  ticket: TicketLike;
-  currentStaffId?: string | null;
-  onRefresh?: () => Promise<void> | void;
-};
-
-const PLACEHOLDER_CATEGORY_VALUES = new Set([
-  "",
-  "uncategorized",
-  "unknown",
-  "none",
-  "null",
-  "undefined",
-  "no-categories",
-  "no categories",
-  "general",
-]);
-
 function normalizeText(value: unknown): string {
   return String(value || "").trim().toLowerCase();
 }
@@ -207,13 +131,6 @@ function normalizeText(value: unknown): string {
 function safeText(value: unknown, fallback = "—"): string {
   const text = String(value ?? "").trim();
   return text || fallback;
-}
-
-function truncateText(value: unknown, max = 120): string {
-  const text = String(value || "").trim();
-  if (!text) return "";
-  if (text.length <= max) return text;
-  return `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
 function titleize(value: unknown): string {
@@ -226,206 +143,11 @@ function titleize(value: unknown): string {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
-function badgeClass(value: unknown): string {
-  const v = String(value || "").toLowerCase().trim();
-
-  if (v === "open") return "badge open";
-  if (v === "closed") return "badge closed";
-  if (v === "deleted") return "badge closed";
-  if (v === "claimed") return "badge claimed";
-
-  if (v === "low") return "badge low";
-  if (v === "medium") return "badge medium";
-  if (v === "high") return "badge danger";
-  if (v === "urgent") return "badge danger";
-
-  if (v === "overdue") return "badge danger";
-  if (v === "ghost") return "badge";
-  if (v === "missing channel") return "badge danger";
-
-  if (v === "staff") return "badge claimed";
-  if (v === "verified") return "badge claimed";
-  if (v === "pending verification") return "badge open";
-  if (v === "needs review") return "badge danger";
-  if (v === "verification history") return "badge";
-  if (v === "vc in progress") return "badge open";
-  if (v === "denied") return "badge danger";
-
-  if (v === "high risk") return "badge danger";
-  if (v === "medium risk") return "badge medium";
-  if (v === "low risk") return "badge low";
-
-  return "badge";
-}
-
-function getChannelId(ticket: TicketLike): string {
-  return String(ticket?.channel_id || ticket?.discord_thread_id || "").trim();
-}
-
-function hasMissingChannel(ticket: TicketLike): boolean {
-  return !getChannelId(ticket);
-}
-
-function isGhost(ticket: TicketLike): boolean {
-  return ticket?.is_ghost === true;
-}
-
-function getStatus(ticket: TicketLike): string {
-  return String(ticket?.status || ticket?.ticket_status || "unknown")
-    .toLowerCase()
-    .trim();
-}
-
-function getPriority(ticket: TicketLike): string {
-  return String(ticket?.priority || "medium").toLowerCase().trim();
-}
-
-function isPlaceholderCategory(value: unknown): boolean {
-  return PLACEHOLDER_CATEGORY_VALUES.has(normalizeText(value));
-}
-
-function normalizeIntakeType(value: unknown): string {
-  const v = normalizeText(value);
-
-  if (!v) return "";
-  if (v === "verification_issue") return "verification";
-  if (v === "verification issue") return "verification";
-  if (v === "verify_issue") return "verification";
-  if (v === "support") return "support";
-  if (v === "general support") return "support";
-  if (v === "report_issue") return "report";
-  if (v === "report issue") return "report";
-
-  return v;
-}
-
-function getDisplayIntakeLabel(value: unknown): string {
-  const intake = normalizeIntakeType(value);
-  return intake ? titleize(intake) : "";
-}
-
-function deriveFallbackCategoryFromTicket(ticket: TicketLike): string {
-  const raw = [
-    ticket?.category,
-    ticket?.raw_category,
-    ticket?.matched_category_slug,
-    ticket?.matched_intake_type,
-  ]
-    .map((v) => normalizeText(v))
-    .filter(Boolean);
-
-  for (const value of raw) {
-    if (isPlaceholderCategory(value)) continue;
-
-    if (
-      value === "verification_issue" ||
-      value === "verification issue" ||
-      value === "verify_issue" ||
-      value === "verification"
-    ) {
-      return "Verification";
-    }
-
-    if (value === "support" || value === "general support") {
-      return "Support";
-    }
-
-    if (
-      value === "report" ||
-      value === "report_issue" ||
-      value === "report issue"
-    ) {
-      return "Report";
-    }
-
-    if (value === "appeal") return "Appeal";
-    if (value === "partnership") return "Partnership";
-    if (value === "question") return "Question";
-    if (value === "ghost") return "Ghost";
-
-    return titleize(value);
-  }
-
-  const title = normalizeText(ticket?.title);
-  if (title.includes("verification")) return "Verification";
-  if (title.includes("appeal")) return "Appeal";
-  if (title.includes("report")) return "Report";
-  if (title.includes("support")) return "Support";
-  if (title.includes("partner")) return "Partnership";
-  if (title.includes("question")) return "Question";
-  if (title.includes("ghost")) return "Ghost";
-
-  return "Support";
-}
-
-function getDisplayedCategoryName(ticket: TicketLike): string {
-  const matchedName = String(ticket?.matched_category_name || "").trim();
-  const matchedSlug = String(ticket?.matched_category_slug || "").trim();
-  const rawCategory = String(ticket?.category || "").trim();
-  const rawAlt = String(ticket?.raw_category || "").trim();
-
-  if (matchedName && !isPlaceholderCategory(matchedName)) {
-    return titleize(matchedName);
-  }
-
-  if (matchedSlug && !isPlaceholderCategory(matchedSlug)) {
-    return titleize(matchedSlug);
-  }
-
-  if (rawCategory && !isPlaceholderCategory(rawCategory)) {
-    return deriveFallbackCategoryFromTicket({ ...ticket, category: rawCategory });
-  }
-
-  if (rawAlt && !isPlaceholderCategory(rawAlt)) {
-    return deriveFallbackCategoryFromTicket({ ...ticket, raw_category: rawAlt });
-  }
-
-  return deriveFallbackCategoryFromTicket(ticket);
-}
-
-function getDisplayedIntakeType(ticket: TicketLike): string {
-  const intake = getDisplayIntakeLabel(
-    ticket?.matched_intake_type || ticket?.category || ticket?.raw_category || ""
-  );
-
-  if (intake === "Verification Issue") return "Verification";
-  return intake;
-}
-
-function getCategoryReason(ticket: TicketLike): string {
-  const reason = String(ticket?.matched_category_reason || "").trim();
-  if (!reason) return "";
-
-  const lowered = normalizeText(reason);
-  if (lowered === "no-categories") return "";
-  if (lowered === "no categories") return "";
-
-  return reason;
-}
-
-function getCategoryScore(ticket: TicketLike): number {
-  const score = Number(ticket?.matched_category_score || 0);
-  return Number.isFinite(score) ? score : 0;
-}
-
-function hasMatchedCategory(ticket: TicketLike): boolean {
-  const matchedName = String(ticket?.matched_category_name || "").trim();
-  const matchedSlug = String(ticket?.matched_category_slug || "").trim();
-
-  return Boolean(
-    (matchedName && !isPlaceholderCategory(matchedName)) ||
-      (matchedSlug && !isPlaceholderCategory(matchedSlug))
-  );
-}
-
-function getOwnerName(ticket: TicketLike): string {
-  return (
-    String(ticket?.owner_display_name || "").trim() ||
-    String(ticket?.display_name || "").trim() ||
-    String(ticket?.username || "").trim() ||
-    String(ticket?.user_id || "").trim() ||
-    "Unknown User"
-  );
+function truncateText(value: unknown, max = 120): string {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
 function getDiscordDefaultAvatarUrl(userId: unknown): string {
@@ -440,12 +162,22 @@ function getDiscordDefaultAvatarUrl(userId: unknown): string {
   }
 }
 
+function getOwnerName(ticket: TicketLike): string {
+  return (
+    String(ticket?.owner_display_name || "").trim() ||
+    String(ticket?.display_name || "").trim() ||
+    String(ticket?.username || "").trim() ||
+    String(ticket?.user_id || "").trim() ||
+    "Unknown User"
+  );
+}
+
 function getOwnerAvatar(ticket: TicketLike): string {
   const explicit = String(ticket?.owner_avatar_url || ticket?.avatar_url || "").trim();
   if (explicit) return explicit;
 
-  const fallbackDiscord = getDiscordDefaultAvatarUrl(ticket?.user_id);
-  if (fallbackDiscord) return fallbackDiscord;
+  const fallback = getDiscordDefaultAvatarUrl(ticket?.user_id);
+  if (fallback) return fallback;
 
   return "";
 }
@@ -454,7 +186,7 @@ function getOwnerInitials(ticket: TicketLike): string {
   const source = getOwnerName(ticket);
   const parts = source.split(/\s+/).filter(Boolean).slice(0, 2);
   if (!parts.length) return "?";
-  return parts.map((part) => part.charAt(0).toUpperCase()).join("");
+  return parts.map((p) => p[0]?.toUpperCase() || "").join("") || "?";
 }
 
 function getTicketTitle(ticket: TicketLike): string {
@@ -463,6 +195,54 @@ function getTicketTitle(ticket: TicketLike): string {
     String(ticket?.channel_name || "").trim() ||
     "Untitled Ticket"
   );
+}
+
+function getChannelId(ticket: TicketLike): string {
+  return String(ticket?.channel_id || ticket?.discord_thread_id || "").trim();
+}
+
+function getStatus(ticket: TicketLike): string {
+  return String(ticket?.status || ticket?.ticket_status || "unknown")
+    .trim()
+    .toLowerCase();
+}
+
+function getPriority(ticket: TicketLike): string {
+  return String(ticket?.priority || "medium").trim().toLowerCase();
+}
+
+function hasMissingChannel(ticket: TicketLike): boolean {
+  return !getChannelId(ticket);
+}
+
+function isGhost(ticket: TicketLike): boolean {
+  return ticket?.is_ghost === true;
+}
+
+function getVisibleVerificationLabel(ticket: TicketLike): string {
+  const value = normalizeText(
+    ticket?.owner_verification_label || ticket?.verification_label || ""
+  );
+
+  if (!value) return "";
+  if (value === "unknown") return "";
+  if (value === "verification history") return "";
+
+  if (value === "pending verification") return "Pending Verification";
+  if (value === "needs review") return "Needs Review";
+  if (value === "verified") return "Verified";
+  if (value === "staff") return "Staff";
+  if (value === "vc in progress") return "VC In Progress";
+  if (value === "denied") return "Denied";
+
+  return titleize(value);
+}
+
+function getVisibleRiskLabel(ticket: TicketLike): string {
+  const value = normalizeText(ticket?.risk_level || "");
+  if (value === "high") return "High Risk";
+  if (value === "medium") return "Medium Risk";
+  return "";
 }
 
 function getClaimedByLabel(ticket: TicketLike): string {
@@ -485,26 +265,70 @@ function getClaimedById(ticket: TicketLike): string {
   );
 }
 
-function getVerificationLabel(ticket: TicketLike): string {
-  const value =
-    String(ticket?.owner_verification_label || "").trim() ||
-    String(ticket?.verification_label || "").trim() ||
-    "";
-  return value;
+function getDisplayedCategoryName(ticket: TicketLike): string {
+  const candidates = [
+    ticket?.matched_category_name,
+    ticket?.matched_category_slug,
+    ticket?.category,
+    ticket?.raw_category,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  for (const candidate of candidates) {
+    const normalized = normalizeText(candidate);
+    if (!normalized) continue;
+    if (normalized === "unknown") continue;
+    if (normalized === "uncategorized") continue;
+    if (normalized === "none") continue;
+
+    if (
+      normalized === "verification_issue" ||
+      normalized === "verification issue" ||
+      normalized === "verify_issue"
+    ) {
+      return "Verification";
+    }
+
+    return titleize(candidate);
+  }
+
+  const title = normalizeText(ticket?.title || "");
+  if (title.includes("verification")) return "Verification";
+  if (title.includes("appeal")) return "Appeal";
+  if (title.includes("report")) return "Report";
+  if (title.includes("support")) return "Support";
+
+  return "Support";
 }
 
-function getVisibleVerificationLabel(ticket: TicketLike): string {
-  const value = getVerificationLabel(ticket).toLowerCase();
-  if (!value || value === "unknown") return "";
-  return titleize(value);
+function getDisplayedIntakeType(ticket: TicketLike): string {
+  const raw = normalizeText(ticket?.matched_intake_type || ticket?.category || "");
+  if (!raw) return "";
+
+  if (
+    raw === "verification_issue" ||
+    raw === "verification issue" ||
+    raw === "verify_issue"
+  ) {
+    return "Verification";
+  }
+
+  return titleize(raw);
 }
 
-function getRiskLevel(ticket: TicketLike): string {
-  const level = normalizeText(ticket?.risk_level);
-  if (level === "high") return "High Risk";
-  if (level === "medium") return "Medium Risk";
-  if (level === "low") return "Low Risk";
-  return "";
+function getCategoryTone(ticket: TicketLike): string {
+  const category = normalizeText(getDisplayedCategoryName(ticket));
+  const intake = normalizeText(getDisplayedIntakeType(ticket));
+
+  if (category.includes("verification") || intake === "verification") return "verification";
+  if (category.includes("support") || intake === "support") return "support";
+  if (category.includes("appeal") || intake === "appeal") return "appeal";
+  if (category.includes("report") || intake === "report") return "report";
+  if (category.includes("partnership") || intake === "partnership") return "partnership";
+  if (category.includes("question") || intake === "question") return "question";
+
+  return "default";
 }
 
 function getEntryMethodLabel(ticket: TicketLike): string {
@@ -516,24 +340,8 @@ function getEntryMethodLabel(ticket: TicketLike): string {
     String(ticket?.entry_method || "").trim() ||
     String(ticket?.source || "").trim() ||
     "";
+
   return raw ? titleize(raw) : "Unknown";
-}
-
-function getQueueIntel(ticket: TicketLike): string[] {
-  const pieces: string[] = [];
-
-  const inviter = String(ticket?.owner_invited_by_name || "").trim();
-  const voucher = String(ticket?.owner_vouched_by_name || "").trim();
-  const approver = String(ticket?.owner_approved_by_name || "").trim();
-
-  if (inviter) pieces.push(`Invited by ${inviter}`);
-  if (voucher) pieces.push(`Vouched by ${voucher}`);
-  if (approver) pieces.push(`Approved by ${approver}`);
-
-  if (ticket?.is_unclaimed) pieces.push("Waiting for claim");
-  if (ticket?.is_claimed) pieces.push("Assigned to staff");
-
-  return pieces;
 }
 
 function getSlaStatusLabel(ticket: TicketLike): string {
@@ -549,28 +357,14 @@ function getSlaStatusLabel(ticket: TicketLike): string {
   }
 
   const status = String(ticket?.sla_status || "").trim();
-  if (!status) return "No SLA";
+  if (!status || status === "no_deadline") return "No SLA";
   if (status === "counting_down") return "Countdown";
   if (status === "closed") return "Closed";
-  if (status === "no_deadline") return "No SLA";
-
   return titleize(status);
 }
 
-function getRecommendedActions(ticket: TicketLike): string[] {
-  if (Array.isArray(ticket?.recommended_actions)) {
-    return ticket.recommended_actions.filter(Boolean);
-  }
-
-  const actions: string[] = [];
-
-  if (ticket?.is_unclaimed) actions.push("Claim this ticket");
-  if (normalizeText(ticket?.priority) === "urgent") actions.push("Handle urgently");
-  if (ticket?.overdue) actions.push("Respond immediately");
-  if (Number(ticket?.note_count || 0) <= 0) actions.push("Add staff notes");
-  if (hasMissingChannel(ticket)) actions.push("Repair missing channel link");
-
-  return actions;
+function getPastTicketCount(ticket: TicketLike): number {
+  return Number(ticket?.owner_ticket_total || ticket?.prior_ticket_total || 0);
 }
 
 function getLatestActivityLabel(ticket: TicketLike): string {
@@ -583,58 +377,78 @@ function getLatestActivityLabel(ticket: TicketLike): string {
 }
 
 function getLatestActivityTime(ticket: TicketLike): string | null {
-  return (ticket?.latest_activity_at ||
-    ticket?.updated_at ||
-    ticket?.created_at ||
-    null) as string | null;
+  return (
+    (ticket?.latest_activity_at as string | null) ||
+    (ticket?.updated_at as string | null) ||
+    (ticket?.created_at as string | null) ||
+    null
+  );
+}
+
+function getQueueHeading(mode: QueueMode) {
+  if (mode === "unclaimed") {
+    return {
+      title: "Unclaimed Ticket Queue",
+      subtitle: "Tickets waiting for a staff member to claim and begin handling",
+    };
+  }
+
+  if (mode === "claimed") {
+    return {
+      title: "Claimed Ticket Queue",
+      subtitle: "Tickets currently assigned to staff and actively being worked",
+    };
+  }
+
+  if (mode === "my_claimed" || mode === "my-claimed") {
+    return {
+      title: "My Claimed Tickets",
+      subtitle: "Tickets currently assigned to the selected staff member",
+    };
+  }
+
+  if (mode === "open_only") {
+    return {
+      title: "Open Ticket Queue",
+      subtitle: "Showing only open tickets that still need staff action",
+    };
+  }
+
+  if (mode === "closed") {
+    return {
+      title: "Closed Ticket History",
+      subtitle: "Closed tickets remain visible here for audit trails and historical review",
+    };
+  }
+
+  if (mode === "deleted") {
+    return {
+      title: "Deleted Ticket History",
+      subtitle: "Deleted ticket records remain visible here for audit and historical review",
+    };
+  }
+
+  if (mode === "all") {
+    return {
+      title: "Ticket History & Queue",
+      subtitle: "Showing active and historical tickets together for review and auditing",
+    };
+  }
+
+  return {
+    title: "Active Ticket Queue",
+    subtitle: "Live active tickets with assignment state, urgency, and next-action context",
+  };
 }
 
 function countByStatus(tickets: TicketLike[], status: string): number {
   return tickets.filter(
-    (ticket) => String(ticket?.status || ticket?.ticket_status || "").toLowerCase() === status
+    (ticket) => getStatus(ticket) === status
   ).length;
-}
-
-function countByPriority(tickets: TicketLike[], priority: string): number {
-  return tickets.filter(
-    (ticket) => String(ticket?.priority || "").toLowerCase() === priority
-  ).length;
-}
-
-function countMatchedCategories(tickets: TicketLike[]): number {
-  return tickets.filter((ticket) => hasMatchedCategory(ticket)).length;
-}
-
-function countVerificationLike(tickets: TicketLike[]): number {
-  return tickets.filter((ticket) => {
-    const intake = getDisplayedIntakeType(ticket).toLowerCase();
-    const category = getDisplayedCategoryName(ticket).toLowerCase();
-    return intake === "verification" || category.includes("verification");
-  }).length;
 }
 
 function countOverdue(tickets: TicketLike[]): number {
   return tickets.filter((ticket) => Boolean(ticket?.overdue)).length;
-}
-
-function countHighRisk(tickets: TicketLike[]): number {
-  return tickets.filter(
-    (ticket) => normalizeText(ticket?.risk_level) === "high"
-  ).length;
-}
-
-function countUnassigned(tickets: TicketLike[]): number {
-  return tickets.filter((ticket) => {
-    if (ticket?.is_unclaimed === true) return true;
-    const claimed = String(ticket?.claimed_by || "").trim();
-    const assigned = String(ticket?.assigned_to || "").trim();
-    const claimedById = String(ticket?.claimed_by_id ?? "").trim();
-    return !claimed && !assigned && !claimedById;
-  }).length;
-}
-
-function countNoNotes(tickets: TicketLike[]): number {
-  return tickets.filter((ticket) => Number(ticket?.note_count || 0) <= 0).length;
 }
 
 function getSummaryStats(tickets: TicketLike[]) {
@@ -644,268 +458,57 @@ function getSummaryStats(tickets: TicketLike[]) {
     claimed: countByStatus(tickets, "claimed"),
     closed: countByStatus(tickets, "closed"),
     deleted: countByStatus(tickets, "deleted"),
-    urgent: countByPriority(tickets, "urgent"),
-    high: countByPriority(tickets, "high"),
-    missingChannel: tickets.filter((ticket) => hasMissingChannel(ticket)).length,
-    ghosts: tickets.filter((ticket) => isGhost(ticket)).length,
-    matched: countMatchedCategories(tickets),
-    verificationLike: countVerificationLike(tickets),
     overdue: countOverdue(tickets),
-    highRisk: countHighRisk(tickets),
-    unassigned: countUnassigned(tickets),
-    noNotes: countNoNotes(tickets),
   };
 }
 
-function getQueueHeading(tickets: TicketLike[], explicitMode: QueueMode) {
-  const rows = Array.isArray(tickets) ? tickets : [];
-  const statuses = [...new Set(rows.map((ticket) => getStatus(ticket)).filter(Boolean))];
-  const activeOnly =
-    statuses.length > 0 &&
-    statuses.every((status) => status === "open" || status === "claimed");
-
-  if (explicitMode === "queue" || explicitMode === "active" || (!explicitMode && activeOnly)) {
-    return {
-      title: "Active Ticket Queue",
-      subtitle:
-        "Live active tickets with assignment state, urgency, and next-action intelligence",
-    };
-  }
-
-  if (explicitMode === "unclaimed") {
-    return {
-      title: "Unclaimed Ticket Queue",
-      subtitle:
-        "Tickets waiting for a staff member to claim and begin handling",
-    };
-  }
-
-  if (explicitMode === "claimed") {
-    return {
-      title: "Claimed Ticket Queue",
-      subtitle:
-        "Tickets currently assigned to staff and actively being worked",
-    };
-  }
-
-  if (explicitMode === "my_claimed" || explicitMode === "my-claimed") {
-    return {
-      title: "My Claimed Tickets",
-      subtitle:
-        "Tickets currently assigned to the selected staff member",
-    };
-  }
-
-  if (explicitMode === "open_only") {
-    return {
-      title: "Open Ticket Queue",
-      subtitle: "Showing only open tickets that still need staff action",
-    };
-  }
-
-  if (explicitMode === "closed") {
-    return {
-      title: "Closed Ticket History",
-      subtitle:
-        "Closed tickets remain visible here for audit trails, reopen workflows, and historical review",
-    };
-  }
-
-  if (explicitMode === "deleted") {
-    return {
-      title: "Deleted Ticket History",
-      subtitle:
-        "Deleted ticket records remain visible here for audit and historical review",
-    };
-  }
-
-  if (explicitMode === "all") {
-    return {
-      title: "Ticket History & Queue",
-      subtitle:
-        "Showing active and historical tickets together for review, auditing, and reopen workflows",
-    };
-  }
-
-  const label =
-    statuses.length === 0
-      ? "No ticket records"
-      : statuses
-          .map((status) => status.charAt(0).toUpperCase() + status.slice(1))
-          .join(", ");
-
-  return {
-    title: "Filtered Ticket View",
-    subtitle: `Showing the current filtered ticket set: ${label}`,
-  };
-}
-
-function isClosedLike(ticket: TicketLike): boolean {
-  const status = getStatus(ticket);
-  return status === "closed" || status === "deleted";
-}
-
-function isVerificationLike(ticket: TicketLike): boolean {
-  const intake = getDisplayedIntakeType(ticket).toLowerCase();
-  const category = getDisplayedCategoryName(ticket).toLowerCase();
-  const verificationLabel = getVerificationLabel(ticket).toLowerCase();
-
+function getTicketRowKey(ticket: TicketLike, index = 0): string {
   return (
-    intake === "verification" ||
-    category.includes("verification") ||
-    verificationLabel === "pending verification" ||
-    verificationLabel === "needs review" ||
-    verificationLabel === "vc in progress"
+    String(ticket?.id || "").trim() ||
+    String(ticket?.channel_id || ticket?.discord_thread_id || "").trim() ||
+    [
+      String(ticket?.user_id || "").trim(),
+      String(ticket?.category || "").trim(),
+      String(ticket?.status || ticket?.ticket_status || "").trim(),
+      String(ticket?.created_at || "").trim(),
+      String(index),
+    ].join("::")
   );
 }
 
-function isHighRisk(ticket: TicketLike): boolean {
-  return normalizeText(ticket?.risk_level) === "high";
+function badgeClass(value: string): string {
+  const normalized = normalizeText(value);
+
+  if (normalized === "open") return "badge open";
+  if (normalized === "claimed") return "badge claimed";
+  if (normalized === "closed") return "badge closed";
+  if (normalized === "deleted") return "badge closed";
+
+  if (normalized === "low") return "badge low";
+  if (normalized === "medium") return "badge medium";
+  if (normalized === "high") return "badge danger";
+  if (normalized === "urgent") return "badge danger";
+
+  if (normalized === "pending verification") return "badge open";
+  if (normalized === "needs review") return "badge danger";
+  if (normalized === "verified") return "badge claimed";
+  if (normalized === "staff") return "badge claimed";
+  if (normalized === "denied") return "badge danger";
+  if (normalized === "vc in progress") return "badge open";
+
+  if (normalized === "high risk") return "badge danger";
+  if (normalized === "medium risk") return "badge medium";
+
+  return "badge";
 }
 
-function hasNoNotes(ticket: TicketLike): boolean {
-  return Number(ticket?.note_count || 0) <= 0;
-}
-
-function isMine(ticket: TicketLike, currentStaffId?: string | null): boolean {
-  const me = String(currentStaffId || "").trim();
-  if (!me) return false;
-  return getClaimedById(ticket) === me;
-}
-
-function needsAttention(ticket: TicketLike, currentStaffId?: string | null): boolean {
-  if (isClosedLike(ticket)) return false;
-  if (ticket?.overdue) return true;
-  if (ticket?.is_unclaimed) return true;
-  if (isHighRisk(ticket)) return true;
-  if (isVerificationLike(ticket)) return true;
-  if (hasMissingChannel(ticket)) return true;
-  if (hasNoNotes(ticket)) return true;
-  if (isMine(ticket, currentStaffId)) return true;
-  return false;
-}
-
-function getSortWeight(ticket: TicketLike, currentStaffId?: string | null): number {
-  let score = 0;
-
-  if (isClosedLike(ticket)) score -= 500;
-  else score += 10;
-
-  if (ticket?.overdue) score += 120;
-  if (ticket?.is_unclaimed) score += 100;
-  if (isMine(ticket, currentStaffId)) score += 85;
-  if (isHighRisk(ticket)) score += 80;
-  if (isVerificationLike(ticket)) score += 70;
-  if (hasMissingChannel(ticket)) score += 60;
-  if (hasNoNotes(ticket)) score += 35;
-  if (isGhost(ticket)) score += 15;
-
-  const priority = getPriority(ticket);
-  if (priority === "urgent") score += 90;
-  else if (priority === "high") score += 50;
-  else if (priority === "medium") score += 20;
-
-  const warnCount = Number(ticket?.owner_warn_count || 0);
-  const flagCount = Number(ticket?.owner_flag_count || 0);
-  score += Math.min(warnCount, 5) * 8;
-  score += Math.min(flagCount, 5) * 10;
-
-  const matchedScore = getCategoryScore(ticket);
-  if (matchedScore <= 0) score += 10;
-
-  return score;
-}
-
-function getUpdatedTimeMs(ticket: TicketLike): number {
-  const raw = getLatestActivityTime(ticket) || ticket?.updated_at || ticket?.created_at || "";
-  const ms = new Date(String(raw)).getTime();
-  return Number.isFinite(ms) ? ms : 0;
-}
-
-function matchesSearch(ticket: TicketLike, query: string): boolean {
-  const q = normalizeText(query);
-  if (!q) return true;
-
-  const haystack = [
-    ticket?.id,
-    ticket?.channel_id,
-    ticket?.discord_thread_id,
-    ticket?.channel_name,
-    ticket?.title,
-    ticket?.username,
-    ticket?.display_name,
-    ticket?.user_id,
-    ticket?.category,
-    ticket?.raw_category,
-    ticket?.matched_category_name,
-    ticket?.matched_category_slug,
-    ticket?.matched_intake_type,
-    ticket?.claimed_by_name,
-    ticket?.assigned_to_name,
-    ticket?.owner_display_name,
-    ticket?.owner_verification_label,
-    ticket?.verification_label,
-    ticket?.risk_level,
-    ticket?.owner_entry_method,
-    ticket?.owner_join_source,
-    ticket?.owner_verification_source,
-    ticket?.owner_invited_by_name,
-    ticket?.owner_vouched_by_name,
-    ticket?.owner_approved_by_name,
-    ticket?.latest_activity_title,
-    ticket?.latest_activity_type,
-    ticket?.mod_suggestion,
-    ticket?.closed_reason,
-    ...(Array.isArray(ticket?.recommended_actions) ? ticket.recommended_actions : []),
-  ]
-    .map((value) => String(value || "").toLowerCase())
-    .join(" ");
-
-  return haystack.includes(q);
-}
-
-function getCategoryTone(categoryName: string, intakeType: string): string {
-  const category = normalizeText(categoryName);
-  const intake = normalizeText(intakeType);
-
-  if (category.includes("verification") || intake === "verification") return "verification";
-  if (category.includes("support") || intake === "support") return "support";
-  if (category.includes("appeal") || intake === "appeal") return "appeal";
-  if (category.includes("report") || intake === "report") return "report";
-  if (category.includes("partnership") || intake === "partnership") return "partnership";
-  if (category.includes("question") || intake === "question") return "question";
-
-  return "default";
-}
-
-function SummaryChip({ label, value, tone = "default" }: SummaryChipProps) {
-  return (
-    <div className={`queue-summary-chip ${tone}`}>
-      <span className="queue-summary-chip-label">{label}</span>
-      <span className="queue-summary-chip-value">{value}</span>
-    </div>
-  );
-}
-
-function MetaBlock({ label, value, full = false }: MetaBlockProps) {
-  return (
-    <div className={`ticket-mobile-meta-item ${full ? "full" : ""}`}>
-      <span className="ticket-mobile-meta-label">{label}</span>
-      <span style={{ overflowWrap: "anywhere" }}>{value}</span>
-    </div>
-  );
-}
-
-function MiniField({ label, value, full = false }: MiniFieldProps) {
-  return (
-    <div className={`ticket-info-item ${full ? "full" : ""}`}>
-      <span className="ticket-info-label">{label}</span>
-      <span style={{ overflowWrap: "anywhere" }}>{value}</span>
-    </div>
-  );
-}
-
-function AvatarBubble({ ticket, size = 42 }: AvatarBubbleProps) {
+function AvatarBubble({
+  ticket,
+  size = 42,
+}: {
+  ticket: TicketLike;
+  size?: number;
+}) {
   const avatar = getOwnerAvatar(ticket);
   const initials = getOwnerInitials(ticket);
 
@@ -931,107 +534,53 @@ function AvatarBubble({ ticket, size = 42 }: AvatarBubbleProps) {
   );
 }
 
-function CategoryDisplay({ ticket, compact = false }: CategoryDisplayProps) {
-  const categoryName = getDisplayedCategoryName(ticket);
-  const intakeType = getDisplayedIntakeType(ticket);
-  const reason = getCategoryReason(ticket);
-  const score = getCategoryScore(ticket);
-  const tone = getCategoryTone(categoryName, intakeType);
+function SummaryChip({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: string | number;
+  tone?: "default" | "open" | "claimed" | "danger";
+}) {
+  return (
+    <div className={`queue-summary-chip ${tone}`}>
+      <span className="queue-summary-chip-label">{label}</span>
+      <span className="queue-summary-chip-value">{value}</span>
+    </div>
+  );
+}
+
+function CategoryChips({ ticket }: { ticket: TicketLike }) {
+  const category = getDisplayedCategoryName(ticket);
+  const intake = getDisplayedIntakeType(ticket);
+  const tone = getCategoryTone(ticket);
 
   return (
-    <div style={{ display: "grid", gap: 8 }}>
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          flexWrap: "wrap",
-          alignItems: "center",
-        }}
-      >
-        <span className={`queue-category-badge ${tone}`}>
-          {categoryName}
-        </span>
-
-        {intakeType && normalizeText(intakeType) !== normalizeText(categoryName) ? (
-          <span className="badge">{intakeType}</span>
-        ) : null}
-      </div>
-
-      {reason ? (
-        <div className="muted" style={{ fontSize: 12, lineHeight: 1.4 }}>
-          {compact ? reason : `Match: ${reason}`}
-          {score > 0 ? ` • score ${score}` : ""}
-        </div>
+    <div className="queue-chip-row">
+      <span className={`queue-category-badge ${tone}`}>{category}</span>
+      {intake && normalizeText(intake) !== normalizeText(category) ? (
+        <span className="badge">{intake}</span>
       ) : null}
     </div>
   );
 }
 
-function TicketHeaderBadges({ ticket }: { ticket: TicketLike }) {
-  const status = getStatus(ticket);
-  const missingChannel = hasMissingChannel(ticket);
-  const ghost = isGhost(ticket);
-  const verification = getVisibleVerificationLabel(ticket);
-  const risk = getRiskLevel(ticket);
-
+function CompactContextRow({ ticket }: { ticket: TicketLike }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        gap: 8,
-        alignItems: "center",
-      }}
-    >
-      <span className={badgeClass(status)}>
-        {safeText(ticket.status || ticket.ticket_status)}
-      </span>
-      <span className={badgeClass(ticket.priority)}>
-        {safeText(ticket.priority)}
-      </span>
-      {verification ? (
-        <span className={badgeClass(verification)}>{verification}</span>
-      ) : null}
-      {risk ? <span className={badgeClass(risk)}>{risk}</span> : null}
-      {ticket?.is_unclaimed ? <span className="badge open">Unclaimed</span> : null}
-      {ticket?.is_claimed ? <span className="badge claimed">Claimed</span> : null}
-      {ticket?.overdue ? <span className="badge danger">Overdue</span> : null}
-      {ghost ? <span className="badge">Ghost</span> : null}
-      {missingChannel ? <span className="badge danger">Missing Channel</span> : null}
-    </div>
-  );
-}
-
-function QueueIntelStrip({ ticket }: { ticket: TicketLike }) {
-  const intel = getQueueIntel(ticket);
-  const noteCount = Number(ticket?.note_count || 0);
-  const priorTotal = Number(ticket?.owner_ticket_total || ticket?.prior_ticket_total || 0);
-  const warnCount = Number(ticket?.owner_warn_count || 0);
-  const flagCount = Number(ticket?.owner_flag_count || 0);
-
-  return (
-    <div className="queue-intel-strip">
-      <span className="queue-intel-pill">Entry: {getEntryMethodLabel(ticket)}</span>
-      <span className="queue-intel-pill">SLA: {getSlaStatusLabel(ticket)}</span>
-      <span className="queue-intel-pill">Notes: {noteCount}</span>
-      <span className="queue-intel-pill">Past Tickets: {priorTotal}</span>
-      {warnCount > 0 ? (
-        <span className="queue-intel-pill danger">Warns: {warnCount}</span>
-      ) : null}
-      {flagCount > 0 ? (
-        <span className="queue-intel-pill danger">Flags: {flagCount}</span>
-      ) : null}
-      {intel.map((line) => (
-        <span key={line} className="queue-intel-pill">
-          {line}
-        </span>
-      ))}
+    <div className="queue-context-row">
+      <span className="queue-context-pill">Entry: {getEntryMethodLabel(ticket)}</span>
+      <span className="queue-context-pill">SLA: {getSlaStatusLabel(ticket)}</span>
+      <span className="queue-context-pill">Notes: {Number(ticket?.note_count || 0)}</span>
+      <span className="queue-context-pill">Past Tickets: {getPastTicketCount(ticket)}</span>
     </div>
   );
 }
 
 function RecommendedActions({ ticket }: { ticket: TicketLike }) {
-  const actions = getRecommendedActions(ticket);
+  const actions = Array.isArray(ticket?.recommended_actions)
+    ? ticket.recommended_actions.filter(Boolean).slice(0, 4)
+    : [];
 
   if (!actions.length) {
     return <div className="muted">No suggested next actions.</div>;
@@ -1048,128 +597,111 @@ function RecommendedActions({ ticket }: { ticket: TicketLike }) {
   );
 }
 
-function getTicketRowKey(ticket: TicketLike, index = 0): string {
-  return (
-    String(ticket?.id || "").trim() ||
-    String(ticket?.channel_id || ticket?.discord_thread_id || "").trim() ||
-    [
-      String(ticket?.user_id || "").trim(),
-      String(ticket?.category_id || "").trim(),
-      String(ticket?.matched_category_id || "").trim(),
-      String(ticket?.category || "").trim(),
-      String(ticket?.status || ticket?.ticket_status || "").trim(),
-      String(ticket?.created_at || "").trim(),
-      String(index),
-    ].join("::")
-  );
-}
-
 function TicketExpandedDetails({
   ticket,
   currentStaffId,
   onRefresh,
-}: TicketExpandedDetailsProps) {
-  const channelId = getChannelId(ticket);
-  const ghost = isGhost(ticket);
-
+}: {
+  ticket: TicketLike;
+  currentStaffId?: string | null;
+  onRefresh?: () => Promise<void> | void;
+}) {
   return (
     <div className="ticket-expanded-shell">
-      <div className="ticket-expanded-topbar">
+      <div className="ticket-expanded-head">
         <div className="ticket-expanded-owner">
-          <AvatarBubble ticket={ticket} size={54} />
+          <AvatarBubble ticket={ticket} size={52} />
           <div style={{ minWidth: 0 }}>
             <div className="ticket-expanded-owner-name">{getOwnerName(ticket)}</div>
-            <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
+            <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
               {getTicketTitle(ticket)}
             </div>
           </div>
         </div>
 
-        <div className="ticket-expanded-badges">
-          <TicketHeaderBadges ticket={ticket} />
+        <div className="queue-chip-row">
+          <span className={badgeClass(getStatus(ticket))}>
+            {safeText(ticket.status || ticket.ticket_status)}
+          </span>
+          <span className={badgeClass(getPriority(ticket))}>
+            {safeText(ticket.priority)}
+          </span>
+          {getVisibleVerificationLabel(ticket) ? (
+            <span className={badgeClass(getVisibleVerificationLabel(ticket))}>
+              {getVisibleVerificationLabel(ticket)}
+            </span>
+          ) : null}
+          {getVisibleRiskLabel(ticket) ? (
+            <span className={badgeClass(getVisibleRiskLabel(ticket))}>
+              {getVisibleRiskLabel(ticket)}
+            </span>
+          ) : null}
         </div>
       </div>
 
-      <QueueIntelStrip ticket={ticket} />
+      <div className="ticket-details-grid">
+        <div className="ticket-detail-box">
+          <div className="ticket-detail-label">Category</div>
+          <div>{getDisplayedCategoryName(ticket)}</div>
+        </div>
 
-      <div className="ticket-info-grid" style={{ marginBottom: 14 }}>
-        <MiniField label="Category" value={getDisplayedCategoryName(ticket)} />
-        <MiniField
-          label="Intake Type"
-          value={getDisplayedIntakeType(ticket) || "—"}
-        />
-        <MiniField
-          label="Verification"
-          value={getVisibleVerificationLabel(ticket) || "—"}
-        />
-        <MiniField label="Risk" value={getRiskLevel(ticket) || "—"} />
-        <MiniField label="Claimed By" value={getClaimedByLabel(ticket)} />
-        <MiniField label="Entry Method" value={getEntryMethodLabel(ticket)} />
-        <MiniField label="Channel ID" value={channelId || "Missing"} />
-        <MiniField label="User ID" value={safeText(ticket.user_id)} />
-        <MiniField
-          label="Latest Activity"
-          value={`${getLatestActivityLabel(ticket)} • ${timeAgo(getLatestActivityTime(ticket))}`}
-          full
-        />
-        <MiniField label="SLA" value={getSlaStatusLabel(ticket)} />
-        <MiniField
-          label="Notes"
-          value={String(Number(ticket?.note_count || 0))}
-        />
-        <MiniField
-          label="Past Tickets"
-          value={String(Number(ticket?.owner_ticket_total || ticket?.prior_ticket_total || 0))}
-        />
-        <MiniField label="Ghost" value={ghost ? "Yes" : "No"} />
-        <MiniField
-          label="Updated"
-          value={timeAgo(ticket.updated_at || ticket.created_at)}
-        />
-        <MiniField
-          label="Queue State"
-          value={
-            ticket?.is_unclaimed
-              ? "Unclaimed"
-              : ticket?.is_claimed
-                ? "Claimed"
-                : safeText(ticket.status || ticket.ticket_status)
-          }
-        />
-        <MiniField
-          label="Invited By"
-          value={safeText(ticket?.owner_invited_by_name)}
-        />
-        <MiniField
-          label="Vouched By"
-          value={safeText(ticket?.owner_vouched_by_name)}
-        />
-        <MiniField
-          label="Approved By"
-          value={safeText(ticket?.owner_approved_by_name)}
-        />
-        <MiniField
-          label="Role State"
-          value={safeText(ticket?.owner_role_state)}
-          full
-        />
-        <MiniField
-          label="Match Reason"
-          value={getCategoryReason(ticket) || "—"}
-          full
-        />
+        <div className="ticket-detail-box">
+          <div className="ticket-detail-label">Intake Type</div>
+          <div>{getDisplayedIntakeType(ticket) || "—"}</div>
+        </div>
+
+        <div className="ticket-detail-box">
+          <div className="ticket-detail-label">Claimed By</div>
+          <div>{getClaimedByLabel(ticket)}</div>
+        </div>
+
+        <div className="ticket-detail-box">
+          <div className="ticket-detail-label">Channel</div>
+          <div>{getChannelId(ticket) || "Missing"}</div>
+        </div>
+
+        <div className="ticket-detail-box">
+          <div className="ticket-detail-label">User ID</div>
+          <div>{safeText(ticket.user_id)}</div>
+        </div>
+
+        <div className="ticket-detail-box">
+          <div className="ticket-detail-label">Latest Activity</div>
+          <div>{`${getLatestActivityLabel(ticket)} • ${timeAgo(getLatestActivityTime(ticket))}`}</div>
+        </div>
+
+        <div className="ticket-detail-box">
+          <div className="ticket-detail-label">Invited By</div>
+          <div>{safeText(ticket.owner_invited_by_name)}</div>
+        </div>
+
+        <div className="ticket-detail-box">
+          <div className="ticket-detail-label">Vouched By</div>
+          <div>{safeText(ticket.owner_vouched_by_name)}</div>
+        </div>
+
+        <div className="ticket-detail-box">
+          <div className="ticket-detail-label">Approved By</div>
+          <div>{safeText(ticket.owner_approved_by_name)}</div>
+        </div>
+
+        <div className="ticket-detail-box full">
+          <div className="ticket-detail-label">Role State</div>
+          <div>{safeText(ticket.owner_role_state)}</div>
+        </div>
+
         {!!ticket.mod_suggestion ? (
-          <MiniField label="Suggestion" value={ticket.mod_suggestion} full />
+          <div className="ticket-detail-box full">
+            <div className="ticket-detail-label">Suggestion</div>
+            <div>{ticket.mod_suggestion}</div>
+          </div>
         ) : null}
+
         {!!ticket.closed_reason ? (
-          <MiniField label="Closed Reason" value={ticket.closed_reason} full />
-        ) : null}
-        {!!ticket.latest_note_staff_name || !!ticket.latest_note_at ? (
-          <MiniField
-            label="Latest Note"
-            value={`${safeText(ticket.latest_note_staff_name)} • ${timeAgo(ticket.latest_note_at)}`}
-            full
-          />
+          <div className="ticket-detail-box full">
+            <div className="ticket-detail-label">Closed Reason</div>
+            <div>{ticket.closed_reason}</div>
+          </div>
         ) : null}
       </div>
 
@@ -1189,8 +721,7 @@ function TicketExpandedDetails({
         }}
       >
         <div className="muted" style={{ fontSize: 12 }}>
-          Full ticket view gives you the full conversation, reply flow, notes,
-          transcript links, and verification actions.
+          Full ticket view gives you the full conversation, reply flow, notes, and verification actions.
         </div>
 
         <Link
@@ -1215,55 +746,66 @@ function MobileTicketCard({
   ticket,
   currentStaffId,
   onRefresh,
-}: MobileTicketCardProps) {
+}: {
+  ticket: TicketLike;
+  currentStaffId?: string | null;
+  onRefresh?: () => Promise<void> | void;
+}) {
   const [expanded, setExpanded] = useState(false);
-  const categoryName = getDisplayedCategoryName(ticket);
-  const intakeType = getDisplayedIntakeType(ticket);
 
   return (
-    <div
-      className={`ticket-mobile-card premium ${expanded ? "expanded" : ""}`}
-      style={{
-        border: hasMissingChannel(ticket)
-          ? "1px solid rgba(248,113,113,0.28)"
-          : undefined,
-      }}
-    >
+    <div className={`ticket-mobile-card ${expanded ? "expanded" : ""}`}>
       <button
         type="button"
         className="ticket-mobile-toggle"
         onClick={() => setExpanded((prev) => !prev)}
       >
-        <div className="queue-card-topline">
-          <div className="queue-card-owner-wrap">
+        <div className="ticket-card-top">
+          <div className="ticket-card-owner">
             <AvatarBubble ticket={ticket} size={46} />
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ marginBottom: 8 }}>
-                <TicketHeaderBadges ticket={ticket} />
+              <div className="queue-chip-row" style={{ marginBottom: 8 }}>
+                <span className={badgeClass(getStatus(ticket))}>
+                  {safeText(ticket.status || ticket.ticket_status)}
+                </span>
+                <span className={badgeClass(getPriority(ticket))}>
+                  {safeText(ticket.priority)}
+                </span>
+                {getVisibleVerificationLabel(ticket) ? (
+                  <span className={badgeClass(getVisibleVerificationLabel(ticket))}>
+                    {getVisibleVerificationLabel(ticket)}
+                  </span>
+                ) : null}
+                {getVisibleRiskLabel(ticket) ? (
+                  <span className={badgeClass(getVisibleRiskLabel(ticket))}>
+                    {getVisibleRiskLabel(ticket)}
+                  </span>
+                ) : null}
+                {ticket?.overdue ? <span className="badge danger">Overdue</span> : null}
+                {ticket?.is_unclaimed ? <span className="badge open">Unclaimed</span> : null}
+                {hasMissingChannel(ticket) ? (
+                  <span className="badge danger">Missing Channel</span>
+                ) : null}
               </div>
 
-              <div className="queue-ticket-name">{getOwnerName(ticket)}</div>
-              <div className="muted queue-ticket-subtitle">
-                {getTicketTitle(ticket)}
-              </div>
+              <div className="ticket-owner-name">{getOwnerName(ticket)}</div>
+              <div className="ticket-owner-subtitle">{getTicketTitle(ticket)}</div>
             </div>
           </div>
 
-          <div className="queue-ticket-time">
+          <div className="ticket-card-time">
             {timeAgo(ticket.updated_at || ticket.created_at)}
           </div>
         </div>
 
-        <div className="queue-category-wrap">
-          <CategoryDisplay ticket={ticket} compact />
-        </div>
+        <CategoryChips ticket={ticket} />
+        <CompactContextRow ticket={ticket} />
 
-        <QueueIntelStrip ticket={ticket} />
+        <div className="ticket-card-footer">
+          <span className="muted" style={{ fontSize: 12 }}>
+            {expanded ? "Tap again to hide tools" : "Tap to open tools"}
+          </span>
 
-        <div className="queue-card-footer-row">
-          <div className="muted" style={{ fontSize: 12 }}>
-            {expanded ? "Tap again to hide tools" : "Tap card to open tools"}
-          </div>
           <span className={`badge ${expanded ? "claimed" : "open"}`}>
             {expanded ? "Expanded" : "Quick View"}
           </span>
@@ -1272,65 +814,36 @@ function MobileTicketCard({
 
       {expanded ? (
         <>
-          <div className="ticket-mobile-meta" style={{ marginTop: 12 }}>
-            <MetaBlock label="Category" value={categoryName} />
-            <MetaBlock label="Intake Type" value={intakeType || "—"} />
-            <MetaBlock
-              label="Verification"
-              value={getVisibleVerificationLabel(ticket) || "—"}
-            />
-            <MetaBlock label="Risk" value={getRiskLevel(ticket) || "—"} />
-            <MetaBlock label="Claimed By" value={getClaimedByLabel(ticket)} />
-            <MetaBlock label="Entry" value={getEntryMethodLabel(ticket)} />
-            <MetaBlock label="Channel" value={getChannelId(ticket) || "Missing"} full />
-            <MetaBlock label="User ID" value={safeText(ticket.user_id)} full />
-            <MetaBlock
-              label="Latest Activity"
-              value={`${getLatestActivityLabel(ticket)} • ${timeAgo(getLatestActivityTime(ticket))}`}
-              full
-            />
-            <MetaBlock label="SLA" value={getSlaStatusLabel(ticket)} />
-            <MetaBlock
-              label="Notes"
-              value={String(Number(ticket?.note_count || 0))}
-            />
-            <MetaBlock
-              label="Past Tickets"
-              value={String(Number(ticket?.owner_ticket_total || ticket?.prior_ticket_total || 0))}
-            />
-            <MetaBlock
-              label="Queue State"
-              value={
-                ticket?.is_unclaimed
-                  ? "Unclaimed"
-                  : ticket?.is_claimed
-                    ? "Claimed"
-                    : safeText(ticket.status || ticket.ticket_status)
-              }
-            />
-            <MetaBlock
-              label="Invited By"
-              value={safeText(ticket?.owner_invited_by_name)}
-            />
-            <MetaBlock
-              label="Vouched By"
-              value={safeText(ticket?.owner_vouched_by_name)}
-            />
-            <MetaBlock
-              label="Approved By"
-              value={safeText(ticket?.owner_approved_by_name)}
-            />
-            <MetaBlock
-              label="Match Reason"
-              value={getCategoryReason(ticket) || "—"}
-              full
-            />
-            {!!ticket.mod_suggestion ? (
-              <MetaBlock label="Suggestion" value={ticket.mod_suggestion} full />
-            ) : null}
-            {!!ticket.closed_reason ? (
-              <MetaBlock label="Closed Reason" value={ticket.closed_reason} full />
-            ) : null}
+          <div className="ticket-mobile-meta-grid">
+            <div className="ticket-detail-box">
+              <div className="ticket-detail-label">Category</div>
+              <div>{getDisplayedCategoryName(ticket)}</div>
+            </div>
+
+            <div className="ticket-detail-box">
+              <div className="ticket-detail-label">Intake Type</div>
+              <div>{getDisplayedIntakeType(ticket) || "—"}</div>
+            </div>
+
+            <div className="ticket-detail-box">
+              <div className="ticket-detail-label">Claimed By</div>
+              <div>{getClaimedByLabel(ticket)}</div>
+            </div>
+
+            <div className="ticket-detail-box">
+              <div className="ticket-detail-label">Entry</div>
+              <div>{getEntryMethodLabel(ticket)}</div>
+            </div>
+
+            <div className="ticket-detail-box full">
+              <div className="ticket-detail-label">Latest Activity</div>
+              <div>{`${getLatestActivityLabel(ticket)} • ${timeAgo(getLatestActivityTime(ticket))}`}</div>
+            </div>
+
+            <div className="ticket-detail-box full">
+              <div className="ticket-detail-label">Channel</div>
+              <div>{getChannelId(ticket) || "Missing"}</div>
+            </div>
           </div>
 
           <div className="ticket-expanded-section" style={{ marginTop: 12 }}>
@@ -1350,8 +863,7 @@ function MobileTicketCard({
             }}
           >
             <div className="muted" style={{ fontSize: 12 }}>
-              Full ticket page gives you full conversation, reply flow, notes,
-              and verification actions.
+              Open the full ticket page for conversation history, notes, and verification actions.
             </div>
 
             <Link
@@ -1374,28 +886,6 @@ function MobileTicketCard({
   );
 }
 
-function FilterChip({
-  label,
-  active,
-  onClick,
-  tone = "default",
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-  tone?: "default" | "open" | "claimed" | "warn" | "danger";
-}) {
-  return (
-    <button
-      type="button"
-      className={`queue-filter-chip ${active ? "active" : ""} ${tone}`}
-      onClick={onClick}
-    >
-      {label}
-    </button>
-  );
-}
-
 export default function TicketQueueTable({
   tickets = [],
   currentStaffId = null,
@@ -1403,131 +893,13 @@ export default function TicketQueueTable({
   createTicketUserId = null,
   createTicketTargetName = "",
   queueMode = "",
-  renderMode = "full",
+  renderMode = "embedded",
 }: TicketQueueTableProps) {
-  const normalizedTickets = Array.isArray(tickets) ? tickets : [];
+  const rows = Array.isArray(tickets) ? tickets : [];
   const isEmbedded = renderMode === "embedded";
-
-  const heading = useMemo(
-    () => getQueueHeading(normalizedTickets, queueMode),
-    [normalizedTickets, queueMode]
-  );
-
+  const heading = getQueueHeading(queueMode);
+  const stats = useMemo(() => getSummaryStats(rows), [rows]);
   const [expandedDesktopId, setExpandedDesktopId] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [queueFilter, setQueueFilter] = useState<QueueFilter>("needs-attention");
-  const [sortMode, setSortMode] = useState<SortMode>("smart");
-
-  const processedTickets = useMemo(() => {
-    if (isEmbedded) {
-      return [...normalizedTickets];
-    }
-
-    const filtered = normalizedTickets.filter((ticket) => {
-      if (!matchesSearch(ticket, search)) return false;
-
-      if (queueFilter === "all") return true;
-      if (queueFilter === "needs-attention") return needsAttention(ticket, currentStaffId);
-      if (queueFilter === "unclaimed") {
-        return ticket?.is_unclaimed === true || (!isClosedLike(ticket) && !getClaimedById(ticket));
-      }
-      if (queueFilter === "mine") return isMine(ticket, currentStaffId);
-      if (queueFilter === "verification") return isVerificationLike(ticket);
-      if (queueFilter === "overdue") return ticket?.overdue === true;
-      if (queueFilter === "high-risk") return isHighRisk(ticket);
-      if (queueFilter === "no-notes") return hasNoNotes(ticket);
-      if (queueFilter === "ghost") return isGhost(ticket);
-      if (queueFilter === "missing-channel") return hasMissingChannel(ticket);
-      if (queueFilter === "closed") return isClosedLike(ticket);
-
-      return true;
-    });
-
-    const sorted = [...filtered].sort((a, b) => {
-      if (sortMode === "smart") {
-        const scoreDiff = getSortWeight(b, currentStaffId) - getSortWeight(a, currentStaffId);
-        if (scoreDiff !== 0) return scoreDiff;
-
-        const timeDiff = getUpdatedTimeMs(b) - getUpdatedTimeMs(a);
-        if (timeDiff !== 0) return timeDiff;
-
-        return getOwnerName(a).localeCompare(getOwnerName(b));
-      }
-
-      if (sortMode === "updated") {
-        return getUpdatedTimeMs(b) - getUpdatedTimeMs(a);
-      }
-
-      if (sortMode === "priority") {
-        const rank = (ticket: TicketLike) => {
-          const p = getPriority(ticket);
-          if (p === "urgent") return 4;
-          if (p === "high") return 3;
-          if (p === "medium") return 2;
-          if (p === "low") return 1;
-          return 0;
-        };
-        const diff = rank(b) - rank(a);
-        if (diff !== 0) return diff;
-        return getUpdatedTimeMs(b) - getUpdatedTimeMs(a);
-      }
-
-      if (sortMode === "risk") {
-        const rank = (ticket: TicketLike) => {
-          const r = normalizeText(ticket?.risk_level);
-          if (r === "high") return 3;
-          if (r === "medium") return 2;
-          if (r === "low") return 1;
-          return 0;
-        };
-        const diff = rank(b) - rank(a);
-        if (diff !== 0) return diff;
-        return getUpdatedTimeMs(b) - getUpdatedTimeMs(a);
-      }
-
-      if (sortMode === "owner") {
-        return getOwnerName(a).localeCompare(getOwnerName(b));
-      }
-
-      if (sortMode === "category") {
-        return getDisplayedCategoryName(a).localeCompare(getDisplayedCategoryName(b));
-      }
-
-      if (sortMode === "status") {
-        return getStatus(a).localeCompare(getStatus(b));
-      }
-
-      return 0;
-    });
-
-    return sorted;
-  }, [normalizedTickets, search, queueFilter, sortMode, currentStaffId, isEmbedded]);
-
-  const stats = useMemo(() => getSummaryStats(processedTickets), [processedTickets]);
-
-  function toggleDesktopTicket(ticketId: string) {
-    setExpandedDesktopId((prev) => (prev === ticketId ? null : ticketId));
-  }
-
-  const summaryNodes = (
-    <>
-      <SummaryChip label="Total" value={stats.total} />
-      <SummaryChip label="Open" value={stats.open} tone="open" />
-      <SummaryChip label="Claimed" value={stats.claimed} tone="claimed" />
-      <SummaryChip label="Closed" value={stats.closed} />
-      <SummaryChip label="Deleted" value={stats.deleted} />
-      <SummaryChip label="Urgent" value={stats.urgent} tone="danger" />
-      <SummaryChip label="High" value={stats.high} tone="warn" />
-      <SummaryChip label="Overdue" value={stats.overdue} tone={stats.overdue ? "danger" : "default"} />
-      <SummaryChip label="High Risk" value={stats.highRisk} tone={stats.highRisk ? "danger" : "default"} />
-      <SummaryChip label="Unassigned" value={stats.unassigned} tone={stats.unassigned ? "warn" : "default"} />
-      <SummaryChip label="Matched" value={stats.matched} tone={stats.matched ? "claimed" : "default"} />
-      <SummaryChip label="Verification" value={stats.verificationLike} tone={stats.verificationLike ? "open" : "default"} />
-      <SummaryChip label="No Notes" value={stats.noNotes} tone={stats.noNotes ? "warn" : "default"} />
-      <SummaryChip label="Missing Channel" value={stats.missingChannel} tone={stats.missingChannel ? "danger" : "default"} />
-      <SummaryChip label="Ghost" value={stats.ghosts} tone={stats.ghosts ? "warn" : "default"} />
-    </>
-  );
 
   return (
     <div className={isEmbedded ? "queue-shell embedded" : "card queue-shell"} id="tickets">
@@ -1560,7 +932,7 @@ export default function TicketQueueTable({
               }}
             >
               <div className="muted" style={{ fontSize: 14 }}>
-                {processedTickets.length} ticket{processedTickets.length === 1 ? "" : "s"}
+                {rows.length} ticket{rows.length === 1 ? "" : "s"}
               </div>
 
               {createTicketUserId ? (
@@ -1578,118 +950,27 @@ export default function TicketQueueTable({
             </div>
           </div>
 
-          <div className="queue-toolbar">
-            <div className="queue-toolbar-left">
-              <input
-                className="input queue-search-input"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search owner, ticket, category, user ID, activity, invite context..."
-              />
-
-              <select
-                className="input queue-sort-select"
-                value={sortMode}
-                onChange={(e) => setSortMode(e.target.value as SortMode)}
-              >
-                <option value="smart">Smart sort</option>
-                <option value="updated">Latest activity</option>
-                <option value="priority">Priority</option>
-                <option value="risk">Risk</option>
-                <option value="owner">Owner</option>
-                <option value="category">Category</option>
-                <option value="status">Status</option>
-              </select>
-            </div>
-
-            <div className="queue-filter-row">
-              <FilterChip
-                label="Needs Attention"
-                active={queueFilter === "needs-attention"}
-                onClick={() => setQueueFilter("needs-attention")}
-                tone="danger"
-              />
-              <FilterChip
-                label="All"
-                active={queueFilter === "all"}
-                onClick={() => setQueueFilter("all")}
-              />
-              <FilterChip
-                label="Unclaimed"
-                active={queueFilter === "unclaimed"}
-                onClick={() => setQueueFilter("unclaimed")}
-                tone="open"
-              />
-              <FilterChip
-                label="Mine"
-                active={queueFilter === "mine"}
-                onClick={() => setQueueFilter("mine")}
-                tone="claimed"
-              />
-              <FilterChip
-                label="Verification"
-                active={queueFilter === "verification"}
-                onClick={() => setQueueFilter("verification")}
-                tone="claimed"
-              />
-              <FilterChip
-                label="Overdue"
-                active={queueFilter === "overdue"}
-                onClick={() => setQueueFilter("overdue")}
-                tone="danger"
-              />
-              <FilterChip
-                label="High Risk"
-                active={queueFilter === "high-risk"}
-                onClick={() => setQueueFilter("high-risk")}
-                tone="danger"
-              />
-              <FilterChip
-                label="No Notes"
-                active={queueFilter === "no-notes"}
-                onClick={() => setQueueFilter("no-notes")}
-                tone="warn"
-              />
-              <FilterChip
-                label="Ghost"
-                active={queueFilter === "ghost"}
-                onClick={() => setQueueFilter("ghost")}
-                tone="warn"
-              />
-              <FilterChip
-                label="Missing Channel"
-                active={queueFilter === "missing-channel"}
-                onClick={() => setQueueFilter("missing-channel")}
-                tone="danger"
-              />
-              <FilterChip
-                label="Closed"
-                active={queueFilter === "closed"}
-                onClick={() => setQueueFilter("closed")}
-              />
-            </div>
-          </div>
-
-          <div className="queue-summary-scroll">
-            {summaryNodes}
-          </div>
-
           <div className="queue-summary-grid" style={{ marginBottom: 14 }}>
-            {summaryNodes}
+            <SummaryChip label="Total" value={stats.total} />
+            <SummaryChip label="Open" value={stats.open} tone="open" />
+            <SummaryChip label="Claimed" value={stats.claimed} tone="claimed" />
+            <SummaryChip label="Closed" value={stats.closed} />
+            <SummaryChip label="Deleted" value={stats.deleted} />
+            <SummaryChip label="Overdue" value={stats.overdue} tone={stats.overdue ? "danger" : "default"} />
           </div>
         </>
       ) : null}
 
-      {!processedTickets.length ? (
+      {!rows.length ? (
         <div className="empty-state">
           No tickets match the current search and filter settings.
         </div>
       ) : null}
 
-      {!!processedTickets.length ? (
+      {!!rows.length ? (
         <>
-          <div className="ticket-mobile-list queue-mobile-stack">
-            {processedTickets.map((ticket, index) => (
+          <div className="ticket-mobile-list">
+            {rows.map((ticket, index) => (
               <MobileTicketCard
                 key={getTicketRowKey(ticket, index)}
                 ticket={ticket}
@@ -1706,172 +987,73 @@ export default function TicketQueueTable({
                   <tr>
                     <th>Owner</th>
                     <th>Category</th>
-                    <th>Queue Intelligence</th>
                     <th>Status</th>
-                    <th>Assigned</th>
                     <th>Updated</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {processedTickets.map((ticket, index) => {
-                    const ticketKey = getTicketRowKey(ticket, index);
-                    const channelId = getChannelId(ticket);
-                    const status = getStatus(ticket);
-                    const missingChannel = hasMissingChannel(ticket);
-                    const isExpanded = expandedDesktopId === ticketKey;
+                  {rows.map((ticket, index) => {
+                    const key = getTicketRowKey(ticket, index);
+                    const isExpanded = expandedDesktopId === key;
 
                     return (
-                      <React.Fragment key={ticketKey}>
-                        <tr
-                          style={
-                            missingChannel
-                              ? { background: "rgba(248,113,113,0.04)" }
-                              : undefined
-                          }
-                        >
+                      <React.Fragment key={key}>
+                        <tr>
                           <td style={{ minWidth: 260 }}>
                             <div className="queue-desktop-owner">
                               <AvatarBubble ticket={ticket} size={42} />
                               <div style={{ minWidth: 0 }}>
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    flexWrap: "wrap",
-                                    gap: 8,
-                                    marginBottom: 6,
-                                    alignItems: "center",
-                                  }}
-                                >
-                                  <span className={badgeClass(status)}>
-                                    {safeText(ticket.status || ticket.ticket_status)}
-                                  </span>
-                                  <span className={badgeClass(ticket.priority)}>
-                                    {safeText(ticket.priority)}
-                                  </span>
-                                  {getVisibleVerificationLabel(ticket) ? (
-                                    <span className={badgeClass(getVisibleVerificationLabel(ticket))}>
-                                      {getVisibleVerificationLabel(ticket)}
-                                    </span>
-                                  ) : null}
-                                  {getRiskLevel(ticket) ? (
-                                    <span className={badgeClass(getRiskLevel(ticket))}>
-                                      {getRiskLevel(ticket)}
-                                    </span>
-                                  ) : null}
-                                  {ticket?.is_unclaimed ? (
-                                    <span className="badge open">Unclaimed</span>
-                                  ) : null}
-                                  {ticket?.is_claimed ? (
-                                    <span className="badge claimed">Claimed</span>
-                                  ) : null}
-                                  {ticket?.overdue ? (
-                                    <span className="badge danger">Overdue</span>
-                                  ) : null}
-                                  {isGhost(ticket) ? <span className="badge">Ghost</span> : null}
-                                  {missingChannel ? (
-                                    <span className="badge danger">Missing Channel</span>
-                                  ) : null}
-                                  {isMine(ticket, currentStaffId) ? (
-                                    <span className="badge claimed">Mine</span>
-                                  ) : null}
-                                </div>
-
-                                <div className="queue-owner-name">
-                                  {getOwnerName(ticket)}
-                                </div>
-
-                                <div className="muted queue-ticket-subtitle">
+                                <div className="ticket-owner-name">{getOwnerName(ticket)}</div>
+                                <div className="ticket-owner-subtitle">
                                   {getTicketTitle(ticket)}
                                 </div>
-
-                                <div className="queue-submeta">
-                                  <span>Entry: {getEntryMethodLabel(ticket)}</span>
-                                  <span>
-                                    Past Tickets: {Number(ticket?.owner_ticket_total || ticket?.prior_ticket_total || 0)}
-                                  </span>
-                                  <span>User ID: {safeText(ticket.user_id)}</span>
-                                </div>
                               </div>
                             </div>
                           </td>
 
-                          <td style={{ whiteSpace: "normal", minWidth: 220 }}>
-                            <CategoryDisplay ticket={ticket} />
+                          <td style={{ minWidth: 220 }}>
+                            <CategoryChips ticket={ticket} />
                           </td>
 
-                          <td style={{ minWidth: 260 }}>
-                            <div className="queue-intel-cell">
-                              <div className="queue-intel-row">
-                                <span className="queue-inline-pill">
-                                  SLA: {getSlaStatusLabel(ticket)}
-                                </span>
-                                <span className="queue-inline-pill">
-                                  Notes: {Number(ticket?.note_count || 0)}
-                                </span>
-                                <span className="queue-inline-pill">
-                                  Activity: {timeAgo(getLatestActivityTime(ticket))}
-                                </span>
-                              </div>
-
-                              <div className="muted" style={{ fontSize: 12, lineHeight: 1.35 }}>
-                                {truncateText(getLatestActivityLabel(ticket), 120)}
-                              </div>
-
-                              <div className="queue-actions-list" style={{ marginTop: 8 }}>
-                                {getRecommendedActions(ticket).slice(0, 2).map((action) => (
-                                  <div key={action} className="queue-action-chip compact">
-                                    {action}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          </td>
-
-                          <td>
-                            <div className="queue-status-stack">
-                              <span className={badgeClass(status)}>
+                          <td style={{ minWidth: 220 }}>
+                            <div className="queue-chip-row">
+                              <span className={badgeClass(getStatus(ticket))}>
                                 {safeText(ticket.status || ticket.ticket_status)}
                               </span>
-                              <span className={badgeClass(ticket.priority)}>
+                              <span className={badgeClass(getPriority(ticket))}>
                                 {safeText(ticket.priority)}
                               </span>
-                            </div>
-                          </td>
-
-                          <td style={{ whiteSpace: "normal", minWidth: 150 }}>
-                            <div style={{ fontWeight: 700 }}>
-                              {getClaimedByLabel(ticket)}
-                            </div>
-                            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                              {channelId || "Missing channel"}
+                              {getVisibleVerificationLabel(ticket) ? (
+                                <span className={badgeClass(getVisibleVerificationLabel(ticket))}>
+                                  {getVisibleVerificationLabel(ticket)}
+                                </span>
+                              ) : null}
+                              {getVisibleRiskLabel(ticket) ? (
+                                <span className={badgeClass(getVisibleRiskLabel(ticket))}>
+                                  {getVisibleRiskLabel(ticket)}
+                                </span>
+                              ) : null}
                             </div>
                           </td>
 
                           <td>
                             <div>{timeAgo(ticket.updated_at || ticket.created_at)}</div>
                             <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                              {ticket?.latest_note_at
-                                ? `Note ${timeAgo(ticket.latest_note_at)}`
-                                : "No notes yet"}
+                              {truncateText(getLatestActivityLabel(ticket), 50)}
                             </div>
                           </td>
 
                           <td>
-                            <div
-                              style={{
-                                display: "flex",
-                                flexWrap: "wrap",
-                                gap: 8,
-                                alignItems: "center",
-                              }}
-                            >
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                               <button
                                 type="button"
                                 className="button ghost"
                                 style={{ width: "auto", minWidth: 118 }}
-                                onClick={() => toggleDesktopTicket(ticketKey)}
+                                onClick={() =>
+                                  setExpandedDesktopId((prev) => (prev === key ? null : key))
+                                }
                               >
                                 {isExpanded ? "Hide Tools" : "Open Tools"}
                               </button>
@@ -1889,14 +1071,7 @@ export default function TicketQueueTable({
 
                         {isExpanded ? (
                           <tr>
-                            <td
-                              colSpan={7}
-                              style={{
-                                whiteSpace: "normal",
-                                padding: 0,
-                                borderBottom: "1px solid rgba(255,255,255,0.06)",
-                              }}
-                            >
+                            <td colSpan={5} style={{ padding: 0 }}>
                               <div className="ticket-desktop-expanded">
                                 <TicketExpandedDetails
                                   ticket={ticket}
@@ -1920,9 +1095,9 @@ export default function TicketQueueTable({
       <style jsx global>{`
         .queue-shell {
           background:
-            radial-gradient(circle at top right, rgba(93, 255, 141, 0.08), transparent 26%),
+            radial-gradient(circle at top right, rgba(93, 255, 141, 0.08), transparent 28%),
             radial-gradient(circle at bottom left, rgba(99, 213, 255, 0.06), transparent 22%),
-            linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015)),
             linear-gradient(180deg, rgba(14, 25, 35, 0.98), rgba(7, 13, 21, 0.98));
           overflow: hidden;
         }
@@ -1935,98 +1110,6 @@ export default function TicketQueueTable({
           overflow: visible;
         }
 
-        .queue-toolbar {
-          display: grid;
-          gap: 12px;
-          margin-bottom: 14px;
-        }
-
-        .queue-toolbar-left {
-          display: grid;
-          grid-template-columns: minmax(0, 1fr) 220px;
-          gap: 10px;
-        }
-
-        .queue-search-input,
-        .queue-sort-select {
-          min-width: 0;
-        }
-
-        .queue-filter-row {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-        }
-
-        .queue-filter-chip {
-          appearance: none !important;
-          -webkit-appearance: none !important;
-          -moz-appearance: none !important;
-          border: 1px solid rgba(255,255,255,0.08);
-          background:
-            radial-gradient(circle at top right, rgba(255,255,255,0.04), transparent 45%),
-            rgba(255,255,255,0.03);
-          color: var(--text, #dbe4ee);
-          border-radius: 999px;
-          padding: 9px 14px;
-          min-height: 40px;
-          font-size: 12px;
-          font-weight: 700;
-          line-height: 1.1;
-          cursor: pointer;
-          transition: border-color 0.16s ease, transform 0.16s ease, background 0.16s ease;
-          white-space: nowrap;
-          flex: 0 0 auto;
-        }
-
-        .queue-filter-chip:hover {
-          transform: translateY(-1px);
-        }
-
-        .queue-filter-chip.active {
-          border-color: rgba(99,213,255,0.25);
-          background:
-            radial-gradient(circle at top right, rgba(99,213,255,0.1), transparent 45%),
-            rgba(99,213,255,0.08);
-        }
-
-        .queue-filter-chip.open.active {
-          border-color: rgba(96,165,250,0.24);
-          background:
-            radial-gradient(circle at top right, rgba(96,165,250,0.12), transparent 48%),
-            rgba(96,165,250,0.08);
-        }
-
-        .queue-filter-chip.claimed.active {
-          border-color: rgba(74,222,128,0.24);
-          background:
-            radial-gradient(circle at top right, rgba(74,222,128,0.12), transparent 48%),
-            rgba(74,222,128,0.08);
-        }
-
-        .queue-filter-chip.warn.active {
-          border-color: rgba(251,191,36,0.24);
-          background:
-            radial-gradient(circle at top right, rgba(251,191,36,0.12), transparent 48%),
-            rgba(251,191,36,0.08);
-        }
-
-        .queue-filter-chip.danger.active {
-          border-color: rgba(248,113,113,0.28);
-          background:
-            radial-gradient(circle at top right, rgba(248,113,113,0.12), transparent 48%),
-            rgba(248,113,113,0.08);
-        }
-
-        .queue-mobile-stack {
-          display: grid;
-          gap: 12px;
-        }
-
-        .queue-summary-scroll {
-          display: none;
-        }
-
         .queue-summary-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2035,57 +1118,39 @@ export default function TicketQueueTable({
 
         .queue-summary-chip {
           border: 1px solid rgba(255, 255, 255, 0.08);
-          background:
-            radial-gradient(circle at top right, rgba(255,255,255,0.04), transparent 45%),
-            rgba(255, 255, 255, 0.025);
+          background: rgba(255, 255, 255, 0.025);
           border-radius: 16px;
           padding: 12px;
           display: grid;
           gap: 6px;
           min-width: 0;
-          box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
         }
 
         .queue-summary-chip.open {
           border-color: rgba(96, 165, 250, 0.2);
-          background:
-            radial-gradient(circle at top right, rgba(96,165,250,0.12), transparent 48%),
-            rgba(96, 165, 250, 0.08);
+          background: rgba(96, 165, 250, 0.08);
         }
 
         .queue-summary-chip.claimed {
           border-color: rgba(74, 222, 128, 0.2);
-          background:
-            radial-gradient(circle at top right, rgba(74,222,128,0.12), transparent 48%),
-            rgba(74, 222, 128, 0.08);
-        }
-
-        .queue-summary-chip.warn {
-          border-color: rgba(251, 191, 36, 0.2);
-          background:
-            radial-gradient(circle at top right, rgba(251,191,36,0.12), transparent 48%),
-            rgba(251, 191, 36, 0.08);
+          background: rgba(74, 222, 128, 0.08);
         }
 
         .queue-summary-chip.danger {
           border-color: rgba(248, 113, 113, 0.24);
-          background:
-            radial-gradient(circle at top right, rgba(248,113,113,0.12), transparent 48%),
-            rgba(248, 113, 113, 0.08);
+          background: rgba(248, 113, 113, 0.08);
         }
 
         .queue-summary-chip-label {
-          display: block;
           font-size: 12px;
-          color: var(--muted);
+          color: var(--muted, #9fb0c3);
           line-height: 1.1;
         }
 
         .queue-summary-chip-value {
-          display: block;
           font-size: 20px;
           font-weight: 800;
-          color: var(--text-strong);
+          color: var(--text-strong, #f8fafc);
           line-height: 1;
           overflow-wrap: anywhere;
         }
@@ -2095,7 +1160,6 @@ export default function TicketQueueTable({
           object-fit: cover;
           flex-shrink: 0;
           border: 1px solid rgba(255,255,255,0.08);
-          box-shadow: 0 8px 18px rgba(0,0,0,0.2);
           background: rgba(255,255,255,0.04);
         }
 
@@ -2110,115 +1174,18 @@ export default function TicketQueueTable({
             linear-gradient(180deg, rgba(46,77,102,0.98), rgba(20,35,50,0.98));
         }
 
-        .queue-desktop-owner {
-          display: flex;
-          align-items: flex-start;
-          gap: 12px;
-        }
-
-        .queue-owner-name {
-          font-weight: 900;
-          font-size: 15px;
-          line-height: 1.15;
-          overflow-wrap: anywhere;
-          color: var(--text-strong, #f8fafc);
-        }
-
-        .queue-submeta {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 10px;
-          margin-top: 6px;
-          font-size: 12px;
-          color: var(--muted, #9fb0c3);
-        }
-
-        .queue-intel-cell {
-          display: grid;
-          gap: 8px;
-        }
-
-        .queue-intel-row {
+        .queue-chip-row {
           display: flex;
           flex-wrap: wrap;
           gap: 8px;
-        }
-
-        .queue-inline-pill {
-          display: inline-flex;
           align-items: center;
-          gap: 6px;
-          border-radius: 999px;
-          padding: 4px 10px;
-          border: 1px solid rgba(255,255,255,0.08);
-          background: rgba(255,255,255,0.035);
-          font-size: 12px;
-          color: var(--text, #dbe4ee);
-        }
-
-        .queue-intel-strip {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-          margin-bottom: 14px;
-        }
-
-        .queue-intel-pill {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          border-radius: 999px;
-          padding: 6px 10px;
-          border: 1px solid rgba(255,255,255,0.08);
-          background:
-            radial-gradient(circle at top right, rgba(255,255,255,0.05), transparent 42%),
-            rgba(255,255,255,0.025);
-          font-size: 12px;
-          color: var(--text, #dbe4ee);
-          overflow-wrap: anywhere;
-        }
-
-        .queue-intel-pill.danger {
-          border-color: rgba(248,113,113,0.22);
-          background:
-            radial-gradient(circle at top right, rgba(248,113,113,0.1), transparent 42%),
-            rgba(248,113,113,0.06);
-        }
-
-        .queue-actions-list {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-        }
-
-        .queue-action-chip {
-          border-radius: 999px;
-          padding: 7px 10px;
-          border: 1px solid rgba(99,213,255,0.14);
-          background:
-            radial-gradient(circle at top right, rgba(99,213,255,0.10), transparent 42%),
-            rgba(99,213,255,0.05);
-          font-size: 12px;
-          line-height: 1.2;
-          color: var(--text, #dbe4ee);
-        }
-
-        .queue-action-chip.compact {
-          padding: 5px 8px;
-          font-size: 11px;
-        }
-
-        .queue-status-stack {
-          display: grid;
-          gap: 8px;
-          justify-items: start;
         }
 
         .queue-category-badge {
           display: inline-flex;
           align-items: center;
-          min-height: 36px;
-          padding: 8px 14px;
+          min-height: 34px;
+          padding: 7px 12px;
           border-radius: 999px;
           font-size: 13px;
           font-weight: 800;
@@ -2262,64 +1229,64 @@ export default function TicketQueueTable({
           border-color: rgba(255,255,255,0.12);
         }
 
-        .ticket-mobile-card.premium {
+        .queue-context-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 12px;
+        }
+
+        .queue-context-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          border-radius: 999px;
+          padding: 6px 10px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.03);
+          font-size: 12px;
+          color: var(--text, #dbe4ee);
+        }
+
+        .queue-actions-list {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .queue-action-chip {
+          border-radius: 999px;
+          padding: 7px 10px;
+          border: 1px solid rgba(99,213,255,0.14);
+          background: rgba(99,213,255,0.05);
+          font-size: 12px;
+          line-height: 1.2;
+          color: var(--text, #dbe4ee);
+        }
+
+        .ticket-mobile-list {
+          display: block;
+        }
+
+        .ticket-mobile-card {
           position: relative;
-          isolation: isolate;
           overflow: hidden;
           border-radius: 22px;
           padding: 14px;
-          color: var(--text-strong, #f8fafc) !important;
+          margin-bottom: 12px;
+          color: var(--text-strong, #f8fafc);
           border: 1px solid rgba(255, 255, 255, 0.08);
           background:
-            radial-gradient(circle at top right, rgba(93,255,141,0.08), transparent 36%),
-            radial-gradient(circle at bottom left, rgba(99,213,255,0.06), transparent 28%),
             linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)),
-            linear-gradient(180deg, rgba(17, 28, 39, 0.98), rgba(9, 16, 24, 0.98)) !important;
-          box-shadow:
-            0 14px 30px rgba(0,0,0,0.24),
-            0 0 0 1px rgba(255,255,255,0.02) inset;
-          -webkit-tap-highlight-color: transparent;
-        }
-
-        .ticket-mobile-card.premium,
-        .ticket-mobile-card.premium * {
-          color: inherit;
-        }
-
-        .ticket-mobile-card.premium::before {
-          content: "";
-          position: absolute;
-          inset: 0;
-          pointer-events: none;
-          border-radius: inherit;
-          background: linear-gradient(
-            180deg,
-            rgba(255,255,255,0.04),
-            rgba(255,255,255,0)
-          );
-          z-index: 0;
-        }
-
-        .ticket-mobile-card.premium > * {
-          position: relative;
-          z-index: 1;
-        }
-
-        .ticket-mobile-card.premium .button,
-        .ticket-mobile-card.premium .input,
-        .ticket-mobile-card.premium select,
-        .ticket-mobile-card.premium textarea {
-          background-color: transparent;
+            linear-gradient(180deg, rgba(17, 28, 39, 0.98), rgba(9, 16, 24, 0.98));
+          box-shadow: 0 14px 30px rgba(0,0,0,0.22);
         }
 
         .ticket-mobile-card.expanded {
-          background:
-            radial-gradient(circle at top right, rgba(99,213,255,0.1), transparent 38%),
-            radial-gradient(circle at bottom left, rgba(93,255,141,0.08), transparent 28%),
-            linear-gradient(180deg, rgba(19, 33, 46, 0.99), rgba(10, 17, 26, 0.99)) !important;
+          border-color: rgba(99,213,255,0.14);
           box-shadow:
-            0 16px 34px rgba(0,0,0,0.28),
-            0 0 0 1px rgba(99,213,255,0.08) inset;
+            0 16px 34px rgba(0,0,0,0.26),
+            0 0 0 1px rgba(99,213,255,0.06) inset;
         }
 
         .ticket-mobile-toggle {
@@ -2339,7 +1306,7 @@ export default function TicketQueueTable({
           cursor: pointer;
         }
 
-        .queue-card-topline {
+        .ticket-card-top {
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
@@ -2347,7 +1314,7 @@ export default function TicketQueueTable({
           margin-bottom: 12px;
         }
 
-        .queue-card-owner-wrap {
+        .ticket-card-owner {
           display: flex;
           gap: 12px;
           align-items: flex-start;
@@ -2355,42 +1322,30 @@ export default function TicketQueueTable({
           min-width: 0;
         }
 
-        .queue-ticket-name {
+        .ticket-owner-name {
           font-weight: 900;
           font-size: 16px;
-          overflow-wrap: anywhere;
           line-height: 1.12;
           color: var(--text-strong, #f8fafc);
-          letter-spacing: -0.02em;
+          overflow-wrap: anywhere;
         }
 
-        .queue-ticket-subtitle {
+        .ticket-owner-subtitle {
           margin-top: 6px;
           font-size: 13px;
-          overflow-wrap: anywhere;
           line-height: 1.35;
           color: var(--muted, #9fb0c3);
+          overflow-wrap: anywhere;
         }
 
-        .queue-ticket-time {
+        .ticket-card-time {
           font-size: 12px;
           white-space: nowrap;
-          flex-shrink: 0;
-          text-align: right;
           color: var(--muted, #9fb0c3);
+          flex-shrink: 0;
         }
 
-        .queue-category-wrap {
-          margin-bottom: 12px;
-          padding: 12px;
-          border-radius: 16px;
-          border: 1px solid rgba(255,255,255,0.06);
-          background:
-            radial-gradient(circle at top right, rgba(255,255,255,0.04), transparent 42%),
-            rgba(255,255,255,0.02) !important;
-        }
-
-        .queue-card-footer-row {
+        .ticket-card-footer {
           display: flex;
           align-items: center;
           justify-content: space-between;
@@ -2398,41 +1353,34 @@ export default function TicketQueueTable({
           margin-top: 12px;
         }
 
-        .ticket-mobile-meta {
+        .ticket-mobile-meta-grid,
+        .ticket-details-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 10px;
+          margin-top: 12px;
         }
 
-        .ticket-mobile-meta-item {
+        .ticket-detail-box {
           display: grid;
           gap: 4px;
           padding: 10px 12px;
           border-radius: 14px;
           border: 1px solid rgba(255,255,255,0.06);
-          background:
-            radial-gradient(circle at top right, rgba(255,255,255,0.04), transparent 42%),
-            rgba(255,255,255,0.025) !important;
+          background: rgba(255,255,255,0.025);
           min-width: 0;
-          color: var(--text, #dbe4ee) !important;
+          color: var(--text, #dbe4ee);
         }
 
-        .ticket-mobile-meta-item.full {
+        .ticket-detail-box.full {
           grid-column: 1 / -1;
         }
 
-        .ticket-mobile-meta-label {
+        .ticket-detail-label {
           font-size: 11px;
           text-transform: uppercase;
           letter-spacing: 0.08em;
-          color: var(--muted, #9fb0c3) !important;
-        }
-
-        .ticket-desktop-expanded {
-          padding: 16px;
-          background:
-            radial-gradient(circle at top right, rgba(99,213,255,0.06), transparent 38%),
-            rgba(255,255,255,0.02);
+          color: var(--muted, #9fb0c3);
         }
 
         .ticket-expanded-shell {
@@ -2440,7 +1388,7 @@ export default function TicketQueueTable({
           gap: 0;
         }
 
-        .ticket-expanded-topbar {
+        .ticket-expanded-head {
           display: flex;
           justify-content: space-between;
           gap: 16px;
@@ -2464,20 +1412,12 @@ export default function TicketQueueTable({
           overflow-wrap: anywhere;
         }
 
-        .ticket-expanded-badges {
-          display: flex;
-          justify-content: flex-end;
-          max-width: 100%;
-        }
-
         .ticket-expanded-section {
           margin-bottom: 14px;
           padding: 12px;
           border-radius: 16px;
           border: 1px solid rgba(255,255,255,0.06);
-          background:
-            radial-gradient(circle at top right, rgba(255,255,255,0.04), transparent 42%),
-            rgba(255,255,255,0.02);
+          background: rgba(255,255,255,0.02);
         }
 
         .ticket-expanded-section-title {
@@ -2489,17 +1429,24 @@ export default function TicketQueueTable({
           margin-bottom: 10px;
         }
 
-        .ticket-mobile-list {
-          display: block;
+        .queue-desktop-owner {
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
         }
 
         .ticket-desktop-table {
           display: none;
         }
 
+        .ticket-desktop-expanded {
+          padding: 16px;
+          background: rgba(255,255,255,0.02);
+        }
+
         @media (min-width: 768px) {
           .queue-summary-grid {
-            grid-template-columns: repeat(5, minmax(0, 1fr));
+            grid-template-columns: repeat(6, minmax(0, 1fr));
           }
         }
 
@@ -2509,63 +1456,23 @@ export default function TicketQueueTable({
             gap: 14px;
           }
 
-          .ticket-mobile-card.premium {
+          .ticket-mobile-card {
             width: 100%;
             margin: 0;
           }
 
-          .queue-toolbar-left {
-            grid-template-columns: 1fr;
-          }
-
-          .queue-filter-row {
-            flex-wrap: nowrap;
-            overflow-x: auto;
-            overflow-y: hidden;
-            padding-bottom: 4px;
-            -webkit-overflow-scrolling: touch;
-            scrollbar-width: none;
-          }
-
-          .queue-filter-row::-webkit-scrollbar {
-            display: none;
-          }
-
-          .queue-summary-grid {
-            display: none;
-          }
-
-          .queue-summary-scroll {
-            display: flex;
-            gap: 10px;
-            overflow-x: auto;
-            overflow-y: hidden;
-            padding-bottom: 6px;
-            margin-bottom: 14px;
-            -webkit-overflow-scrolling: touch;
-            scrollbar-width: none;
-          }
-
-          .queue-summary-scroll::-webkit-scrollbar {
-            display: none;
-          }
-
-          .queue-summary-scroll .queue-summary-chip {
-            min-width: 110px;
-            flex: 0 0 auto;
-          }
-
-          .ticket-mobile-meta {
-            grid-template-columns: 1fr;
-          }
-
-          .queue-card-topline {
+          .ticket-card-top {
             flex-direction: column;
             align-items: stretch;
           }
 
-          .queue-ticket-time {
+          .ticket-card-time {
             text-align: left;
+          }
+
+          .ticket-mobile-meta-grid,
+          .ticket-details-grid {
+            grid-template-columns: 1fr;
           }
 
           .table-wrap,
@@ -2586,16 +1493,6 @@ export default function TicketQueueTable({
 
           .ticket-desktop-table {
             display: block;
-          }
-
-          .queue-summary-scroll {
-            display: none;
-          }
-        }
-
-        @media (min-width: 1280px) {
-          .queue-summary-grid {
-            grid-template-columns: repeat(15, minmax(0, 1fr));
           }
         }
       `}</style>
