@@ -1,3 +1,4 @@
+// components/UserDashboardClient.js
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -350,12 +351,186 @@ function getDashboardEntry(initialData, member) {
 
   return {
     joined_at: entry?.joined_at || member?.joined_at || null,
-    join_source: entry?.join_source || null,
-    entry_method: entry?.entry_method || entry?.join_source || null,
-    invite_code: entry?.invite_code || null,
-    inviter_id: entry?.inviter_id || null,
-    inviter_name: entry?.inviter_name || null,
-    vanity_used: Boolean(entry?.vanity_used),
+    join_source: entry?.join_source || member?.join_source || null,
+    entry_method: entry?.entry_method || entry?.join_source || member?.entry_method || null,
+    invite_code: entry?.invite_code || member?.invite_code || null,
+    inviter_id: entry?.inviter_id || member?.invited_by || null,
+    inviter_name: entry?.inviter_name || member?.invited_by_name || null,
+    vanity_used: Boolean(entry?.vanity_used || member?.vanity_used),
+  };
+}
+
+function getLatestJoinHistoryRow(initialData) {
+  return (
+    safeArray(initialData?.joinHistory)
+      .slice()
+      .sort(
+        (a, b) =>
+          new Date(b?.joined_at || b?.created_at || 0).getTime() -
+          new Date(a?.joined_at || a?.created_at || 0).getTime()
+      )[0] || null
+  );
+}
+
+function formatEntryMethodLabel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+
+  if (!normalized) return "Unknown";
+  if (normalized === "discord_invite" || normalized === "invite") return "Discord Invite";
+  if (normalized === "vanity_invite") return "Vanity Invite";
+  if (normalized === "vouched") return "Vouched Entry";
+  if (normalized === "manual_verification") return "Manual Verification";
+  if (normalized === "ticket_staff_approval") return "Ticket Staff Approval";
+  if (normalized === "vc_staff_approval") return "VC Staff Approval";
+  if (normalized === "join_observer_unresolved") return "Unresolved Join";
+  if (normalized === "invite_tracking_unavailable") return "Invite Tracking Unavailable";
+  if (normalized === "invite_cache_warming") return "Invite Cache Warming";
+  if (normalized === "invite_unresolved") return "Invite Unresolved";
+
+  return normalized
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function getDashboardRelationships(initialData) {
+  const relationships = safeObject(initialData?.relationships);
+
+  return {
+    entry_method: relationships?.entry_method || null,
+    verification_source: relationships?.verification_source || null,
+    entry_reason: relationships?.entry_reason || null,
+    approval_reason: relationships?.approval_reason || null,
+    invite_code: relationships?.invite_code || null,
+    inviter_id: relationships?.inviter_id || null,
+    inviter_name: relationships?.inviter_name || null,
+    vanity_used: Boolean(relationships?.vanity_used),
+    vouched_by: relationships?.vouched_by || null,
+    vouched_by_name: relationships?.vouched_by_name || null,
+    approved_by: relationships?.approved_by || null,
+    approved_by_name: relationships?.approved_by_name || null,
+    source_ticket_id: relationships?.source_ticket_id || null,
+    verification_ticket_id: relationships?.verification_ticket_id || null,
+    vouch_count: safeCount(relationships?.vouch_count, safeArray(initialData?.vouches).length),
+    latest_vouch_at: relationships?.latest_vouch_at || null,
+  };
+}
+
+function getEntryFacts(initialData, member) {
+  const entry = getDashboardEntry(initialData, member);
+  const relationships = getDashboardRelationships(initialData);
+  const latestJoin = getLatestJoinHistoryRow(initialData);
+
+  const joinSource =
+    latestJoin?.join_source ||
+    latestJoin?.entry_method ||
+    entry?.join_source ||
+    relationships?.verification_source ||
+    relationships?.entry_method ||
+    null;
+
+  const entryMethod =
+    latestJoin?.entry_method ||
+    entry?.entry_method ||
+    relationships?.entry_method ||
+    joinSource ||
+    null;
+
+  const inviteCode =
+    latestJoin?.invite_code ||
+    relationships?.invite_code ||
+    entry?.invite_code ||
+    null;
+
+  const inviterId =
+    latestJoin?.inviter_id ||
+    relationships?.inviter_id ||
+    entry?.inviter_id ||
+    null;
+
+  const inviterName =
+    latestJoin?.inviter_name ||
+    relationships?.inviter_name ||
+    entry?.inviter_name ||
+    null;
+
+  const vouchedBy =
+    latestJoin?.vouched_by ||
+    relationships?.vouched_by ||
+    member?.vouched_by ||
+    null;
+
+  const vouchedByName =
+    latestJoin?.vouched_by_name ||
+    relationships?.vouched_by_name ||
+    member?.vouched_by_name ||
+    null;
+
+  const approvedBy =
+    latestJoin?.approved_by ||
+    relationships?.approved_by ||
+    member?.approved_by ||
+    null;
+
+  const approvedByName =
+    latestJoin?.approved_by_name ||
+    relationships?.approved_by_name ||
+    member?.approved_by_name ||
+    null;
+
+  const vanityUsed = Boolean(
+    latestJoin?.vanity_used ||
+      relationships?.vanity_used ||
+      entry?.vanity_used
+  );
+
+  let truthStatus = "unknown";
+  let truthReason = "The dashboard does not yet have enough reliable join-source detail.";
+  let sourceLabel = formatEntryMethodLabel(entryMethod || joinSource);
+  let sourceDetail = "";
+
+  if (vouchedBy || vouchedByName) {
+    truthStatus = "confirmed";
+    truthReason = "A vouch record is attached to this member history.";
+    sourceLabel = "Vouched Entry";
+    sourceDetail = safeText(vouchedByName || vouchedBy, "Unknown vouched-by source");
+  } else if (vanityUsed) {
+    truthStatus = "confirmed";
+    truthReason = "The join was tied to the server vanity invite.";
+    sourceLabel = "Vanity Invite";
+    sourceDetail = inviteCode ? `Code: ${inviteCode}` : "Server vanity URL";
+  } else if (inviteCode || inviterId || inviterName) {
+    truthStatus = "confirmed";
+    truthReason = "The join was matched to a tracked Discord invite.";
+    sourceLabel = "Discord Invite";
+    sourceDetail = inviterName || inviterId ? safeText(inviterName || inviterId) : `Code: ${inviteCode}`;
+  } else if (approvedBy || approvedByName) {
+    truthStatus = "partial";
+    truthReason = "A staff approval trail exists, but the original invite path is incomplete.";
+    sourceLabel = formatEntryMethodLabel(joinSource || entryMethod || "ticket_staff_approval");
+    sourceDetail = `Approved by ${safeText(approvedByName || approvedBy, "staff")}`;
+  } else if (joinSource || entryMethod) {
+    truthStatus = "partial";
+    truthReason = "The dashboard knows the general entry path, but not all source details.";
+    sourceLabel = formatEntryMethodLabel(joinSource || entryMethod);
+    sourceDetail = safeText(relationships?.entry_reason || latestJoin?.join_note, "");
+  }
+
+  return {
+    joinedAt: entry?.joined_at || latestJoin?.joined_at || member?.joined_at || null,
+    joinSource,
+    entryMethod,
+    inviteCode,
+    inviterId,
+    inviterName,
+    vanityUsed,
+    vouchedBy,
+    vouchedByName,
+    approvedBy,
+    approvedByName,
+    truthStatus,
+    truthReason,
+    sourceLabel,
+    sourceDetail,
   };
 }
 
@@ -416,19 +591,6 @@ function getHistoricalNameList(initialData, viewer, member) {
   });
 
   return [...new Set(names)].slice(0, 20);
-}
-
-function getDashboardRelationships(initialData) {
-  const relationships = safeObject(initialData?.relationships);
-
-  return {
-    invite_code: relationships?.invite_code || null,
-    inviter_id: relationships?.inviter_id || null,
-    inviter_name: relationships?.inviter_name || null,
-    vanity_used: Boolean(relationships?.vanity_used),
-    vouch_count: safeCount(relationships?.vouch_count, safeArray(initialData?.vouches).length),
-    latest_vouch_at: relationships?.latest_vouch_at || null,
-  };
 }
 
 function getRecentVouches(initialData) {
@@ -920,7 +1082,7 @@ function HomeExtraSignals({
   viewer,
   openTicket,
 }) {
-  const entry = getDashboardEntry(initialData, member);
+  const entryFacts = getEntryFacts(initialData, member);
   const relationships = getDashboardRelationships(initialData);
   const ticketSummary = safeObject(initialData?.ticketSummary);
   const verificationSummary = getDashboardVerificationSummary(
@@ -951,7 +1113,12 @@ function HomeExtraSignals({
 
         <div className="mini-card">
           <div className="ticket-info-label">Joined Via</div>
-          <div>{safeText(entry?.entry_method || entry?.join_source, "Unknown")}</div>
+          <div>{safeText(entryFacts?.sourceLabel, "Unknown")}</div>
+        </div>
+
+        <div className="mini-card">
+          <div className="ticket-info-label">Entry Confidence</div>
+          <div>{safeText(entryFacts?.truthStatus, "unknown")}</div>
         </div>
 
         <div className="mini-card">
@@ -963,6 +1130,18 @@ function HomeExtraSignals({
           <div className="ticket-info-label">Latest VC Status</div>
           <div>{safeText(verificationSummary?.vc_latest_status, "—")}</div>
         </div>
+      </div>
+
+      <div className="mini-card" style={{ marginTop: 14 }}>
+        <div className="ticket-info-label">Entry Trail</div>
+        <div style={{ lineHeight: 1.65 }}>
+          {safeText(entryFacts?.truthReason, "No entry trail is visible yet.")}
+        </div>
+        {entryFacts?.sourceDetail ? (
+          <div className="muted" style={{ marginTop: 8, lineHeight: 1.6 }}>
+            {entryFacts.sourceDetail}
+          </div>
+        ) : null}
       </div>
 
       {historicalNames.length > 1 ? (
@@ -1182,7 +1361,7 @@ function AccountExtraSections({
   viewer,
   recentActivity,
 }) {
-  const entry = getDashboardEntry(initialData, member);
+  const entryFacts = getEntryFacts(initialData, member);
   const relationships = getDashboardRelationships(initialData);
   const stats = safeObject(initialData?.stats);
   const verification = getDashboardVerificationSummary(
@@ -1283,26 +1462,48 @@ function AccountExtraSections({
       >
         <div className="info-grid">
           <div className="mini-card">
-            <div className="ticket-info-label">Entry Method</div>
-            <div>{safeText(entry?.entry_method || entry?.join_source, "Unknown")}</div>
+            <div className="ticket-info-label">Joined Via</div>
+            <div>{safeText(entryFacts?.sourceLabel, "Unknown")}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Entry Confidence</div>
+            <div>{safeText(entryFacts?.truthStatus, "unknown")}</div>
           </div>
 
           <div className="mini-card">
             <div className="ticket-info-label">Invited By</div>
-            <div>{safeText(entry?.inviter_name || entry?.inviter_id, "Unknown")}</div>
+            <div>{safeText(entryFacts?.inviterName || entryFacts?.inviterId, "Unknown")}</div>
           </div>
 
           <div className="mini-card">
             <div className="ticket-info-label">Invite Code</div>
             <div>
-              {safeText(entry?.invite_code, entry?.vanity_used ? "Vanity Link" : "Unknown")}
+              {safeText(entryFacts?.inviteCode, entryFacts?.vanityUsed ? "Vanity Link" : "Unknown")}
             </div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Approved By</div>
+            <div>{safeText(entryFacts?.approvedByName || entryFacts?.approvedBy, "Unknown")}</div>
           </div>
 
           <div className="mini-card">
             <div className="ticket-info-label">Latest Vouch</div>
             <div>{formatTime(relationships?.latest_vouch_at)}</div>
           </div>
+        </div>
+
+        <div className="mini-card" style={{ marginTop: 14 }}>
+          <div className="ticket-info-label">Entry Trail</div>
+          <div style={{ lineHeight: 1.65 }}>
+            {safeText(entryFacts?.truthReason, "No entry trail is visible yet.")}
+          </div>
+          {entryFacts?.sourceDetail ? (
+            <div className="muted" style={{ marginTop: 8, lineHeight: 1.6 }}>
+              {entryFacts.sourceDetail}
+            </div>
+          ) : null}
         </div>
 
         <div style={{ marginTop: 14 }}>
@@ -1335,7 +1536,7 @@ function AccountTab({ viewer, member, verificationFlags, initialData, recentActi
   const displayName = getDisplayName(viewer, member);
   const username = getUsername(viewer, member);
   const accessLabel = getAccessLabel(member, viewer);
-  const entry = getDashboardEntry(initialData, member);
+  const entryFacts = getEntryFacts(initialData, member);
 
   return (
     <div className="user-dashboard-grid">
@@ -1378,7 +1579,7 @@ function AccountTab({ viewer, member, verificationFlags, initialData, recentActi
 
           <div className="mini-card">
             <div className="ticket-info-label">Joined</div>
-            <div>{formatTime(entry?.joined_at || member?.joined_at)}</div>
+            <div>{formatTime(entryFacts?.joinedAt || member?.joined_at)}</div>
           </div>
 
           <div className="mini-card">
@@ -1392,13 +1593,23 @@ function AccountTab({ viewer, member, verificationFlags, initialData, recentActi
           </div>
 
           <div className="mini-card">
-            <div className="ticket-info-label">Entry Method</div>
-            <div>{safeText(entry?.entry_method || entry?.join_source, "Unknown")}</div>
+            <div className="ticket-info-label">Joined Via</div>
+            <div>{safeText(entryFacts?.sourceLabel, "Unknown")}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Entry Confidence</div>
+            <div>{safeText(entryFacts?.truthStatus, "unknown")}</div>
           </div>
 
           <div className="mini-card">
             <div className="ticket-info-label">Invited By</div>
-            <div>{safeText(entry?.inviter_name || entry?.inviter_id, "Unknown")}</div>
+            <div>{safeText(entryFacts?.inviterName || entryFacts?.inviterId, "Unknown")}</div>
+          </div>
+
+          <div className="mini-card">
+            <div className="ticket-info-label">Approved By</div>
+            <div>{safeText(entryFacts?.approvedByName || entryFacts?.approvedBy, "Unknown")}</div>
           </div>
         </div>
 
@@ -1677,7 +1888,12 @@ export default function UserDashboardClient({ initialData }) {
     <>
       <Topbar />
 
-      <main style={{ paddingBottom: "calc(156px + env(safe-area-inset-bottom, 0px))" }}>
+      <main
+        style={{
+          paddingBottom: "calc(156px + env(safe-area-inset-bottom, 0px))",
+          overflowX: "hidden",
+        }}
+      >
         {notice ? (
           <div
             className={
@@ -1769,10 +1985,13 @@ export default function UserDashboardClient({ initialData }) {
         .user-dashboard-grid {
           display: grid;
           gap: 16px;
+          min-width: 0;
         }
 
         .member-section {
           border-radius: 24px;
+          min-width: 0;
+          overflow: hidden;
         }
 
         .member-section.tone-account {
@@ -1795,6 +2014,8 @@ export default function UserDashboardClient({ initialData }) {
             rgba(255,255,255,0.025);
           border-radius: 22px;
           padding: 14px;
+          min-width: 0;
+          overflow-wrap: anywhere;
         }
 
         .ticket-row-card.emphasis,
@@ -1823,6 +2044,7 @@ export default function UserDashboardClient({ initialData }) {
         .space {
           display: grid;
           gap: 12px;
+          min-width: 0;
         }
 
         .roles {
@@ -1880,6 +2102,7 @@ export default function UserDashboardClient({ initialData }) {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 10px;
+          min-width: 0;
         }
 
         .mini-card {
