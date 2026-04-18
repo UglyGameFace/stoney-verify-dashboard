@@ -1,9 +1,14 @@
 // ============================================================
 // File: components/dashboard/DesktopDashboardView.js
 // Purpose:
-//   Cleaner desktop dashboard shell with stronger hierarchy,
-//   reduced visual clutter, and better separation between
-//   everyday moderation actions vs maintenance actions.
+//   Desktop dashboard shell rebuilt to feel more like a real
+//   moderation operator workspace than a generic settings page.
+//
+//   Improvements:
+//   - stronger desktop ticket hierarchy
+//   - dedicated operator rail for queue views + shortcuts
+//   - safer separation of live moderation vs maintenance
+//   - cleaner command-center layout for tickets, members, categories
 // ============================================================
 
 "use client";
@@ -18,107 +23,88 @@ function DesktopKpiStrip({
 }) {
   const items = [
     {
-      key: "queueTotal",
-      label: "Active Queue",
+      key: "queue",
+      label: "Live Queue",
       value: Number((counts?.queueTotal ?? counts?.openTickets) || 0),
       helper: "Open + claimed tickets",
-      action: () => jumpToTickets?.({ status: "queue" }),
       tone: "green",
+      onClick: () => jumpToTickets?.({ status: "queue" }),
     },
     {
-      key: "queueUnclaimed",
+      key: "unclaimed",
       label: "Unclaimed",
       value: Number(counts?.queueUnclaimed || 0),
-      helper: "Still needs a staff owner",
-      action: () => jumpToTickets?.({ status: "unclaimed" }),
+      helper: "Needs a staff owner",
       tone: "amber",
+      onClick: () => jumpToTickets?.({ status: "unclaimed" }),
     },
     {
-      key: "queueClaimed",
+      key: "claimed",
       label: "Claimed",
       value: Number(counts?.queueClaimed || 0),
-      helper: "Already being handled",
-      action: () => jumpToTickets?.({ status: "claimed" }),
+      helper: "Already assigned",
       tone: "blue",
+      onClick: () => jumpToTickets?.({ status: "claimed" }),
     },
     {
-      key: "queueOverdue",
+      key: "overdue",
       label: "Overdue",
       value: Number(counts?.queueOverdue || 0),
-      helper: "Needs response now",
-      action: () => jumpToTickets?.({ status: "queue" }),
+      helper: "Needs attention now",
       tone: "pink",
+      onClick: () => jumpToTickets?.({ status: "queue" }),
     },
     {
-      key: "pendingVerification",
+      key: "verify",
       label: "Pending Verify",
       value: Number(intelligence?.pendingVerification || 0),
-      helper: "Verification queue pressure",
-      action: () => jumpToTickets?.({ status: "queue" }),
+      helper: "Verification pressure",
       tone: "purple",
+      onClick: () => jumpToTickets?.({ status: "queue" }),
     },
     {
-      key: "fraudFlags",
+      key: "fraud",
       label: "Fraud Signals",
       value: Number(counts?.fraudFlags || 0),
-      helper: "Flagged accounts to review",
-      action: () => jumpToPanel?.("fraud"),
+      helper: "Flagged accounts",
       tone: "pink",
+      onClick: () => jumpToPanel?.("fraud"),
     },
     {
-      key: "warnsToday",
+      key: "warns",
       label: "Warn Heat",
       value: Number(counts?.warnsToday || 0),
-      helper: "Warning activity today",
-      action: () => jumpToPanel?.("warns"),
+      helper: "Warnings today",
       tone: "amber",
+      onClick: () => jumpToPanel?.("warns"),
     },
     {
-      key: "raidAlerts",
+      key: "raids",
       label: "Raid Signals",
       value: Number(counts?.raidAlerts || 0),
-      helper: "Recent raid alert pressure",
-      action: () => jumpToPanel?.("raids"),
+      helper: "Recent raid pressure",
       tone: "blue",
+      onClick: () => jumpToPanel?.("raids"),
     },
   ];
 
   return (
     <>
       <div className="desktop-kpi-strip">
-        {items.map((item) => {
-          const content = (
-            <>
-              <span className="desktop-kpi-label">{item.label}</span>
-              <span className={`desktop-kpi-value tone-${item.tone}`}>
-                {item.value}
-              </span>
-              <span className="desktop-kpi-helper">{item.helper}</span>
-            </>
-          );
-
-          if (item.action) {
-            return (
-              <button
-                key={item.key}
-                type="button"
-                className={`desktop-kpi-card clickable tone-${item.tone}`}
-                onClick={item.action}
-              >
-                {content}
-              </button>
-            );
-          }
-
-          return (
-            <div
-              key={item.key}
-              className={`desktop-kpi-card tone-${item.tone}`}
-            >
-              {content}
-            </div>
-          );
-        })}
+        {items.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            className={`desktop-kpi-card tone-${item.tone}`}
+            onClick={item.onClick}
+          >
+            <span className="desktop-kpi-label">{item.label}</span>
+            <span className={`desktop-kpi-value tone-${item.tone}`}>
+              {item.value}
+            </span>
+            <span className="desktop-kpi-helper">{item.helper}</span>
+          </button>
+        ))}
       </div>
 
       <style jsx>{`
@@ -140,27 +126,9 @@ function DesktopKpiStrip({
           min-height: 104px;
           border: 1px solid rgba(255, 255, 255, 0.08);
           background:
-            radial-gradient(circle at top right, rgba(93, 255, 141, 0.07), transparent 34%),
+            radial-gradient(circle at top right, rgba(93, 255, 141, 0.08), transparent 34%),
             linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015)),
             linear-gradient(180deg, rgba(18, 30, 42, 0.95), rgba(8, 16, 26, 0.95));
-          overflow: hidden;
-        }
-
-        .desktop-kpi-card::before {
-          content: "";
-          position: absolute;
-          inset: 0;
-          border-radius: inherit;
-          pointer-events: none;
-          background: linear-gradient(
-            180deg,
-            rgba(255, 255, 255, 0.05),
-            rgba(255, 255, 255, 0)
-          );
-          opacity: 0.55;
-        }
-
-        .desktop-kpi-card.clickable {
           cursor: pointer;
           transition:
             transform 0.18s ease,
@@ -168,7 +136,7 @@ function DesktopKpiStrip({
             box-shadow 0.18s ease;
         }
 
-        .desktop-kpi-card.clickable:hover {
+        .desktop-kpi-card:hover {
           transform: translateY(-2px);
           border-color: rgba(93, 255, 141, 0.18);
           box-shadow: var(--glow-green);
@@ -178,8 +146,6 @@ function DesktopKpiStrip({
           font-size: 12px;
           color: var(--muted, rgba(255, 255, 255, 0.72));
           line-height: 1.2;
-          position: relative;
-          z-index: 1;
         }
 
         .desktop-kpi-value {
@@ -188,15 +154,11 @@ function DesktopKpiStrip({
           line-height: 0.95;
           letter-spacing: -0.05em;
           overflow-wrap: anywhere;
-          position: relative;
-          z-index: 1;
         }
 
         .desktop-kpi-helper {
           font-size: 12px;
           color: var(--muted, rgba(255, 255, 255, 0.72));
-          position: relative;
-          z-index: 1;
           line-height: 1.35;
         }
 
@@ -225,12 +187,6 @@ function DesktopKpiStrip({
           color: var(--purple, #b26dff);
         }
 
-        @media (max-width: 1599px) {
-          .desktop-kpi-strip {
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-          }
-        }
-
         @media (max-width: 1319px) {
           .desktop-kpi-strip {
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -244,9 +200,8 @@ function DesktopKpiStrip({
 function DesktopPageShell({
   title,
   subtitle,
-  actions,
-  children,
   tone = "default",
+  children,
 }) {
   return (
     <div className={`desktop-page-shell card tone-${tone}`}>
@@ -260,23 +215,19 @@ function DesktopPageShell({
                 : tone === "members"
                   ? "People + Roles"
                   : tone === "categories"
-                    ? "Support Routing"
+                    ? "Routing"
                     : "Dashboard"}
             </span>
           </div>
 
           <h2 className="desktop-page-title">{title}</h2>
-
           {subtitle ? (
             <div className="muted desktop-page-subtitle">{subtitle}</div>
           ) : null}
         </div>
-
-        {actions ? <div className="desktop-page-actions">{actions}</div> : null}
       </div>
 
       <div className="glass-divider" style={{ marginBottom: 14 }} />
-
       <div className="desktop-page-body">{children}</div>
 
       <style jsx>{`
@@ -363,15 +314,8 @@ function DesktopPageShell({
 
         .desktop-page-subtitle {
           margin-top: 8px;
-          max-width: 900px;
+          max-width: 920px;
           line-height: 1.55;
-        }
-
-        .desktop-page-actions {
-          display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
-          justify-content: flex-end;
         }
 
         .desktop-page-body {
@@ -379,6 +323,254 @@ function DesktopPageShell({
         }
       `}</style>
     </div>
+  );
+}
+
+function DesktopTicketRail({
+  counts = {},
+  intelligence = {},
+  statusFilter,
+  jumpToTickets,
+  jumpToPanel,
+  refresh,
+}) {
+  const queueViews = [
+    {
+      key: "queue",
+      label: "Full Queue",
+      helper: `${Number(counts?.queueTotal || 0)} live tickets`,
+      active: statusFilter === "queue" || statusFilter === "active",
+      tone: "green",
+      onClick: () => jumpToTickets?.({ status: "queue" }),
+    },
+    {
+      key: "unclaimed",
+      label: "Unclaimed",
+      helper: `${Number(counts?.queueUnclaimed || 0)} waiting for staff`,
+      active: statusFilter === "unclaimed",
+      tone: "amber",
+      onClick: () => jumpToTickets?.({ status: "unclaimed" }),
+    },
+    {
+      key: "claimed",
+      label: "Claimed",
+      helper: `${Number(counts?.queueClaimed || 0)} in progress`,
+      active: statusFilter === "claimed",
+      tone: "blue",
+      onClick: () => jumpToTickets?.({ status: "claimed" }),
+    },
+    {
+      key: "mine",
+      label: "My Queue",
+      helper: "Staff-owned tickets only",
+      active: statusFilter === "my_claimed",
+      tone: "purple",
+      onClick: () => jumpToTickets?.({ status: "my_claimed" }),
+    },
+    {
+      key: "closed",
+      label: "Closed",
+      helper: "Audit and reopen workflow",
+      active: statusFilter === "closed",
+      tone: "slate",
+      onClick: () => jumpToTickets?.({ status: "closed" }),
+    },
+  ];
+
+  const shortcuts = [
+    {
+      key: "refresh",
+      label: "Refresh",
+      helper: "Pull latest state",
+      tone: "green",
+      onClick: () => refresh?.({ force: true, reason: "desktop-ticket-rail" }),
+    },
+    {
+      key: "overdue",
+      label: "Overdue",
+      helper: `${Number(counts?.queueOverdue || 0)} need response now`,
+      tone: "pink",
+      onClick: () => jumpToTickets?.({ status: "queue" }),
+    },
+    {
+      key: "verify",
+      label: "Pending Verify",
+      helper: `${Number(intelligence?.pendingVerification || 0)} waiting`,
+      tone: "purple",
+      onClick: () => jumpToTickets?.({ status: "queue" }),
+    },
+    {
+      key: "fraud",
+      label: "Fraud",
+      helper: `${Number(counts?.fraudFlags || 0)} flagged`,
+      tone: "pink",
+      onClick: () => jumpToPanel?.("fraud"),
+    },
+    {
+      key: "warns",
+      label: "Warns",
+      helper: `${Number(counts?.warnsToday || 0)} today`,
+      tone: "amber",
+      onClick: () => jumpToPanel?.("warns"),
+    },
+  ];
+
+  return (
+    <>
+      <div className="desktop-ticket-rail">
+        <div className="desktop-ticket-rail-group">
+          <div className="desktop-ticket-rail-title">Queue Views</div>
+          <div className="desktop-ticket-rail-grid">
+            {queueViews.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className={`desktop-ticket-rail-card tone-${item.tone} ${item.active ? "active" : ""}`}
+                onClick={item.onClick}
+              >
+                <span className="desktop-ticket-rail-label">{item.label}</span>
+                <span className="desktop-ticket-rail-helper">{item.helper}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="desktop-ticket-rail-group">
+          <div className="desktop-ticket-rail-title">Operator Shortcuts</div>
+          <div className="desktop-ticket-rail-grid compact">
+            {shortcuts.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className={`desktop-ticket-rail-card tone-${item.tone}`}
+                onClick={item.onClick}
+              >
+                <span className="desktop-ticket-rail-label">{item.label}</span>
+                <span className="desktop-ticket-rail-helper">{item.helper}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <style jsx>{`
+        .desktop-ticket-rail {
+          display: grid;
+          gap: 14px;
+          margin-bottom: 16px;
+        }
+
+        .desktop-ticket-rail-group {
+          display: grid;
+          gap: 10px;
+          padding: 14px;
+          border-radius: 20px;
+          border: 1px solid rgba(255, 255, 255, 0.07);
+          background: rgba(255, 255, 255, 0.02);
+        }
+
+        .desktop-ticket-rail-title {
+          font-size: 12px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: var(--muted, rgba(255, 255, 255, 0.72));
+        }
+
+        .desktop-ticket-rail-grid {
+          display: grid;
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .desktop-ticket-rail-grid.compact {
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+        }
+
+        .desktop-ticket-rail-card {
+          text-align: left;
+          border-radius: 16px;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          background: rgba(255, 255, 255, 0.03);
+          padding: 12px;
+          color: var(--text-strong, #f8fafc);
+          display: grid;
+          gap: 6px;
+          cursor: pointer;
+          transition:
+            transform 0.16s ease,
+            border-color 0.16s ease,
+            box-shadow 0.16s ease,
+            background 0.16s ease;
+        }
+
+        .desktop-ticket-rail-card:hover,
+        .desktop-ticket-rail-card.active {
+          transform: translateY(-1px);
+          border-color: rgba(93, 255, 141, 0.18);
+          box-shadow: var(--glow-green);
+        }
+
+        .desktop-ticket-rail-card.active {
+          background: linear-gradient(180deg, rgba(93, 255, 141, 0.12), rgba(99, 213, 255, 0.06));
+        }
+
+        .desktop-ticket-rail-label {
+          font-size: 14px;
+          font-weight: 800;
+          line-height: 1.2;
+        }
+
+        .desktop-ticket-rail-helper {
+          font-size: 12px;
+          line-height: 1.4;
+          color: var(--muted, rgba(255, 255, 255, 0.72));
+        }
+
+        .tone-green.active,
+        .tone-green:hover {
+          border-color: rgba(93, 255, 141, 0.22);
+        }
+
+        .tone-blue.active,
+        .tone-blue:hover {
+          border-color: rgba(99, 213, 255, 0.22);
+          box-shadow: var(--glow-blue);
+        }
+
+        .tone-amber.active,
+        .tone-amber:hover {
+          border-color: rgba(255, 211, 107, 0.22);
+          box-shadow: var(--glow-amber);
+        }
+
+        .tone-purple.active,
+        .tone-purple:hover {
+          border-color: rgba(178, 109, 255, 0.22);
+          box-shadow: var(--glow-purple);
+        }
+
+        .tone-pink.active,
+        .tone-pink:hover {
+          border-color: rgba(255, 111, 142, 0.24);
+          box-shadow: 0 0 0 1px rgba(255, 111, 142, 0.08), 0 0 24px rgba(255, 111, 142, 0.12);
+        }
+
+        @media (max-width: 1599px) {
+          .desktop-ticket-rail-grid,
+          .desktop-ticket-rail-grid.compact {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+        }
+
+        @media (max-width: 1319px) {
+          .desktop-ticket-rail-grid,
+          .desktop-ticket-rail-grid.compact {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+        }
+      `}</style>
+    </>
   );
 }
 
@@ -402,7 +594,7 @@ function DesktopTicketsHeader({
   const summaryLabel = useMemo(() => {
     const parts = [];
 
-    if (statusFilter === "queue") parts.push("Queue");
+    if (statusFilter === "queue" || statusFilter === "active") parts.push("Queue");
     else if (statusFilter === "unclaimed") parts.push("Unclaimed");
     else if (statusFilter === "claimed") parts.push("Claimed");
     else if (statusFilter === "my_claimed") parts.push("Mine");
@@ -478,9 +670,7 @@ function DesktopTicketsHeader({
               type="button"
               className="button"
               style={{ width: "auto", minWidth: 136 }}
-              onClick={() =>
-                refresh({ force: true, reason: "desktop-ticket-refresh" })
-              }
+              onClick={() => refresh({ force: true, reason: "desktop-ticket-refresh" })}
             >
               Refresh Queue
             </button>
@@ -537,7 +727,8 @@ function DesktopTicketsHeader({
               <div>
                 <div className="desktop-ticket-maintenance-title">Maintenance</div>
                 <div className="muted desktop-ticket-maintenance-copy">
-                  Keep these tools separate from everyday moderation so staff does not hit destructive actions by accident.
+                  Keep repair and cleanup tools away from the main moderation loop
+                  so staff can work faster with fewer misclicks.
                 </div>
               </div>
             </div>
@@ -778,12 +969,8 @@ export default function DesktopDashboardView({
         ? "24px"
         : "18px";
 
-  const visibleHomeKeys = homeLayout.filter(
-    (key) => sectionVisibility[key] !== false
-  );
-  const visibleMembersKeys = membersLayout.filter(
-    (key) => sectionVisibility[key] !== false
-  );
+  const visibleHomeKeys = homeLayout.filter((key) => sectionVisibility[key] !== false);
+  const visibleMembersKeys = membersLayout.filter((key) => sectionVisibility[key] !== false);
 
   function homeItemClass(key, index) {
     const order = index + 1;
@@ -792,9 +979,9 @@ export default function DesktopDashboardView({
     if (key === "stats") return "desktop-home-item-half";
     if (key === "quickActions") return "desktop-home-item-half";
     if (key === "activity") return "desktop-home-item-wide";
-    if (key === "warns") return "desktop-home-item-third";
-    if (key === "raids") return "desktop-home-item-third";
-    if (key === "fraud") return "desktop-home-item-third";
+    if (key === "warns" || key === "raids" || key === "fraud") {
+      return "desktop-home-item-third";
+    }
 
     if (order === 1) return "desktop-home-item-full";
     if (order === 2 || order === 3) return "desktop-home-item-half";
@@ -844,12 +1031,12 @@ export default function DesktopDashboardView({
         : statusFilter === "all"
           ? "Active and historical tickets together for review, auditing, and reopen workflows."
           : statusFilter === "claimed"
-            ? "Tickets currently assigned to staff and actively being worked."
+            ? "Tickets already assigned and actively being worked."
             : statusFilter === "unclaimed"
               ? "Tickets waiting for a staff member to claim and begin handling."
               : statusFilter === "my_claimed"
                 ? "Tickets currently assigned to the selected staff member."
-                : "Live moderation queue with cleaner hierarchy, faster scanning, and less maintenance noise.";
+                : "A cleaner operator view for fast scanning, faster claiming, and less clutter than a generic ticket page.";
 
   return (
     <div className="desktop-dashboard-shell">
@@ -898,8 +1085,19 @@ export default function DesktopDashboardView({
               refresh={refresh}
             />
 
+            <DesktopTicketRail
+              counts={counts}
+              intelligence={intelligence}
+              statusFilter={statusFilter}
+              jumpToTickets={jumpToTickets}
+              jumpToPanel={jumpToPanel}
+              refresh={refresh}
+            />
+
             <div className="muted desktop-ticket-note">
-              Everyday moderation actions should stay fast. Repair and purge actions are intentionally tucked behind maintenance so staff can move quicker without accidental cleanup clicks.
+              Staff should not hunt for routine actions. Queue views, high-pressure
+              shortcuts, and maintenance are separated so everyday ticket handling
+              stays quicker and safer.
             </div>
 
             <div>{filteredTickets}</div>
