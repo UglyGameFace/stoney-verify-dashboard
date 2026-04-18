@@ -1,10 +1,9 @@
 // ============================================================
 // File: components/TicketQueueTable.tsx
 // Purpose:
-//   Unified ticket queue renderer with two display modes:
-//   - full: owns its own heading, toolbar, filters, and summary
-//   - embedded: renders only the ticket list / table content so
-//     parent screens can provide the surrounding mobile chrome
+//   Unified ticket queue renderer with cleaner visual hierarchy,
+//   more stable badge/color behavior, better mobile consistency,
+//   and stronger avatar fallbacks for tickets missing avatar_url.
 // ============================================================
 
 "use client";
@@ -58,7 +57,9 @@ type TicketLike = {
 
   owner_entry_method?: string | null;
   owner_verification_source?: string | null;
+  owner_join_source?: string | null;
   entry_method?: string | null;
+  join_source?: string | null;
   source?: string | null;
 
   owner_invited_by_name?: string | null;
@@ -66,6 +67,7 @@ type TicketLike = {
   owner_approved_by_name?: string | null;
 
   owner_ticket_total?: number | null;
+  prior_ticket_total?: number | null;
   owner_warn_count?: number | null;
   owner_flag_count?: number | null;
 
@@ -237,31 +239,21 @@ function badgeClass(value: unknown): string {
   if (v === "high") return "badge danger";
   if (v === "urgent") return "badge danger";
 
-  if (v === "verification") return "badge claimed";
-  if (v === "appeal") return "badge medium";
-  if (v === "report") return "badge danger";
-  if (v === "partnership") return "badge low";
-  if (v === "question") return "badge";
-  if (v === "custom") return "badge";
-  if (v === "support") return "badge low";
+  if (v === "overdue") return "badge danger";
   if (v === "ghost") return "badge";
+  if (v === "missing channel") return "badge danger";
 
-  if (v === "verified") return "badge claimed";
-  if (v === "pending") return "badge open";
-  if (v === "vc in progress") return "badge open";
-  if (v === "needs review") return "badge danger";
-  if (v === "denied") return "badge danger";
   if (v === "staff") return "badge claimed";
-  if (v === "unknown") return "badge";
+  if (v === "verified") return "badge claimed";
+  if (v === "pending verification") return "badge open";
+  if (v === "needs review") return "badge danger";
+  if (v === "verification history") return "badge";
+  if (v === "vc in progress") return "badge open";
+  if (v === "denied") return "badge danger";
 
   if (v === "high risk") return "badge danger";
   if (v === "medium risk") return "badge medium";
   if (v === "low risk") return "badge low";
-
-  if (v === "overdue") return "badge danger";
-  if (v === "counting_down") return "badge medium";
-  if (v === "closed_sla") return "badge closed";
-  if (v === "no_deadline") return "badge";
 
   return "badge";
 }
@@ -331,7 +323,7 @@ function deriveFallbackCategoryFromTicket(ticket: TicketLike): string {
       value === "verify_issue" ||
       value === "verification"
     ) {
-      return "Verification Issue";
+      return "Verification";
     }
 
     if (value === "support" || value === "general support") {
@@ -355,7 +347,7 @@ function deriveFallbackCategoryFromTicket(ticket: TicketLike): string {
   }
 
   const title = normalizeText(ticket?.title);
-  if (title.includes("verification")) return "Verification Issue";
+  if (title.includes("verification")) return "Verification";
   if (title.includes("appeal")) return "Appeal";
   if (title.includes("report")) return "Report";
   if (title.includes("support")) return "Support";
@@ -436,9 +428,26 @@ function getOwnerName(ticket: TicketLike): string {
   );
 }
 
+function getDiscordDefaultAvatarUrl(userId: unknown): string {
+  const raw = String(userId || "").trim();
+  if (!raw || !/^\d+$/.test(raw)) return "";
+
+  try {
+    const index = Number((BigInt(raw) >> 22n) % 6n);
+    return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
+  } catch {
+    return "";
+  }
+}
+
 function getOwnerAvatar(ticket: TicketLike): string {
-  const url = String(ticket?.owner_avatar_url || ticket?.avatar_url || "").trim();
-  return url || "";
+  const explicit = String(ticket?.owner_avatar_url || ticket?.avatar_url || "").trim();
+  if (explicit) return explicit;
+
+  const fallbackDiscord = getDiscordDefaultAvatarUrl(ticket?.user_id);
+  if (fallbackDiscord) return fallbackDiscord;
+
+  return "";
 }
 
 function getOwnerInitials(ticket: TicketLike): string {
@@ -477,11 +486,17 @@ function getClaimedById(ticket: TicketLike): string {
 }
 
 function getVerificationLabel(ticket: TicketLike): string {
-  return (
+  const value =
     String(ticket?.owner_verification_label || "").trim() ||
     String(ticket?.verification_label || "").trim() ||
-    "Unknown"
-  );
+    "";
+  return value;
+}
+
+function getVisibleVerificationLabel(ticket: TicketLike): string {
+  const value = getVerificationLabel(ticket).toLowerCase();
+  if (!value || value === "unknown") return "";
+  return titleize(value);
 }
 
 function getRiskLevel(ticket: TicketLike): string {
@@ -489,13 +504,15 @@ function getRiskLevel(ticket: TicketLike): string {
   if (level === "high") return "High Risk";
   if (level === "medium") return "Medium Risk";
   if (level === "low") return "Low Risk";
-  return "Unknown";
+  return "";
 }
 
 function getEntryMethodLabel(ticket: TicketLike): string {
   const raw =
+    String(ticket?.owner_join_source || "").trim() ||
     String(ticket?.owner_entry_method || "").trim() ||
     String(ticket?.owner_verification_source || "").trim() ||
+    String(ticket?.join_source || "").trim() ||
     String(ticket?.entry_method || "").trim() ||
     String(ticket?.source || "").trim() ||
     "";
@@ -736,7 +753,7 @@ function isVerificationLike(ticket: TicketLike): boolean {
   return (
     intake === "verification" ||
     category.includes("verification") ||
-    verificationLabel === "pending" ||
+    verificationLabel === "pending verification" ||
     verificationLabel === "needs review" ||
     verificationLabel === "vc in progress"
   );
@@ -830,6 +847,7 @@ function matchesSearch(ticket: TicketLike, query: string): boolean {
     ticket?.verification_label,
     ticket?.risk_level,
     ticket?.owner_entry_method,
+    ticket?.owner_join_source,
     ticket?.owner_verification_source,
     ticket?.owner_invited_by_name,
     ticket?.owner_vouched_by_name,
@@ -844,6 +862,20 @@ function matchesSearch(ticket: TicketLike, query: string): boolean {
     .join(" ");
 
   return haystack.includes(q);
+}
+
+function getCategoryTone(categoryName: string, intakeType: string): string {
+  const category = normalizeText(categoryName);
+  const intake = normalizeText(intakeType);
+
+  if (category.includes("verification") || intake === "verification") return "verification";
+  if (category.includes("support") || intake === "support") return "support";
+  if (category.includes("appeal") || intake === "appeal") return "appeal";
+  if (category.includes("report") || intake === "report") return "report";
+  if (category.includes("partnership") || intake === "partnership") return "partnership";
+  if (category.includes("question") || intake === "question") return "question";
+
+  return "default";
 }
 
 function SummaryChip({ label, value, tone = "default" }: SummaryChipProps) {
@@ -904,21 +936,10 @@ function CategoryDisplay({ ticket, compact = false }: CategoryDisplayProps) {
   const intakeType = getDisplayedIntakeType(ticket);
   const reason = getCategoryReason(ticket);
   const score = getCategoryScore(ticket);
-  const matched = hasMatchedCategory(ticket);
-
-  const normalizedCategory = normalizeText(categoryName);
-  const normalizedIntake = normalizeText(intakeType);
-  const normalizedCategoryWithoutIssue = normalizeText(
-    categoryName.replace(/\s+issue$/i, "")
-  );
-
-  const showIntakeChip =
-    Boolean(intakeType) &&
-    normalizedIntake !== normalizedCategory &&
-    normalizedIntake !== normalizedCategoryWithoutIssue;
+  const tone = getCategoryTone(categoryName, intakeType);
 
   return (
-    <div style={{ display: "grid", gap: 6 }}>
+    <div style={{ display: "grid", gap: 8 }}>
       <div
         style={{
           display: "flex",
@@ -927,19 +948,17 @@ function CategoryDisplay({ ticket, compact = false }: CategoryDisplayProps) {
           alignItems: "center",
         }}
       >
-        <span className={matched ? "badge claimed" : "badge low"}>
+        <span className={`queue-category-badge ${tone}`}>
           {categoryName}
         </span>
 
-        {showIntakeChip ? (
-          <span className={badgeClass(intakeType.toLowerCase())}>
-            {intakeType}
-          </span>
+        {intakeType && normalizeText(intakeType) !== normalizeText(categoryName) ? (
+          <span className="badge">{intakeType}</span>
         ) : null}
       </div>
 
       {reason ? (
-        <div className="muted" style={{ fontSize: 12, lineHeight: 1.35 }}>
+        <div className="muted" style={{ fontSize: 12, lineHeight: 1.4 }}>
           {compact ? reason : `Match: ${reason}`}
           {score > 0 ? ` • score ${score}` : ""}
         </div>
@@ -952,7 +971,7 @@ function TicketHeaderBadges({ ticket }: { ticket: TicketLike }) {
   const status = getStatus(ticket);
   const missingChannel = hasMissingChannel(ticket);
   const ghost = isGhost(ticket);
-  const verification = getVerificationLabel(ticket);
+  const verification = getVisibleVerificationLabel(ticket);
   const risk = getRiskLevel(ticket);
 
   return (
@@ -964,12 +983,16 @@ function TicketHeaderBadges({ ticket }: { ticket: TicketLike }) {
         alignItems: "center",
       }}
     >
-      <span className={badgeClass(status)}>{safeText(ticket.status || ticket.ticket_status)}</span>
+      <span className={badgeClass(status)}>
+        {safeText(ticket.status || ticket.ticket_status)}
+      </span>
       <span className={badgeClass(ticket.priority)}>
         {safeText(ticket.priority)}
       </span>
-      <span className={badgeClass(verification)}>{verification}</span>
-      <span className={badgeClass(risk.toLowerCase())}>{risk}</span>
+      {verification ? (
+        <span className={badgeClass(verification)}>{verification}</span>
+      ) : null}
+      {risk ? <span className={badgeClass(risk)}>{risk}</span> : null}
       {ticket?.is_unclaimed ? <span className="badge open">Unclaimed</span> : null}
       {ticket?.is_claimed ? <span className="badge claimed">Claimed</span> : null}
       {ticket?.overdue ? <span className="badge danger">Overdue</span> : null}
@@ -982,7 +1005,7 @@ function TicketHeaderBadges({ ticket }: { ticket: TicketLike }) {
 function QueueIntelStrip({ ticket }: { ticket: TicketLike }) {
   const intel = getQueueIntel(ticket);
   const noteCount = Number(ticket?.note_count || 0);
-  const priorTotal = Number(ticket?.owner_ticket_total || 0);
+  const priorTotal = Number(ticket?.owner_ticket_total || ticket?.prior_ticket_total || 0);
   const warnCount = Number(ticket?.owner_warn_count || 0);
   const flagCount = Number(ticket?.owner_flag_count || 0);
 
@@ -1075,8 +1098,11 @@ function TicketExpandedDetails({
           label="Intake Type"
           value={getDisplayedIntakeType(ticket) || "—"}
         />
-        <MiniField label="Verification" value={getVerificationLabel(ticket)} />
-        <MiniField label="Risk" value={getRiskLevel(ticket)} />
+        <MiniField
+          label="Verification"
+          value={getVisibleVerificationLabel(ticket) || "—"}
+        />
+        <MiniField label="Risk" value={getRiskLevel(ticket) || "—"} />
         <MiniField label="Claimed By" value={getClaimedByLabel(ticket)} />
         <MiniField label="Entry Method" value={getEntryMethodLabel(ticket)} />
         <MiniField label="Channel ID" value={channelId || "Missing"} />
@@ -1086,19 +1112,16 @@ function TicketExpandedDetails({
           value={`${getLatestActivityLabel(ticket)} • ${timeAgo(getLatestActivityTime(ticket))}`}
           full
         />
-        <MiniField
-          label="SLA"
-          value={getSlaStatusLabel(ticket)}
-        />
+        <MiniField label="SLA" value={getSlaStatusLabel(ticket)} />
         <MiniField
           label="Notes"
           value={String(Number(ticket?.note_count || 0))}
         />
         <MiniField
           label="Past Tickets"
-          value={String(Number(ticket?.owner_ticket_total || 0))}
+          value={String(Number(ticket?.owner_ticket_total || ticket?.prior_ticket_total || 0))}
         />
-        <MiniField label="Ghost" value={ghost ? "yes" : "no"} />
+        <MiniField label="Ghost" value={ghost ? "Yes" : "No"} />
         <MiniField
           label="Updated"
           value={timeAgo(ticket.updated_at || ticket.created_at)}
@@ -1194,7 +1217,8 @@ function MobileTicketCard({
   onRefresh,
 }: MobileTicketCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const channelId = getChannelId(ticket);
+  const categoryName = getDisplayedCategoryName(ticket);
+  const intakeType = getDisplayedIntakeType(ticket);
 
   return (
     <div
@@ -1212,21 +1236,20 @@ function MobileTicketCard({
       >
         <div className="queue-card-topline">
           <div className="queue-card-owner-wrap">
-            <AvatarBubble ticket={ticket} size={44} />
+            <AvatarBubble ticket={ticket} size={46} />
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ marginBottom: 8 }}>
                 <TicketHeaderBadges ticket={ticket} />
               </div>
 
               <div className="queue-ticket-name">{getOwnerName(ticket)}</div>
-
               <div className="muted queue-ticket-subtitle">
                 {getTicketTitle(ticket)}
               </div>
             </div>
           </div>
 
-          <div className="muted queue-ticket-time">
+          <div className="queue-ticket-time">
             {timeAgo(ticket.updated_at || ticket.created_at)}
           </div>
         </div>
@@ -1239,44 +1262,41 @@ function MobileTicketCard({
 
         <div className="queue-card-footer-row">
           <div className="muted" style={{ fontSize: 12 }}>
-            {expanded ? "Hide tools" : "Open tools"}
+            {expanded ? "Tap again to hide tools" : "Tap card to open tools"}
           </div>
-          <div className={`badge ${expanded ? "claimed" : "open"}`}>
+          <span className={`badge ${expanded ? "claimed" : "open"}`}>
             {expanded ? "Expanded" : "Quick View"}
-          </div>
+          </span>
         </div>
       </button>
 
       {expanded ? (
         <>
           <div className="ticket-mobile-meta" style={{ marginTop: 12 }}>
-            <MetaBlock label="Category" value={getDisplayedCategoryName(ticket)} />
+            <MetaBlock label="Category" value={categoryName} />
+            <MetaBlock label="Intake Type" value={intakeType || "—"} />
             <MetaBlock
-              label="Intake Type"
-              value={getDisplayedIntakeType(ticket) || "—"}
+              label="Verification"
+              value={getVisibleVerificationLabel(ticket) || "—"}
             />
-            <MetaBlock label="Verification" value={getVerificationLabel(ticket)} />
-            <MetaBlock label="Risk" value={getRiskLevel(ticket)} />
+            <MetaBlock label="Risk" value={getRiskLevel(ticket) || "—"} />
             <MetaBlock label="Claimed By" value={getClaimedByLabel(ticket)} />
             <MetaBlock label="Entry" value={getEntryMethodLabel(ticket)} />
-            <MetaBlock label="Channel" value={channelId || "Missing"} full />
+            <MetaBlock label="Channel" value={getChannelId(ticket) || "Missing"} full />
             <MetaBlock label="User ID" value={safeText(ticket.user_id)} full />
             <MetaBlock
               label="Latest Activity"
               value={`${getLatestActivityLabel(ticket)} • ${timeAgo(getLatestActivityTime(ticket))}`}
               full
             />
-            <MetaBlock
-              label="SLA"
-              value={getSlaStatusLabel(ticket)}
-            />
+            <MetaBlock label="SLA" value={getSlaStatusLabel(ticket)} />
             <MetaBlock
               label="Notes"
               value={String(Number(ticket?.note_count || 0))}
             />
             <MetaBlock
               label="Past Tickets"
-              value={String(Number(ticket?.owner_ticket_total || 0))}
+              value={String(Number(ticket?.owner_ticket_total || ticket?.prior_ticket_total || 0))}
             />
             <MetaBlock
               label="Queue State"
@@ -1730,12 +1750,16 @@ export default function TicketQueueTable({
                                   <span className={badgeClass(ticket.priority)}>
                                     {safeText(ticket.priority)}
                                   </span>
-                                  <span className={badgeClass(getVerificationLabel(ticket))}>
-                                    {getVerificationLabel(ticket)}
-                                  </span>
-                                  <span className={badgeClass(getRiskLevel(ticket).toLowerCase())}>
-                                    {getRiskLevel(ticket)}
-                                  </span>
+                                  {getVisibleVerificationLabel(ticket) ? (
+                                    <span className={badgeClass(getVisibleVerificationLabel(ticket))}>
+                                      {getVisibleVerificationLabel(ticket)}
+                                    </span>
+                                  ) : null}
+                                  {getRiskLevel(ticket) ? (
+                                    <span className={badgeClass(getRiskLevel(ticket))}>
+                                      {getRiskLevel(ticket)}
+                                    </span>
+                                  ) : null}
                                   {ticket?.is_unclaimed ? (
                                     <span className="badge open">Unclaimed</span>
                                   ) : null}
@@ -1764,7 +1788,9 @@ export default function TicketQueueTable({
 
                                 <div className="queue-submeta">
                                   <span>Entry: {getEntryMethodLabel(ticket)}</span>
-                                  <span>Past Tickets: {Number(ticket?.owner_ticket_total || 0)}</span>
+                                  <span>
+                                    Past Tickets: {Number(ticket?.owner_ticket_total || ticket?.prior_ticket_total || 0)}
+                                  </span>
                                   <span>User ID: {safeText(ticket.user_id)}</span>
                                 </div>
                               </div>
@@ -2188,6 +2214,54 @@ export default function TicketQueueTable({
           justify-items: start;
         }
 
+        .queue-category-badge {
+          display: inline-flex;
+          align-items: center;
+          min-height: 36px;
+          padding: 8px 14px;
+          border-radius: 999px;
+          font-size: 13px;
+          font-weight: 800;
+          line-height: 1.1;
+          border: 1px solid rgba(255,255,255,0.08);
+          color: #f8fafc;
+        }
+
+        .queue-category-badge.verification {
+          background: rgba(122, 92, 255, 0.16);
+          border-color: rgba(122, 92, 255, 0.26);
+        }
+
+        .queue-category-badge.support {
+          background: rgba(74, 222, 128, 0.14);
+          border-color: rgba(74, 222, 128, 0.24);
+        }
+
+        .queue-category-badge.appeal {
+          background: rgba(251, 191, 36, 0.14);
+          border-color: rgba(251, 191, 36, 0.24);
+        }
+
+        .queue-category-badge.report {
+          background: rgba(248, 113, 113, 0.14);
+          border-color: rgba(248, 113, 113, 0.24);
+        }
+
+        .queue-category-badge.partnership {
+          background: rgba(99, 213, 255, 0.14);
+          border-color: rgba(99, 213, 255, 0.24);
+        }
+
+        .queue-category-badge.question {
+          background: rgba(148, 163, 184, 0.14);
+          border-color: rgba(148, 163, 184, 0.22);
+        }
+
+        .queue-category-badge.default {
+          background: rgba(255,255,255,0.06);
+          border-color: rgba(255,255,255,0.12);
+        }
+
         .ticket-mobile-card.premium {
           position: relative;
           isolation: isolate;
@@ -2308,7 +2382,7 @@ export default function TicketQueueTable({
 
         .queue-category-wrap {
           margin-bottom: 12px;
-          padding: 10px 12px;
+          padding: 12px;
           border-radius: 16px;
           border: 1px solid rgba(255,255,255,0.06);
           background:
