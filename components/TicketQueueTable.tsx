@@ -1,12 +1,14 @@
 // ============================================================
 // File: components/TicketQueueTable.tsx
 // Purpose:
-//   Simpler, cleaner ticket queue renderer with:
-//   - stable category colors
-//   - no meaningless "Unknown" chips
-//   - Discord default avatar fallback
-//   - much quieter mobile cards
-//   - one consistent visual system for mobile + desktop
+//   Faster, clearer ticket queue for both desktop and mobile.
+//
+//   Key improvements:
+//   - mobile cards have immediate actions without forcing expand
+//   - desktop rows scan like an operator workspace, not a plain list
+//   - queue context is visible before opening tools
+//   - assignment state is clearer
+//   - stable category colors and cleaner badge logic
 // ============================================================
 
 "use client";
@@ -367,6 +369,14 @@ function getPastTicketCount(ticket: TicketLike): number {
   return Number(ticket?.owner_ticket_total || ticket?.prior_ticket_total || 0);
 }
 
+function getWarnCount(ticket: TicketLike): number {
+  return Number(ticket?.owner_warn_count || 0);
+}
+
+function getFlagCount(ticket: TicketLike): number {
+  return Number(ticket?.owner_flag_count || 0);
+}
+
 function getLatestActivityLabel(ticket: TicketLike): string {
   const title =
     String(ticket?.latest_activity_title || "").trim() ||
@@ -442,9 +452,7 @@ function getQueueHeading(mode: QueueMode) {
 }
 
 function countByStatus(tickets: TicketLike[], status: string): number {
-  return tickets.filter(
-    (ticket) => getStatus(ticket) === status
-  ).length;
+  return tickets.filter((ticket) => getStatus(ticket) === status).length;
 }
 
 function countOverdue(tickets: TicketLike[]): number {
@@ -573,6 +581,106 @@ function CompactContextRow({ ticket }: { ticket: TicketLike }) {
       <span className="queue-context-pill">SLA: {getSlaStatusLabel(ticket)}</span>
       <span className="queue-context-pill">Notes: {Number(ticket?.note_count || 0)}</span>
       <span className="queue-context-pill">Past Tickets: {getPastTicketCount(ticket)}</span>
+    </div>
+  );
+}
+
+function QueueContextStack({ ticket }: { ticket: TicketLike }) {
+  return (
+    <div className="queue-stack">
+      <CategoryChips ticket={ticket} />
+      <div className="queue-meta-lines">
+        <div className="queue-meta-line">
+          <span className="queue-inline-label">Entry</span>
+          <span>{getEntryMethodLabel(ticket)}</span>
+        </div>
+        <div className="queue-meta-line">
+          <span className="queue-inline-label">SLA</span>
+          <span>{getSlaStatusLabel(ticket)}</span>
+        </div>
+        <div className="queue-meta-line">
+          <span className="queue-inline-label">Past</span>
+          <span>{getPastTicketCount(ticket)} tickets</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AssignmentStack({
+  ticket,
+  currentStaffId,
+}: {
+  ticket: TicketLike;
+  currentStaffId?: string | null;
+}) {
+  const claimedBy = getClaimedByLabel(ticket);
+  const claimedById = getClaimedById(ticket);
+  const mine =
+    currentStaffId && claimedById && String(currentStaffId).trim() === claimedById.trim();
+
+  return (
+    <div className="queue-stack">
+      <div className="queue-chip-row">
+        <span className={badgeClass(getStatus(ticket))}>
+          {safeText(ticket.status || ticket.ticket_status)}
+        </span>
+        <span className={badgeClass(getPriority(ticket))}>
+          {safeText(ticket.priority)}
+        </span>
+        {getVisibleVerificationLabel(ticket) ? (
+          <span className={badgeClass(getVisibleVerificationLabel(ticket))}>
+            {getVisibleVerificationLabel(ticket)}
+          </span>
+        ) : null}
+        {getVisibleRiskLabel(ticket) ? (
+          <span className={badgeClass(getVisibleRiskLabel(ticket))}>
+            {getVisibleRiskLabel(ticket)}
+          </span>
+        ) : null}
+        {ticket?.overdue ? <span className="badge danger">Overdue</span> : null}
+        {ticket?.is_unclaimed ? <span className="badge open">Unclaimed</span> : null}
+        {hasMissingChannel(ticket) ? <span className="badge danger">Missing Channel</span> : null}
+        {isGhost(ticket) ? <span className="badge danger">Ghost</span> : null}
+        {mine ? <span className="badge claimed">Mine</span> : null}
+      </div>
+
+      <div className="queue-meta-lines">
+        <div className="queue-meta-line">
+          <span className="queue-inline-label">Claimed By</span>
+          <span>{claimedBy}</span>
+        </div>
+        <div className="queue-meta-line">
+          <span className="queue-inline-label">Channel</span>
+          <span>{getChannelId(ticket) || "Missing"}</span>
+        </div>
+        <div className="queue-meta-line">
+          <span className="queue-inline-label">Flags</span>
+          <span>{getFlagCount(ticket)} flags • {getWarnCount(ticket)} warns</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ActivityStack({ ticket }: { ticket: TicketLike }) {
+  return (
+    <div className="queue-stack">
+      <div className="queue-activity-title">{truncateText(getLatestActivityLabel(ticket), 68)}</div>
+      <div className="queue-meta-lines">
+        <div className="queue-meta-line">
+          <span className="queue-inline-label">Updated</span>
+          <span>{timeAgo(ticket.updated_at || ticket.created_at)}</span>
+        </div>
+        <div className="queue-meta-line">
+          <span className="queue-inline-label">Notes</span>
+          <span>{Number(ticket?.note_count || 0)}</span>
+        </div>
+        <div className="queue-meta-line">
+          <span className="queue-inline-label">Role State</span>
+          <span>{truncateText(ticket?.owner_role_state || "Normal", 32)}</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -755,62 +863,76 @@ function MobileTicketCard({
 
   return (
     <div className={`ticket-mobile-card ${expanded ? "expanded" : ""}`}>
-      <button
-        type="button"
-        className="ticket-mobile-toggle"
-        onClick={() => setExpanded((prev) => !prev)}
-      >
-        <div className="ticket-card-top">
-          <div className="ticket-card-owner">
-            <AvatarBubble ticket={ticket} size={46} />
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div className="queue-chip-row" style={{ marginBottom: 8 }}>
-                <span className={badgeClass(getStatus(ticket))}>
-                  {safeText(ticket.status || ticket.ticket_status)}
+      <div className="ticket-card-top">
+        <div className="ticket-card-owner">
+          <AvatarBubble ticket={ticket} size={46} />
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="queue-chip-row" style={{ marginBottom: 8 }}>
+              <span className={badgeClass(getStatus(ticket))}>
+                {safeText(ticket.status || ticket.ticket_status)}
+              </span>
+              <span className={badgeClass(getPriority(ticket))}>
+                {safeText(ticket.priority)}
+              </span>
+              {getVisibleVerificationLabel(ticket) ? (
+                <span className={badgeClass(getVisibleVerificationLabel(ticket))}>
+                  {getVisibleVerificationLabel(ticket)}
                 </span>
-                <span className={badgeClass(getPriority(ticket))}>
-                  {safeText(ticket.priority)}
+              ) : null}
+              {getVisibleRiskLabel(ticket) ? (
+                <span className={badgeClass(getVisibleRiskLabel(ticket))}>
+                  {getVisibleRiskLabel(ticket)}
                 </span>
-                {getVisibleVerificationLabel(ticket) ? (
-                  <span className={badgeClass(getVisibleVerificationLabel(ticket))}>
-                    {getVisibleVerificationLabel(ticket)}
-                  </span>
-                ) : null}
-                {getVisibleRiskLabel(ticket) ? (
-                  <span className={badgeClass(getVisibleRiskLabel(ticket))}>
-                    {getVisibleRiskLabel(ticket)}
-                  </span>
-                ) : null}
-                {ticket?.overdue ? <span className="badge danger">Overdue</span> : null}
-                {ticket?.is_unclaimed ? <span className="badge open">Unclaimed</span> : null}
-                {hasMissingChannel(ticket) ? (
-                  <span className="badge danger">Missing Channel</span>
-                ) : null}
-              </div>
-
-              <div className="ticket-owner-name">{getOwnerName(ticket)}</div>
-              <div className="ticket-owner-subtitle">{getTicketTitle(ticket)}</div>
+              ) : null}
+              {ticket?.overdue ? <span className="badge danger">Overdue</span> : null}
+              {ticket?.is_unclaimed ? <span className="badge open">Unclaimed</span> : null}
+              {hasMissingChannel(ticket) ? (
+                <span className="badge danger">Missing Channel</span>
+              ) : null}
             </div>
-          </div>
 
-          <div className="ticket-card-time">
-            {timeAgo(ticket.updated_at || ticket.created_at)}
+            <div className="ticket-owner-name">{getOwnerName(ticket)}</div>
+            <div className="ticket-owner-subtitle">{getTicketTitle(ticket)}</div>
           </div>
         </div>
 
-        <CategoryChips ticket={ticket} />
-        <CompactContextRow ticket={ticket} />
-
-        <div className="ticket-card-footer">
-          <span className="muted" style={{ fontSize: 12 }}>
-            {expanded ? "Tap again to hide tools" : "Tap to open tools"}
-          </span>
-
-          <span className={`badge ${expanded ? "claimed" : "open"}`}>
-            {expanded ? "Expanded" : "Quick View"}
-          </span>
+        <div className="ticket-card-time">
+          {timeAgo(ticket.updated_at || ticket.created_at)}
         </div>
-      </button>
+      </div>
+
+      <CategoryChips ticket={ticket} />
+      <CompactContextRow ticket={ticket} />
+
+      <div className="ticket-mobile-quick-grid">
+        <div className="ticket-mobile-quick-card">
+          <div className="ticket-detail-label">Claimed By</div>
+          <div>{getClaimedByLabel(ticket)}</div>
+        </div>
+
+        <div className="ticket-mobile-quick-card">
+          <div className="ticket-detail-label">Latest Activity</div>
+          <div>{truncateText(getLatestActivityLabel(ticket), 44)}</div>
+        </div>
+      </div>
+
+      <div className="ticket-mobile-action-row">
+        <Link
+          className="button ghost"
+          href={`/tickets/${ticket.id}`}
+          style={{ width: "100%" }}
+        >
+          Open Full Ticket
+        </Link>
+
+        <button
+          type="button"
+          className="button ghost"
+          onClick={() => setExpanded((prev) => !prev)}
+        >
+          {expanded ? "Hide Quick Tools" : "Quick Tools"}
+        </button>
+      </div>
 
       {expanded ? (
         <>
@@ -849,30 +971,6 @@ function MobileTicketCard({
           <div className="ticket-expanded-section" style={{ marginTop: 12 }}>
             <div className="ticket-expanded-section-title">Recommended Actions</div>
             <RecommendedActions ticket={ticket} />
-          </div>
-
-          <div
-            className="row"
-            style={{
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 10,
-              marginTop: 12,
-              marginBottom: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <div className="muted" style={{ fontSize: 12 }}>
-              Open the full ticket page for conversation history, notes, and verification actions.
-            </div>
-
-            <Link
-              className="button ghost"
-              href={`/tickets/${ticket.id}`}
-              style={{ width: "auto", minWidth: 150 }}
-            >
-              Open Full Ticket
-            </Link>
           </div>
 
           <TicketControls
@@ -956,7 +1054,11 @@ export default function TicketQueueTable({
             <SummaryChip label="Claimed" value={stats.claimed} tone="claimed" />
             <SummaryChip label="Closed" value={stats.closed} />
             <SummaryChip label="Deleted" value={stats.deleted} />
-            <SummaryChip label="Overdue" value={stats.overdue} tone={stats.overdue ? "danger" : "default"} />
+            <SummaryChip
+              label="Overdue"
+              value={stats.overdue}
+              tone={stats.overdue ? "danger" : "default"}
+            />
           </div>
         </>
       ) : null}
@@ -986,9 +1088,9 @@ export default function TicketQueueTable({
                 <thead>
                   <tr>
                     <th>Owner</th>
-                    <th>Category</th>
-                    <th>Status</th>
-                    <th>Updated</th>
+                    <th>Queue Context</th>
+                    <th>Assignment</th>
+                    <th>Activity</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -1000,7 +1102,7 @@ export default function TicketQueueTable({
 
                     return (
                       <React.Fragment key={key}>
-                        <tr>
+                        <tr className={isExpanded ? "queue-row-expanded" : ""}>
                           <td style={{ minWidth: 260 }}>
                             <div className="queue-desktop-owner">
                               <AvatarBubble ticket={ticket} size={42} />
@@ -1009,62 +1111,47 @@ export default function TicketQueueTable({
                                 <div className="ticket-owner-subtitle">
                                   {getTicketTitle(ticket)}
                                 </div>
+                                <div className="queue-owner-submeta">
+                                  ID: {safeText(ticket.user_id)}
+                                </div>
                               </div>
                             </div>
                           </td>
 
-                          <td style={{ minWidth: 220 }}>
-                            <CategoryChips ticket={ticket} />
+                          <td style={{ minWidth: 240 }}>
+                            <QueueContextStack ticket={ticket} />
+                          </td>
+
+                          <td style={{ minWidth: 260 }}>
+                            <AssignmentStack
+                              ticket={ticket}
+                              currentStaffId={currentStaffId}
+                            />
                           </td>
 
                           <td style={{ minWidth: 220 }}>
-                            <div className="queue-chip-row">
-                              <span className={badgeClass(getStatus(ticket))}>
-                                {safeText(ticket.status || ticket.ticket_status)}
-                              </span>
-                              <span className={badgeClass(getPriority(ticket))}>
-                                {safeText(ticket.priority)}
-                              </span>
-                              {getVisibleVerificationLabel(ticket) ? (
-                                <span className={badgeClass(getVisibleVerificationLabel(ticket))}>
-                                  {getVisibleVerificationLabel(ticket)}
-                                </span>
-                              ) : null}
-                              {getVisibleRiskLabel(ticket) ? (
-                                <span className={badgeClass(getVisibleRiskLabel(ticket))}>
-                                  {getVisibleRiskLabel(ticket)}
-                                </span>
-                              ) : null}
-                            </div>
+                            <ActivityStack ticket={ticket} />
                           </td>
 
-                          <td>
-                            <div>{timeAgo(ticket.updated_at || ticket.created_at)}</div>
-                            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                              {truncateText(getLatestActivityLabel(ticket), 50)}
-                            </div>
-                          </td>
+                          <td style={{ minWidth: 180 }}>
+                            <div className="queue-desktop-actions">
+                              <Link
+                                className="button ghost"
+                                href={`/tickets/${ticket.id}`}
+                                style={{ width: "100%" }}
+                              >
+                                Full Ticket
+                              </Link>
 
-                          <td>
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                               <button
                                 type="button"
                                 className="button ghost"
-                                style={{ width: "auto", minWidth: 118 }}
                                 onClick={() =>
                                   setExpandedDesktopId((prev) => (prev === key ? null : key))
                                 }
                               >
-                                {isExpanded ? "Hide Tools" : "Open Tools"}
+                                {isExpanded ? "Hide Tools" : "Quick Tools"}
                               </button>
-
-                              <Link
-                                className="button ghost"
-                                href={`/tickets/${ticket.id}`}
-                                style={{ width: "auto", minWidth: 110 }}
-                              >
-                                Full Ticket
-                              </Link>
                             </div>
                           </td>
                         </tr>
@@ -1264,6 +1351,53 @@ export default function TicketQueueTable({
           color: var(--text, #dbe4ee);
         }
 
+        .queue-stack {
+          display: grid;
+          gap: 8px;
+          min-width: 0;
+        }
+
+        .queue-meta-lines {
+          display: grid;
+          gap: 6px;
+          min-width: 0;
+        }
+
+        .queue-meta-line {
+          display: flex;
+          gap: 8px;
+          align-items: flex-start;
+          min-width: 0;
+          font-size: 12px;
+          line-height: 1.4;
+          color: var(--text, #dbe4ee);
+        }
+
+        .queue-inline-label {
+          flex: 0 0 auto;
+          color: var(--muted, #9fb0c3);
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          font-size: 11px;
+        }
+
+        .queue-activity-title {
+          font-size: 13px;
+          font-weight: 700;
+          line-height: 1.4;
+          color: var(--text-strong, #f8fafc);
+          overflow-wrap: anywhere;
+        }
+
+        .queue-owner-submeta {
+          margin-top: 6px;
+          font-size: 12px;
+          line-height: 1.35;
+          color: var(--muted, #9fb0c3);
+          overflow-wrap: anywhere;
+        }
+
         .ticket-mobile-list {
           display: block;
         }
@@ -1287,23 +1421,6 @@ export default function TicketQueueTable({
           box-shadow:
             0 16px 34px rgba(0,0,0,0.26),
             0 0 0 1px rgba(99,213,255,0.06) inset;
-        }
-
-        .ticket-mobile-toggle {
-          appearance: none !important;
-          -webkit-appearance: none !important;
-          -moz-appearance: none !important;
-          display: block;
-          width: 100%;
-          background: transparent !important;
-          border: 0 !important;
-          outline: none !important;
-          box-shadow: none !important;
-          padding: 0;
-          margin: 0;
-          text-align: left;
-          color: inherit !important;
-          cursor: pointer;
         }
 
         .ticket-card-top {
@@ -1345,11 +1462,30 @@ export default function TicketQueueTable({
           flex-shrink: 0;
         }
 
-        .ticket-card-footer {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
+        .ticket-mobile-quick-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+          margin-top: 12px;
+        }
+
+        .ticket-mobile-quick-card {
+          display: grid;
+          gap: 4px;
+          padding: 10px 12px;
+          border-radius: 14px;
+          border: 1px solid rgba(255,255,255,0.06);
+          background: rgba(255,255,255,0.025);
+          min-width: 0;
+          color: var(--text, #dbe4ee);
+          font-size: 13px;
+          line-height: 1.4;
+        }
+
+        .ticket-mobile-action-row {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
           margin-top: 12px;
         }
 
@@ -1435,6 +1571,16 @@ export default function TicketQueueTable({
           gap: 12px;
         }
 
+        .queue-desktop-actions {
+          display: grid;
+          gap: 8px;
+          min-width: 140px;
+        }
+
+        .queue-row-expanded {
+          background: rgba(255,255,255,0.02);
+        }
+
         .ticket-desktop-table {
           display: none;
         }
@@ -1471,7 +1617,9 @@ export default function TicketQueueTable({
           }
 
           .ticket-mobile-meta-grid,
-          .ticket-details-grid {
+          .ticket-details-grid,
+          .ticket-mobile-quick-grid,
+          .ticket-mobile-action-row {
             grid-template-columns: 1fr;
           }
 
