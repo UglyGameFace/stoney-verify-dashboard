@@ -1,10 +1,10 @@
 // ============================================================
 // File: components/DashboardClient.js
 // Purpose:
-//   Main dashboard shell with mobile-first ticket workflow.
-//   Mobile tickets now use one clear command center and embed
-//   TicketQueueTable in compact mode instead of double-rendering
-//   a full queue dashboard inside another dashboard.
+//   Main dashboard workspace shell.
+//   This version reduces stacked control clutter, improves
+//   ticket-first workflow on desktop/mobile, and makes the
+//   workspace feel more like one operator surface.
 // ============================================================
 
 "use client";
@@ -48,6 +48,37 @@ const RESUME_PENDING_REFRESH_CHECK_MS = 1500;
 const MOBILE_NAV_RESERVED_PX = 84;
 const REALTIME_DEBOUNCE_MS = 1250;
 const DESKTOP_LAYOUT_MIN_WIDTH = 1024;
+
+const WORKSPACE_TAB_META = {
+  home: {
+    label: "Overview",
+    eyebrow: "Moderation Workspace",
+    title: "Overview Control Room",
+    subtitle:
+      "Risk, activity, and moderation pressure in one place so staff knows what matters first.",
+  },
+  tickets: {
+    label: "Tickets",
+    eyebrow: "Moderation Workspace",
+    title: "Live Ticket Operations",
+    subtitle:
+      "Queue-first workspace for faster claiming, quicker scanning, and fewer accidental maintenance clicks.",
+  },
+  members: {
+    label: "Members",
+    eyebrow: "Moderation Workspace",
+    title: "Member Investigation Desk",
+    subtitle:
+      "Search people fast, inspect history, and jump back into ticket action without losing context.",
+  },
+  categories: {
+    label: "Categories",
+    eyebrow: "Moderation Workspace",
+    title: "Routing + Intake Lab",
+    subtitle:
+      "Tune category logic and jump straight into the ticket flows those categories feed.",
+  },
+};
 
 const LEGACY_CATEGORY_ALIASES = {
   verification: [
@@ -714,37 +745,6 @@ function SimpleFeedPanel({ rows, emptyMessage, renderRow }) {
   return <div className="space">{rows.map(renderRow)}</div>;
 }
 
-function DesktopTabBar({ activeTab, onChange }) {
-  return (
-    <div
-      className="card"
-      style={{
-        padding: 12,
-        marginBottom: 16,
-        display: "flex",
-        gap: 10,
-        flexWrap: "wrap",
-      }}
-    >
-      {MOBILE_TABS.map((tab) => {
-        const active = activeTab === tab;
-
-        return (
-          <button
-            key={tab}
-            type="button"
-            className={active ? "button" : "button ghost"}
-            style={{ width: "auto", minWidth: 110 }}
-            onClick={() => onChange(tab, { preserveScroll: true })}
-          >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function useIsDesktopLayout(minWidth = DESKTOP_LAYOUT_MIN_WIDTH) {
   const getValue = () => {
     if (typeof window === "undefined") return false;
@@ -813,6 +813,387 @@ function getEffectsModeClass(mode) {
   return "effects-full";
 }
 
+function DesktopWorkspaceBar({
+  activeTab,
+  onChange,
+  onRefresh,
+  onOpenSettings,
+  lastRefreshLabel,
+  isRefreshing,
+  isModalPaused,
+  counts,
+  intelligence,
+  jumpToTickets,
+  jumpToPanel,
+}) {
+  const meta = WORKSPACE_TAB_META[activeTab] || WORKSPACE_TAB_META.home;
+
+  return (
+    <>
+      <div className="card desktop-workspace-bar">
+        <div className="desktop-workspace-top">
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="desktop-workspace-eyebrow">{meta.eyebrow}</div>
+            <div className="desktop-workspace-title">{meta.title}</div>
+            <div className="muted desktop-workspace-copy">{meta.subtitle}</div>
+          </div>
+
+          <div className="desktop-workspace-cta-row">
+            <button
+              type="button"
+              className="button ghost"
+              style={{ width: "auto", minWidth: 132 }}
+              onClick={onOpenSettings}
+            >
+              Personalize UI
+            </button>
+
+            <button
+              type="button"
+              className="button"
+              style={{ width: "auto", minWidth: 136 }}
+              onClick={onRefresh}
+            >
+              {isRefreshing ? "Refreshing..." : "Refresh Now"}
+            </button>
+          </div>
+        </div>
+
+        <div className="desktop-workspace-tab-row">
+          {MOBILE_TABS.map((tab) => {
+            const tabMeta = WORKSPACE_TAB_META[tab] || {
+              label: tab.charAt(0).toUpperCase() + tab.slice(1),
+            };
+            const active = activeTab === tab;
+
+            return (
+              <button
+                key={tab}
+                type="button"
+                className={`desktop-workspace-tab ${active ? "active" : ""}`}
+                onClick={() => onChange(tab, { preserveScroll: true })}
+              >
+                <span className="desktop-workspace-tab-label">{tabMeta.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="desktop-workspace-status-row">
+          <button
+            type="button"
+            className={`desktop-status-pill ${activeTab === "tickets" ? "active" : ""}`}
+            onClick={() => jumpToTickets({ status: "queue" })}
+          >
+            <span>Queue</span>
+            <strong>{Number(counts?.queueTotal || 0)}</strong>
+          </button>
+
+          <button
+            type="button"
+            className="desktop-status-pill"
+            onClick={() => jumpToTickets({ status: "unclaimed" })}
+          >
+            <span>Unclaimed</span>
+            <strong>{Number(counts?.queueUnclaimed || 0)}</strong>
+          </button>
+
+          <button
+            type="button"
+            className="desktop-status-pill"
+            onClick={() => jumpToTickets({ status: "claimed" })}
+          >
+            <span>Claimed</span>
+            <strong>{Number(counts?.queueClaimed || 0)}</strong>
+          </button>
+
+          <button
+            type="button"
+            className="desktop-status-pill"
+            onClick={() => jumpToPanel("fraud")}
+          >
+            <span>Fraud Flags</span>
+            <strong>{Number(counts?.fraudFlags || 0)}</strong>
+          </button>
+
+          <button
+            type="button"
+            className="desktop-status-pill"
+            onClick={() => jumpToTickets({ status: "queue" })}
+          >
+            <span>Pending Verify</span>
+            <strong>{Number(intelligence?.pendingVerification || 0)}</strong>
+          </button>
+        </div>
+
+        <div className="desktop-workspace-footer">
+          <div className="desktop-workspace-footer-meta">
+            <span>Last successful refresh: {lastRefreshLabel}</span>
+            {isModalPaused ? <span>Refresh paused while another modal is open</span> : null}
+          </div>
+        </div>
+      </div>
+
+      <style jsx>{`
+        .desktop-workspace-bar {
+          padding: 18px;
+          margin-bottom: 16px;
+          border-radius: 26px;
+          box-shadow: var(--shadow-strong), var(--glow-green);
+        }
+
+        .desktop-workspace-top {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 16px;
+          flex-wrap: wrap;
+          margin-bottom: 14px;
+        }
+
+        .desktop-workspace-eyebrow {
+          font-size: 11px;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          color: var(--muted);
+          margin-bottom: 8px;
+        }
+
+        .desktop-workspace-title {
+          font-size: clamp(28px, 3vw, 40px);
+          line-height: 0.98;
+          letter-spacing: -0.045em;
+          font-weight: 900;
+          color: var(--text-strong);
+          text-shadow:
+            0 0 18px rgba(93, 255, 141, 0.08),
+            0 0 18px rgba(99, 213, 255, 0.06);
+        }
+
+        .desktop-workspace-copy {
+          margin-top: 8px;
+          max-width: 860px;
+          line-height: 1.55;
+        }
+
+        .desktop-workspace-cta-row {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+          align-items: center;
+        }
+
+        .desktop-workspace-tab-row {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+          align-items: center;
+          padding: 10px;
+          border-radius: 20px;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          margin-bottom: 12px;
+        }
+
+        .desktop-workspace-tab {
+          min-height: 48px;
+          padding: 12px 16px;
+          border-radius: 16px;
+          border: 1px solid transparent;
+          background: rgba(255, 255, 255, 0.02);
+          color: var(--muted);
+          font-weight: 800;
+          cursor: pointer;
+          transition: 0.18s ease;
+        }
+
+        .desktop-workspace-tab:hover,
+        .desktop-workspace-tab.active {
+          color: white;
+          background:
+            linear-gradient(135deg, rgba(93, 255, 141, 0.18), rgba(99, 213, 255, 0.16));
+          border-color: rgba(93, 255, 141, 0.18);
+          box-shadow: var(--glow-green);
+        }
+
+        .desktop-workspace-tab-label {
+          display: block;
+          line-height: 1;
+        }
+
+        .desktop-workspace-status-row {
+          display: grid;
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+          gap: 10px;
+          margin-bottom: 10px;
+        }
+
+        .desktop-status-pill {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          border-radius: 16px;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          background: rgba(255, 255, 255, 0.025);
+          color: var(--text);
+          min-height: 52px;
+          padding: 12px 14px;
+          cursor: pointer;
+          transition: 0.16s ease;
+          text-align: left;
+        }
+
+        .desktop-status-pill:hover,
+        .desktop-status-pill.active {
+          border-color: rgba(99, 213, 255, 0.2);
+          background: rgba(99, 213, 255, 0.08);
+          box-shadow: var(--glow-blue);
+        }
+
+        .desktop-status-pill span {
+          font-size: 12px;
+          color: var(--muted);
+          line-height: 1.2;
+        }
+
+        .desktop-status-pill strong {
+          font-size: 18px;
+          font-weight: 900;
+          color: var(--text-strong);
+          line-height: 1;
+        }
+
+        .desktop-workspace-footer {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+
+        .desktop-workspace-footer-meta {
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+          font-size: 12px;
+          color: var(--muted);
+          line-height: 1.5;
+        }
+
+        @media (max-width: 1399px) {
+          .desktop-workspace-status-row {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+        }
+
+        @media (max-width: 1199px) {
+          .desktop-workspace-status-row {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+        }
+      `}</style>
+    </>
+  );
+}
+
+function MobileWorkspaceBar({
+  activeTab,
+  onRefresh,
+  onOpenSettings,
+  lastRefreshLabel,
+  isRefreshing,
+  isModalPaused,
+}) {
+  const meta = WORKSPACE_TAB_META[activeTab] || WORKSPACE_TAB_META.home;
+
+  return (
+    <>
+      <div className="card mobile-workspace-bar">
+        <div className="mobile-workspace-top">
+          <div style={{ minWidth: 0 }}>
+            <div className="mobile-workspace-eyebrow">{meta.label}</div>
+            <div className="mobile-workspace-title">{meta.title}</div>
+            <div className="muted mobile-workspace-copy">{meta.subtitle}</div>
+          </div>
+        </div>
+
+        <div className="mobile-workspace-meta">
+          <span>Last refresh: {lastRefreshLabel}</span>
+          {isModalPaused ? <span>Paused while modal is open</span> : null}
+        </div>
+
+        <div className="mobile-workspace-actions">
+          <button type="button" className="button ghost" onClick={onOpenSettings}>
+            Personalize UI
+          </button>
+          <button type="button" className="button" onClick={onRefresh}>
+            {isRefreshing ? "Refreshing..." : "Refresh Now"}
+          </button>
+        </div>
+      </div>
+
+      <style jsx>{`
+        .mobile-workspace-bar {
+          padding: 14px;
+          margin-bottom: 12px;
+          border-radius: 22px;
+        }
+
+        .mobile-workspace-top {
+          margin-bottom: 12px;
+        }
+
+        .mobile-workspace-eyebrow {
+          font-size: 11px;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          color: var(--muted);
+          margin-bottom: 8px;
+        }
+
+        .mobile-workspace-title {
+          font-size: 24px;
+          line-height: 1.02;
+          letter-spacing: -0.04em;
+          font-weight: 900;
+          color: var(--text-strong);
+        }
+
+        .mobile-workspace-copy {
+          margin-top: 8px;
+          line-height: 1.5;
+          font-size: 13px;
+        }
+
+        .mobile-workspace-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+          font-size: 12px;
+          color: var(--muted);
+          line-height: 1.45;
+          margin-bottom: 12px;
+        }
+
+        .mobile-workspace-actions {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        @media (max-width: 479px) {
+          .mobile-workspace-actions {
+            grid-template-columns: 1fr;
+          }
+        }
+      `}</style>
+    </>
+  );
+}
+
 export default function DashboardClient({
   initialData,
   staffName,
@@ -843,7 +1224,7 @@ export default function DashboardClient({
     roles: false,
     staff: false,
   });
-  const [showMobileTicketFilters, setShowMobileTicketFilters] = useState(true);
+  const [showMobileTicketFilters, setShowMobileTicketFilters] = useState(false);
   const [showMobileTicketMaintenance, setShowMobileTicketMaintenance] = useState(false);
 
   const isDesktopLayout = useIsDesktopLayout();
@@ -1572,8 +1953,87 @@ export default function DashboardClient({
     setSelectedCategoryFilter(null);
   }, []);
 
-  const mobileExtraActions = useMemo(
-    () => [
+  const ticketFilterBanner = selectedCategoryFilter ? (
+    <div className="info-banner" style={{ marginBottom: 12 }}>
+      Filtering tickets by category:{" "}
+      <strong>
+        {selectedCategoryFilter?.name ||
+          selectedCategoryFilter?.slug ||
+          "Selected Category"}
+      </strong>
+    </div>
+  ) : null;
+
+  const mobileExtraActions = useMemo(() => {
+    const refreshAction = {
+      key: "refresh",
+      label: isRefreshing ? "Refreshing..." : "Refresh",
+      icon: "↻",
+      onClick: () => refresh({ force: true, reason: `mobile-actions-${activeTab}` }),
+      disabled: isRefreshing,
+    };
+
+    if (activeTab === "tickets") {
+      return [
+        {
+          key: "queue",
+          label: "Full Queue",
+          icon: "🎟️",
+          onClick: () => jumpToTickets({ status: "queue" }),
+        },
+        {
+          key: "unclaimed",
+          label: "Unclaimed",
+          icon: "🟡",
+          onClick: () => jumpToTickets({ status: "unclaimed" }),
+        },
+        {
+          key: "mine",
+          label: "My Queue",
+          icon: "🧑‍💻",
+          onClick: () => jumpToTickets({ status: "my_claimed" }),
+        },
+        refreshAction,
+      ];
+    }
+
+    if (activeTab === "members") {
+      return [
+        {
+          key: "overview",
+          label: "Overview",
+          icon: "🏠",
+          onClick: () => handleTabChange("home", { preserveScroll: true }),
+        },
+        {
+          key: "queue",
+          label: "Open Queue",
+          icon: "🎟️",
+          onClick: () => jumpToTickets({ status: "queue" }),
+        },
+        refreshAction,
+      ];
+    }
+
+    if (activeTab === "categories") {
+      return [
+        {
+          key: "queue",
+          label: "Open Queue",
+          icon: "🎟️",
+          onClick: () => jumpToTickets({ status: "queue" }),
+        },
+        {
+          key: "unclaimed",
+          label: "Unclaimed",
+          icon: "🟡",
+          onClick: () => jumpToTickets({ status: "unclaimed" }),
+        },
+        refreshAction,
+      ];
+    }
+
+    return [
       {
         key: "warns",
         label: "Open Warns",
@@ -1592,9 +2052,9 @@ export default function DashboardClient({
         icon: "🕵️",
         onClick: () => jumpToPanel("fraud"),
       },
-    ],
-    [jumpToPanel]
-  );
+      refreshAction,
+    ];
+  }, [activeTab, handleTabChange, isRefreshing, jumpToPanel, jumpToTickets, refresh]);
 
   const homeSections = {
     intelligence: (
@@ -1873,87 +2333,6 @@ export default function DashboardClient({
     />
   );
 
-  const commonRefreshCard = (
-    <div
-      className="card dashboard-refresh-card"
-      style={{ marginBottom: 14, padding: 12 }}
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
-      >
-        <div className="muted" style={{ fontSize: 13 }}>
-          Last successful refresh: {lastRefreshLabel}
-          {isModalPaused ? " • refresh paused while another modal is open" : ""}
-        </div>
-
-        <div
-          className="dashboard-refresh-actions"
-          style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-        >
-          <button
-            type="button"
-            className="button ghost"
-            style={{ width: "auto", minWidth: 120 }}
-            onClick={() => {
-              rememberCurrentScroll();
-              setSettingsOpen(true);
-            }}
-          >
-            Personalize UI
-          </button>
-
-          <button
-            type="button"
-            className="button ghost"
-            style={{ width: "auto", minWidth: 120 }}
-            onClick={() =>
-              refresh({ force: true, reason: "manual-header-refresh" })
-            }
-          >
-            Refresh Now
-          </button>
-
-          <button
-            type="button"
-            className="button ghost"
-            style={{ width: "auto", minWidth: 140 }}
-            disabled={isMaintaining}
-            onClick={() =>
-              handleSyncActiveTickets({
-                dryRun: false,
-                includeClosedVisibleChannels: true,
-              })
-            }
-          >
-            {isMaintaining ? "Working..." : "Sync Active"}
-          </button>
-
-          <button
-            type="button"
-            className="button ghost"
-            style={{ width: "auto", minWidth: 140 }}
-            disabled={isMaintaining}
-            onClick={() =>
-              handleReconcileTickets({
-                includeOpenWithMissingChannel: true,
-                includeTranscriptBackfill: true,
-                dryRun: true,
-              })
-            }
-          >
-            {isMaintaining ? "Working..." : "Preview Reconcile"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
   const themeVars = {
     "--accent": theme?.accent || "#45d483",
     "--accent2": theme?.accent2 || "#3b82f6",
@@ -1976,11 +2355,22 @@ export default function DashboardClient({
       >
         {isDesktopLayout ? (
           <>
-            <div className="desktop-only-nav">
-              <DesktopTabBar activeTab={activeTab} onChange={handleTabChange} />
-            </div>
-
-            {commonRefreshCard}
+            <DesktopWorkspaceBar
+              activeTab={activeTab}
+              onChange={handleTabChange}
+              onRefresh={() => refresh({ force: true, reason: "desktop-workspace" })}
+              onOpenSettings={() => {
+                rememberCurrentScroll();
+                setSettingsOpen(true);
+              }}
+              lastRefreshLabel={lastRefreshLabel}
+              isRefreshing={isRefreshing}
+              isModalPaused={isModalPaused}
+              counts={enhancedCounts}
+              intelligence={intelligence}
+              jumpToTickets={jumpToTickets}
+              jumpToPanel={jumpToPanel}
+            />
 
             {error ? (
               <div className="error-banner" style={{ marginBottom: 16 }}>
@@ -2031,14 +2421,17 @@ export default function DashboardClient({
               homeSections={homeSections}
               membersSections={membersSections}
               filteredTickets={
-                <TicketQueueTable
-                  tickets={filteredTickets}
-                  currentStaffId={currentStaffId}
-                  queueMode={statusFilter}
-                  onRefresh={() =>
-                    refresh({ force: true, reason: "ticket-controls" })
-                  }
-                />
+                <>
+                  {ticketFilterBanner}
+                  <TicketQueueTable
+                    tickets={filteredTickets}
+                    currentStaffId={currentStaffId}
+                    queueMode={statusFilter}
+                    onRefresh={() =>
+                      refresh({ force: true, reason: "ticket-controls" })
+                    }
+                  />
+                </>
               }
               search={search}
               setSearch={setSearch}
@@ -2057,7 +2450,17 @@ export default function DashboardClient({
           </>
         ) : (
           <>
-            {commonRefreshCard}
+            <MobileWorkspaceBar
+              activeTab={activeTab}
+              onRefresh={() => refresh({ force: true, reason: "mobile-workspace" })}
+              onOpenSettings={() => {
+                rememberCurrentScroll();
+                setSettingsOpen(true);
+              }}
+              lastRefreshLabel={lastRefreshLabel}
+              isRefreshing={isRefreshing}
+              isModalPaused={isModalPaused}
+            />
 
             {error ? (
               <div className="error-banner" style={{ marginBottom: 14 }}>
@@ -2108,7 +2511,7 @@ export default function DashboardClient({
                   <div>
                     <h2 style={{ margin: 0 }}>Tickets</h2>
                     <div className="muted" style={{ marginTop: 6, lineHeight: 1.5 }}>
-                      One queue, one control rail, and faster mobile moderation.
+                      One queue, one command rail, and faster thumb-first moderation.
                     </div>
                   </div>
 
@@ -2133,6 +2536,44 @@ export default function DashboardClient({
                   </div>
                 ) : null}
 
+                <div className="mobile-ticket-queue-pills">
+                  <button
+                    type="button"
+                    className={`mobile-ticket-queue-pill ${statusFilter === "queue" ? "active" : ""}`}
+                    onClick={() => setStatusFilter("queue")}
+                  >
+                    <span>Full Queue</span>
+                    <strong>{enhancedCounts.queueTotal}</strong>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`mobile-ticket-queue-pill ${statusFilter === "unclaimed" ? "active" : ""}`}
+                    onClick={() => setStatusFilter("unclaimed")}
+                  >
+                    <span>Unclaimed</span>
+                    <strong>{enhancedCounts.queueUnclaimed}</strong>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`mobile-ticket-queue-pill ${statusFilter === "claimed" ? "active" : ""}`}
+                    onClick={() => setStatusFilter("claimed")}
+                  >
+                    <span>Claimed</span>
+                    <strong>{enhancedCounts.queueClaimed}</strong>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`mobile-ticket-queue-pill ${statusFilter === "my_claimed" ? "active" : ""}`}
+                    onClick={() => setStatusFilter("my_claimed")}
+                  >
+                    <span>My Queue</span>
+                    <strong>{currentStaffId ? "View" : "—"}</strong>
+                  </button>
+                </div>
+
                 <div className="mobile-ticket-primary-actions">
                   <button
                     type="button"
@@ -2142,6 +2583,14 @@ export default function DashboardClient({
                     }
                   >
                     Refresh Queue
+                  </button>
+
+                  <button
+                    type="button"
+                    className="button ghost"
+                    onClick={() => setShowMobileTicketFilters((prev) => !prev)}
+                  >
+                    {showMobileTicketFilters ? "Hide Filters" : "Show Filters"}
                   </button>
 
                   <button
@@ -2160,14 +2609,6 @@ export default function DashboardClient({
 
                   <button
                     type="button"
-                    className={showMobileTicketFilters ? "button ghost" : "button ghost"}
-                    onClick={() => setShowMobileTicketFilters((prev) => !prev)}
-                  >
-                    {showMobileTicketFilters ? "Hide Filters" : "Show Filters"}
-                  </button>
-
-                  <button
-                    type="button"
                     className="button ghost"
                     onClick={() => setShowMobileTicketMaintenance((prev) => !prev)}
                   >
@@ -2181,7 +2622,7 @@ export default function DashboardClient({
                       <div>
                         <div className="mobile-ticket-panel-title">Filters</div>
                         <div className="muted mobile-ticket-panel-copy">
-                          Everyday queue controls first. Fewer taps, less clutter.
+                          Detailed queue controls stay close, but not in the way.
                         </div>
                       </div>
 
@@ -2271,7 +2712,7 @@ export default function DashboardClient({
                       <div>
                         <div className="mobile-ticket-panel-title">Maintenance</div>
                         <div className="muted mobile-ticket-panel-copy">
-                          Repair, preview, and purge actions kept out of the main moderation flow.
+                          Repair, preview, and purge actions are intentionally kept out of the live moderation loop.
                         </div>
                       </div>
                     </div>
@@ -2450,10 +2891,6 @@ export default function DashboardClient({
           gap: 22px;
         }
 
-        .desktop-only-nav {
-          display: block;
-        }
-
         .dashboard-home-grid,
         .dashboard-members-grid {
           display: grid;
@@ -2493,6 +2930,49 @@ export default function DashboardClient({
           gap: 8px;
           flex-wrap: wrap;
           align-items: center;
+        }
+
+        .mobile-ticket-queue-pills {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+          margin-bottom: 14px;
+        }
+
+        .mobile-ticket-queue-pill {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          min-height: 48px;
+          padding: 12px 14px;
+          border-radius: 16px;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          background: rgba(255, 255, 255, 0.025);
+          color: var(--text);
+          cursor: pointer;
+          transition: 0.16s ease;
+          text-align: left;
+        }
+
+        .mobile-ticket-queue-pill.active,
+        .mobile-ticket-queue-pill:hover {
+          border-color: rgba(99, 213, 255, 0.2);
+          background: rgba(99, 213, 255, 0.08);
+          box-shadow: var(--glow-blue);
+        }
+
+        .mobile-ticket-queue-pill span {
+          font-size: 12px;
+          color: var(--muted);
+          line-height: 1.2;
+        }
+
+        .mobile-ticket-queue-pill strong {
+          font-size: 16px;
+          font-weight: 900;
+          color: var(--text-strong);
+          line-height: 1;
         }
 
         .mobile-ticket-primary-actions {
@@ -2627,29 +3107,15 @@ export default function DashboardClient({
         }
 
         @media (max-width: 1023px) {
-          .desktop-only-nav {
-            display: none;
-          }
-
-          .dashboard-refresh-card {
-            margin-bottom: 12px !important;
-            padding: 10px !important;
-          }
-
-          .dashboard-refresh-actions {
-            width: 100%;
-            display: grid !important;
+          .mobile-ticket-primary-actions,
+          .mobile-ticket-queue-pills {
             grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-
-          .dashboard-refresh-actions :global(.button) {
-            width: 100% !important;
-            min-width: 0 !important;
           }
         }
 
         @media (max-width: 479px) {
-          .mobile-ticket-primary-actions {
+          .mobile-ticket-primary-actions,
+          .mobile-ticket-queue-pills {
             grid-template-columns: 1fr;
           }
 
