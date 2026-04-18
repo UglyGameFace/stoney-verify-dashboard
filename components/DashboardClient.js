@@ -1,3 +1,12 @@
+// ============================================================
+// File: components/DashboardClient.js
+// Purpose:
+//   Main dashboard shell with mobile-first ticket workflow.
+//   Mobile tickets now use one clear command center and embed
+//   TicketQueueTable in compact mode instead of double-rendering
+//   a full queue dashboard inside another dashboard.
+// ============================================================
+
 "use client";
 
 import {
@@ -834,6 +843,8 @@ export default function DashboardClient({
     roles: false,
     staff: false,
   });
+  const [showMobileTicketFilters, setShowMobileTicketFilters] = useState(true);
+  const [showMobileTicketMaintenance, setShowMobileTicketMaintenance] = useState(false);
 
   const isDesktopLayout = useIsDesktopLayout();
 
@@ -1477,6 +1488,17 @@ export default function DashboardClient({
     currentStaffId,
   ]);
 
+  const mobileTicketStats = useMemo(() => {
+    const rows = safeArray(filteredTickets);
+    return {
+      total: rows.length,
+      open: rows.filter((ticket) => String(ticket?.status || ticket?.ticket_status || "").toLowerCase() === "open").length,
+      claimed: rows.filter((ticket) => String(ticket?.status || ticket?.ticket_status || "").toLowerCase() === "claimed").length,
+      unclaimed: rows.filter((ticket) => isTicketUnclaimed(ticket)).length,
+      overdue: rows.filter((ticket) => isTicketOverdue(ticket)).length,
+    };
+  }, [filteredTickets]);
+
   const homeSummary = useMemo(() => {
     return {
       recentEvents: safeEvents.slice(0, 5),
@@ -2072,7 +2094,7 @@ export default function DashboardClient({
             </section>
 
             <section className={`mobile-tab-panel ${activeTab === "tickets" ? "active" : ""}`}>
-              <div className="card">
+              <div className="card mobile-ticket-shell">
                 <div
                   className="row"
                   style={{
@@ -2084,83 +2106,19 @@ export default function DashboardClient({
                   }}
                 >
                   <div>
-                    <h2 style={{ margin: 0 }}>Ticket Queue</h2>
-                    <div className="muted" style={{ marginTop: 6 }}>
-                      Live moderation queue with claim-state, repair, transcript, and filtering controls
+                    <h2 style={{ margin: 0 }}>Tickets</h2>
+                    <div className="muted" style={{ marginTop: 6, lineHeight: 1.5 }}>
+                      One queue, one control rail, and faster mobile moderation.
                     </div>
                   </div>
 
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <button
-                      type="button"
-                      className="button ghost"
-                      style={{ width: "auto", minWidth: 120 }}
-                      onClick={clearTicketFilters}
-                    >
-                      Clear Filters
-                    </button>
-
-                    <button
-                      type="button"
-                      className="button ghost"
-                      style={{ width: "auto", minWidth: 120 }}
-                      onClick={() =>
-                        refresh({ force: true, reason: "manual-ticket-refresh" })
-                      }
-                    >
-                      Refresh Queue
-                    </button>
-
-                    <button
-                      type="button"
-                      className="button ghost"
-                      style={{ width: "auto", minWidth: 140 }}
-                      disabled={isMaintaining}
-                      onClick={() =>
-                        handleSyncActiveTickets({
-                          dryRun: false,
-                          includeClosedVisibleChannels: true,
-                        })
-                      }
-                    >
-                      {isMaintaining ? "Working..." : "Sync Active"}
-                    </button>
-
-                    <button
-                      type="button"
-                      className="button ghost"
-                      style={{ width: "auto", minWidth: 140 }}
-                      disabled={isMaintaining}
-                      onClick={() =>
-                        handleReconcileTickets({
-                          includeOpenWithMissingChannel: true,
-                          includeTranscriptBackfill: true,
-                          dryRun: false,
-                        })
-                      }
-                    >
-                      {isMaintaining ? "Working..." : "Reconcile Tickets"}
-                    </button>
-
-                    <button
-                      type="button"
-                      className="button ghost"
-                      style={{ width: "auto", minWidth: 140 }}
-                      disabled={isMaintaining}
-                      onClick={handlePreviewPurge}
-                    >
-                      {isMaintaining ? "Working..." : "Preview Purge"}
-                    </button>
-
-                    <button
-                      type="button"
-                      className="button danger"
-                      style={{ width: "auto", minWidth: 140 }}
-                      disabled={isMaintaining}
-                      onClick={handlePurgeStale}
-                    >
-                      {isMaintaining ? "Working..." : "Purge Stale"}
-                    </button>
+                  <div className="mobile-ticket-header-badges">
+                    <span className="badge open">{mobileTicketStats.open} Open</span>
+                    <span className="badge claimed">{mobileTicketStats.claimed} Claimed</span>
+                    <span className="badge">{mobileTicketStats.total} Total</span>
+                    {mobileTicketStats.overdue > 0 ? (
+                      <span className="badge danger">{mobileTicketStats.overdue} Overdue</span>
+                    ) : null}
                   </div>
                 </div>
 
@@ -2175,79 +2133,212 @@ export default function DashboardClient({
                   </div>
                 ) : null}
 
-                <div
-                  className="muted"
-                  style={{
-                    marginBottom: 14,
-                    fontSize: 12,
-                    lineHeight: 1.5,
-                  }}
-                >
-                  Reconcile repairs stale ticket rows that no longer reflect Discord truth.
-                  Purge removes dead closed or deleted rows that no longer have a usable live channel.
+                <div className="mobile-ticket-primary-actions">
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() =>
+                      refresh({ force: true, reason: "manual-ticket-refresh" })
+                    }
+                  >
+                    Refresh Queue
+                  </button>
+
+                  <button
+                    type="button"
+                    className="button ghost"
+                    disabled={isMaintaining}
+                    onClick={() =>
+                      handleSyncActiveTickets({
+                        dryRun: false,
+                        includeClosedVisibleChannels: true,
+                      })
+                    }
+                  >
+                    {isMaintaining ? "Working..." : "Sync Active"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className={showMobileTicketFilters ? "button ghost" : "button ghost"}
+                    onClick={() => setShowMobileTicketFilters((prev) => !prev)}
+                  >
+                    {showMobileTicketFilters ? "Hide Filters" : "Show Filters"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="button ghost"
+                    onClick={() => setShowMobileTicketMaintenance((prev) => !prev)}
+                  >
+                    {showMobileTicketMaintenance ? "Hide Maintenance" : "Maintenance"}
+                  </button>
                 </div>
 
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                    gap: 10,
-                    marginBottom: 14,
-                  }}
-                >
-                  <input
-                    className="input"
-                    placeholder="Search tickets, categories, intake types..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                  />
+                {showMobileTicketFilters ? (
+                  <div className="mobile-ticket-panel">
+                    <div className="mobile-ticket-panel-header">
+                      <div>
+                        <div className="mobile-ticket-panel-title">Filters</div>
+                        <div className="muted mobile-ticket-panel-copy">
+                          Everyday queue controls first. Fewer taps, less clutter.
+                        </div>
+                      </div>
 
-                  <select
-                    className="input"
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                  >
-                    <option value="queue">Full Queue (Open + Claimed)</option>
-                    <option value="unclaimed">Unclaimed Only</option>
-                    <option value="claimed">Claimed Only</option>
-                    <option value="my_claimed">My Claimed Tickets</option>
-                    <option value="all">All statuses</option>
-                    <option value="open_only">Open Only</option>
-                    <option value="closed">Closed</option>
-                    <option value="deleted">Deleted</option>
-                  </select>
+                      <button
+                        type="button"
+                        className="button ghost"
+                        style={{ width: "auto", minWidth: 118 }}
+                        onClick={clearTicketFilters}
+                      >
+                        Clear Filters
+                      </button>
+                    </div>
 
-                  <select
-                    className="input"
-                    value={priorityFilter}
-                    onChange={(e) => setPriorityFilter(e.target.value)}
-                  >
-                    <option value="all">All priorities</option>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="urgent">Urgent</option>
-                  </select>
+                    <div className="mobile-ticket-form-grid">
+                      <input
+                        className="input"
+                        placeholder="Search tickets, categories, intake types..."
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                      />
 
-                  <select
-                    className="input"
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                  >
-                    <option value="priority_desc">Priority Desc</option>
-                    <option value="priority_asc">Priority Asc</option>
-                    <option value="updated_desc">Updated Desc</option>
-                    <option value="updated_asc">Updated Asc</option>
-                    <option value="created_desc">Created Desc</option>
-                    <option value="created_asc">Created Asc</option>
-                  </select>
-                </div>
+                      <select
+                        className="input"
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value)}
+                      >
+                        <option value="queue">Full Queue (Open + Claimed)</option>
+                        <option value="unclaimed">Unclaimed Only</option>
+                        <option value="claimed">Claimed Only</option>
+                        <option value="my_claimed">My Claimed Tickets</option>
+                        <option value="all">All statuses</option>
+                        <option value="open_only">Open Only</option>
+                        <option value="closed">Closed</option>
+                        <option value="deleted">Deleted</option>
+                      </select>
 
-                <div className="profile-scroll-safe-zone">
+                      <select
+                        className="input"
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value)}
+                      >
+                        <option value="priority_desc">Priority Desc</option>
+                        <option value="priority_asc">Priority Asc</option>
+                        <option value="updated_desc">Updated Desc</option>
+                        <option value="updated_asc">Updated Asc</option>
+                        <option value="created_desc">Created Desc</option>
+                        <option value="created_asc">Created Asc</option>
+                      </select>
+
+                      <select
+                        className="input"
+                        value={priorityFilter}
+                        onChange={(e) => setPriorityFilter(e.target.value)}
+                      >
+                        <option value="all">All priorities</option>
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                        <option value="urgent">Urgent</option>
+                      </select>
+                    </div>
+
+                    <div className="mobile-ticket-stats-grid">
+                      <div className="mobile-ticket-stat-card">
+                        <div className="ticket-info-label">Visible</div>
+                        <div className="mobile-ticket-stat-value">{mobileTicketStats.total}</div>
+                      </div>
+                      <div className="mobile-ticket-stat-card">
+                        <div className="ticket-info-label">Open</div>
+                        <div className="mobile-ticket-stat-value">{mobileTicketStats.open}</div>
+                      </div>
+                      <div className="mobile-ticket-stat-card">
+                        <div className="ticket-info-label">Unclaimed</div>
+                        <div className="mobile-ticket-stat-value">{mobileTicketStats.unclaimed}</div>
+                      </div>
+                      <div className="mobile-ticket-stat-card">
+                        <div className="ticket-info-label">Claimed</div>
+                        <div className="mobile-ticket-stat-value">{mobileTicketStats.claimed}</div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {showMobileTicketMaintenance ? (
+                  <div className="mobile-ticket-panel maintenance">
+                    <div className="mobile-ticket-panel-header">
+                      <div>
+                        <div className="mobile-ticket-panel-title">Maintenance</div>
+                        <div className="muted mobile-ticket-panel-copy">
+                          Repair, preview, and purge actions kept out of the main moderation flow.
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="muted mobile-ticket-maintenance-copy">
+                      Reconcile repairs stale ticket rows that no longer reflect Discord truth.
+                      Purge removes dead closed or deleted rows that no longer have a usable live channel.
+                    </div>
+
+                    <div className="mobile-ticket-maintenance-grid">
+                      <button
+                        type="button"
+                        className="button ghost"
+                        disabled={isMaintaining}
+                        onClick={() =>
+                          handleReconcileTickets({
+                            includeOpenWithMissingChannel: true,
+                            includeTranscriptBackfill: true,
+                            dryRun: true,
+                          })
+                        }
+                      >
+                        {isMaintaining ? "Working..." : "Preview Reconcile"}
+                      </button>
+
+                      <button
+                        type="button"
+                        className="button ghost"
+                        disabled={isMaintaining}
+                        onClick={() =>
+                          handleReconcileTickets({
+                            includeOpenWithMissingChannel: true,
+                            includeTranscriptBackfill: true,
+                            dryRun: false,
+                          })
+                        }
+                      >
+                        {isMaintaining ? "Working..." : "Reconcile Tickets"}
+                      </button>
+
+                      <button
+                        type="button"
+                        className="button ghost"
+                        disabled={isMaintaining}
+                        onClick={handlePreviewPurge}
+                      >
+                        {isMaintaining ? "Working..." : "Preview Purge"}
+                      </button>
+
+                      <button
+                        type="button"
+                        className="button danger"
+                        disabled={isMaintaining}
+                        onClick={handlePurgeStale}
+                      >
+                        {isMaintaining ? "Working..." : "Purge Stale"}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="profile-scroll-safe-zone mobile-ticket-list-wrap">
                   <TicketQueueTable
                     tickets={filteredTickets}
                     currentStaffId={currentStaffId}
                     queueMode={statusFilter}
+                    renderMode="embedded"
                     onRefresh={() =>
                       refresh({ force: true, reason: "ticket-controls" })
                     }
@@ -2393,6 +2484,104 @@ export default function DashboardClient({
           padding-bottom: 8px;
         }
 
+        .mobile-ticket-shell {
+          padding: 14px;
+        }
+
+        .mobile-ticket-header-badges {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          align-items: center;
+        }
+
+        .mobile-ticket-primary-actions {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+          margin-bottom: 14px;
+        }
+
+        .mobile-ticket-panel {
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          background: rgba(255, 255, 255, 0.025);
+          border-radius: 18px;
+          padding: 12px;
+          margin-bottom: 14px;
+        }
+
+        .mobile-ticket-panel.maintenance {
+          border-color: rgba(255, 255, 255, 0.06);
+          background: rgba(255, 255, 255, 0.02);
+        }
+
+        .mobile-ticket-panel-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 12px;
+          flex-wrap: wrap;
+          margin-bottom: 12px;
+        }
+
+        .mobile-ticket-panel-title {
+          font-weight: 900;
+          font-size: 15px;
+          color: var(--text-strong);
+        }
+
+        .mobile-ticket-panel-copy {
+          margin-top: 6px;
+          font-size: 12px;
+          line-height: 1.5;
+        }
+
+        .mobile-ticket-form-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 10px;
+        }
+
+        .mobile-ticket-stats-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+          margin-top: 12px;
+        }
+
+        .mobile-ticket-stat-card {
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          background: rgba(255, 255, 255, 0.02);
+          border-radius: 14px;
+          padding: 12px;
+          min-width: 0;
+        }
+
+        .mobile-ticket-stat-value {
+          font-size: 20px;
+          font-weight: 900;
+          line-height: 1;
+          color: var(--text-strong);
+          margin-top: 6px;
+          overflow-wrap: anywhere;
+        }
+
+        .mobile-ticket-maintenance-copy {
+          margin-bottom: 12px;
+          font-size: 12px;
+          line-height: 1.55;
+        }
+
+        .mobile-ticket-maintenance-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 10px;
+        }
+
+        .mobile-ticket-list-wrap {
+          padding-bottom: 0;
+        }
+
         .intelligence-grid {
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -2449,6 +2638,23 @@ export default function DashboardClient({
 
           .dashboard-refresh-actions {
             width: 100%;
+            display: grid !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .dashboard-refresh-actions :global(.button) {
+            width: 100% !important;
+            min-width: 0 !important;
+          }
+        }
+
+        @media (max-width: 479px) {
+          .mobile-ticket-primary-actions {
+            grid-template-columns: 1fr;
+          }
+
+          .mobile-ticket-stats-grid {
+            grid-template-columns: 1fr 1fr;
           }
         }
       `}</style>
