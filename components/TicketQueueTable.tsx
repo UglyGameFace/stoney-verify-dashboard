@@ -1,3 +1,12 @@
+// ============================================================
+// File: components/TicketQueueTable.tsx
+// Purpose:
+//   Unified ticket queue renderer with two display modes:
+//   - full: owns its own heading, toolbar, filters, and summary
+//   - embedded: renders only the ticket list / table content so
+//     parent screens can provide the surrounding mobile chrome
+// ============================================================
+
 "use client";
 
 import Link from "next/link";
@@ -84,6 +93,8 @@ type TicketLike = {
   is_claimed?: boolean | null;
   recommended_actions?: string[] | null;
 
+  owner_role_state?: string | null;
+
   [key: string]: unknown;
 };
 
@@ -123,6 +134,8 @@ type SortMode =
   | "category"
   | "status";
 
+type QueueRenderMode = "full" | "embedded";
+
 type TicketQueueTableProps = {
   tickets?: TicketLike[];
   currentStaffId?: string | null;
@@ -130,6 +143,7 @@ type TicketQueueTableProps = {
   createTicketUserId?: string | number | null;
   createTicketTargetName?: string;
   queueMode?: QueueMode;
+  renderMode?: QueueRenderMode;
 };
 
 type SummaryChipProps = {
@@ -1369,8 +1383,11 @@ export default function TicketQueueTable({
   createTicketUserId = null,
   createTicketTargetName = "",
   queueMode = "",
+  renderMode = "full",
 }: TicketQueueTableProps) {
   const normalizedTickets = Array.isArray(tickets) ? tickets : [];
+  const isEmbedded = renderMode === "embedded";
+
   const heading = useMemo(
     () => getQueueHeading(normalizedTickets, queueMode),
     [normalizedTickets, queueMode]
@@ -1382,12 +1399,18 @@ export default function TicketQueueTable({
   const [sortMode, setSortMode] = useState<SortMode>("smart");
 
   const processedTickets = useMemo(() => {
+    if (isEmbedded) {
+      return [...normalizedTickets];
+    }
+
     const filtered = normalizedTickets.filter((ticket) => {
       if (!matchesSearch(ticket, search)) return false;
 
       if (queueFilter === "all") return true;
       if (queueFilter === "needs-attention") return needsAttention(ticket, currentStaffId);
-      if (queueFilter === "unclaimed") return ticket?.is_unclaimed === true || (!isClosedLike(ticket) && !getClaimedById(ticket));
+      if (queueFilter === "unclaimed") {
+        return ticket?.is_unclaimed === true || (!isClosedLike(ticket) && !getClaimedById(ticket));
+      }
       if (queueFilter === "mine") return isMine(ticket, currentStaffId);
       if (queueFilter === "verification") return isVerificationLike(ticket);
       if (queueFilter === "overdue") return ticket?.overdue === true;
@@ -1458,7 +1481,7 @@ export default function TicketQueueTable({
     });
 
     return sorted;
-  }, [normalizedTickets, search, queueFilter, sortMode, currentStaffId]);
+  }, [normalizedTickets, search, queueFilter, sortMode, currentStaffId, isEmbedded]);
 
   const stats = useMemo(() => getSummaryStats(processedTickets), [processedTickets]);
 
@@ -1487,151 +1510,155 @@ export default function TicketQueueTable({
   );
 
   return (
-    <div className="card queue-shell" id="tickets">
-      <div
-        className="row"
-        style={{
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: 12,
-          marginBottom: 14,
-        }}
-      >
-        <div style={{ minWidth: 0 }}>
-          <h2 style={{ margin: 0 }}>{heading.title}</h2>
-          <div className="muted" style={{ marginTop: 6 }}>
-            {heading.subtitle}
-          </div>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            justifyContent: "flex-end",
-            gap: 10,
-            alignItems: "center",
-          }}
-        >
-          <div className="muted" style={{ fontSize: 14 }}>
-            {processedTickets.length} ticket{processedTickets.length === 1 ? "" : "s"}
-          </div>
-
-          {createTicketUserId ? (
-            <CreateTicketButton
-              userId={String(createTicketUserId)}
-              currentStaffId={currentStaffId}
-              onCreated={onRefresh}
-              title={
-                createTicketTargetName
-                  ? `Create Ticket for ${createTicketTargetName}`
-                  : "Create Ticket"
-              }
-            />
-          ) : null}
-        </div>
-      </div>
-
-      <div className="queue-toolbar">
-        <div className="queue-toolbar-left">
-          <input
-            className="input queue-search-input"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search owner, ticket, category, user ID, activity, invite context..."
-          />
-
-          <select
-            className="input queue-sort-select"
-            value={sortMode}
-            onChange={(e) => setSortMode(e.target.value as SortMode)}
+    <div className={isEmbedded ? "queue-shell embedded" : "card queue-shell"} id="tickets">
+      {!isEmbedded ? (
+        <>
+          <div
+            className="row"
+            style={{
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: 12,
+              marginBottom: 14,
+            }}
           >
-            <option value="smart">Smart sort</option>
-            <option value="updated">Latest activity</option>
-            <option value="priority">Priority</option>
-            <option value="risk">Risk</option>
-            <option value="owner">Owner</option>
-            <option value="category">Category</option>
-            <option value="status">Status</option>
-          </select>
-        </div>
+            <div style={{ minWidth: 0 }}>
+              <h2 style={{ margin: 0 }}>{heading.title}</h2>
+              <div className="muted" style={{ marginTop: 6 }}>
+                {heading.subtitle}
+              </div>
+            </div>
 
-        <div className="queue-filter-row">
-          <FilterChip
-            label="Needs Attention"
-            active={queueFilter === "needs-attention"}
-            onClick={() => setQueueFilter("needs-attention")}
-            tone="danger"
-          />
-          <FilterChip
-            label="All"
-            active={queueFilter === "all"}
-            onClick={() => setQueueFilter("all")}
-          />
-          <FilterChip
-            label="Unclaimed"
-            active={queueFilter === "unclaimed"}
-            onClick={() => setQueueFilter("unclaimed")}
-            tone="open"
-          />
-          <FilterChip
-            label="Mine"
-            active={queueFilter === "mine"}
-            onClick={() => setQueueFilter("mine")}
-            tone="claimed"
-          />
-          <FilterChip
-            label="Verification"
-            active={queueFilter === "verification"}
-            onClick={() => setQueueFilter("verification")}
-            tone="claimed"
-          />
-          <FilterChip
-            label="Overdue"
-            active={queueFilter === "overdue"}
-            onClick={() => setQueueFilter("overdue")}
-            tone="danger"
-          />
-          <FilterChip
-            label="High Risk"
-            active={queueFilter === "high-risk"}
-            onClick={() => setQueueFilter("high-risk")}
-            tone="danger"
-          />
-          <FilterChip
-            label="No Notes"
-            active={queueFilter === "no-notes"}
-            onClick={() => setQueueFilter("no-notes")}
-            tone="warn"
-          />
-          <FilterChip
-            label="Ghost"
-            active={queueFilter === "ghost"}
-            onClick={() => setQueueFilter("ghost")}
-            tone="warn"
-          />
-          <FilterChip
-            label="Missing Channel"
-            active={queueFilter === "missing-channel"}
-            onClick={() => setQueueFilter("missing-channel")}
-            tone="danger"
-          />
-          <FilterChip
-            label="Closed"
-            active={queueFilter === "closed"}
-            onClick={() => setQueueFilter("closed")}
-          />
-        </div>
-      </div>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                justifyContent: "flex-end",
+                gap: 10,
+                alignItems: "center",
+              }}
+            >
+              <div className="muted" style={{ fontSize: 14 }}>
+                {processedTickets.length} ticket{processedTickets.length === 1 ? "" : "s"}
+              </div>
 
-      <div className="queue-summary-scroll">
-        {summaryNodes}
-      </div>
+              {createTicketUserId ? (
+                <CreateTicketButton
+                  userId={String(createTicketUserId)}
+                  currentStaffId={currentStaffId}
+                  onCreated={onRefresh}
+                  title={
+                    createTicketTargetName
+                      ? `Create Ticket for ${createTicketTargetName}`
+                      : "Create Ticket"
+                  }
+                />
+              ) : null}
+            </div>
+          </div>
 
-      <div className="queue-summary-grid" style={{ marginBottom: 14 }}>
-        {summaryNodes}
-      </div>
+          <div className="queue-toolbar">
+            <div className="queue-toolbar-left">
+              <input
+                className="input queue-search-input"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search owner, ticket, category, user ID, activity, invite context..."
+              />
+
+              <select
+                className="input queue-sort-select"
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value as SortMode)}
+              >
+                <option value="smart">Smart sort</option>
+                <option value="updated">Latest activity</option>
+                <option value="priority">Priority</option>
+                <option value="risk">Risk</option>
+                <option value="owner">Owner</option>
+                <option value="category">Category</option>
+                <option value="status">Status</option>
+              </select>
+            </div>
+
+            <div className="queue-filter-row">
+              <FilterChip
+                label="Needs Attention"
+                active={queueFilter === "needs-attention"}
+                onClick={() => setQueueFilter("needs-attention")}
+                tone="danger"
+              />
+              <FilterChip
+                label="All"
+                active={queueFilter === "all"}
+                onClick={() => setQueueFilter("all")}
+              />
+              <FilterChip
+                label="Unclaimed"
+                active={queueFilter === "unclaimed"}
+                onClick={() => setQueueFilter("unclaimed")}
+                tone="open"
+              />
+              <FilterChip
+                label="Mine"
+                active={queueFilter === "mine"}
+                onClick={() => setQueueFilter("mine")}
+                tone="claimed"
+              />
+              <FilterChip
+                label="Verification"
+                active={queueFilter === "verification"}
+                onClick={() => setQueueFilter("verification")}
+                tone="claimed"
+              />
+              <FilterChip
+                label="Overdue"
+                active={queueFilter === "overdue"}
+                onClick={() => setQueueFilter("overdue")}
+                tone="danger"
+              />
+              <FilterChip
+                label="High Risk"
+                active={queueFilter === "high-risk"}
+                onClick={() => setQueueFilter("high-risk")}
+                tone="danger"
+              />
+              <FilterChip
+                label="No Notes"
+                active={queueFilter === "no-notes"}
+                onClick={() => setQueueFilter("no-notes")}
+                tone="warn"
+              />
+              <FilterChip
+                label="Ghost"
+                active={queueFilter === "ghost"}
+                onClick={() => setQueueFilter("ghost")}
+                tone="warn"
+              />
+              <FilterChip
+                label="Missing Channel"
+                active={queueFilter === "missing-channel"}
+                onClick={() => setQueueFilter("missing-channel")}
+                tone="danger"
+              />
+              <FilterChip
+                label="Closed"
+                active={queueFilter === "closed"}
+                onClick={() => setQueueFilter("closed")}
+              />
+            </div>
+          </div>
+
+          <div className="queue-summary-scroll">
+            {summaryNodes}
+          </div>
+
+          <div className="queue-summary-grid" style={{ marginBottom: 14 }}>
+            {summaryNodes}
+          </div>
+        </>
+      ) : null}
 
       {!processedTickets.length ? (
         <div className="empty-state">
@@ -1872,6 +1899,14 @@ export default function TicketQueueTable({
             linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
             linear-gradient(180deg, rgba(14, 25, 35, 0.98), rgba(7, 13, 21, 0.98));
           overflow: hidden;
+        }
+
+        .queue-shell.embedded {
+          background: transparent !important;
+          border: none !important;
+          box-shadow: none !important;
+          padding: 0 !important;
+          overflow: visible;
         }
 
         .queue-toolbar {
