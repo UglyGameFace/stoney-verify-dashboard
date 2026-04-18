@@ -55,10 +55,21 @@ type TicketRow = {
   closed_reason?: string | null;
   closed_by?: string | null;
   owner_display_name?: string | null;
+  verification_ticket_id?: string | null;
+  source_ticket_id?: string | null;
 };
 
 type BotCommandInsertRow = {
   id?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+};
+
+type ExistingCommandRow = {
+  id?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+  payload?: JsonRecord | null;
 };
 
 type RequestBody = {
@@ -69,6 +80,26 @@ type RequestBody = {
 };
 
 type JsonRecord = Record<string, unknown>;
+
+type MemberContextRow = {
+  invited_by?: string | null;
+  invited_by_name?: string | null;
+  invite_code?: string | null;
+  vouched_by?: string | null;
+  vouched_by_name?: string | null;
+  approved_by?: string | null;
+  approved_by_name?: string | null;
+  verification_ticket_id?: string | null;
+  source_ticket_id?: string | null;
+  entry_method?: string | null;
+  join_source?: string | null;
+  verification_source?: string | null;
+  entry_reason?: string | null;
+  approval_reason?: string | null;
+  avatar_url?: string | null;
+  display_name?: string | null;
+  username?: string | null;
+};
 
 function normalizeString(value: unknown): string {
   return String(value || "").trim();
@@ -82,6 +113,18 @@ function safeObject<T extends object = JsonRecord>(value: unknown): T {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as T)
     : ({} as T);
+}
+
+function safeArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function firstNonEmpty(...values: unknown[]): string {
+  for (const value of values) {
+    const text = normalizeString(value);
+    if (text) return text;
+  }
+  return "";
 }
 
 function getSessionUser(session: SessionLike | null | undefined) {
@@ -348,6 +391,188 @@ async function insertActivityEventSafe(
   }
 }
 
+async function getMemberContextSafe(
+  supabase: ReturnType<typeof createServerSupabase>,
+  guildId: string,
+  userId: string
+): Promise<MemberContextRow | null> {
+  if (!guildId || !userId) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from("guild_members")
+      .select(
+        [
+          "invited_by",
+          "invited_by_name",
+          "invite_code",
+          "vouched_by",
+          "vouched_by_name",
+          "approved_by",
+          "approved_by_name",
+          "verification_ticket_id",
+          "source_ticket_id",
+          "entry_method",
+          "join_source",
+          "verification_source",
+          "entry_reason",
+          "approval_reason",
+          "avatar_url",
+          "display_name",
+          "username",
+        ].join(",")
+      )
+      .eq("guild_id", guildId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return safeObject<MemberContextRow>(data);
+  } catch {
+    return null;
+  }
+}
+
+async function findPendingVerificationCommand(
+  supabase: ReturnType<typeof createServerSupabase>,
+  args: {
+    guildId: string;
+    commandAction: string;
+    ticketId: string;
+    userId: string;
+  }
+): Promise<ExistingCommandRow | null> {
+  try {
+    const { data, error } = await supabase
+      .from("bot_commands")
+      .select("id,status,created_at,payload")
+      .eq("guild_id", args.guildId)
+      .eq("action", args.commandAction)
+      .in("status", ["pending", "processing"])
+      .order("created_at", { ascending: false })
+      .limit(25);
+
+    if (error) return null;
+
+    const rows = safeArray<ExistingCommandRow>(data);
+    return (
+      rows.find((row) => {
+        const payload = safeObject(row?.payload);
+        const payloadTicketId = normalizeString(payload?.ticket_id);
+        const payloadUserId = normalizeString(payload?.user_id);
+        return payloadTicketId === args.ticketId && (!args.userId || payloadUserId === args.userId);
+      }) || null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function buildVerificationCommandPayload(args: {
+  action: string;
+  commandAction: string;
+  guildId: string;
+  ticketId: string;
+  channelId: string;
+  userId: string;
+  username: string;
+  staffId: string;
+  staffName: string;
+  reason: string;
+  roleId: string;
+  memberContext: MemberContextRow | null;
+}): JsonRecord {
+  const memberContext = args.memberContext || {};
+  const existingApprovedBy = normalizeString(memberContext?.approved_by);
+  const existingApprovedByName = normalizeString(memberContext?.approved_by_name);
+
+  const approvedBy =
+    args.action === "approve"
+      ? args.staffId
+      : existingApprovedBy || null;
+
+  const approvedByName =
+    args.action === "approve"
+      ? args.staffName
+      : existingApprovedByName || null;
+
+  const verificationTicketId = firstNonEmpty(
+    memberContext?.verification_ticket_id,
+    args.ticketId
+  );
+
+  const sourceTicketId = firstNonEmpty(
+    memberContext?.source_ticket_id,
+    args.ticketId
+  );
+
+  const verificationSource = firstNonEmpty(
+    memberContext?.verification_source,
+    `dashboard_ticket_verify_${args.action}`
+  );
+
+  const entryMethod = firstNonEmpty(memberContext?.entry_method, "verification");
+  const joinSource = firstNonEmpty(memberContext?.join_source, entryMethod);
+  const entryReason = firstNonEmpty(memberContext?.entry_reason);
+  const approvalReason = firstNonEmpty(
+    memberContext?.approval_reason,
+    args.action === "approve" ? args.reason : ""
+  );
+
+  const nestedMemberSnapshot: JsonRecord = {
+    invited_by: normalizeString(memberContext?.invited_by) || null,
+    invited_by_name: normalizeString(memberContext?.invited_by_name) || null,
+    invite_code: normalizeString(memberContext?.invite_code) || null,
+    vouched_by: normalizeString(memberContext?.vouched_by) || null,
+    vouched_by_name: normalizeString(memberContext?.vouched_by_name) || null,
+    approved_by: approvedBy,
+    approved_by_name: approvedByName,
+    verification_ticket_id: verificationTicketId || null,
+    source_ticket_id: sourceTicketId || null,
+    entry_method: entryMethod || null,
+    join_source: joinSource || null,
+    verification_source: verificationSource || null,
+    entry_reason: entryReason || null,
+    approval_reason: approvalReason || null,
+    avatar_url: normalizeString(memberContext?.avatar_url) || null,
+    display_name: normalizeString(memberContext?.display_name) || null,
+    username: normalizeString(memberContext?.username) || null,
+  };
+
+  return {
+    ticket_id: args.ticketId,
+    channel_id: args.channelId || null,
+    user_id: args.userId || null,
+    username: args.username,
+    requester_id: args.staffId,
+    staff_id: args.staffId,
+    staff_name: args.staffName,
+    reason: args.reason,
+    role_id: args.roleId || null,
+    source: "dashboard_ticket_verify",
+    verification_ticket_id: verificationTicketId || null,
+    source_ticket_id: sourceTicketId || null,
+    invited_by: normalizeString(memberContext?.invited_by) || null,
+    invited_by_name: normalizeString(memberContext?.invited_by_name) || null,
+    invite_code: normalizeString(memberContext?.invite_code) || null,
+    vouched_by: normalizeString(memberContext?.vouched_by) || null,
+    vouched_by_name: normalizeString(memberContext?.vouched_by_name) || null,
+    approved_by: approvedBy,
+    approved_by_name: approvedByName,
+    entry_method: entryMethod || null,
+    join_source: joinSource || null,
+    verification_source: verificationSource || null,
+    entry_reason: entryReason || null,
+    approval_reason: approvalReason || null,
+    member_snapshot: nestedMemberSnapshot,
+    dashboard_context: {
+      command_action: args.commandAction,
+      dashboard_action: args.action,
+      queued_from: "app/api/tickets/[id]/verify/route.ts",
+    },
+  };
+}
+
 export async function POST(
   request: Request,
   context: { params: { id?: string } }
@@ -455,6 +680,32 @@ export async function POST(
       );
     }
 
+    const existingPending = await findPendingVerificationCommand(supabase, {
+      guildId,
+      commandAction,
+      ticketId,
+      userId,
+    });
+
+    if (existingPending) {
+      return buildJsonResponse(
+        {
+          ok: true,
+          duplicate: true,
+          action,
+          ticketId,
+          commandId: normalizeString(existingPending.id) || null,
+          message: `${buildHumanMessage(action, username)} Already queued.`,
+        },
+        200,
+        refreshedTokens
+      );
+    }
+
+    const memberContext = userId
+      ? await getMemberContextSafe(supabase, guildId, userId)
+      : null;
+
     const nowIso = new Date().toISOString();
 
     const noteLines = buildNoteLines({
@@ -467,6 +718,21 @@ export async function POST(
         `Ticket ID: ${ticketId}`,
         channelId ? `Channel ID: ${channelId}` : "",
         userId ? `User ID: ${userId}` : "",
+        firstNonEmpty(memberContext?.entry_method)
+          ? `Entry Method: ${firstNonEmpty(memberContext?.entry_method)}`
+          : "",
+        firstNonEmpty(memberContext?.join_source)
+          ? `Join Source: ${firstNonEmpty(memberContext?.join_source)}`
+          : "",
+        firstNonEmpty(memberContext?.verification_source)
+          ? `Verification Source: ${firstNonEmpty(memberContext?.verification_source)}`
+          : "",
+        firstNonEmpty(memberContext?.invited_by_name, memberContext?.invited_by)
+          ? `Invited By: ${firstNonEmpty(memberContext?.invited_by_name, memberContext?.invited_by)}`
+          : "",
+        firstNonEmpty(memberContext?.vouched_by_name, memberContext?.vouched_by)
+          ? `Vouched By: ${firstNonEmpty(memberContext?.vouched_by_name, memberContext?.vouched_by)}`
+          : "",
       ],
     });
 
@@ -485,29 +751,32 @@ export async function POST(
         "Ticket note could not be saved, but verification continued.";
     }
 
-    const commandPayload = {
-      guild_id: guildId,
-      action: commandAction,
-      status: "pending",
-      payload: {
-        ticket_id: ticketId,
-        channel_id: channelId || null,
-        user_id: userId || null,
-        username,
-        requester_id: staffId,
-        staff_id: staffId,
-        staff_name: staffName,
-        reason,
-        role_id: roleId || null,
-        source: "dashboard_ticket_verify",
-      },
-      created_at: nowIso,
-    };
+    const commandPayload = buildVerificationCommandPayload({
+      action,
+      commandAction,
+      guildId,
+      ticketId,
+      channelId,
+      userId,
+      username,
+      staffId,
+      staffName,
+      reason,
+      roleId,
+      memberContext,
+    });
 
     const { data: commandRow, error: commandError } = await supabase
       .from("bot_commands")
-      .insert(commandPayload)
-      .select("id")
+      .insert({
+        guild_id: guildId,
+        action: commandAction,
+        status: "pending",
+        payload: commandPayload,
+        requested_by: staffId,
+        created_at: nowIso,
+      })
+      .select("id,status,created_at")
       .single();
 
     if (commandError) {
@@ -518,28 +787,14 @@ export async function POST(
       );
     }
 
-    const command = commandRow as BotCommandInsertRow | null;
+    const command = (commandRow as BotCommandInsertRow | null) || null;
 
-    if (action === "deny") {
-      await supabase
-        .from("tickets")
-        .update({
-          status: "closed",
-          closed_reason: reason,
-          closed_by: staffId,
-          updated_at: nowIso,
-        })
-        .eq("id", ticketId);
-    }
-
-    if (action === "approve") {
-      await supabase
-        .from("tickets")
-        .update({
-          updated_at: nowIso,
-        })
-        .eq("id", ticketId);
-    }
+    await supabase
+      .from("tickets")
+      .update({
+        updated_at: nowIso,
+      })
+      .eq("id", ticketId);
 
     await insertActivityEventSafe(supabase, {
       guild_id: guildId,
@@ -563,6 +818,14 @@ export async function POST(
         command_id: command?.id || null,
         action,
         role_id: roleId || null,
+        invited_by: firstNonEmpty(memberContext?.invited_by) || null,
+        invited_by_name: firstNonEmpty(memberContext?.invited_by_name) || null,
+        invite_code: firstNonEmpty(memberContext?.invite_code) || null,
+        vouched_by: firstNonEmpty(memberContext?.vouched_by) || null,
+        vouched_by_name: firstNonEmpty(memberContext?.vouched_by_name) || null,
+        entry_method: firstNonEmpty(memberContext?.entry_method) || null,
+        join_source: firstNonEmpty(memberContext?.join_source) || null,
+        verification_source: firstNonEmpty(memberContext?.verification_source) || null,
       },
       created_at: nowIso,
     });
