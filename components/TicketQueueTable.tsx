@@ -9,6 +9,7 @@
 //   - queue context is visible before opening tools
 //   - assignment state is clearer
 //   - stable category colors and cleaner badge logic
+//   - ES-safe Discord default avatar fallback (no BigInt literals)
 // ============================================================
 
 "use client";
@@ -152,12 +153,34 @@ function truncateText(value: unknown, max = 120): string {
   return `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
+function decimalStringMod(value: string, mod: number): number {
+  let remainder = 0;
+
+  for (let i = 0; i < value.length; i += 1) {
+    const digit = value.charCodeAt(i) - 48;
+    if (digit < 0 || digit > 9) return 0;
+    remainder = (remainder * 10 + digit) % mod;
+  }
+
+  return remainder;
+}
+
 function getDiscordDefaultAvatarUrl(userId: unknown): string {
   const raw = String(userId || "").trim();
   if (!raw || !/^\d+$/.test(raw)) return "";
 
   try {
-    const index = Number((BigInt(raw) >> 22n) % 6n);
+    // Discord default avatar index:
+    // Number((BigInt(userId) >> 22n) % 6n)
+    //
+    // Equivalent without BigInt literals:
+    // floor((userId % (6 * 2^22)) / 2^22)
+    const bucketSize = 4194304; // 2^22
+    const cycleSize = bucketSize * 6; // 25165824
+
+    const reduced = decimalStringMod(raw, cycleSize);
+    const index = Math.floor(reduced / bucketSize);
+
     return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
   } catch {
     return "";
