@@ -27,8 +27,10 @@ type SupabaseSingleResponse<T> = {
   data?: T | null;
 };
 
-type QueryFactoryRows<T> = () => Promise<SupabaseRowsResponse<T>>;
-type QueryFactorySingle<T> = () => Promise<SupabaseSingleResponse<T>>;
+type Awaitable<T> = T | PromiseLike<T> | Promise<T>;
+
+type QueryFactoryRows<T> = () => Awaitable<SupabaseRowsResponse<T>>;
+type QueryFactorySingle<T> = () => Awaitable<SupabaseSingleResponse<T>>;
 
 interface ViewerSummary {
   discord_id: string;
