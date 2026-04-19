@@ -497,6 +497,37 @@ function getBestMemberDisplayName(member) {
   );
 }
 
+function cleanIdentityLabel(value) {
+  let text = normalizeString(value);
+  if (!text) return "";
+  if (looksLikeDiscordId(text)) return "";
+
+  text = text.replace(/\(\s*(\d{16,22})\s*\)\s*[•·]\s*\1\b/g, "($1)");
+  text = text.replace(/\b(\d{16,22})\b\s*[•·]\s*\1\b/g, "$1");
+  text = text.replace(/\s+/g, " ").trim();
+
+  return text;
+}
+
+function firstNonEmptyCleanIdentity(...values) {
+  for (const value of values) {
+    const text = cleanIdentityLabel(value);
+    if (text) return text;
+  }
+  return "";
+}
+
+function getBestAvatarUrl(...values) {
+  for (const value of values) {
+    const text = normalizeString(value);
+    if (!text) continue;
+    if (looksLikeDiscordId(text)) continue;
+    if (text === "[object Object]") continue;
+    return text;
+  }
+  return "";
+}
+
 function resolveStaffContext({
   memberMaps,
   idCandidates = [],
@@ -663,19 +694,6 @@ function mapActivityFeedEvent(row, guildMembers, memberMaps) {
     meta?.staff_id
   );
 
-  const actorName = firstNonEmpty(
-    row?.actor_name,
-    row?.actor_display,
-    row?.staff_name,
-    meta?.actor_name,
-    meta?.actor_display,
-    meta?.staff_name,
-    actorResolved?.member?.display_name,
-    actorResolved?.member?.nickname,
-    actorResolved?.member?.username,
-    "System"
-  );
-
   const targetId = firstNonEmpty(
     targetResolved?.member?.user_id,
     targetResolved?.id,
@@ -689,19 +707,74 @@ function mapActivityFeedEvent(row, guildMembers, memberMaps) {
     meta?.requester_id
   );
 
+  const resolvedActorName = getBestMemberDisplayName(actorResolved?.member);
+  const resolvedTargetName = getBestMemberDisplayName(targetResolved?.member);
+
+  const actorName = firstNonEmpty(
+    resolvedActorName,
+    firstNonEmptyCleanIdentity(
+      row?.actor_name,
+      row?.actor_display,
+      row?.staff_name,
+      meta?.actor_name,
+      meta?.actor_display,
+      meta?.staff_name,
+      meta?.requested_by_name,
+      meta?.closed_by_name,
+      meta?.claimed_by_name,
+      meta?.assigned_to_name
+    ),
+    actorId ? `User ${actorId}` : "",
+    "System"
+  );
+
   const targetName = firstNonEmpty(
-    row?.target_name,
-    row?.username,
-    row?.member_name,
-    meta?.target_name,
-    meta?.username,
-    meta?.member_name,
-    meta?.owner_name,
-    meta?.requester_display_name,
-    meta?.requester_username,
-    targetResolved?.member?.display_name,
-    targetResolved?.member?.nickname,
-    targetResolved?.member?.username
+    resolvedTargetName,
+    firstNonEmptyCleanIdentity(
+      row?.target_name,
+      row?.username,
+      row?.member_name,
+      meta?.target_name,
+      meta?.username,
+      meta?.member_name,
+      meta?.owner_name,
+      meta?.requester_display_name,
+      meta?.requester_username
+    ),
+    targetId ? `User ${targetId}` : ""
+  );
+
+  const sameIdentity =
+    (actorId && targetId && actorId === targetId) ||
+    (normalizeString(actorName) &&
+      normalizeString(targetName) &&
+      normalizeString(actorName).toLowerCase() ===
+        normalizeString(targetName).toLowerCase());
+
+  const actorAvatarUrl = getBestAvatarUrl(
+    row?.actor_avatar_url,
+    row?.actorAvatarUrl,
+    row?.avatar_url,
+    row?.avatarUrl,
+    meta?.actor_avatar_url,
+    meta?.actorAvatarUrl,
+    meta?.avatar_url,
+    meta?.avatarUrl,
+    actorResolved?.member?.avatar_url,
+    sameIdentity ? row?.target_avatar_url : "",
+    sameIdentity ? row?.targetAvatarUrl : "",
+    sameIdentity ? meta?.target_avatar_url : "",
+    sameIdentity ? meta?.targetAvatarUrl : "",
+    sameIdentity ? targetResolved?.member?.avatar_url : ""
+  );
+
+  const targetAvatarUrl = getBestAvatarUrl(
+    row?.target_avatar_url,
+    row?.targetAvatarUrl,
+    meta?.target_avatar_url,
+    meta?.targetAvatarUrl,
+    targetResolved?.member?.avatar_url,
+    sameIdentity ? actorResolved?.member?.avatar_url : ""
   );
 
   const title =
@@ -757,12 +830,17 @@ function mapActivityFeedEvent(row, guildMembers, memberMaps) {
     event_family: eventFamily,
     related_id: row?.related_id || row?.ticket_id || row?.channel_id || null,
     created_at: row?.created_at || null,
+
     actor_id: actorId || null,
     actor_name: actorName || null,
-    actor_avatar_url: actorResolved?.member?.avatar_url || null,
+    actor_display_name: resolvedActorName || actorName || null,
+    actor_avatar_url: actorAvatarUrl || null,
+
     target_user_id: targetId || null,
     target_name: targetName || null,
-    target_avatar_url: targetResolved?.member?.avatar_url || null,
+    target_display_name: resolvedTargetName || targetName || null,
+    target_avatar_url: targetAvatarUrl || null,
+
     source,
     channel_id: row?.channel_id || meta?.channel_id || null,
     channel_name: row?.channel_name || meta?.channel_name || null,
