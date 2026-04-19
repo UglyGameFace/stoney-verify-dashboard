@@ -485,6 +485,55 @@ function firstNonEmpty(...values) {
   return "";
 }
 
+function looksLikeDiscordId(value) {
+  return /^\d{16,22}$/.test(normalizeString(value));
+}
+
+function getBestMemberDisplayName(member) {
+  return firstNonEmpty(
+    member?.display_name,
+    member?.nickname,
+    member?.username
+  );
+}
+
+function resolveStaffContext({
+  memberMaps,
+  idCandidates = [],
+  nameCandidates = [],
+}) {
+  const cleanedIdCandidates = safeArray(idCandidates)
+    .map((value) => normalizeString(value))
+    .filter(Boolean);
+
+  const cleanedNameCandidates = safeArray(nameCandidates)
+    .map((value) => normalizeString(value))
+    .filter(Boolean);
+
+  const resolved = resolveMemberByIdOrName({
+    memberMaps,
+    idCandidates: cleanedIdCandidates,
+    nameCandidates: cleanedNameCandidates,
+  });
+
+  const resolvedMember = resolved?.member || null;
+  const resolvedId = firstNonEmpty(resolved?.id, ...cleanedIdCandidates);
+
+  const explicitName =
+    cleanedNameCandidates.find((value) => value && !looksLikeDiscordId(value)) || "";
+
+  const resolvedName = firstNonEmpty(
+    explicitName,
+    getBestMemberDisplayName(resolvedMember)
+  );
+
+  return {
+    id: resolvedId || null,
+    name: resolvedName || (resolvedId ? "Unknown Staff" : "Unclaimed"),
+    avatar_url: resolvedMember?.avatar_url || null,
+  };
+}
+
 function buildMemberIdentityMaps(guildMembers) {
   const byId = new Map();
   const nameToId = new Map();
@@ -1307,12 +1356,66 @@ function enrichTicketForDashboard({
   ticket,
   member,
   workspace,
+  claimedStaff,
 }) {
   const ownerContext = buildOwnerContext(member, ticket);
+
+  const cleanClaimedByName = !looksLikeDiscordId(ticket?.claimed_by_name)
+    ? normalizeString(ticket?.claimed_by_name)
+    : "";
+
+  const cleanAssignedToName = !looksLikeDiscordId(ticket?.assigned_to_name)
+    ? normalizeString(ticket?.assigned_to_name)
+    : "";
+
+  const cleanClaimedByText =
+    !looksLikeDiscordId(ticket?.claimed_by) ? normalizeString(ticket?.claimed_by) : "";
+
+  const cleanAssignedToText =
+    !looksLikeDiscordId(ticket?.assigned_to) ? normalizeString(ticket?.assigned_to) : "";
+
+  const claimedById = firstNonEmpty(
+    ticket?.claimed_by_id,
+    claimedStaff?.id,
+    looksLikeDiscordId(ticket?.claimed_by) ? ticket?.claimed_by : "",
+    looksLikeDiscordId(ticket?.assigned_to) ? ticket?.assigned_to : ""
+  );
+
+  const claimedByName = firstNonEmpty(
+    cleanClaimedByName,
+    cleanAssignedToName,
+    claimedStaff?.name,
+    cleanClaimedByText,
+    cleanAssignedToText,
+    claimedById ? "Unknown Staff" : "Unclaimed"
+  );
+
+  const assignedToId = firstNonEmpty(
+    ticket?.assigned_to_id,
+    claimedStaff?.id,
+    looksLikeDiscordId(ticket?.assigned_to) ? ticket?.assigned_to : ""
+  );
+
+  const assignedToName = firstNonEmpty(
+    cleanAssignedToName,
+    cleanClaimedByName,
+    claimedStaff?.name,
+    cleanAssignedToText,
+    cleanClaimedByText
+  );
 
   return {
     ...ticket,
     ...ownerContext,
+
+    claimed_by_id: claimedById || null,
+    claimed_by_name: claimedByName || "Unclaimed",
+    claimed_by_avatar_url: claimedStaff?.avatar_url || null,
+
+    assigned_to_id: assignedToId || null,
+    assigned_to_name: assignedToName || null,
+    assigned_to_avatar_url: claimedStaff?.avatar_url || null,
+
     owner_verification_label: workspace.verification_label,
     note_count: workspace.note_count,
     latest_note_at: workspace.latest_note_at,
@@ -1933,6 +2036,7 @@ export async function GET(request) {
     const ticketStatsByUser = buildTicketStatsByUser(canonicalTicketsBase);
 
     const memberLookup = new Map(guildMembers.map((member) => [String(member.user_id), member]));
+    const memberMaps = buildMemberIdentityMaps(guildMembers);
 
     const canonicalTickets = canonicalTicketsBase.map((ticket) => {
       const userId = normalizeString(ticket?.user_id);
@@ -1950,6 +2054,22 @@ export async function GET(request) {
         latest_ticket_at: null,
       };
 
+      const claimedStaff = resolveStaffContext({
+        memberMaps,
+        idCandidates: [
+          ticket?.claimed_by_id,
+          ticket?.assigned_to_id,
+          looksLikeDiscordId(ticket?.claimed_by) ? ticket?.claimed_by : "",
+          looksLikeDiscordId(ticket?.assigned_to) ? ticket?.assigned_to : "",
+        ],
+        nameCandidates: [
+          !looksLikeDiscordId(ticket?.claimed_by_name) ? ticket?.claimed_by_name : "",
+          !looksLikeDiscordId(ticket?.assigned_to_name) ? ticket?.assigned_to_name : "",
+          !looksLikeDiscordId(ticket?.claimed_by) ? ticket?.claimed_by : "",
+          !looksLikeDiscordId(ticket?.assigned_to) ? ticket?.assigned_to : "",
+        ],
+      });
+
       const workspace = buildTicketWorkspace({
         ticket,
         member,
@@ -1965,6 +2085,7 @@ export async function GET(request) {
         ticket,
         member,
         workspace,
+        claimedStaff,
       });
     });
 
