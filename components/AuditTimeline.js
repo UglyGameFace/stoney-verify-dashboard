@@ -23,6 +23,14 @@ function prettyLabel(value) {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
 function getInitials(name) {
   const text = String(name || "").trim();
   if (!text) return "•";
@@ -31,14 +39,6 @@ function getInitials(name) {
   if (!parts.length) return "•";
 
   return parts.map((p) => p[0]?.toUpperCase() || "").join("");
-}
-
-function firstNonEmpty(...values) {
-  for (const value of values) {
-    const text = String(value || "").trim();
-    if (text) return text;
-  }
-  return "";
 }
 
 function getMeta(event) {
@@ -62,8 +62,8 @@ function getDiscordDefaultAvatarUrl(userId) {
   if (!raw || !/^\d+$/.test(raw)) return "";
 
   try {
-    const bucketSize = 4194304; // 2^22
-    const cycleSize = bucketSize * 6; // 25165824
+    const bucketSize = 4194304;
+    const cycleSize = bucketSize * 6;
     const reduced = decimalStringMod(raw, cycleSize);
     const index = Math.floor(reduced / bucketSize);
 
@@ -309,14 +309,6 @@ function getEventAccent(event) {
   return "#7c8aa5";
 }
 
-function sourceLabel(event) {
-  return sourceMeta(event?.source).label || safeText(event?.source, "Timeline");
-}
-
-function familyLabel(event) {
-  return familyMeta(event?.event_family).label || "";
-}
-
 function formatDateTime(value) {
   if (!value) return "—";
   try {
@@ -324,6 +316,14 @@ function formatDateTime(value) {
   } catch {
     return "—";
   }
+}
+
+function sourceLabel(event) {
+  return sourceMeta(event?.source).label || safeText(event?.source, "Timeline");
+}
+
+function familyLabel(event) {
+  return familyMeta(event?.event_family).label || "";
 }
 
 function eventSearchBlob(event) {
@@ -380,9 +380,7 @@ function matchesFilter(event, filters) {
     if (!targetBlob.includes(target)) return false;
   }
 
-  if (q) {
-    if (!eventSearchBlob(event).includes(q)) return false;
-  }
+  if (q && !eventSearchBlob(event).includes(q)) return false;
 
   return true;
 }
@@ -393,89 +391,14 @@ function uniqueSorted(values) {
   );
 }
 
-function TimelineDetailRow({ label, value }) {
-  if (!value) return null;
-
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "110px 1fr",
-        gap: 10,
-        alignItems: "start",
-      }}
-    >
-      <div
-        className="muted"
-        style={{
-          fontSize: 12,
-          fontWeight: 700,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 13,
-          lineHeight: 1.5,
-          wordBreak: "break-word",
-          color: "var(--text-strong)",
-        }}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function ActiveFilterChip({ label, onClear }) {
-  return (
-    <button
-      type="button"
-      onClick={onClear}
-      style={{
-        border: "1px solid rgba(255,255,255,0.1)",
-        background: "rgba(255,255,255,0.05)",
-        color: "var(--text-strong)",
-        borderRadius: 999,
-        padding: "8px 12px",
-        fontSize: 12,
-        fontWeight: 700,
-        cursor: "pointer",
-      }}
-    >
-      {label} ✕
-    </button>
-  );
-}
-
-function FilterExplainCard({ title, description, tone = "neutral" }) {
-  const colors = getToneColors(tone);
-
-  return (
-    <div
-      style={{
-        border: `1px solid ${colors.border}`,
-        background: colors.bg,
-        color: colors.text,
-        borderRadius: 14,
-        padding: 12,
-      }}
-    >
-      <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>{title}</div>
-      <div style={{ fontSize: 12, lineHeight: 1.5 }}>{description}</div>
-    </div>
-  );
-}
-
 function getActorName(event) {
   const meta = getMeta(event);
 
   return firstNonEmpty(
-    event?.actor_name,
     event?.actor_display_name,
-    meta?.actor_name,
+    event?.actor_name,
     meta?.actor_display_name,
+    meta?.actor_name,
     meta?.staff_name,
     event?.staff_name,
     "System"
@@ -486,7 +409,9 @@ function getTargetName(event) {
   const meta = getMeta(event);
 
   return firstNonEmpty(
+    event?.target_display_name,
     event?.target_name,
+    meta?.target_display_name,
     meta?.target_name,
     meta?.member_name,
     meta?.owner_name,
@@ -501,7 +426,6 @@ function buildIdentityText(name, id) {
   if (!cleanName && !cleanId) return "";
   if (!cleanId) return cleanName;
   if (!cleanName) return cleanId;
-
   if (cleanName.includes(cleanId)) return cleanName;
 
   return `${cleanName} (${cleanId})`;
@@ -553,8 +477,10 @@ function getAvatarCandidates(event) {
     meta?.actorAvatarUrl,
     meta?.avatar_url,
     meta?.avatarUrl,
-    isSameIdentity(event) ? event?.target_avatar_url : "",
-    isSameIdentity(event) ? meta?.target_avatar_url : "",
+    event?.target_avatar_url,
+    event?.targetAvatarUrl,
+    meta?.target_avatar_url,
+    meta?.targetAvatarUrl,
   ]
     .map((value) => String(value || "").trim())
     .filter(Boolean);
@@ -591,50 +517,51 @@ function TimelineAvatar({ event, actorName }) {
 
           setSrc("");
         }}
-        style={{
-          width: 40,
-          height: 40,
-          minWidth: 40,
-          minHeight: 40,
-          maxWidth: 40,
-          maxHeight: 40,
-          aspectRatio: "1 / 1",
-          borderRadius: "999px",
-          objectFit: "cover",
-          objectPosition: "center",
-          display: "block",
-          overflow: "hidden",
-          border: "1px solid rgba(255,255,255,0.08)",
-          background: "rgba(255,255,255,0.04)",
-          flexShrink: 0,
-        }}
+        className="timeline-avatar-image"
       />
     );
   }
 
   return (
+    <div className="timeline-avatar-fallback" aria-hidden="true">
+      {getInitials(actorName)}
+    </div>
+  );
+}
+
+function TimelineDetailRow({ label, value }) {
+  if (!value) return null;
+
+  return (
+    <div className="timeline-detail-row">
+      <div className="muted timeline-detail-label">{label}</div>
+      <div className="timeline-detail-value">{value}</div>
+    </div>
+  );
+}
+
+function ActiveFilterChip({ label, onClear }) {
+  return (
+    <button type="button" onClick={onClear} className="timeline-filter-chip">
+      {label} ✕
+    </button>
+  );
+}
+
+function FilterExplainCard({ title, description, tone = "neutral" }) {
+  const colors = getToneColors(tone);
+
+  return (
     <div
-      aria-hidden="true"
+      className="timeline-explain-card"
       style={{
-        width: 40,
-        height: 40,
-        minWidth: 40,
-        minHeight: 40,
-        maxWidth: 40,
-        maxHeight: 40,
-        borderRadius: "999px",
-        display: "grid",
-        placeItems: "center",
-        fontWeight: 800,
-        fontSize: 13,
-        color: "#fff",
-        background:
-          "radial-gradient(circle at top right, rgba(93,255,141,0.18), transparent 45%), linear-gradient(180deg, rgba(46,77,102,0.98), rgba(20,35,50,0.98))",
-        border: "1px solid rgba(255,255,255,0.08)",
-        flexShrink: 0,
+        borderColor: colors.border,
+        background: colors.bg,
+        color: colors.text,
       }}
     >
-      {getInitials(actorName)}
+      <div className="timeline-explain-title">{title}</div>
+      <div className="timeline-explain-copy">{description}</div>
     </div>
   );
 }
@@ -655,133 +582,63 @@ function TimelineCard({ event, expanded, onToggle }) {
   const visibleDescription = getVisibleDescription(event);
 
   return (
-    <div
-      className="timeline-item"
-      style={{
-        display: "grid",
-        gridTemplateColumns: "48px 1fr",
-        gap: 12,
-        alignItems: "start",
-        border: "1px solid rgba(255,255,255,0.08)",
-        borderLeft: `4px solid ${accent}`,
-        borderRadius: 16,
-        padding: 14,
-        background:
-          "radial-gradient(circle at top right, rgba(255,255,255,0.04), transparent 42%), rgba(255,255,255,0.02)",
-      }}
-    >
-      <div>
+    <div className="timeline-card" style={{ borderLeftColor: accent }}>
+      <div className="timeline-card-avatar">
         <TimelineAvatar event={event} actorName={actorName} />
       </div>
 
-      <div style={{ minWidth: 0 }}>
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            gap: 8,
-            marginBottom: 6,
-          }}
-        >
-          <div
-            style={{
-              fontWeight: 800,
-              lineHeight: 1.2,
-              color: "var(--text-strong)",
-              overflowWrap: "anywhere",
-            }}
-          >
-            {safeText(event?.title, "Activity Event")}
+      <div className="timeline-card-main">
+        <div className="timeline-card-head">
+          <div className="timeline-card-title-wrap">
+            <div className="timeline-card-title">
+              {safeText(event?.title, "Activity Event")}
+            </div>
+
+            {actorLine ? (
+              <div className="muted timeline-card-actor">By {actorLine}</div>
+            ) : null}
           </div>
 
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              padding: "4px 8px",
-              borderRadius: 999,
-              background: sourceColors.bg,
-              border: `1px solid ${sourceColors.border}`,
-              color: sourceColors.text,
-              whiteSpace: "nowrap",
-            }}
-          >
-            {sourceLabel(event)}
-          </span>
-
-          {event?.event_family ? (
+          <div className="timeline-card-chip-row">
             <span
+              className="timeline-pill"
               style={{
-                fontSize: 11,
-                fontWeight: 700,
-                padding: "4px 8px",
-                borderRadius: 999,
-                background: familyColors.bg,
-                border: `1px solid ${familyColors.border}`,
-                color: familyColors.text,
-                whiteSpace: "nowrap",
+                background: sourceColors.bg,
+                borderColor: sourceColors.border,
+                color: sourceColors.text,
               }}
             >
-              {familyLabel(event)}
+              {sourceLabel(event)}
             </span>
-          ) : null}
-        </div>
 
-        {actorLine ? (
-          <div
-            className="muted"
-            style={{
-              fontSize: 13,
-              marginBottom: 6,
-              overflowWrap: "anywhere",
-            }}
-          >
-            By {actorLine}
+            {event?.event_family ? (
+              <span
+                className="timeline-pill"
+                style={{
+                  background: familyColors.bg,
+                  borderColor: familyColors.border,
+                  color: familyColors.text,
+                }}
+              >
+                {familyLabel(event)}
+              </span>
+            ) : null}
           </div>
-        ) : null}
+        </div>
 
         {targetLine && !sameIdentity ? (
-          <div
-            className="muted"
-            style={{
-              fontSize: 13,
-              marginBottom: 6,
-              overflowWrap: "anywhere",
-            }}
-          >
-            Target: {targetLine}
-          </div>
+          <div className="muted timeline-card-target">Target: {targetLine}</div>
         ) : null}
 
-        <div
-          className="muted"
-          style={{
-            marginTop: 4,
-            lineHeight: 1.5,
-            wordBreak: "break-word",
-          }}
-        >
-          {visibleDescription}
-        </div>
+        <div className="muted timeline-card-description">{visibleDescription}</div>
 
-        <div
-          className="muted"
-          style={{
-            marginTop: 8,
-            fontSize: 12,
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 8,
-            alignItems: "center",
-          }}
-        >
+        <div className="muted timeline-card-meta">
           <span>{timeAgo(event?.created_at)}</span>
 
           {event?.event_type ? (
             <>
               <span>•</span>
-              <span>{safeText(event.event_type)}</span>
+              <span>{safeText(event?.event_type)}</span>
             </>
           ) : null}
 
@@ -800,14 +657,7 @@ function TimelineCard({ event, expanded, onToggle }) {
           ) : null}
         </div>
 
-        <div
-          style={{
-            marginTop: 12,
-            display: "flex",
-            gap: 8,
-            flexWrap: "wrap",
-          }}
-        >
+        <div className="timeline-card-actions">
           <button
             type="button"
             className="button ghost"
@@ -819,17 +669,7 @@ function TimelineCard({ event, expanded, onToggle }) {
         </div>
 
         {expanded ? (
-          <div
-            style={{
-              marginTop: 12,
-              padding: 12,
-              borderRadius: 14,
-              background: "rgba(255,255,255,0.03)",
-              border: "1px solid rgba(255,255,255,0.06)",
-              display: "grid",
-              gap: 10,
-            }}
-          >
+          <div className="timeline-card-details">
             <TimelineDetailRow
               label="Created"
               value={formatDateTime(event?.created_at)}
@@ -858,7 +698,9 @@ function TimelineCard({ event, expanded, onToggle }) {
               label="Channel"
               value={
                 event?.channel_name || event?.channel_id
-                  ? `${event.channel_name || "Unknown"}${event?.channel_id ? ` (${event.channel_id})` : ""}`
+                  ? `${event.channel_name || "Unknown"}${
+                      event?.channel_id ? ` (${event.channel_id})` : ""
+                    }`
                   : ""
               }
             />
@@ -876,29 +718,9 @@ function TimelineCard({ event, expanded, onToggle }) {
             />
 
             {Object.keys(meta).length ? (
-              <div
-                style={{
-                  marginTop: 2,
-                  paddingTop: 10,
-                  borderTop: "1px solid rgba(255,255,255,0.08)",
-                }}
-              >
-                <div
-                  className="muted"
-                  style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}
-                >
-                  Metadata
-                </div>
-                <pre
-                  style={{
-                    margin: 0,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                    fontSize: 12,
-                    lineHeight: 1.45,
-                    color: "var(--text-muted)",
-                  }}
-                >
+              <div className="timeline-meta-block">
+                <div className="muted timeline-meta-block-label">Metadata</div>
+                <pre className="timeline-meta-pre">
                   {JSON.stringify(meta, null, 2)}
                 </pre>
               </div>
@@ -977,36 +799,20 @@ export default function AuditTimeline({ events = [] }) {
 
   return (
     <div className="card" id="timeline">
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          marginBottom: 14,
-          flexWrap: "wrap",
-        }}
-      >
+      <div className="timeline-topbar">
         <div>
           <h2 style={{ marginTop: 0, marginBottom: 0 }}>Activity Feed</h2>
-          <div className="muted" style={{ fontSize: 13, marginTop: 6 }}>
+          <div className="muted timeline-topbar-copy">
             Search Discord actions, dashboard actions, tickets, moderation, and member changes
           </div>
         </div>
 
-        <div className="muted" style={{ fontSize: 13 }}>
+        <div className="muted timeline-topbar-count">
           {filteredEvents.length} shown • {safeEvents.length} loaded
         </div>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 10,
-          marginBottom: 14,
-        }}
-      >
+      <div className="timeline-filter-grid">
         <input
           className="input"
           placeholder="Search anything..."
@@ -1068,14 +874,7 @@ export default function AuditTimeline({ events = [] }) {
         </select>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-          gap: 10,
-          marginBottom: 14,
-        }}
-      >
+      <div className="timeline-explain-grid">
         <FilterExplainCard
           title="Families = event category"
           description={
@@ -1098,14 +897,7 @@ export default function AuditTimeline({ events = [] }) {
       </div>
 
       {hasActiveFilters ? (
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            flexWrap: "wrap",
-            marginBottom: 14,
-          }}
-        >
+        <div className="timeline-active-filters">
           {query ? (
             <ActiveFilterChip
               label={`Search: ${query}`}
@@ -1150,14 +942,7 @@ export default function AuditTimeline({ events = [] }) {
         </div>
       ) : null}
 
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          flexWrap: "wrap",
-          marginBottom: 14,
-        }}
-      >
+      <div className="timeline-toolbar-actions">
         <button
           type="button"
           className="button ghost"
@@ -1169,19 +954,11 @@ export default function AuditTimeline({ events = [] }) {
       </div>
 
       {!filteredEvents.length ? (
-        <div
-          className="muted"
-          style={{
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 16,
-            padding: 16,
-            background: "rgba(255,255,255,0.02)",
-          }}
-        >
+        <div className="muted timeline-empty">
           No activity matched the current filters.
         </div>
       ) : (
-        <div className="timeline" style={{ display: "grid", gap: 12 }}>
+        <div className="timeline-list">
           {filteredEvents.map((event) => (
             <TimelineCard
               key={event.id}
@@ -1194,6 +971,305 @@ export default function AuditTimeline({ events = [] }) {
           ))}
         </div>
       )}
+
+      <style jsx>{`
+        .timeline-topbar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          margin-bottom: 14px;
+          flex-wrap: wrap;
+        }
+
+        .timeline-topbar-copy {
+          font-size: 13px;
+          margin-top: 6px;
+          line-height: 1.5;
+        }
+
+        .timeline-topbar-count {
+          font-size: 13px;
+        }
+
+        .timeline-filter-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: 10px;
+          margin-bottom: 14px;
+        }
+
+        .timeline-explain-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+          gap: 10px;
+          margin-bottom: 14px;
+        }
+
+        .timeline-explain-card {
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 14px;
+          padding: 12px;
+          min-width: 0;
+        }
+
+        .timeline-explain-title {
+          font-weight: 800;
+          font-size: 13px;
+          margin-bottom: 4px;
+        }
+
+        .timeline-explain-copy {
+          font-size: 12px;
+          line-height: 1.5;
+        }
+
+        .timeline-active-filters {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin-bottom: 14px;
+        }
+
+        .timeline-filter-chip {
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          background: rgba(255, 255, 255, 0.05);
+          color: var(--text-strong);
+          border-radius: 999px;
+          padding: 8px 12px;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+        }
+
+        .timeline-toolbar-actions {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin-bottom: 14px;
+        }
+
+        .timeline-empty {
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 16px;
+          padding: 16px;
+          background: rgba(255, 255, 255, 0.02);
+        }
+
+        .timeline-list {
+          display: grid;
+          gap: 12px;
+        }
+
+        .timeline-card {
+          display: grid;
+          grid-template-columns: 48px minmax(0, 1fr);
+          gap: 12px;
+          align-items: start;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-left: 4px solid rgba(255, 255, 255, 0.12);
+          border-radius: 18px;
+          padding: 14px;
+          background:
+            radial-gradient(circle at top right, rgba(255,255,255,0.04), transparent 42%),
+            rgba(255,255,255,0.02);
+        }
+
+        .timeline-card-avatar {
+          display: flex;
+          align-items: flex-start;
+          justify-content: center;
+        }
+
+        .timeline-avatar-image,
+        .timeline-avatar-fallback {
+          width: 40px;
+          height: 40px;
+          min-width: 40px;
+          min-height: 40px;
+          max-width: 40px;
+          max-height: 40px;
+          border-radius: 999px;
+          overflow: hidden;
+          flex-shrink: 0;
+          aspect-ratio: 1 / 1;
+        }
+
+        .timeline-avatar-image {
+          object-fit: cover;
+          object-position: center;
+          display: block;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.04);
+        }
+
+        .timeline-avatar-fallback {
+          display: grid;
+          place-items: center;
+          font-weight: 800;
+          font-size: 13px;
+          color: #fff;
+          background:
+            radial-gradient(circle at top right, rgba(93,255,141,0.18), transparent 45%),
+            linear-gradient(180deg, rgba(46,77,102,0.98), rgba(20,35,50,0.98));
+          border: 1px solid rgba(255,255,255,0.08);
+        }
+
+        .timeline-card-main {
+          min-width: 0;
+        }
+
+        .timeline-card-head {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 12px;
+          flex-wrap: wrap;
+          margin-bottom: 6px;
+        }
+
+        .timeline-card-title-wrap {
+          min-width: 0;
+          flex: 1;
+        }
+
+        .timeline-card-title {
+          font-weight: 800;
+          line-height: 1.2;
+          color: var(--text-strong);
+          overflow-wrap: anywhere;
+        }
+
+        .timeline-card-actor,
+        .timeline-card-target {
+          font-size: 13px;
+          margin-top: 6px;
+          overflow-wrap: anywhere;
+          line-height: 1.45;
+        }
+
+        .timeline-card-chip-row {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          align-items: center;
+        }
+
+        .timeline-pill {
+          font-size: 11px;
+          font-weight: 700;
+          padding: 4px 8px;
+          border-radius: 999px;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          white-space: nowrap;
+          line-height: 1.1;
+        }
+
+        .timeline-card-description {
+          margin-top: 4px;
+          line-height: 1.55;
+          word-break: break-word;
+        }
+
+        .timeline-card-meta {
+          margin-top: 8px;
+          font-size: 12px;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          align-items: center;
+          line-height: 1.4;
+        }
+
+        .timeline-card-actions {
+          margin-top: 12px;
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+
+        .timeline-card-details {
+          margin-top: 12px;
+          padding: 12px;
+          border-radius: 14px;
+          background: rgba(255,255,255,0.03);
+          border: 1px solid rgba(255,255,255,0.06);
+          display: grid;
+          gap: 10px;
+        }
+
+        .timeline-detail-row {
+          display: grid;
+          grid-template-columns: 110px minmax(0, 1fr);
+          gap: 10px;
+          align-items: start;
+        }
+
+        .timeline-detail-label {
+          font-size: 12px;
+          font-weight: 700;
+        }
+
+        .timeline-detail-value {
+          font-size: 13px;
+          line-height: 1.5;
+          word-break: break-word;
+          color: var(--text-strong);
+        }
+
+        .timeline-meta-block {
+          margin-top: 2px;
+          padding-top: 10px;
+          border-top: 1px solid rgba(255,255,255,0.08);
+        }
+
+        .timeline-meta-block-label {
+          font-size: 12px;
+          font-weight: 700;
+          margin-bottom: 8px;
+        }
+
+        .timeline-meta-pre {
+          margin: 0;
+          white-space: pre-wrap;
+          word-break: break-word;
+          font-size: 12px;
+          line-height: 1.45;
+          color: var(--text-muted);
+        }
+
+        @media (max-width: 640px) {
+          .timeline-card {
+            grid-template-columns: 1fr;
+            gap: 10px;
+          }
+
+          .timeline-card-avatar {
+            justify-content: flex-start;
+          }
+
+          .timeline-card-head {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+          }
+
+          .timeline-card-actions {
+            display: grid;
+            grid-template-columns: 1fr;
+          }
+
+          .timeline-card-actions :global(.button) {
+            width: 100% !important;
+            min-width: 0 !important;
+          }
+
+          .timeline-detail-row {
+            grid-template-columns: 1fr;
+            gap: 4px;
+          }
+        }
+      `}</style>
     </div>
   );
 }
