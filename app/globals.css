@@ -21,6 +21,7 @@
   --muted-2: #87a291;
 
   --accent: #5dff8d;
+  --accent2: #63d5ff;
   --accent-strong: #2cff72;
   --accent-soft: rgba(93, 255, 141, 0.16);
 
@@ -143,6 +144,7 @@ select {
 img {
   max-width: 100%;
   display: block;
+  image-orientation: from-image;
 }
 
 button,
@@ -211,7 +213,7 @@ button:focus-visible,
   display: grid;
   place-items: center;
   background:
-    linear-gradient(135deg, rgba(93, 255, 141, 0.95), rgba(99, 213, 255, 0.95));
+    linear-gradient(135deg, var(--accent), var(--accent2));
   color: #04110b;
   font-weight: 900;
   box-shadow:
@@ -435,7 +437,7 @@ button:focus-visible,
 
 .button.primary {
   background:
-    linear-gradient(135deg, rgba(93, 255, 141, 0.95), rgba(99, 213, 255, 0.95));
+    linear-gradient(135deg, var(--accent), var(--accent2));
   color: #03110a;
   border: none;
   font-weight: 900;
@@ -580,18 +582,34 @@ tbody tr:hover {
   border-color: rgba(255, 111, 142, 0.22);
 }
 
+.avatar,
+.queue-avatar,
+.member-drawer-avatar {
+  border-radius: 999px;
+  overflow: hidden;
+  aspect-ratio: 1 / 1;
+  flex-shrink: 0;
+}
+
 .avatar {
   width: 40px;
   height: 40px;
-  border-radius: 999px;
   display: grid;
   place-items: center;
-  background: linear-gradient(135deg, var(--accent), var(--blue));
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
   color: #04120c;
   font-weight: 900;
-  overflow: hidden;
-  flex: 0 0 40px;
   box-shadow: 0 8px 18px rgba(93, 255, 141, 0.18);
+}
+
+.avatar img,
+.member-drawer-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  border-radius: inherit;
+  display: block;
 }
 
 .timeline {
@@ -623,7 +641,7 @@ tbody tr:hover {
   width: 12px;
   height: 12px;
   border-radius: 999px;
-  background: linear-gradient(135deg, var(--accent), var(--blue));
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
   box-shadow: 0 0 16px rgba(93, 255, 141, 0.22);
 }
 
@@ -722,12 +740,6 @@ tbody tr:hover {
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.02);
 }
-
-/* intentionally no global .ticket-mobile-list or .ticket-desktop-table styling here anymore
-   so TicketQueueTable can fully own its responsive layout */
-
-/* intentionally no global .ticket-mobile-card styling here anymore
-   so TicketQueueTable can fully own its mobile card look */
 
 .ticket-mobile-meta {
   display: grid;
@@ -1050,7 +1062,6 @@ tbody tr:hover {
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), transparent);
 }
 
-/* keep these neutral so component-specific nav styles own the final look */
 .mobile-bottom-nav,
 .mobile-nav-link,
 .mobile-command-item {
@@ -1124,6 +1135,16 @@ tbody tr:hover {
 .settings-sheet .badge {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
   color: inherit;
+}
+
+.scroll-section {
+  scroll-margin-top: 90px;
+}
+
+.profile-scroll-safe-zone,
+.profile-scroll-safe-zone > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 @media (max-width: 1180px) {
@@ -1237,6 +1258,10 @@ tbody tr:hover {
     width: 100%;
     min-width: 0;
     min-height: var(--tap-lg);
+  }
+
+  .scroll-section {
+    scroll-margin-top: 64px;
   }
 }
 
