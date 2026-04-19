@@ -6,8 +6,12 @@ const MAX_MESSAGE_LENGTH = 4000;
 const MAX_ATTACHMENTS = 10;
 
 type Attachment = {
-  name: string;
-  url: string;
+  name?: string | null;
+  url?: string | null;
+  proxy_url?: string | null;
+  content_type?: string | null;
+  mime_type?: string | null;
+  size?: number | null;
 };
 
 type ReplyResponse = {
@@ -20,6 +24,7 @@ type ReplyResponse = {
     ticket_id?: string | null;
     author_id?: string | null;
     author_name?: string | null;
+    author_avatar_url?: string | null;
     content?: string | null;
     message_type?: string | null;
     attachments?: Attachment[] | null;
@@ -40,6 +45,7 @@ type ToneBannerProps = {
 
 type AttachmentPreviewProps = {
   attachments: Attachment[];
+  onRemove: (index: number) => void;
 };
 
 type ParsedAttachments = {
@@ -84,6 +90,43 @@ function parseAttachmentNameFromUrl(url: string, index: number): string {
   return `attachment-${index + 1}`;
 }
 
+function getAttachmentMimeFromUrl(url: string): string {
+  const lower = url.toLowerCase();
+
+  if (
+    lower.includes(".png") ||
+    lower.includes(".jpg") ||
+    lower.includes(".jpeg") ||
+    lower.includes(".gif") ||
+    lower.includes(".webp") ||
+    lower.includes(".bmp") ||
+    lower.includes(".svg")
+  ) {
+    return "image/*";
+  }
+
+  if (
+    lower.includes(".mp4") ||
+    lower.includes(".webm") ||
+    lower.includes(".mov") ||
+    lower.includes(".m4v")
+  ) {
+    return "video/*";
+  }
+
+  if (
+    lower.includes(".mp3") ||
+    lower.includes(".wav") ||
+    lower.includes(".ogg") ||
+    lower.includes(".m4a") ||
+    lower.includes(".flac")
+  ) {
+    return "audio/*";
+  }
+
+  return "";
+}
+
 function parseAttachments(value: unknown): ParsedAttachments {
   const rows = String(value || "")
     .split("\n")
@@ -102,6 +145,7 @@ function parseAttachments(value: unknown): ParsedAttachments {
     attachments.push({
       name: parseAttachmentNameFromUrl(url, attachments.length),
       url,
+      content_type: getAttachmentMimeFromUrl(url),
     });
   });
 
@@ -113,6 +157,57 @@ function parseAttachments(value: unknown): ParsedAttachments {
     totalEntered: rows.length,
     trimmedCount: Math.max(0, attachments.length - keptAttachments.length),
   };
+}
+
+function formatBytes(value: unknown): string {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "—";
+
+  const units = ["B", "KB", "MB", "GB"];
+  let current = bytes;
+  let unitIndex = 0;
+
+  while (current >= 1024 && unitIndex < units.length - 1) {
+    current /= 1024;
+    unitIndex += 1;
+  }
+
+  const digits = current >= 10 || unitIndex === 0 ? 0 : 1;
+  return `${current.toFixed(digits)} ${units[unitIndex]}`;
+}
+
+function getAttachmentKind(
+  attachment: Attachment
+): "image" | "video" | "audio" | "file" {
+  const mime = String(
+    attachment?.content_type || attachment?.mime_type || ""
+  ).toLowerCase();
+  const url = String(attachment?.url || "").toLowerCase();
+
+  if (
+    mime.startsWith("image/") ||
+    [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"].some((ext) =>
+      url.includes(ext)
+    )
+  ) {
+    return "image";
+  }
+
+  if (
+    mime.startsWith("video/") ||
+    [".mp4", ".webm", ".mov", ".m4v"].some((ext) => url.includes(ext))
+  ) {
+    return "video";
+  }
+
+  if (
+    mime.startsWith("audio/") ||
+    [".mp3", ".wav", ".ogg", ".m4a", ".flac"].some((ext) => url.includes(ext))
+  ) {
+    return "audio";
+  }
+
+  return "file";
 }
 
 function ToneBanner({ children, tone = "info" }: ToneBannerProps) {
@@ -128,21 +223,72 @@ function ToneBanner({ children, tone = "info" }: ToneBannerProps) {
   return <div className={className}>{children}</div>;
 }
 
-function AttachmentPreview({ attachments }: AttachmentPreviewProps) {
+function AttachmentPreview({
+  attachments,
+  onRemove,
+}: AttachmentPreviewProps) {
   if (!attachments.length) {
     return <div className="muted">No attachments queued.</div>;
   }
 
   return (
-    <div className="attachment-preview-list">
-      {attachments.map((item, index) => (
-        <div key={`${item.url}-${index}`} className="attachment-preview-chip">
-          <span className="attachment-preview-index">#{index + 1}</span>
-          <span className="attachment-preview-url" title={item.url}>
-            {truncateText(item.name || item.url, 80)}
-          </span>
-        </div>
-      ))}
+    <div className="reply-attachment-grid">
+      {attachments.map((item, index) => {
+        const kind = getAttachmentKind(item);
+        const name = truncateText(item.name || item.url, 80);
+        const url = normalizeText(item.url);
+
+        return (
+          <div key={`${item.url}-${index}`} className="reply-attachment-card">
+            {kind === "image" ? (
+              <img
+                src={url}
+                alt={item.name || `Attachment ${index + 1}`}
+                className="reply-attachment-thumb"
+                loading="lazy"
+              />
+            ) : (
+              <div className="reply-attachment-thumb fallback">
+                {kind === "video" ? "🎬" : kind === "audio" ? "🎵" : "📎"}
+              </div>
+            )}
+
+            <div className="reply-attachment-meta">
+              <div className="reply-attachment-name">{name}</div>
+              <div className="reply-attachment-submeta">
+                <span>#{index + 1}</span>
+                <span>•</span>
+                <span>{kind}</span>
+                {formatBytes(item.size) !== "—" ? (
+                  <>
+                    <span>•</span>
+                    <span>{formatBytes(item.size)}</span>
+                  </>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="reply-attachment-actions">
+              <a
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="reply-mini-link"
+              >
+                Open
+              </a>
+
+              <button
+                type="button"
+                className="reply-mini-link danger"
+                onClick={() => onRemove(index)}
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -167,6 +313,11 @@ export default function TicketReplyBox({
   const remainingCharacters = MAX_MESSAGE_LENGTH - message.length;
   const attachmentCount = parsedAttachments.attachments.length;
   const invalidAttachmentCount = parsedAttachments.invalid.length;
+
+  function removeAttachment(index: number) {
+    const next = parsedAttachments.attachments.filter((_, i) => i !== index);
+    setAttachmentInput(next.map((item) => item.url || "").filter(Boolean).join("\n"));
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -337,7 +488,10 @@ export default function TicketReplyBox({
             </div>
           ) : null}
 
-          <AttachmentPreview attachments={parsedAttachments.attachments} />
+          <AttachmentPreview
+            attachments={parsedAttachments.attachments}
+            onRemove={removeAttachment}
+          />
         </div>
 
         <div className="reply-footer">
@@ -453,32 +607,93 @@ export default function TicketReplyBox({
           overflow-wrap: anywhere;
         }
 
-        .attachment-preview-list {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
+        .reply-attachment-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
         }
 
-        .attachment-preview-chip {
+        .reply-attachment-card {
+          display: grid;
+          gap: 10px;
+          padding: 10px;
+          border-radius: 16px;
+          border: 1px solid rgba(99,213,255,0.14);
+          background:
+            radial-gradient(circle at top right, rgba(99,213,255,0.08), transparent 42%),
+            rgba(99,213,255,0.04);
+          min-width: 0;
+        }
+
+        .reply-attachment-thumb {
+          width: 100%;
+          height: 160px;
+          border-radius: 14px;
+          object-fit: cover;
+          object-position: center;
+          display: block;
+          background: rgba(255,255,255,0.03);
+          border: 1px solid rgba(255,255,255,0.06);
+        }
+
+        .reply-attachment-thumb.fallback {
+          display: grid;
+          place-items: center;
+          font-size: 28px;
+          color: #fff;
+          background:
+            radial-gradient(circle at top right, rgba(93,255,141,0.18), transparent 45%),
+            linear-gradient(180deg, rgba(46,77,102,0.98), rgba(20,35,50,0.98));
+        }
+
+        .reply-attachment-meta {
+          display: grid;
+          gap: 4px;
+          min-width: 0;
+        }
+
+        .reply-attachment-name {
+          font-weight: 700;
+          color: var(--text-strong, #f8fafc);
+          overflow-wrap: anywhere;
+          line-height: 1.35;
+        }
+
+        .reply-attachment-submeta {
+          display: flex;
+          gap: 6px;
+          flex-wrap: wrap;
+          color: var(--muted, #9fb0c3);
+          font-size: 12px;
+          line-height: 1.4;
+        }
+
+        .reply-attachment-actions {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+
+        .reply-mini-link {
           display: inline-flex;
           align-items: center;
-          gap: 8px;
-          max-width: 100%;
-          border-radius: 999px;
+          justify-content: center;
+          min-height: 34px;
           padding: 7px 10px;
-          border: 1px solid rgba(99,213,255,0.14);
-          background: rgba(99,213,255,0.06);
+          border-radius: 999px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.04);
           color: var(--text, #dbe4ee);
+          text-decoration: none;
           font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
         }
 
-        .attachment-preview-index {
-          color: var(--muted, #9fb0c3);
-          flex-shrink: 0;
-        }
-
-        .attachment-preview-url {
-          overflow-wrap: anywhere;
+        .reply-mini-link.danger {
+          border-color: rgba(248,113,113,0.24);
+          background: rgba(248,113,113,0.08);
+          color: #fecaca;
         }
 
         .reply-footer {
@@ -502,6 +717,24 @@ export default function TicketReplyBox({
           padding: 12px 14px;
           color: #fde68a;
           margin-bottom: 12px;
+        }
+
+        @media (max-width: 860px) {
+          .reply-attachment-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .reply-footer {
+            display: grid;
+            grid-template-columns: 1fr;
+          }
+
+          .reply-footer :global(.button) {
+            width: 100% !important;
+            min-width: 0 !important;
+          }
         }
       `}</style>
     </div>
