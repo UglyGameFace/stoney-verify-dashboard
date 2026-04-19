@@ -93,6 +93,34 @@ function normalizeObjectList(value: unknown): Dict[] {
   ) as Dict[];
 }
 
+function decimalStringMod(value: string, mod: number): number {
+  let remainder = 0;
+
+  for (let i = 0; i < value.length; i += 1) {
+    const digit = value.charCodeAt(i) - 48;
+    if (digit < 0 || digit > 9) return 0;
+    remainder = (remainder * 10 + digit) % mod;
+  }
+
+  return remainder;
+}
+
+function getDiscordDefaultAvatarUrl(userId: unknown): string {
+  const raw = String(userId || "").trim();
+  if (!raw || !/^\d+$/.test(raw)) return "";
+
+  try {
+    const bucketSize = 4194304; // 2^22
+    const cycleSize = bucketSize * 6; // 25165824
+    const reduced = decimalStringMod(raw, cycleSize);
+    const index = Math.floor(reduced / bucketSize);
+
+    return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
+  } catch {
+    return "";
+  }
+}
+
 function formatDateTime(value: unknown): string {
   if (!value) return "—";
   try {
@@ -136,6 +164,7 @@ function badgeClass(value: unknown): string {
 
   if (v === "verified") return "badge claimed";
   if (v === "pending") return "badge open";
+  if (v === "pending verification") return "badge open";
   if (v === "vc in progress") return "badge open";
   if (v === "needs review") return "badge danger";
   if (v === "denied") return "badge danger";
@@ -168,6 +197,15 @@ function getCurrentStaffId(data: TicketApiResponse | null | undefined): string {
   );
 }
 
+function getOwnerUserId(ticket: Dict, member: Dict): string {
+  return (
+    String(ticket?.owner_user_id || "").trim() ||
+    String(ticket?.user_id || "").trim() ||
+    String(member?.user_id || "").trim() ||
+    ""
+  );
+}
+
 function getOwnerName(ticket: Dict, member: Dict): string {
   return (
     String(ticket?.owner_display_name || "").trim() ||
@@ -181,11 +219,15 @@ function getOwnerName(ticket: Dict, member: Dict): string {
 }
 
 function getOwnerAvatar(ticket: Dict, member: Dict): string {
-  return (
-    String(ticket?.owner_avatar_url || "").trim() ||
+  const preferred =
     String(member?.avatar_url || "").trim() ||
-    ""
-  );
+    String(ticket?.owner_avatar_url || "").trim() ||
+    String(ticket?.avatar_url || "").trim();
+
+  if (preferred) return preferred;
+
+  const fallback = getDiscordDefaultAvatarUrl(getOwnerUserId(ticket, member));
+  return fallback || "";
 }
 
 function getOwnerInitials(ticket: Dict, member: Dict): string {
@@ -435,7 +477,8 @@ function SectionCard({
 }
 
 function IdentityBubble({ ticket, member }: IdentityBubbleProps) {
-  const avatar = getOwnerAvatar(ticket, member);
+  const [failed, setFailed] = useState(false);
+  const avatar = failed ? "" : getOwnerAvatar(ticket, member);
   const initials = getOwnerInitials(ticket, member);
 
   if (avatar) {
@@ -443,12 +486,52 @@ function IdentityBubble({ ticket, member }: IdentityBubbleProps) {
       <img
         src={avatar}
         alt={getOwnerName(ticket, member)}
-        className="ticket-owner-avatar"
+        onError={() => setFailed(true)}
+        style={{
+          width: 72,
+          height: 72,
+          minWidth: 72,
+          minHeight: 72,
+          maxWidth: 72,
+          maxHeight: 72,
+          aspectRatio: "1 / 1",
+          borderRadius: "999px",
+          objectFit: "cover",
+          objectPosition: "center",
+          display: "block",
+          overflow: "hidden",
+          border: "1px solid rgba(255,255,255,0.08)",
+          background: "rgba(255,255,255,0.04)",
+          flexShrink: 0,
+        }}
       />
     );
   }
 
-  return <div className="ticket-owner-avatar fallback">{initials}</div>;
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        width: 72,
+        height: 72,
+        minWidth: 72,
+        minHeight: 72,
+        maxWidth: 72,
+        maxHeight: 72,
+        borderRadius: "999px",
+        display: "grid",
+        placeItems: "center",
+        fontWeight: 900,
+        color: "#fff",
+        background:
+          "radial-gradient(circle at top right, rgba(93,255,141,0.18), transparent 45%), linear-gradient(180deg, rgba(46,77,102,0.98), rgba(20,35,50,0.98))",
+        border: "1px solid rgba(255,255,255,0.08)",
+        flexShrink: 0,
+      }}
+    >
+      {initials}
+    </div>
+  );
 }
 
 export default function TicketDetailClient({
@@ -486,9 +569,11 @@ export default function TicketDetailClient({
   }
 
   useEffect(() => {
-    void refresh({ silent: true });
+    if (!initialData?.ticket?.id) {
+      void refresh({ silent: true });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticketId]);
+  }, [ticketId, initialData?.ticket?.id]);
 
   useEffect(() => {
     let supabase: any;
@@ -528,11 +613,7 @@ export default function TicketDetailClient({
           },
           handleRealtimeChange
         )
-        .subscribe((status: string) => {
-          if (status === "SUBSCRIBED") {
-            void refresh({ silent: true });
-          }
-        });
+        .subscribe();
     } catch (err: unknown) {
       setError(getErrorMessage(err, "Realtime initialization failed."));
       return;
@@ -751,7 +832,8 @@ export default function TicketDetailClient({
         <div className="ticket-hero-top">
           <div className="ticket-hero-owner">
             <IdentityBubble ticket={ticket} member={member} />
-            <div style={{ minWidth: 0, flex: 1 }}>
+
+            <div className="ticket-hero-copy">
               <div className="muted" style={{ marginBottom: 6 }}>
                 Ticket Detail
               </div>
@@ -762,13 +844,6 @@ export default function TicketDetailClient({
                 <span>{ownerName}</span>
                 <span>•</span>
                 <span>{finalCategoryLabel}</span>
-                <span>•</span>
-                <span>
-                  {safeText(
-                    ticket?.channel_id || ticket?.discord_thread_id,
-                    "Not linked"
-                  )}
-                </span>
               </div>
             </div>
           </div>
@@ -795,7 +870,7 @@ export default function TicketDetailClient({
         </div>
 
         <div className="ticket-hero-toolbar">
-          <div className="muted" style={{ minWidth: 0, flex: 1 }}>
+          <div className="muted ticket-hero-helper">
             This view is built for fast staff decisions: member context,
             verification history, SLA pressure, note continuity, category control,
             full reply flow, and alt / bot detection in one place.
@@ -1521,51 +1596,36 @@ export default function TicketDetailClient({
             radial-gradient(circle at bottom left, rgba(99,213,255,0.06), transparent 24%),
             linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015)),
             linear-gradient(180deg, rgba(14, 25, 35, 0.98), rgba(7, 13, 21, 0.98));
+          overflow: hidden;
         }
 
         .ticket-hero-top {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
           gap: 16px;
-          flex-wrap: wrap;
+          align-items: start;
           margin-bottom: 14px;
         }
 
         .ticket-hero-owner {
           display: flex;
-          align-items: flex-start;
+          align-items: center;
           gap: 14px;
+          min-width: 0;
+        }
+
+        .ticket-hero-copy {
           min-width: 0;
           flex: 1;
         }
 
-        .ticket-owner-avatar {
-          width: 62px;
-          height: 62px;
-          border-radius: 999px;
-          object-fit: cover;
-          flex-shrink: 0;
-          border: 1px solid rgba(255,255,255,0.08);
-          background: rgba(255,255,255,0.04);
-        }
-
-        .ticket-owner-avatar.fallback {
-          display: grid;
-          place-items: center;
-          font-weight: 900;
-          color: white;
-          background:
-            radial-gradient(circle at top right, rgba(93,255,141,0.18), transparent 45%),
-            linear-gradient(180deg, rgba(46,77,102,0.98), rgba(20,35,50,0.98));
-        }
-
         .ticket-hero-title {
           margin: 0;
-          font-size: clamp(30px, 5vw, 46px);
+          font-size: clamp(28px, 5vw, 46px);
           line-height: 0.96;
           letter-spacing: -0.05em;
           overflow-wrap: anywhere;
+          word-break: break-word;
         }
 
         .ticket-hero-subtitle {
@@ -1574,6 +1634,7 @@ export default function TicketDetailClient({
           gap: 8px;
           flex-wrap: wrap;
           overflow-wrap: anywhere;
+          word-break: break-word;
         }
 
         .ticket-hero-badges {
@@ -1582,6 +1643,7 @@ export default function TicketDetailClient({
           flex-wrap: wrap;
           align-items: center;
           justify-content: flex-end;
+          max-width: 100%;
         }
 
         .ticket-hero-toolbar {
@@ -1590,6 +1652,12 @@ export default function TicketDetailClient({
           align-items: center;
           gap: 14px;
           flex-wrap: wrap;
+        }
+
+        .ticket-hero-helper {
+          min-width: 0;
+          flex: 1;
+          line-height: 1.55;
         }
 
         .ticket-workspace-pills {
@@ -1753,6 +1821,18 @@ export default function TicketDetailClient({
         }
 
         @media (max-width: 640px) {
+          .ticket-hero-top {
+            grid-template-columns: 1fr;
+          }
+
+          .ticket-hero-owner {
+            align-items: flex-start;
+          }
+
+          .ticket-hero-badges {
+            justify-content: flex-start;
+          }
+
           .ticket-hero-toolbar,
           .ticket-hero-link-row {
             display: grid;
