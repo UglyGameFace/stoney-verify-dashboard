@@ -33,6 +33,34 @@ function prettyLabel(value) {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
+function decimalStringMod(value, mod) {
+  let remainder = 0;
+
+  for (let i = 0; i < value.length; i += 1) {
+    const digit = value.charCodeAt(i) - 48;
+    if (digit < 0 || digit > 9) return 0;
+    remainder = (remainder * 10 + digit) % mod;
+  }
+
+  return remainder;
+}
+
+function getDiscordDefaultAvatarUrl(userId) {
+  const raw = String(userId || "").trim();
+  if (!raw || !/^\d+$/.test(raw)) return "";
+
+  try {
+    const bucketSize = 4194304; // 2^22
+    const cycleSize = bucketSize * 6; // 25165824
+    const reduced = decimalStringMod(raw, cycleSize);
+    const index = Math.floor(reduced / bucketSize);
+
+    return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
+  } catch {
+    return "";
+  }
+}
+
 function familyMeta(value) {
   const family = normalizeText(value);
 
@@ -428,12 +456,84 @@ function FilterExplainCard({ title, description, tone = "neutral" }) {
   );
 }
 
+function TimelineAvatar({ event, actorName }) {
+  const explicitAvatar = String(event?.actor_avatar_url || "").trim();
+  const fallbackDiscordAvatar = getDiscordDefaultAvatarUrl(event?.actor_id);
+  const [src, setSrc] = useState(explicitAvatar || fallbackDiscordAvatar || "");
+
+  useEffect(() => {
+    setSrc(explicitAvatar || fallbackDiscordAvatar || "");
+  }, [explicitAvatar, fallbackDiscordAvatar]);
+
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={actorName || "Actor"}
+        onError={() => {
+          if (src !== fallbackDiscordAvatar && fallbackDiscordAvatar) {
+            setSrc(fallbackDiscordAvatar);
+            return;
+          }
+          setSrc("");
+        }}
+        style={{
+          width: 40,
+          height: 40,
+          minWidth: 40,
+          minHeight: 40,
+          maxWidth: 40,
+          maxHeight: 40,
+          aspectRatio: "1 / 1",
+          borderRadius: "999px",
+          objectFit: "cover",
+          objectPosition: "center",
+          display: "block",
+          overflow: "hidden",
+          border: "1px solid rgba(255,255,255,0.08)",
+          background: "rgba(255,255,255,0.04)",
+          flexShrink: 0,
+        }}
+      />
+    );
+  }
+
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        width: 40,
+        height: 40,
+        minWidth: 40,
+        minHeight: 40,
+        maxWidth: 40,
+        maxHeight: 40,
+        borderRadius: "999px",
+        display: "grid",
+        placeItems: "center",
+        fontWeight: 800,
+        fontSize: 13,
+        color: "#fff",
+        background:
+          "radial-gradient(circle at top right, rgba(93,255,141,0.18), transparent 45%), linear-gradient(180deg, rgba(46,77,102,0.98), rgba(20,35,50,0.98))",
+        border: "1px solid rgba(255,255,255,0.08)",
+        flexShrink: 0,
+      }}
+    >
+      {getInitials(actorName)}
+    </div>
+  );
+}
+
 function TimelineCard({ event, expanded, onToggle }) {
   const accent = getEventAccent(event);
   const actorName = safeText(event?.actor_name, "");
-  const actorAvatar = event?.actor_avatar_url || null;
   const targetName = safeText(event?.target_name, "");
   const meta = event?.meta && typeof event.meta === "object" ? event.meta : {};
+  const familyTone = familyMeta(event?.event_family).tone;
+  const sourceTone = sourceMeta(event?.source).tone;
+  const familyColors = getToneColors(familyTone);
+  const sourceColors = getToneColors(sourceTone);
 
   return (
     <div
@@ -447,42 +547,12 @@ function TimelineCard({ event, expanded, onToggle }) {
         borderLeft: `4px solid ${accent}`,
         borderRadius: 16,
         padding: 14,
-        background: "rgba(255,255,255,0.02)",
+        background:
+          "radial-gradient(circle at top right, rgba(255,255,255,0.04), transparent 42%), rgba(255,255,255,0.02)",
       }}
     >
       <div>
-        {actorAvatar ? (
-          <img
-            src={actorAvatar}
-            alt={actorName || "Actor"}
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: "999px",
-              objectFit: "cover",
-              display: "block",
-              border: "1px solid rgba(255,255,255,0.08)",
-            }}
-          />
-        ) : (
-          <div
-            aria-hidden="true"
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: "999px",
-              display: "grid",
-              placeItems: "center",
-              fontWeight: 800,
-              fontSize: 13,
-              color: "#fff",
-              background: "rgba(255,255,255,0.08)",
-              border: "1px solid rgba(255,255,255,0.08)",
-            }}
-          >
-            {getInitials(actorName)}
-          </div>
-        )}
+        <TimelineAvatar event={event} actorName={actorName} />
       </div>
 
       <div style={{ minWidth: 0 }}>
@@ -499,6 +569,8 @@ function TimelineCard({ event, expanded, onToggle }) {
             style={{
               fontWeight: 800,
               lineHeight: 1.2,
+              color: "var(--text-strong)",
+              overflowWrap: "anywhere",
             }}
           >
             {safeText(event?.title, "Activity Event")}
@@ -510,8 +582,9 @@ function TimelineCard({ event, expanded, onToggle }) {
               fontWeight: 700,
               padding: "4px 8px",
               borderRadius: 999,
-              background: "rgba(255,255,255,0.08)",
-              color: "#cfd8e3",
+              background: sourceColors.bg,
+              border: `1px solid ${sourceColors.border}`,
+              color: sourceColors.text,
               whiteSpace: "nowrap",
             }}
           >
@@ -525,8 +598,9 @@ function TimelineCard({ event, expanded, onToggle }) {
                 fontWeight: 700,
                 padding: "4px 8px",
                 borderRadius: 999,
-                background: "rgba(69,212,131,0.12)",
-                color: "#d6ffe4",
+                background: familyColors.bg,
+                border: `1px solid ${familyColors.border}`,
+                color: familyColors.text,
                 whiteSpace: "nowrap",
               }}
             >
@@ -541,6 +615,7 @@ function TimelineCard({ event, expanded, onToggle }) {
             style={{
               fontSize: 13,
               marginBottom: 6,
+              overflowWrap: "anywhere",
             }}
           >
             By {actorName}
@@ -554,6 +629,7 @@ function TimelineCard({ event, expanded, onToggle }) {
             style={{
               fontSize: 13,
               marginBottom: 6,
+              overflowWrap: "anywhere",
             }}
           >
             Target: {targetName}
