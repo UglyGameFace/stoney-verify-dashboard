@@ -192,9 +192,10 @@ function getStatusTone(status?: string | null): string {
   if (value === "high") return "danger";
   if (value === "urgent") return "danger";
   if (value === "medium") return "medium";
-  if (value === "low") return "claimed";
+  if (value === "low") return "low";
   if (value === "verified") return "claimed";
   if (value === "pending") return "open";
+  if (value === "pending verification") return "open";
   if (value === "needs review") return "danger";
   if (value === "denied") return "danger";
   if (value === "verification") return "claimed";
@@ -304,11 +305,7 @@ function getVerificationLabel(ticket: TicketLike): string {
 }
 
 function getEntryMethodLabel(ticket: TicketLike): string {
-  return (
-    titleize(ticket.owner_entry_method) ||
-    titleize(ticket.source) ||
-    "Unknown"
-  );
+  return titleize(ticket.owner_entry_method) || titleize(ticket.source) || "Unknown";
 }
 
 function ticketIsClaimed(ticket: TicketLike): boolean {
@@ -370,6 +367,33 @@ function getRecommendedActions(ticket: TicketLike): string[] {
   return actions;
 }
 
+function HeaderChip({
+  label,
+  tone = "",
+}: {
+  label: string;
+  tone?: string;
+}) {
+  return <span className={`badge ${tone}`.trim()}>{label}</span>;
+}
+
+function SnapshotItem({
+  label,
+  value,
+  full = false,
+}: {
+  label: string;
+  value: ReactNode;
+  full?: boolean;
+}) {
+  return (
+    <div className={`ticket-controls-info-card ${full ? "full-width" : ""}`}>
+      <div className="ticket-info-label">{label}</div>
+      <div className="ticket-controls-mini-value">{value}</div>
+    </div>
+  );
+}
+
 function ActionAccordion({
   title,
   subtitle,
@@ -407,15 +431,11 @@ function ActionAccordion({
 
         <div className="ticket-action-accordion-side">
           {badge}
-          <span className={`ticket-action-chevron ${open ? "open" : ""}`}>
-            ⌄
-          </span>
+          <span className={`ticket-action-chevron ${open ? "open" : ""}`}>⌄</span>
         </div>
       </button>
 
-      {open ? (
-        <div className="ticket-action-accordion-body">{children}</div>
-      ) : null}
+      {open ? <div className="ticket-action-accordion-body">{children}</div> : null}
     </div>
   );
 }
@@ -457,6 +477,10 @@ export default function TicketControls({
   className = "",
   onChanged,
 }: TicketControlsProps) {
+  const normalizedCurrentStaffId = useMemo(
+    () => normalizeString(currentStaffId),
+    [currentStaffId]
+  );
   const channelId = useMemo(() => getChannelId(ticket), [ticket]);
   const ticketId = useMemo(() => normalizeString(ticket?.id), [ticket]);
 
@@ -469,9 +493,9 @@ export default function TicketControls({
     const unclaimed = ticketIsUnclaimed(ticket);
     const claimedById = getClaimedById(ticket);
     const mine =
-      Boolean(currentStaffId) &&
+      Boolean(normalizedCurrentStaffId) &&
       claimed &&
-      claimedById === normalizeString(currentStaffId);
+      claimedById === normalizedCurrentStaffId;
 
     const transcript = getTranscriptState(ticket);
     const missingChannel = !getChannelId(ticket);
@@ -528,7 +552,7 @@ export default function TicketControls({
       manualCategory,
       shouldOfferVerificationLink,
     };
-  }, [ticket, currentStaffId]);
+  }, [ticket, normalizedCurrentStaffId]);
 
   const [actionState, setActionState] = useState<ActionState>("idle");
   const [error, setError] = useState("");
@@ -638,19 +662,19 @@ export default function TicketControls({
   const claimDisabled =
     busy ||
     !ticketId ||
-    !currentStaffId ||
+    !normalizedCurrentStaffId ||
     derived.deleted ||
     (derived.claimed && !derived.mine);
 
   const unclaimDisabled =
     busy ||
     !ticketId ||
-    !currentStaffId ||
+    !normalizedCurrentStaffId ||
     derived.deleted ||
     !derived.claimed;
 
   const closeDisabled = busy || !ticketId || derived.deleted || derived.closed;
-  const reopenDisabled = busy || !ticketId || derived.deleted || derived.open;
+  const reopenDisabled = busy || !ticketId || derived.deleted || !derived.closed;
   const deleteDisabled = busy || !ticketId || derived.deleted;
   const syncDisabled = busy || !channelId;
   const saveCategoryDisabled =
@@ -711,7 +735,7 @@ export default function TicketControls({
   }
 
   async function handleClaim() {
-    if (!ticketId || !currentStaffId) {
+    if (!ticketId || !normalizedCurrentStaffId) {
       setError("Missing ticket ID or current staff ID.");
       return;
     }
@@ -742,7 +766,7 @@ export default function TicketControls({
   }
 
   async function handleUnclaim() {
-    if (!ticketId || !currentStaffId) {
+    if (!ticketId || !normalizedCurrentStaffId) {
       setError("Missing ticket ID or current staff ID.");
       return;
     }
@@ -774,8 +798,8 @@ export default function TicketControls({
       await postJson("/api/tickets/sync-one", {
         channel_id: channelId,
         dry_run: dryRun,
-        requested_by: currentStaffId ?? null,
-        staff_id: currentStaffId ?? null,
+        requested_by: normalizedCurrentStaffId || null,
+        staff_id: normalizedCurrentStaffId || null,
       });
 
       setMessage(
@@ -850,12 +874,13 @@ export default function TicketControls({
     try {
       await postJson(`/api/tickets/${encodeURIComponent(ticketId)}/delete`, {
         reason: deleteReason.trim() || "Deleted from dashboard",
+        force_transcript: forceTranscript,
       });
 
       setMessage(
         derived.ghost
           ? forceTranscript
-            ? "Ghost ticket deleted with transcript metadata recorded."
+            ? "Ghost ticket deleted with transcript intent recorded."
             : "Ghost ticket deleted."
           : "Ticket deleted."
       );
@@ -933,7 +958,7 @@ export default function TicketControls({
           category_id: selectedCategory.id,
           category: selectedCategory.slug || selectedCategory.name,
           category_override: true,
-          category_set_by: currentStaffId ?? "",
+          category_set_by: normalizedCurrentStaffId || "",
         }),
       });
 
@@ -1012,7 +1037,8 @@ export default function TicketControls({
         },
         body: JSON.stringify({
           action: "link-verification-context",
-          category_id: categoryToUse?.id || ticket.category_id || ticket.matched_category_id || null,
+          category_id:
+            categoryToUse?.id || ticket.category_id || ticket.matched_category_id || null,
           category:
             categoryToUse?.slug ||
             categoryToUse?.name ||
@@ -1022,7 +1048,8 @@ export default function TicketControls({
           verification_source: "dashboard_manual_category_override",
           entry_method: "verification_ticket",
           entry_reason: "Verification context linked from dashboard ticket controls.",
-          approval_reason: "Dashboard staff linked verification context after category review.",
+          approval_reason:
+            "Dashboard staff linked verification context after category review.",
         }),
       });
 
@@ -1050,48 +1077,61 @@ export default function TicketControls({
           <div style={{ minWidth: 0, flex: 1 }}>
             <div className="ticket-controls-header-title">Ticket Actions</div>
             <div className="muted ticket-controls-header-copy">
-              Claim, transfer, sync, close, reopen, delete, transcript export,
-              and category correction in one fast workflow.
+              Fast moderation workflow for assignment, repair, routing, transcript
+              handling, and lifecycle actions.
             </div>
           </div>
 
           <div className="ticket-controls-status-row">
-            <span className={`badge ${getStatusTone(ticket.status)}`}>
-              {safeText(ticket.status, "unknown")}
-            </span>
-            <span
-              className={`badge ${
-                derived.unclaimed ? "open" : derived.claimed ? "claimed" : ""
-              }`}
-            >
-              {derived.queueStateLabel}
-            </span>
-            <span className={`badge ${getStatusTone(derived.verificationLabel)}`}>
-              {safeText(derived.verificationLabel)}
-            </span>
-            <span className={`badge ${getStatusTone(derived.riskLevel)}`}>
-              {safeText(derived.riskLevel)}
-            </span>
-            <span className={`badge ${getStatusTone(derived.priority)}`}>
-              {safeText(derived.priority)}
-            </span>
-            {derived.overdue ? <span className="badge danger">Overdue</span> : null}
-            {derived.mine ? <span className="badge claimed">Mine</span> : null}
-            {derived.ghost ? <span className="badge">Ghost</span> : null}
+            <HeaderChip
+              label={safeText(ticket.status, "unknown")}
+              tone={getStatusTone(ticket.status)}
+            />
+            <HeaderChip
+              label={derived.queueStateLabel}
+              tone={derived.unclaimed ? "open" : derived.claimed ? "claimed" : ""}
+            />
+            <HeaderChip
+              label={safeText(derived.verificationLabel)}
+              tone={getStatusTone(derived.verificationLabel)}
+            />
+            <HeaderChip
+              label={safeText(derived.riskLevel)}
+              tone={getStatusTone(derived.riskLevel)}
+            />
+            <HeaderChip
+              label={safeText(derived.priority)}
+              tone={getStatusTone(derived.priority)}
+            />
+            {derived.overdue ? <HeaderChip label="Overdue" tone="danger" /> : null}
+            {derived.mine ? <HeaderChip label="Mine" tone="claimed" /> : null}
+            {derived.ghost ? <HeaderChip label="Ghost" /> : null}
             {derived.hasTranscript ? (
-              <span className="badge claimed">Transcript</span>
+              <HeaderChip label="Transcript" tone="claimed" />
             ) : (
-              <span className="badge">No Transcript</span>
+              <HeaderChip label="No Transcript" />
             )}
             {derived.missingChannel ? (
-              <span className="badge danger">Missing Channel</span>
+              <HeaderChip label="Missing Channel" tone="danger" />
             ) : null}
             {derived.manualCategory ? (
-              <span className="badge medium">Manual Category</span>
+              <HeaderChip label="Manual Category" tone="medium" />
             ) : (
-              <span className="badge">Auto Category</span>
+              <HeaderChip label="Auto Category" />
             )}
           </div>
+        </div>
+
+        <div className="ticket-controls-summary-grid">
+          <SnapshotItem label="Member" value={derived.ownerLabel} />
+          <SnapshotItem label="Claimed By" value={derived.claimedBy} />
+          <SnapshotItem label="Entry Method" value={derived.entryMethodLabel} />
+          <SnapshotItem label="Current Category" value={derived.currentCategoryName} />
+          <SnapshotItem label="Latest Activity" value={derived.latestActivityTitle} />
+          <SnapshotItem
+            label="Notes / Warns / Flags"
+            value={`${derived.noteCount} / ${derived.warnCount} / ${derived.flagCount}`}
+          />
         </div>
 
         <div className="ticket-primary-actions">
@@ -1177,201 +1217,78 @@ export default function TicketControls({
 
       <ActionAccordion
         title="Workflow Snapshot"
-        subtitle="The minimum context staff need before taking action."
+        subtitle="Critical context first, without making staff dig."
         badge={<span className="badge open">Live</span>}
         open={openPanels.workflow}
         onToggle={() => togglePanel("workflow")}
       >
         <div className="ticket-controls-info-grid">
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Member</div>
-            <div className="ticket-controls-mini-value">{derived.ownerLabel}</div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Claimed By</div>
-            <div className="ticket-controls-mini-value">{derived.claimedBy}</div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Claimed By ID</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(derived.claimedById, "—")}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Queue State</div>
-            <div className="ticket-controls-mini-value">
-              {derived.queueStateLabel}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Verification</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(derived.verificationLabel)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Entry Method</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(derived.entryMethodLabel)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Channel ID</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(channelId, "Missing")}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Transcript State</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(derived.transcriptState)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Priority</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(derived.priority)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Risk Level</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(derived.riskLevel)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Warn Count</div>
-            <div className="ticket-controls-mini-value">
-              {String(derived.warnCount)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Flag Count</div>
-            <div className="ticket-controls-mini-value">
-              {String(derived.flagCount)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Past Tickets</div>
-            <div className="ticket-controls-mini-value">
-              {String(derived.priorTickets)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Role State</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(derived.roleState)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Invited By</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(derived.invitedBy)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Vouched By</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(derived.vouchedBy)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Approved By</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(derived.approvedBy)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Source</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(ticket.source)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Ghost Ticket</div>
-            <div className="ticket-controls-mini-value">
-              {derived.ghost ? "Yes" : "No"}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Latest Activity</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(derived.latestActivityTitle)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Latest Activity At</div>
-            <div className="ticket-controls-mini-value">
-              {formatDateTime(derived.latestActivityAt)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Latest Note</div>
-            <div className="ticket-controls-mini-value">
-              {derived.latestNoteStaff === "—" && !derived.latestNoteAt
+          <SnapshotItem label="Member" value={derived.ownerLabel} />
+          <SnapshotItem label="Queue State" value={derived.queueStateLabel} />
+          <SnapshotItem label="Claimed By" value={derived.claimedBy} />
+          <SnapshotItem
+            label="Claimed By ID"
+            value={safeText(derived.claimedById, "—")}
+          />
+          <SnapshotItem label="Verification" value={safeText(derived.verificationLabel)} />
+          <SnapshotItem label="Entry Method" value={safeText(derived.entryMethodLabel)} />
+          <SnapshotItem label="Priority" value={safeText(derived.priority)} />
+          <SnapshotItem label="Risk Level" value={safeText(derived.riskLevel)} />
+          <SnapshotItem label="Warn Count" value={String(derived.warnCount)} />
+          <SnapshotItem label="Flag Count" value={String(derived.flagCount)} />
+          <SnapshotItem label="Past Tickets" value={String(derived.priorTickets)} />
+          <SnapshotItem label="Role State" value={safeText(derived.roleState)} />
+          <SnapshotItem label="Invited By" value={safeText(derived.invitedBy)} />
+          <SnapshotItem label="Vouched By" value={safeText(derived.vouchedBy)} />
+          <SnapshotItem label="Approved By" value={safeText(derived.approvedBy)} />
+          <SnapshotItem label="Source" value={safeText(ticket.source)} />
+          <SnapshotItem label="Ghost Ticket" value={derived.ghost ? "Yes" : "No"} />
+          <SnapshotItem
+            label="Channel ID"
+            value={safeText(channelId, "Missing")}
+          />
+          <SnapshotItem
+            label="Transcript State"
+            value={safeText(derived.transcriptState)}
+          />
+          <SnapshotItem
+            label="Latest Activity"
+            value={safeText(derived.latestActivityTitle)}
+          />
+          <SnapshotItem
+            label="Latest Activity At"
+            value={formatDateTime(derived.latestActivityAt)}
+          />
+          <SnapshotItem
+            label="Latest Note"
+            value={
+              derived.latestNoteStaff === "—" && !derived.latestNoteAt
                 ? "—"
                 : `${safeText(derived.latestNoteStaff)} • ${formatDateTime(
                     derived.latestNoteAt
-                  )}`}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Note Count</div>
-            <div className="ticket-controls-mini-value">
-              {String(derived.noteCount)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Closed At</div>
-            <div className="ticket-controls-mini-value">
-              {formatDateTime(ticket.closed_at)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Deleted At</div>
-            <div className="ticket-controls-mini-value">
-              {formatDateTime(ticket.deleted_at)}
-            </div>
-          </div>
-
-          <div className="member-detail-item full-width">
-            <div className="ticket-info-label">Recommended Actions</div>
-            <div className="ticket-controls-action-pills">
-              {derived.recommendedActions.length ? (
-                derived.recommendedActions.map((action) => (
-                  <span key={action} className="ticket-mini-pill">
-                    {action}
-                  </span>
-                ))
+                  )}`
+            }
+          />
+          <SnapshotItem label="Note Count" value={String(derived.noteCount)} />
+          <SnapshotItem label="Closed At" value={formatDateTime(ticket.closed_at)} />
+          <SnapshotItem label="Deleted At" value={formatDateTime(ticket.deleted_at)} />
+          <SnapshotItem
+            label="Recommended Actions"
+            value={
+              derived.recommendedActions.length ? (
+                <div className="ticket-controls-action-pills">
+                  {derived.recommendedActions.map((action) => (
+                    <span key={action} className="ticket-mini-pill">
+                      {action}
+                    </span>
+                  ))}
+                </div>
               ) : (
-                <span className="ticket-controls-mini-value">No suggestions.</span>
-              )}
-            </div>
-          </div>
+                "No suggestions."
+              )
+            }
+            full
+          />
         </div>
 
         <div className="ticket-controls-actions">
@@ -1412,7 +1329,7 @@ export default function TicketControls({
 
       <ActionAccordion
         title="Repair / Sync Ticket"
-        subtitle="Re-sync this single ticket row against live Discord state."
+        subtitle="Re-sync just this ticket against live Discord state."
         badge={
           derived.missingChannel ? (
             <span className="badge danger">Needs Repair</span>
@@ -1424,47 +1341,15 @@ export default function TicketControls({
         onToggle={() => togglePanel("repair")}
       >
         <div className="ticket-controls-info-grid" style={{ marginBottom: 12 }}>
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Channel ID</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(channelId, "Missing")}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Queue State</div>
-            <div className="ticket-controls-mini-value">
-              {derived.queueStateLabel}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Current Status</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(ticket.status, "unknown")}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Missing Channel</div>
-            <div className="ticket-controls-mini-value">
-              {derived.missingChannel ? "Yes" : "No"}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Transcript State</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(derived.transcriptState)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Closed / Deleted</div>
-            <div className="ticket-controls-mini-value">
-              {derived.deleted ? "Deleted" : derived.closed ? "Closed" : "Active"}
-            </div>
-          </div>
+          <SnapshotItem label="Channel ID" value={safeText(channelId, "Missing")} />
+          <SnapshotItem label="Queue State" value={derived.queueStateLabel} />
+          <SnapshotItem label="Current Status" value={safeText(ticket.status, "unknown")} />
+          <SnapshotItem label="Missing Channel" value={derived.missingChannel ? "Yes" : "No"} />
+          <SnapshotItem label="Transcript State" value={safeText(derived.transcriptState)} />
+          <SnapshotItem
+            label="Closed / Deleted"
+            value={derived.deleted ? "Deleted" : derived.closed ? "Closed" : "Active"}
+          />
         </div>
 
         <div className="ticket-controls-actions">
@@ -1497,7 +1382,7 @@ export default function TicketControls({
 
       <ActionAccordion
         title="Category Override"
-        subtitle="Correct a bad match, clear a manual override, or link verification context."
+        subtitle="Fix a bad match, clear a manual override, or link verification context."
         badge={
           derived.manualCategory ? (
             <span className="badge claimed">Manual Override</span>
@@ -1509,47 +1394,12 @@ export default function TicketControls({
         onToggle={() => togglePanel("category")}
       >
         <div className="ticket-controls-info-grid" style={{ marginBottom: 12 }}>
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Current Category</div>
-            <div className="ticket-controls-mini-value">
-              {derived.currentCategoryName}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Current Slug</div>
-            <div className="ticket-controls-mini-value">
-              {derived.currentCategorySlug}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Matched Intake Type</div>
-            <div className="ticket-controls-mini-value">
-              {derived.currentIntakeType}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Matched Score</div>
-            <div className="ticket-controls-mini-value">
-              {String(derived.currentCategoryScore || 0)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Current Reason</div>
-            <div className="ticket-controls-mini-value">
-              {derived.currentCategoryReason}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Override Set At</div>
-            <div className="ticket-controls-mini-value">
-              {formatDateTime(ticket?.category_set_at)}
-            </div>
-          </div>
+          <SnapshotItem label="Current Category" value={derived.currentCategoryName} />
+          <SnapshotItem label="Current Slug" value={derived.currentCategorySlug} />
+          <SnapshotItem label="Matched Intake Type" value={derived.currentIntakeType} />
+          <SnapshotItem label="Matched Score" value={String(derived.currentCategoryScore || 0)} />
+          <SnapshotItem label="Current Reason" value={derived.currentCategoryReason} />
+          <SnapshotItem label="Override Set At" value={formatDateTime(ticket?.category_set_at)} />
         </div>
 
         {categoryLoadError ? (
@@ -1590,50 +1440,29 @@ export default function TicketControls({
 
         {selectedCategory ? (
           <div className="ticket-controls-info-grid" style={{ marginTop: 12 }}>
-            <div className="member-detail-item">
-              <div className="ticket-info-label">Selected Name</div>
-              <div className="ticket-controls-mini-value">
-                {safeText(selectedCategory.name)}
-              </div>
-            </div>
-
-            <div className="member-detail-item">
-              <div className="ticket-info-label">Selected Slug</div>
-              <div className="ticket-controls-mini-value">
-                {safeText(selectedCategory.slug)}
-              </div>
-            </div>
-
-            <div className="member-detail-item">
-              <div className="ticket-info-label">Selected Intake Type</div>
-              <div className="ticket-controls-mini-value">
-                {safeText(selectedCategory.intake_type)}
-              </div>
-            </div>
-
-            <div className="member-detail-item">
-              <div className="ticket-info-label">Default Category</div>
-              <div className="ticket-controls-mini-value">
-                {selectedCategory.is_default ? "Yes" : "No"}
-              </div>
-            </div>
-
-            <div className="member-detail-item">
-              <div className="ticket-info-label">Selected Description</div>
-              <div className="ticket-controls-mini-value">
-                {safeText(selectedCategory.description)}
-              </div>
-            </div>
-
-            <div className="member-detail-item">
-              <div className="ticket-info-label">Keywords</div>
-              <div className="ticket-controls-mini-value">
-                {Array.isArray(selectedCategory.match_keywords) &&
+            <SnapshotItem label="Selected Name" value={safeText(selectedCategory.name)} />
+            <SnapshotItem label="Selected Slug" value={safeText(selectedCategory.slug)} />
+            <SnapshotItem
+              label="Selected Intake Type"
+              value={safeText(selectedCategory.intake_type)}
+            />
+            <SnapshotItem
+              label="Default Category"
+              value={selectedCategory.is_default ? "Yes" : "No"}
+            />
+            <SnapshotItem
+              label="Selected Description"
+              value={safeText(selectedCategory.description)}
+            />
+            <SnapshotItem
+              label="Keywords"
+              value={
+                Array.isArray(selectedCategory.match_keywords) &&
                 selectedCategory.match_keywords.length
                   ? selectedCategory.match_keywords.join(" • ")
-                  : "—"}
-              </div>
-            </div>
+                  : "—"
+              }
+            />
           </div>
         ) : null}
 
@@ -1644,9 +1473,7 @@ export default function TicketControls({
             disabled={clearCategoryDisabled}
             onClick={handleClearCategoryOverride}
           >
-            {actionState === "clearing-category"
-              ? "Clearing..."
-              : "Clear Override"}
+            {actionState === "clearing-category" ? "Clearing..." : "Clear Override"}
           </button>
 
           <button
@@ -1664,8 +1491,8 @@ export default function TicketControls({
         {derived.shouldOfferVerificationLink ? (
           <div className="info-banner">
             This category looks verification-related. If staff manually routed it
-            to verification, you can also link verification context so member/join
-            records stay consistent.
+            to verification, you can also link verification context so member and
+            join records stay consistent.
           </div>
         ) : null}
       </ActionAccordion>
@@ -1678,17 +1505,11 @@ export default function TicketControls({
         onToggle={() => togglePanel("transfer")}
       >
         <div className="ticket-controls-info-grid" style={{ marginBottom: 12 }}>
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Current Owner</div>
-            <div className="ticket-controls-mini-value">{derived.claimedBy}</div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Current Owner ID</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(derived.claimedById, "Unclaimed")}
-            </div>
-          </div>
+          <SnapshotItem label="Current Owner" value={derived.claimedBy} />
+          <SnapshotItem
+            label="Current Owner ID"
+            value={safeText(derived.claimedById, "Unclaimed")}
+          />
         </div>
 
         <input
@@ -1731,10 +1552,10 @@ export default function TicketControls({
         onToggle={() => togglePanel("transcript")}
       >
         <div className="ticket-controls-info-grid">
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Transcript URL</div>
-            <div className="ticket-controls-mini-value">
-              {derived.transcriptUrl ? (
+          <SnapshotItem
+            label="Transcript URL"
+            value={
+              derived.transcriptUrl ? (
                 <a
                   href={derived.transcriptUrl}
                   target="_blank"
@@ -1745,58 +1566,25 @@ export default function TicketControls({
                 </a>
               ) : (
                 "—"
-              )}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Transcript Message ID</div>
-            <div className="ticket-controls-mini-value">
-              {derived.transcriptMessageId || "—"}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Transcript Channel ID</div>
-            <div className="ticket-controls-mini-value">
-              {derived.transcriptChannelId || "—"}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Closed By</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(ticket.closed_by)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Closed At</div>
-            <div className="ticket-controls-mini-value">
-              {formatDateTime(ticket.closed_at)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Closed Reason</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(ticket.closed_reason)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Deleted By</div>
-            <div className="ticket-controls-mini-value">
-              {safeText(ticket.deleted_by_name || ticket.deleted_by)}
-            </div>
-          </div>
-
-          <div className="member-detail-item">
-            <div className="ticket-info-label">Deleted At</div>
-            <div className="ticket-controls-mini-value">
-              {formatDateTime(ticket.deleted_at)}
-            </div>
-          </div>
+              )
+            }
+          />
+          <SnapshotItem
+            label="Transcript Message ID"
+            value={derived.transcriptMessageId || "—"}
+          />
+          <SnapshotItem
+            label="Transcript Channel ID"
+            value={derived.transcriptChannelId || "—"}
+          />
+          <SnapshotItem label="Closed By" value={safeText(ticket.closed_by)} />
+          <SnapshotItem label="Closed At" value={formatDateTime(ticket.closed_at)} />
+          <SnapshotItem label="Closed Reason" value={safeText(ticket.closed_reason)} />
+          <SnapshotItem
+            label="Deleted By"
+            value={safeText(ticket.deleted_by_name || ticket.deleted_by)}
+          />
+          <SnapshotItem label="Deleted At" value={formatDateTime(ticket.deleted_at)} />
         </div>
 
         <div className="ticket-controls-actions">
@@ -2032,9 +1820,26 @@ export default function TicketControls({
           align-items: center;
         }
 
+        .ticket-controls-summary-grid {
+          display: grid;
+          grid-template-columns: repeat(6, minmax(0, 1fr));
+          gap: 10px;
+          margin-bottom: 12px;
+        }
+
+        .ticket-controls-info-card {
+          padding: 12px;
+          border-radius: 16px;
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          background:
+            radial-gradient(circle at top right, rgba(255, 255, 255, 0.04), transparent 42%),
+            rgba(255, 255, 255, 0.02);
+          min-width: 0;
+        }
+
         .ticket-primary-actions {
           display: grid;
-          grid-template-columns: repeat(8, minmax(0, 1fr));
+          grid-template-columns: repeat(4, minmax(0, 1fr));
           gap: 10px;
         }
 
@@ -2194,6 +1999,10 @@ export default function TicketControls({
         }
 
         @media (max-width: ${MOBILE_LAYOUT_MAX_WIDTH}px) {
+          .ticket-controls-summary-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
           .ticket-primary-actions {
             grid-template-columns: repeat(2, minmax(0, 1fr));
           }
@@ -2214,13 +2023,10 @@ export default function TicketControls({
             min-width: 0;
             text-align: center;
           }
-
-          .full-width {
-            grid-column: auto;
-          }
         }
 
         @media (max-width: 520px) {
+          .ticket-controls-summary-grid,
           .ticket-primary-actions {
             grid-template-columns: 1fr;
           }
