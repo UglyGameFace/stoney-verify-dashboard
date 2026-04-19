@@ -16,6 +16,13 @@ function normalizeText(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function prettyLabel(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
 function getInitials(name) {
   const text = String(name || "").trim();
   if (!text) return "•";
@@ -26,11 +33,16 @@ function getInitials(name) {
   return parts.map((p) => p[0]?.toUpperCase() || "").join("");
 }
 
-function prettyLabel(value) {
-  return String(value || "")
-    .trim()
-    .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, (m) => m.toUpperCase());
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function getMeta(event) {
+  return event?.meta && typeof event.meta === "object" ? event.meta : {};
 }
 
 function decimalStringMod(value, mod) {
@@ -456,14 +468,108 @@ function FilterExplainCard({ title, description, tone = "neutral" }) {
   );
 }
 
+function getActorName(event) {
+  const meta = getMeta(event);
+
+  return firstNonEmpty(
+    event?.actor_name,
+    event?.actor_display_name,
+    meta?.actor_name,
+    meta?.actor_display_name,
+    meta?.staff_name,
+    event?.staff_name,
+    "System"
+  );
+}
+
+function getTargetName(event) {
+  const meta = getMeta(event);
+
+  return firstNonEmpty(
+    event?.target_name,
+    meta?.target_name,
+    meta?.member_name,
+    meta?.owner_name,
+    ""
+  );
+}
+
+function buildIdentityText(name, id) {
+  const cleanName = String(name || "").trim();
+  const cleanId = String(id || "").trim();
+
+  if (!cleanName && !cleanId) return "";
+  if (!cleanId) return cleanName;
+  if (!cleanName) return cleanId;
+
+  if (cleanName.includes(cleanId)) return cleanName;
+
+  return `${cleanName} (${cleanId})`;
+}
+
+function isSameIdentity(event) {
+  const actorId = String(event?.actor_id || "").trim();
+  const targetId = String(event?.target_user_id || "").trim();
+  const actorName = normalizeText(getActorName(event));
+  const targetName = normalizeText(getTargetName(event));
+
+  if (actorId && targetId && actorId === targetId) return true;
+  if (actorName && targetName && actorName === targetName) return true;
+
+  return false;
+}
+
+function getVisibleDescription(event) {
+  const raw = String(event?.description || "").trim();
+  const eventType = prettyLabel(event?.event_type || event?.title || "activity");
+  const actorName = normalizeText(getActorName(event));
+  const targetName = normalizeText(getTargetName(event));
+  const rawNorm = normalizeText(raw);
+
+  if (!raw) {
+    return `Performed ${eventType}.`;
+  }
+
+  const mostlyDuplicate =
+    (actorName && rawNorm.includes(actorName)) ||
+    (targetName && rawNorm.includes(targetName));
+
+  if (mostlyDuplicate && raw.length > 70) {
+    return `Performed ${eventType}.`;
+  }
+
+  return raw;
+}
+
+function getAvatarCandidates(event) {
+  const meta = getMeta(event);
+
+  return [
+    event?.actor_avatar_url,
+    event?.actorAvatarUrl,
+    event?.avatar_url,
+    event?.avatarUrl,
+    meta?.actor_avatar_url,
+    meta?.actorAvatarUrl,
+    meta?.avatar_url,
+    meta?.avatarUrl,
+    isSameIdentity(event) ? event?.target_avatar_url : "",
+    isSameIdentity(event) ? meta?.target_avatar_url : "",
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+}
+
 function TimelineAvatar({ event, actorName }) {
-  const explicitAvatar = String(event?.actor_avatar_url || "").trim();
-  const fallbackDiscordAvatar = getDiscordDefaultAvatarUrl(event?.actor_id);
-  const [src, setSrc] = useState(explicitAvatar || fallbackDiscordAvatar || "");
+  const actorId = String(event?.actor_id || "").trim();
+  const fallbackDiscordAvatar = getDiscordDefaultAvatarUrl(actorId);
+  const candidates = getAvatarCandidates(event);
+  const preferred = candidates[0] || fallbackDiscordAvatar || "";
+  const [src, setSrc] = useState(preferred);
 
   useEffect(() => {
-    setSrc(explicitAvatar || fallbackDiscordAvatar || "");
-  }, [explicitAvatar, fallbackDiscordAvatar]);
+    setSrc(preferred);
+  }, [preferred]);
 
   if (src) {
     return (
@@ -471,10 +577,18 @@ function TimelineAvatar({ event, actorName }) {
         src={src}
         alt={actorName || "Actor"}
         onError={() => {
+          const nextCandidate = candidates.find((candidate) => candidate && candidate !== src);
+
+          if (nextCandidate) {
+            setSrc(nextCandidate);
+            return;
+          }
+
           if (src !== fallbackDiscordAvatar && fallbackDiscordAvatar) {
             setSrc(fallbackDiscordAvatar);
             return;
           }
+
           setSrc("");
         }}
         style={{
@@ -527,13 +641,18 @@ function TimelineAvatar({ event, actorName }) {
 
 function TimelineCard({ event, expanded, onToggle }) {
   const accent = getEventAccent(event);
-  const actorName = safeText(event?.actor_name, "");
-  const targetName = safeText(event?.target_name, "");
-  const meta = event?.meta && typeof event.meta === "object" ? event.meta : {};
+  const actorName = getActorName(event);
+  const targetName = getTargetName(event);
+  const meta = getMeta(event);
   const familyTone = familyMeta(event?.event_family).tone;
   const sourceTone = sourceMeta(event?.source).tone;
   const familyColors = getToneColors(familyTone);
   const sourceColors = getToneColors(sourceTone);
+
+  const actorLine = buildIdentityText(actorName, event?.actor_id);
+  const targetLine = buildIdentityText(targetName, event?.target_user_id);
+  const sameIdentity = isSameIdentity(event);
+  const visibleDescription = getVisibleDescription(event);
 
   return (
     <div
@@ -609,7 +728,7 @@ function TimelineCard({ event, expanded, onToggle }) {
           ) : null}
         </div>
 
-        {actorName ? (
+        {actorLine ? (
           <div
             className="muted"
             style={{
@@ -618,12 +737,11 @@ function TimelineCard({ event, expanded, onToggle }) {
               overflowWrap: "anywhere",
             }}
           >
-            By {actorName}
-            {event?.actor_id ? ` • ${event.actor_id}` : ""}
+            By {actorLine}
           </div>
         ) : null}
 
-        {targetName ? (
+        {targetLine && !sameIdentity ? (
           <div
             className="muted"
             style={{
@@ -632,8 +750,7 @@ function TimelineCard({ event, expanded, onToggle }) {
               overflowWrap: "anywhere",
             }}
           >
-            Target: {targetName}
-            {event?.target_user_id ? ` • ${event.target_user_id}` : ""}
+            Target: {targetLine}
           </div>
         ) : null}
 
@@ -645,7 +762,7 @@ function TimelineCard({ event, expanded, onToggle }) {
             wordBreak: "break-word",
           }}
         >
-          {safeText(event?.description, "No description provided.")}
+          {visibleDescription}
         </div>
 
         <div
@@ -731,19 +848,11 @@ function TimelineCard({ event, expanded, onToggle }) {
             />
             <TimelineDetailRow
               label="Actor"
-              value={
-                actorName || event?.actor_id
-                  ? `${actorName || "Unknown"}${event?.actor_id ? ` (${event.actor_id})` : ""}`
-                  : ""
-              }
+              value={actorLine}
             />
             <TimelineDetailRow
               label="Target"
-              value={
-                targetName || event?.target_user_id
-                  ? `${targetName || "Unknown"}${event?.target_user_id ? ` (${event.target_user_id})` : ""}`
-                  : ""
-              }
+              value={!sameIdentity ? targetLine : "Same as actor"}
             />
             <TimelineDetailRow
               label="Channel"
