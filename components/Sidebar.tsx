@@ -23,6 +23,12 @@ const links: SidebarLink[] = [
     icon: "🛠️",
     match: "startsWith",
   },
+  {
+    href: "/ticket-forms",
+    label: "Ticket Forms",
+    icon: "📝",
+    match: "startsWith",
+  },
 ];
 
 function normalizeString(value: unknown): string {
