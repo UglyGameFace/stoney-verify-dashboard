@@ -2,6 +2,18 @@ const fs = require("fs")
 const path = require("path")
 const { Client } = require("pg")
 
+function migrationFiles() {
+  const dir = path.join(process.cwd(), "supabase")
+  const primary = path.join(dir, "schema.sql")
+  const extras = fs
+    .readdirSync(dir)
+    .filter((name) => name.endsWith(".sql") && name !== "schema.sql")
+    .sort()
+    .map((name) => path.join(dir, name))
+
+  return [primary, ...extras]
+}
+
 async function main() {
   const dbUrl = process.env.SUPABASE_DB_URL
   if (!dbUrl) {
@@ -9,13 +21,16 @@ async function main() {
     process.exit(1)
   }
 
-  const sqlPath = path.join(process.cwd(), "supabase", "schema.sql")
-  const sql = fs.readFileSync(sqlPath, "utf8")
+  const files = migrationFiles()
   const client = new Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } })
 
   try {
     await client.connect()
-    await client.query(sql)
+    for (const file of files) {
+      const sql = fs.readFileSync(file, "utf8")
+      await client.query(sql)
+      console.log(`Applied migration: ${path.relative(process.cwd(), file)}`)
+    }
     console.log("Migration completed successfully.")
   } catch (error) {
     console.error("Migration failed:")
