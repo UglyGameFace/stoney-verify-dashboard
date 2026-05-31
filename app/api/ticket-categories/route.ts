@@ -19,6 +19,18 @@ type RefreshedTokens = {
 
 type JsonRecord = Record<string, unknown>;
 
+type TicketFormQuestion = {
+  key?: string | null;
+  label?: string | null;
+  question?: string | null;
+  placeholder?: string | null;
+  description?: string | null;
+  required?: boolean | null;
+  style?: string | null;
+  type?: string | null;
+  max_length?: number | null;
+};
+
 type SessionLike = {
   user?: {
     discord_id?: string | null;
@@ -46,6 +58,11 @@ type TicketCategoryRow = {
   sort_order?: number | null;
   is_default?: boolean | null;
   created_at?: string | null;
+  form_enabled?: boolean | null;
+  form_questions?: TicketFormQuestion[] | null;
+  form_config?: JsonRecord | null;
+  form_updated_at?: string | null;
+  form_updated_by?: string | null;
 };
 
 type TicketRow = {
@@ -158,6 +175,8 @@ const ALLOWED_INTAKE_TYPES = new Set([
   "custom",
 ]);
 
+const ALLOWED_FORM_STYLES = new Set(["short", "paragraph"]);
+
 function normalizeString(value: unknown): string {
   return String(value || "").trim();
 }
@@ -231,6 +250,60 @@ function parseSortOrder(value: unknown): number | null {
   return Number.isFinite(num) ? num : null;
 }
 
+function parseMaxLength(value: unknown): number {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 700;
+  return Math.max(50, Math.min(Math.round(num), 4000));
+}
+
+function normalizeFormQuestions(value: unknown): TicketFormQuestion[] {
+  const raw = Array.isArray(value) ? value : [];
+  const out: TicketFormQuestion[] = [];
+
+  for (const item of raw) {
+    const record = safeObject<JsonRecord>(item);
+    const label = normalizeString(
+      record.label || record.question || record.name || record.title
+    ).slice(0, 45);
+    if (!label) continue;
+
+    const rawStyle = normalizeLower(record.style || record.type || "paragraph");
+    const style = ALLOWED_FORM_STYLES.has(rawStyle) ? rawStyle : "paragraph";
+
+    out.push({
+      key: slugify(record.key || record.name || label).slice(0, 80),
+      label,
+      placeholder: normalizeString(
+        record.placeholder || record.description || record.help_text
+      ).slice(0, 100),
+      required: normalizeBoolean(record.required ?? true),
+      style,
+      max_length: parseMaxLength(record.max_length ?? record.maxLength),
+    });
+
+    if (out.length >= 5) break;
+  }
+
+  return out;
+}
+
+function normalizeFormConfig(value: unknown): JsonRecord {
+  const config = safeObject<JsonRecord>(value);
+  return {
+    ...config,
+    disable_default_template: normalizeBoolean(config.disable_default_template),
+    forms_disabled: normalizeBoolean(config.forms_disabled),
+  };
+}
+
+function formSettingsTouched(body: JsonRecord): boolean {
+  return (
+    Object.prototype.hasOwnProperty.call(body, "form_enabled") ||
+    Object.prototype.hasOwnProperty.call(body, "form_questions") ||
+    Object.prototype.hasOwnProperty.call(body, "form_config")
+  );
+}
+
 function containsAny(haystack: unknown, needles: string[]): boolean {
   const cleanHaystack = normalizeText(haystack);
   if (!cleanHaystack) return false;
@@ -288,7 +361,8 @@ function buildPresetKeywords(payload: Partial<TicketCategoryRow>): string[] {
 function buildCategoryPayload(
   body: JsonRecord,
   guildId: string,
-  existing?: TicketCategoryRow | null
+  existing?: TicketCategoryRow | null,
+  actorId?: string | null
 ): TicketCategoryRow {
   const existingRow = existing || {};
   const name = normalizeString(body?.name ?? existingRow?.name);
@@ -316,6 +390,20 @@ function buildCategoryPayload(
     sort_order: parseSortOrder(body?.sort_order ?? existingRow?.sort_order),
     is_default: normalizeBoolean(body?.is_default ?? existingRow?.is_default ?? false),
   };
+
+  if (formSettingsTouched(body)) {
+    basePayload.form_enabled = normalizeBoolean(
+      body?.form_enabled ?? existingRow?.form_enabled ?? false
+    );
+    basePayload.form_questions = normalizeFormQuestions(
+      body?.form_questions ?? existingRow?.form_questions ?? []
+    );
+    basePayload.form_config = normalizeFormConfig(
+      body?.form_config ?? existingRow?.form_config ?? {}
+    );
+    basePayload.form_updated_at = new Date().toISOString();
+    basePayload.form_updated_by = actorId || "dashboard";
+  }
 
   return {
     ...basePayload,
@@ -555,6 +643,9 @@ function enrichCategories(
         keyword_count: Array.isArray(category.match_keywords)
           ? category.match_keywords.length
           : 0,
+        form_question_count: Array.isArray(category.form_questions)
+          ? category.form_questions.length
+          : 0,
         usage: {
           total: stats?.total || 0,
           open: stats?.open || 0,
@@ -632,7 +723,7 @@ export async function POST(request: Request) {
       return buildErrorResponse("Missing guild id.", 500, refreshedTokens);
     }
 
-    const payload = buildCategoryPayload(body, guildId);
+    const payload = buildCategoryPayload(body, guildId, null, actorId);
 
     await assertSlugAvailable(supabase, guildId, normalizeString(payload.slug));
 
@@ -698,7 +789,7 @@ export async function PATCH(request: Request) {
       return buildErrorResponse("Category not found.", 404, refreshedTokens);
     }
 
-    const payload = buildCategoryPayload(body, guildId, existing);
+    const payload = buildCategoryPayload(body, guildId, existing, actorId);
 
     await assertSlugAvailable(
       supabase,
