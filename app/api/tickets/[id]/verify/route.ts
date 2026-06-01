@@ -4,7 +4,7 @@ import {
   requireStaffSessionForRoute,
   applyAuthCookies,
 } from "@/lib/auth-server";
-import { env } from "@/lib/env";
+import { getSelectedGuildId } from "@/lib/guild-selection";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -16,6 +16,8 @@ type RefreshedTokens = {
   refresh_token?: string;
   scope?: string;
 } | null;
+
+type JsonRecord = Record<string, unknown>;
 
 type SessionLike = {
   user?: {
@@ -51,18 +53,7 @@ type TicketRow = {
   status?: string | null;
   channel_id?: string | null;
   discord_thread_id?: string | null;
-  updated_at?: string | null;
-  closed_reason?: string | null;
-  closed_by?: string | null;
   owner_display_name?: string | null;
-  verification_ticket_id?: string | null;
-  source_ticket_id?: string | null;
-};
-
-type BotCommandInsertRow = {
-  id?: string | null;
-  status?: string | null;
-  created_at?: string | null;
 };
 
 type ExistingCommandRow = {
@@ -76,10 +67,7 @@ type RequestBody = {
   action?: string | null;
   reason?: string | null;
   role_id?: string | null;
-  staff_id?: string | null;
 };
-
-type JsonRecord = Record<string, unknown>;
 
 type MemberContextRow = {
   invited_by?: string | null;
@@ -133,7 +121,6 @@ function getSessionUser(session: SessionLike | null | undefined) {
 
 function getStaffId(session: SessionLike | null | undefined): string {
   const user = getSessionUser(session);
-
   return normalizeString(
     user?.id ||
       (user as { user_id?: string | null })?.user_id ||
@@ -160,9 +147,12 @@ function getStaffName(session: SessionLike | null | undefined): string {
       user?.username ||
       user?.name ||
       session?.discordUser?.username ||
-      env.defaultStaffName ||
       "Dashboard Staff"
   );
+}
+
+function selectedGuildId(): string {
+  return normalizeString(getSelectedGuildId());
 }
 
 function buildJsonResponse(
@@ -176,7 +166,6 @@ function buildJsonResponse(
       "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     },
   });
-
   applyAuthCookies(response, refreshedTokens);
   return response;
 }
@@ -184,9 +173,10 @@ function buildJsonResponse(
 function buildErrorResponse(
   message: string,
   status = 500,
-  refreshedTokens: RefreshedTokens = null
+  refreshedTokens: RefreshedTokens = null,
+  extra: Record<string, unknown> = {}
 ): NextResponse {
-  return buildJsonResponse({ error: message }, status, refreshedTokens);
+  return buildJsonResponse({ error: message, ...extra }, status, refreshedTokens);
 }
 
 function buildCommandAction(action: string): string {
@@ -222,7 +212,6 @@ function buildHumanMessage(action: string, username: string): string {
 function buildReason(action: string, requestedReason: unknown): string {
   const explicit = normalizeString(requestedReason);
   if (explicit) return explicit;
-
   switch (action) {
     case "deny":
       return "Denied by staff review";
@@ -250,16 +239,11 @@ function buildNoteLines(args: {
     `Staff: ${args.staffName} (${args.staffId})`,
     `Reason: ${args.reason}`,
   ];
-
-  if (args.roleId) {
-    lines.push(`Role ID: ${args.roleId}`);
-  }
-
+  if (args.roleId) lines.push(`Role ID: ${args.roleId}`);
   for (const item of args.extra) {
     const line = normalizeString(item);
     if (line) lines.push(line);
   }
-
   return lines;
 }
 
@@ -282,7 +266,7 @@ async function insertTicketNoteSafe(
     created_at: string;
   }
 ): Promise<{ ok: true } | { ok: false; error: { message?: string } | null }> {
-  const attempts = [
+  const attempts: JsonRecord[] = [
     {
       ticket_id: payload.ticket_id,
       staff_id: payload.staff_id,
@@ -293,30 +277,24 @@ async function insertTicketNoteSafe(
     {
       ticket_id: payload.ticket_id,
       staff_id: payload.staff_id,
+      staff_name: payload.staff_name,
       content: payload.content,
       created_at: payload.created_at,
     },
     {
       ticket_id: payload.ticket_id,
-      content: payload.content,
-      created_at: payload.created_at,
-    },
-    {
-      ticket_id: payload.ticket_id,
+      staff_id: payload.staff_id,
+      staff_name: payload.staff_name,
       content: payload.content,
     },
   ];
 
   let lastError: { message?: string } | null = null;
-
   for (const candidate of attempts) {
     const { error } = await supabase.from("ticket_notes").insert(candidate);
-    if (!error) {
-      return { ok: true };
-    }
+    if (!error) return { ok: true };
     lastError = error;
   }
-
   return { ok: false, error: lastError };
 }
 
@@ -397,7 +375,6 @@ async function getMemberContextSafe(
   userId: string
 ): Promise<MemberContextRow | null> {
   if (!guildId || !userId) return null;
-
   try {
     const { data, error } = await supabase
       .from("guild_members")
@@ -425,7 +402,6 @@ async function getMemberContextSafe(
       .eq("guild_id", guildId)
       .eq("user_id", userId)
       .maybeSingle();
-
     if (error || !data) return null;
     return safeObject<MemberContextRow>(data);
   } catch {
@@ -451,9 +427,7 @@ async function findPendingVerificationCommand(
       .in("status", ["pending", "processing"])
       .order("created_at", { ascending: false })
       .limit(25);
-
     if (error) return null;
-
     const rows = safeArray<ExistingCommandRow>(data);
     return (
       rows.find((row) => {
@@ -483,41 +457,15 @@ function buildVerificationCommandPayload(args: {
   memberContext: MemberContextRow | null;
 }): JsonRecord {
   const memberContext = args.memberContext || {};
-  const existingApprovedBy = normalizeString(memberContext?.approved_by);
-  const existingApprovedByName = normalizeString(memberContext?.approved_by_name);
-
-  const approvedBy =
-    args.action === "approve"
-      ? args.staffId
-      : existingApprovedBy || null;
-
-  const approvedByName =
-    args.action === "approve"
-      ? args.staffName
-      : existingApprovedByName || null;
-
-  const verificationTicketId = firstNonEmpty(
-    memberContext?.verification_ticket_id,
-    args.ticketId
-  );
-
-  const sourceTicketId = firstNonEmpty(
-    memberContext?.source_ticket_id,
-    args.ticketId
-  );
-
-  const verificationSource = firstNonEmpty(
-    memberContext?.verification_source,
-    `dashboard_ticket_verify_${args.action}`
-  );
-
+  const approvedBy = args.action === "approve" ? args.staffId : normalizeString(memberContext?.approved_by) || null;
+  const approvedByName = args.action === "approve" ? args.staffName : normalizeString(memberContext?.approved_by_name) || null;
+  const verificationTicketId = firstNonEmpty(memberContext?.verification_ticket_id, args.ticketId);
+  const sourceTicketId = firstNonEmpty(memberContext?.source_ticket_id, args.ticketId);
+  const verificationSource = firstNonEmpty(memberContext?.verification_source, `dashboard_ticket_verify_${args.action}`);
   const entryMethod = firstNonEmpty(memberContext?.entry_method, "verification");
   const joinSource = firstNonEmpty(memberContext?.join_source, entryMethod);
   const entryReason = firstNonEmpty(memberContext?.entry_reason);
-  const approvalReason = firstNonEmpty(
-    memberContext?.approval_reason,
-    args.action === "approve" ? args.reason : ""
-  );
+  const approvalReason = firstNonEmpty(memberContext?.approval_reason, args.action === "approve" ? args.reason : "");
 
   const nestedMemberSnapshot: JsonRecord = {
     invited_by: normalizeString(memberContext?.invited_by) || null,
@@ -578,107 +526,63 @@ export async function POST(
   context: { params: { id?: string } }
 ) {
   let refreshedTokens: RefreshedTokens = null;
-
   try {
     const auth = await requireStaffSessionForRoute();
     const session = auth?.session as SessionLike | undefined;
     refreshedTokens = (auth?.refreshedTokens as RefreshedTokens) ?? null;
-
-    const supabase = createServerSupabase();
-    const body = await parseRequestBody(request);
-
-    const ticketId = normalizeString(context?.params?.id);
-    if (!ticketId) {
-      return buildErrorResponse("Missing ticket id.", 400, refreshedTokens);
-    }
-
-    const action = normalizeLower(body?.action);
-    const supportedActions = new Set([
-      "approve",
-      "deny",
-      "remove_unverified",
-      "repost_verify_ui",
-    ]);
-
-    if (!supportedActions.has(action)) {
+    const guildId = selectedGuildId();
+    if (!guildId) {
       return buildErrorResponse(
-        "Unsupported verification action.",
-        400,
-        refreshedTokens
+        "Select a server before running verification actions.",
+        428,
+        refreshedTokens,
+        { needsServerSelection: true }
       );
     }
 
-    const staffId = normalizeString(body?.staff_id) || getStaffId(session);
+    const supabase = createServerSupabase();
+    const body = await parseRequestBody(request);
+    const ticketId = normalizeString(context?.params?.id);
+    if (!ticketId) return buildErrorResponse("Missing ticket id.", 400, refreshedTokens);
+
+    const action = normalizeLower(body?.action);
+    const supportedActions = new Set(["approve", "deny", "remove_unverified", "repost_verify_ui"]);
+    if (!supportedActions.has(action)) {
+      return buildErrorResponse("Unsupported verification action.", 400, refreshedTokens, { selectedGuildId: guildId });
+    }
+
+    const staffId = getStaffId(session);
     const staffName = getStaffName(session);
     const reason = buildReason(action, body?.reason);
     const roleId = normalizeString(body?.role_id);
-
-    if (!staffId) {
-      return buildErrorResponse("Missing staff identity.", 401, refreshedTokens);
-    }
+    if (!staffId) return buildErrorResponse("Missing staff identity.", 401, refreshedTokens, { selectedGuildId: guildId });
 
     const { data: ticket, error: ticketError } = await supabase
       .from("tickets")
       .select("*")
       .eq("id", ticketId)
+      .eq("guild_id", guildId)
       .single();
 
     if (ticketError || !ticket) {
-      return buildErrorResponse(
-        ticketError?.message || "Ticket not found.",
-        404,
-        refreshedTokens
-      );
+      return buildErrorResponse(ticketError?.message || "Ticket not found.", 404, refreshedTokens, { selectedGuildId: guildId });
     }
 
     const typedTicket = ticket as TicketRow;
-
-    const guildId = normalizeString(
-      env.guildId || env.discordGuildId || typedTicket?.guild_id || ""
-    );
-    if (!guildId) {
-      return buildErrorResponse(
-        "Missing Discord guild id in environment.",
-        500,
-        refreshedTokens
-      );
-    }
-
     const ticketStatus = normalizeLower(typedTicket?.status);
     if (ticketStatus === "deleted") {
-      return buildErrorResponse(
-        "Cannot run verification actions on a deleted ticket.",
-        409,
-        refreshedTokens
-      );
+      return buildErrorResponse("Cannot run verification actions on a deleted ticket.", 409, refreshedTokens, { selectedGuildId: guildId });
     }
 
     const userId = normalizeString(typedTicket?.user_id);
     if (!userId && action !== "repost_verify_ui") {
-      return buildErrorResponse(
-        "Ticket is missing user_id.",
-        400,
-        refreshedTokens
-      );
+      return buildErrorResponse("Ticket is missing user_id.", 400, refreshedTokens, { selectedGuildId: guildId });
     }
 
-    const channelId = normalizeString(
-      typedTicket?.channel_id || typedTicket?.discord_thread_id
-    );
-    const username =
-      normalizeString(typedTicket?.username) ||
-      normalizeString(typedTicket?.owner_display_name) ||
-      normalizeString(typedTicket?.title) ||
-      "member";
-
+    const channelId = normalizeString(typedTicket?.channel_id || typedTicket?.discord_thread_id);
+    const username = normalizeString(typedTicket?.username) || normalizeString(typedTicket?.owner_display_name) || normalizeString(typedTicket?.title) || "member";
     const commandAction = buildCommandAction(action);
-    if (!commandAction) {
-      return buildErrorResponse(
-        "Could not resolve verification command.",
-        400,
-        refreshedTokens
-      );
-    }
+    if (!commandAction) return buildErrorResponse("Could not resolve verification command.", 400, refreshedTokens, { selectedGuildId: guildId });
 
     const existingPending = await findPendingVerificationCommand(supabase, {
       guildId,
@@ -692,6 +596,7 @@ export async function POST(
         {
           ok: true,
           duplicate: true,
+          selectedGuildId: guildId,
           action,
           ticketId,
           commandId: normalizeString(existingPending.id) || null,
@@ -702,12 +607,8 @@ export async function POST(
       );
     }
 
-    const memberContext = userId
-      ? await getMemberContextSafe(supabase, guildId, userId)
-      : null;
-
+    const memberContext = userId ? await getMemberContextSafe(supabase, guildId, userId) : null;
     const nowIso = new Date().toISOString();
-
     const noteLines = buildNoteLines({
       action,
       staffName,
@@ -718,21 +619,11 @@ export async function POST(
         `Ticket ID: ${ticketId}`,
         channelId ? `Channel ID: ${channelId}` : "",
         userId ? `User ID: ${userId}` : "",
-        firstNonEmpty(memberContext?.entry_method)
-          ? `Entry Method: ${firstNonEmpty(memberContext?.entry_method)}`
-          : "",
-        firstNonEmpty(memberContext?.join_source)
-          ? `Join Source: ${firstNonEmpty(memberContext?.join_source)}`
-          : "",
-        firstNonEmpty(memberContext?.verification_source)
-          ? `Verification Source: ${firstNonEmpty(memberContext?.verification_source)}`
-          : "",
-        firstNonEmpty(memberContext?.invited_by_name, memberContext?.invited_by)
-          ? `Invited By: ${firstNonEmpty(memberContext?.invited_by_name, memberContext?.invited_by)}`
-          : "",
-        firstNonEmpty(memberContext?.vouched_by_name, memberContext?.vouched_by)
-          ? `Vouched By: ${firstNonEmpty(memberContext?.vouched_by_name, memberContext?.vouched_by)}`
-          : "",
+        firstNonEmpty(memberContext?.entry_method) ? `Entry Method: ${firstNonEmpty(memberContext?.entry_method)}` : "",
+        firstNonEmpty(memberContext?.join_source) ? `Join Source: ${firstNonEmpty(memberContext?.join_source)}` : "",
+        firstNonEmpty(memberContext?.verification_source) ? `Verification Source: ${firstNonEmpty(memberContext?.verification_source)}` : "",
+        firstNonEmpty(memberContext?.invited_by_name, memberContext?.invited_by) ? `Invited By: ${firstNonEmpty(memberContext?.invited_by_name, memberContext?.invited_by)}` : "",
+        firstNonEmpty(memberContext?.vouched_by_name, memberContext?.vouched_by) ? `Vouched By: ${firstNonEmpty(memberContext?.vouched_by_name, memberContext?.vouched_by)}` : "",
       ],
     });
 
@@ -744,12 +635,9 @@ export async function POST(
       created_at: nowIso,
     });
 
-    let noteWarning: string | null = null;
-    if (noteResult.ok === false) {
-      noteWarning =
-        noteResult.error?.message ||
-        "Ticket note could not be saved, but verification continued.";
-    }
+    const noteWarning = noteResult.ok === false
+      ? noteResult.error?.message || "Ticket note could not be saved, but verification continued."
+      : null;
 
     const commandPayload = buildVerificationCommandPayload({
       action,
@@ -780,21 +668,15 @@ export async function POST(
       .single();
 
     if (commandError) {
-      return buildErrorResponse(
-        commandError.message || "Failed to queue verification command.",
-        500,
-        refreshedTokens
-      );
+      return buildErrorResponse(commandError.message || "Failed to queue verification command.", 500, refreshedTokens, { selectedGuildId: guildId });
     }
 
-    const command = (commandRow as BotCommandInsertRow | null) || null;
-
+    const command = (commandRow as { id?: string | null } | null) || null;
     await supabase
       .from("tickets")
-      .update({
-        updated_at: nowIso,
-      })
-      .eq("id", ticketId);
+      .update({ updated_at: nowIso })
+      .eq("id", ticketId)
+      .eq("guild_id", guildId);
 
     await insertActivityEventSafe(supabase, {
       guild_id: guildId,
@@ -833,6 +715,7 @@ export async function POST(
     return buildJsonResponse(
       {
         ok: true,
+        selectedGuildId: guildId,
         action,
         ticketId,
         commandId: command?.id || null,
@@ -845,11 +728,6 @@ export async function POST(
   } catch (error) {
     const err = error as { status?: number; message?: string } | undefined;
     const status = err?.status || (err?.message === "Unauthorized" ? 401 : 500);
-
-    return buildErrorResponse(
-      err?.message || "Verification route failed.",
-      status,
-      refreshedTokens
-    );
+    return buildErrorResponse(err?.message || "Verification route failed.", status, refreshedTokens);
   }
 }
