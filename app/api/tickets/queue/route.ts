@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireStaffSessionForRoute } from "@/lib/auth-server";
-import { env } from "@/lib/env";
+import { getSelectedGuildId } from "@/lib/guild-selection";
 import { getTicketQueueAction } from "@/lib/dashboardActions";
 
 export const dynamic = "force-dynamic";
@@ -11,18 +11,8 @@ function normalizeNullable(value: unknown): string | null {
   return text || null;
 }
 
-function resolveGuildIdFromRequest(
-  req: NextRequest,
-  body?: Record<string, unknown> | null
-): string {
-  return (
-    normalizeNullable(body?.guildId) ||
-    normalizeNullable(body?.guild_id) ||
-    normalizeNullable(req.nextUrl.searchParams.get("guildId")) ||
-    normalizeNullable(req.nextUrl.searchParams.get("guild_id")) ||
-    normalizeNullable(env.guildId) ||
-    ""
-  );
+function resolveSelectedGuildId(): string {
+  return normalizeNullable(getSelectedGuildId()) || "";
 }
 
 function buildUnauthorizedResponse() {
@@ -40,11 +30,12 @@ function buildUnauthorizedResponse() {
   );
 }
 
-function buildErrorResponse(message: string, status = 500) {
+function buildErrorResponse(message: string, status = 500, extra: Record<string, unknown> = {}) {
   return NextResponse.json(
     {
       ok: false,
       error: message,
+      ...extra,
     },
     {
       status,
@@ -56,6 +47,7 @@ function buildErrorResponse(message: string, status = 500) {
 }
 
 function buildSuccessResponse(payload: {
+  selectedGuildId: string;
   queue?: unknown[];
   tickets?: unknown[];
   total?: number;
@@ -67,6 +59,7 @@ function buildSuccessResponse(payload: {
   return NextResponse.json(
     {
       ok: true,
+      selectedGuildId: payload.selectedGuildId,
       queue: Array.isArray(payload.queue)
         ? payload.queue
         : Array.isArray(payload.tickets)
@@ -92,31 +85,32 @@ function buildSuccessResponse(payload: {
   );
 }
 
-async function handleRequest(
-  req: NextRequest,
-  body?: Record<string, unknown> | null
-) {
+async function handleRequest(_req: NextRequest) {
   try {
     await requireStaffSessionForRoute();
 
-    const guildId = resolveGuildIdFromRequest(req, body);
+    const guildId = resolveSelectedGuildId();
 
     if (!guildId) {
-      return buildErrorResponse("Missing guildId", 400);
+      return buildErrorResponse(
+        "Select a server before loading the ticket queue.",
+        428,
+        { needsServerSelection: true }
+      );
     }
 
-    const result = await getTicketQueueAction({
-      guildId,
-    });
+    const result = await getTicketQueueAction({ guildId });
 
     if (!result.ok) {
       return buildErrorResponse(
         result.error || "Failed to load ticket queue.",
-        500
+        500,
+        { selectedGuildId: guildId }
       );
     }
 
     return buildSuccessResponse({
+      selectedGuildId: guildId,
       queue: result.queue,
       tickets: result.tickets,
       total: result.total,
@@ -138,20 +132,9 @@ async function handleRequest(
 }
 
 export async function GET(req: NextRequest) {
-  return handleRequest(req, null);
+  return handleRequest(req);
 }
 
 export async function POST(req: NextRequest) {
-  try {
-    const body = (await req.json().catch(() => null)) as
-      | Record<string, unknown>
-      | null;
-
-    return handleRequest(req, body);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Invalid JSON body";
-
-    return buildErrorResponse(message || "Invalid JSON body", 400);
-  }
+  return handleRequest(req);
 }
