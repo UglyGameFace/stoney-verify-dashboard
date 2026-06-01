@@ -46,14 +46,8 @@ function requireEnv(name: string, value: string | undefined): string {
 }
 
 function normalizeString(value: unknown): string {
-  if (typeof value === "string") {
-    return value.trim();
-  }
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(value).trim();
-  }
-
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value).trim();
   return "";
 }
 
@@ -65,31 +59,30 @@ function normalizeNullable(value: unknown): string | null {
 function normalizeBoolean(value: unknown, fallback = false): boolean {
   if (typeof value === "boolean") return value;
   if (value === null || value === undefined) return fallback;
-
   const text = String(value).trim().toLowerCase();
   if (["1", "true", "yes", "y", "on"].includes(text)) return true;
   if (["0", "false", "no", "n", "off"].includes(text)) return false;
-
   return fallback;
 }
 
 function normalizeStringArray(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
-
-  const cleaned = value
-    .map((item) => normalizeString(item))
-    .filter(Boolean);
-
+  const cleaned = value.map((item) => normalizeString(item)).filter(Boolean);
   return cleaned.length ? cleaned : null;
 }
 
-function getGuildId(): string {
+function getDefaultGuildId(): string {
   return requireEnv(
     "DISCORD_GUILD_ID or GUILD_ID or NEXT_PUBLIC_DISCORD_GUILD_ID",
     process.env.DISCORD_GUILD_ID ||
       process.env.GUILD_ID ||
       process.env.NEXT_PUBLIC_DISCORD_GUILD_ID
   );
+}
+
+function resolveGuildId(guildId?: string | null): string {
+  const selected = normalizeString(guildId);
+  return selected || getDefaultGuildId();
 }
 
 function getSupabase(): SupabaseClient {
@@ -103,7 +96,9 @@ function getSupabase(): SupabaseClient {
   const serviceRoleKey = requireEnv(
     "SUPABASE_SERVICE_ROLE",
     process.env.SUPABASE_SERVICE_ROLE ||
-      process.env.SUPABASE_SERVICE_ROLE_KEY
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.SUPABASE_ROLE_KEY ||
+      process.env.SUPABASE_SERVICE_KEY
   );
 
   supabase = createClient(url, serviceRoleKey, {
@@ -119,15 +114,16 @@ function getSupabase(): SupabaseClient {
 async function insertCommand(
   action: BotCommandAction,
   payload: Record<string, Json>,
-  requestedBy?: string | null
+  requestedBy?: string | null,
+  guildId?: string | null
 ): Promise<BotCommandRow> {
   const sb = getSupabase();
-  const guildId = getGuildId();
+  const resolvedGuildId = resolveGuildId(guildId);
 
   const { data, error } = await sb
     .from("bot_commands")
     .insert({
-      guild_id: guildId,
+      guild_id: resolvedGuildId,
       action,
       payload,
       requested_by: normalizeNullable(requestedBy),
@@ -143,6 +139,7 @@ async function insertCommand(
 }
 
 export async function queueCreateTicket(input: {
+  guildId?: string | null;
   userId: string;
   category?: string;
   priority?: string;
@@ -167,9 +164,7 @@ export async function queueCreateTicket(input: {
   approvalReason?: string | null;
 }) {
   const userId = normalizeString(input.userId);
-  if (!userId) {
-    throw new Error("Missing userId");
-  }
+  if (!userId) throw new Error("Missing userId");
 
   return insertCommand(
     "create_ticket",
@@ -196,20 +191,20 @@ export async function queueCreateTicket(input: {
       entry_reason: normalizeNullable(input.entryReason),
       approval_reason: normalizeNullable(input.approvalReason),
     },
-    input.requestedBy
+    input.requestedBy,
+    input.guildId
   );
 }
 
 export async function queueCloseTicket(input: {
+  guildId?: string | null;
   channelId: string;
   reason?: string;
   staffId?: string | null;
   requestedBy?: string | null;
 }) {
   const channelId = normalizeString(input.channelId);
-  if (!channelId) {
-    throw new Error("Missing channelId");
-  }
+  if (!channelId) throw new Error("Missing channelId");
 
   return insertCommand(
     "close_ticket",
@@ -218,11 +213,13 @@ export async function queueCloseTicket(input: {
       reason: normalizeString(input.reason) || "Resolved",
       staff_id: normalizeNullable(input.staffId),
     },
-    input.requestedBy
+    input.requestedBy,
+    input.guildId
   );
 }
 
 export async function queueDeleteTicket(input: {
+  guildId?: string | null;
   channelId: string;
   ghost?: boolean;
   forceTranscript?: boolean;
@@ -231,9 +228,7 @@ export async function queueDeleteTicket(input: {
   requestedBy?: string | null;
 }) {
   const channelId = normalizeString(input.channelId);
-  if (!channelId) {
-    throw new Error("Missing channelId");
-  }
+  if (!channelId) throw new Error("Missing channelId");
 
   return insertCommand(
     "delete_ticket",
@@ -244,43 +239,37 @@ export async function queueDeleteTicket(input: {
       reason: normalizeString(input.reason) || "Deleted from dashboard",
       staff_id: normalizeNullable(input.staffId),
     },
-    input.requestedBy
+    input.requestedBy,
+    input.guildId
   );
 }
 
 export async function queueReopenTicket(input: {
+  guildId?: string | null;
   channelId: string;
   requestedBy?: string | null;
 }) {
   const channelId = normalizeString(input.channelId);
-  if (!channelId) {
-    throw new Error("Missing channelId");
-  }
+  if (!channelId) throw new Error("Missing channelId");
 
   return insertCommand(
     "reopen_ticket",
-    {
-      channel_id: channelId,
-    },
-    input.requestedBy
+    { channel_id: channelId },
+    input.requestedBy,
+    input.guildId
   );
 }
 
 export async function queueAssignTicket(input: {
+  guildId?: string | null;
   channelId: string;
   staffId: string;
   requestedBy?: string | null;
 }) {
   const channelId = normalizeString(input.channelId);
   const staffId = normalizeString(input.staffId);
-
-  if (!channelId) {
-    throw new Error("Missing channelId");
-  }
-
-  if (!staffId) {
-    throw new Error("Missing staffId");
-  }
+  if (!channelId) throw new Error("Missing channelId");
+  if (!staffId) throw new Error("Missing staffId");
 
   return insertCommand(
     "assign_ticket",
@@ -288,41 +277,43 @@ export async function queueAssignTicket(input: {
       channel_id: channelId,
       staff_id: staffId,
     },
-    input.requestedBy
+    input.requestedBy,
+    input.guildId
   );
 }
 
 export async function queueSyncMembers(input?: {
+  guildId?: string | null;
   requestedBy?: string | null;
 }) {
-  return insertCommand("sync_members", {}, input?.requestedBy);
+  return insertCommand("sync_members", {}, input?.requestedBy, input?.guildId);
 }
 
 export async function queueReconcileDepartedMembers(input?: {
+  guildId?: string | null;
   requestedBy?: string | null;
 }) {
-  return insertCommand("reconcile_departed_members", {}, input?.requestedBy);
+  return insertCommand("reconcile_departed_members", {}, input?.requestedBy, input?.guildId);
 }
 
 export async function queueSyncRoleMembers(input: {
+  guildId?: string | null;
   roleId: string;
   requestedBy?: string | null;
 }) {
   const roleId = normalizeString(input.roleId);
-  if (!roleId) {
-    throw new Error("Missing roleId");
-  }
+  if (!roleId) throw new Error("Missing roleId");
 
   return insertCommand(
     "sync_role_members",
-    {
-      role_id: roleId,
-    },
-    input.requestedBy
+    { role_id: roleId },
+    input.requestedBy,
+    input.guildId
   );
 }
 
 export async function queueSyncActiveTickets(input?: {
+  guildId?: string | null;
   requestedBy?: string | null;
   includeClosedVisibleChannels?: boolean;
   dryRun?: boolean;
@@ -330,25 +321,22 @@ export async function queueSyncActiveTickets(input?: {
   return insertCommand(
     "sync_active_tickets",
     {
-      include_closed_visible_channels: normalizeBoolean(
-        input?.includeClosedVisibleChannels,
-        true
-      ),
+      include_closed_visible_channels: normalizeBoolean(input?.includeClosedVisibleChannels, true),
       dry_run: normalizeBoolean(input?.dryRun, false),
     },
-    input?.requestedBy
+    input?.requestedBy,
+    input?.guildId
   );
 }
 
 export async function queueSyncSingleTicket(input: {
+  guildId?: string | null;
   channelId: string;
   requestedBy?: string | null;
   dryRun?: boolean;
 }) {
   const channelId = normalizeString(input.channelId);
-  if (!channelId) {
-    throw new Error("Missing channelId");
-  }
+  if (!channelId) throw new Error("Missing channelId");
 
   return insertCommand(
     "sync_single_ticket",
@@ -356,11 +344,13 @@ export async function queueSyncSingleTicket(input: {
       channel_id: channelId,
       dry_run: normalizeBoolean(input?.dryRun, false),
     },
-    input.requestedBy
+    input.requestedBy,
+    input.guildId
   );
 }
 
 export async function queuePortalTicketReply(input: {
+  guildId?: string | null;
   ticketId: string;
   channelId: string;
   userId: string;
@@ -373,19 +363,10 @@ export async function queuePortalTicketReply(input: {
   const channelId = normalizeString(input.channelId);
   const userId = normalizeString(input.userId);
   const content = normalizeString(input.content);
-
-  if (!ticketId) {
-    throw new Error("Missing ticketId");
-  }
-  if (!channelId) {
-    throw new Error("Missing channelId");
-  }
-  if (!userId) {
-    throw new Error("Missing userId");
-  }
-  if (!content) {
-    throw new Error("Missing content");
-  }
+  if (!ticketId) throw new Error("Missing ticketId");
+  if (!channelId) throw new Error("Missing channelId");
+  if (!userId) throw new Error("Missing userId");
+  if (!content) throw new Error("Missing content");
 
   return insertCommand(
     "portal_ticket_reply",
@@ -397,29 +378,17 @@ export async function queuePortalTicketReply(input: {
       content,
       message_id: normalizeNullable(input.messageId),
     },
-    input.requestedBy ?? userId
+    input.requestedBy ?? userId,
+    input.guildId
   );
 }
 
-export async function getBotCommand(
-  commandId: string
-): Promise<BotCommandRow | null> {
+export async function getBotCommand(commandId: string): Promise<BotCommandRow | null> {
   const id = normalizeString(commandId);
-  if (!id) {
-    throw new Error("Missing commandId");
-  }
+  if (!id) throw new Error("Missing commandId");
 
   const sb = getSupabase();
-
-  const { data, error } = await sb
-    .from("bot_commands")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return (data as BotCommandRow | null) ?? null;
+  const { data, error } = await sb.from("bot_commands").select("*").eq("id", id).maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as BotCommandRow | null) || null;
 }
