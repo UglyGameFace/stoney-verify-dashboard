@@ -1,0 +1,317 @@
+/*
+  Dank Shield readability layer
+  --------------------------------
+  This file intentionally loads after globals.css. It keeps the neon/glass brand,
+  but raises contrast, touch clarity, and mobile scan speed for production use.
+*/
+
+:root {
+  --bg: #071017;
+  --bg-deep: #04080d;
+  --panel: rgba(17, 31, 43, 0.96);
+  --panel-2: rgba(20, 36, 50, 0.98);
+  --panel-3: rgba(13, 25, 36, 0.98);
+  --panel-solid: #111f2b;
+  --panel-bg-soft: rgba(255, 255, 255, 0.075);
+  --line: rgba(143, 255, 193, 0.28);
+  --line-strong: rgba(143, 255, 193, 0.46);
+  --line-soft: rgba(255, 255, 255, 0.16);
+  --panel-border: rgba(255, 255, 255, 0.16);
+  --text: #f5fff9;
+  --text-strong: #ffffff;
+  --text-muted: rgba(245, 255, 249, 0.86);
+  --muted: #c7ddcf;
+  --muted-2: #a8c4b3;
+  --accent: #6dff9d;
+  --accent2: #78ddff;
+  --accent-strong: #3cff81;
+  --shadow: 0 16px 38px rgba(0, 0, 0, 0.42);
+  --shadow-strong: 0 20px 56px rgba(0, 0, 0, 0.52);
+}
+
+html,
+body {
+  background:
+    radial-gradient(circle at 12% 8%, rgba(93, 255, 141, 0.10) 0%, transparent 24%),
+    radial-gradient(circle at 88% 8%, rgba(99, 213, 255, 0.10) 0%, transparent 24%),
+    linear-gradient(180deg, #0b151d 0%, #071017 46%, #04070c 100%) !important;
+  color: var(--text) !important;
+}
+
+body::before,
+body::after {
+  opacity: 0.24 !important;
+}
+
+.content {
+  padding: 22px !important;
+}
+
+.card,
+.drawer,
+.ticket-controls-panel,
+.table-wrap,
+.message,
+.member-card,
+.recent-join-card,
+.member-search-result,
+.empty-state,
+.info-banner,
+.warning-banner,
+.error-banner {
+  color: var(--text) !important;
+  border-color: var(--panel-border) !important;
+}
+
+.card {
+  background:
+    radial-gradient(circle at top right, rgba(109, 255, 157, 0.10), transparent 30%),
+    radial-gradient(circle at bottom left, rgba(120, 221, 255, 0.08), transparent 28%),
+    linear-gradient(180deg, rgba(25, 43, 59, 0.98), rgba(10, 20, 31, 0.98)) !important;
+  box-shadow: var(--shadow) !important;
+}
+
+.card::before,
+.card::after {
+  opacity: 0.22 !important;
+}
+
+.muted,
+.ticket-info-label,
+.ticket-mobile-meta-label,
+.ticket-controls-copy,
+.ticket-controls-footnote,
+.recent-join-id,
+.recent-join-time,
+th,
+.server-meta {
+  color: var(--muted) !important;
+}
+
+h1,
+h2,
+h3,
+h4,
+.neon-title,
+.stat-value,
+.server-name,
+.recent-join-name,
+.ticket-category-name {
+  color: var(--text-strong) !important;
+  text-shadow: none !important;
+}
+
+.input,
+.textarea,
+.select,
+select.input,
+button,
+.button {
+  color: var(--text-strong) !important;
+}
+
+.input,
+.textarea,
+.select,
+select.input {
+  background: rgba(4, 11, 17, 0.76) !important;
+  border-color: rgba(186, 255, 216, 0.24) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: #b9d2c2 !important;
+  opacity: 1 !important;
+}
+
+.input:focus,
+.textarea:focus,
+.select:focus,
+select.input:focus {
+  border-color: rgba(109, 255, 157, 0.62) !important;
+  box-shadow:
+    0 0 0 3px rgba(109, 255, 157, 0.16),
+    0 0 24px rgba(109, 255, 157, 0.10) !important;
+}
+
+select,
+option {
+  background-color: #101f2b !important;
+  color: #ffffff !important;
+}
+
+.button {
+  border-color: rgba(186, 255, 216, 0.22) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  font-weight: 900 !important;
+}
+
+.button.primary {
+  background: linear-gradient(135deg, #6dff9d, #78ddff) !important;
+  color: #03110a !important;
+  border-color: transparent !important;
+  box-shadow:
+    0 10px 24px rgba(109, 255, 157, 0.24),
+    0 0 22px rgba(120, 221, 255, 0.14) !important;
+}
+
+.button.ghost {
+  background: rgba(255, 255, 255, 0.09) !important;
+}
+
+.button.danger {
+  background: rgba(255, 111, 142, 0.22) !important;
+  border-color: rgba(255, 170, 190, 0.46) !important;
+  color: #ffe5ea !important;
+}
+
+.button[disabled],
+button[disabled] {
+  opacity: 0.52 !important;
+  filter: grayscale(0.35) !important;
+}
+
+.badge {
+  background: rgba(255, 255, 255, 0.10) !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  color: #f8fff9 !important;
+}
+
+.empty-state {
+  background: rgba(255, 255, 255, 0.055) !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  color: var(--muted) !important;
+}
+
+.info-banner {
+  background: rgba(99, 213, 255, 0.15) !important;
+  color: #ecfbff !important;
+}
+
+.warning-banner {
+  background: rgba(255, 211, 107, 0.16) !important;
+  color: #fff5d6 !important;
+}
+
+.error-banner {
+  background: rgba(255, 111, 142, 0.16) !important;
+  color: #ffe3e9 !important;
+}
+
+.sidebar {
+  background:
+    radial-gradient(circle at top, rgba(109, 255, 157, 0.10), transparent 34%),
+    linear-gradient(180deg, rgba(12, 23, 32, 0.98), rgba(5, 10, 17, 0.98)) !important;
+  border-right-color: rgba(255, 255, 255, 0.14) !important;
+}
+
+.sidebar-link {
+  color: #d6e8dc !important;
+  background: rgba(255, 255, 255, 0.055) !important;
+}
+
+.sidebar-link.active,
+.sidebar-link:hover {
+  color: #ffffff !important;
+  background: linear-gradient(135deg, rgba(109, 255, 157, 0.22), rgba(120, 221, 255, 0.16)) !important;
+  border-color: rgba(109, 255, 157, 0.30) !important;
+}
+
+.server-card,
+.ticket-category-list-card,
+.ticket-category-editor-card,
+.ticket-category-row,
+.ticket-category-preset-box,
+.ticket-category-usage-panel {
+  background: rgba(8, 18, 27, 0.78) !important;
+  border-color: rgba(255, 255, 255, 0.16) !important;
+}
+
+.server-card.selected,
+.ticket-category-row.active {
+  border-color: rgba(109, 255, 157, 0.58) !important;
+  box-shadow:
+    0 0 0 1px rgba(109, 255, 157, 0.18) inset,
+    0 0 26px rgba(109, 255, 157, 0.10) !important;
+}
+
+.server-card.disabled {
+  opacity: 0.68 !important;
+}
+
+.ticket-keyword-chip {
+  background: rgba(120, 221, 255, 0.14) !important;
+  border-color: rgba(120, 221, 255, 0.28) !important;
+  color: #f5fdff !important;
+  font-weight: 800 !important;
+}
+
+.ticket-check-row input,
+input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+}
+
+@media (max-width: 1024px) {
+  .shell {
+    display: block !important;
+  }
+
+  .sidebar {
+    position: relative !important;
+    height: auto !important;
+    border-right: none !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.14) !important;
+  }
+
+  .content {
+    padding: 14px !important;
+    padding-bottom: 110px !important;
+  }
+
+  .card {
+    border-radius: 22px !important;
+    padding: 16px !important;
+  }
+
+  .button,
+  .input,
+  .textarea,
+  .select,
+  select.input {
+    min-height: 56px !important;
+    font-size: 16px !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .content {
+    padding: 12px !important;
+  }
+
+  .row {
+    align-items: stretch !important;
+  }
+
+  .row > .button,
+  .row > button,
+  .row > a.button {
+    width: 100% !important;
+  }
+
+  .metrics,
+  .hero,
+  .grid-2,
+  .grid-3,
+  .filters,
+  .ticket-shell,
+  .quick-actions,
+  .ticket-mobile-actions,
+  .ticket-controls-info-grid,
+  .ticket-info-grid,
+  .member-detail-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
