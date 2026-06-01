@@ -4,7 +4,7 @@ import {
   requireStaffSessionForRoute,
   applyAuthCookies,
 } from "@/lib/auth-server";
-import { env } from "@/lib/env";
+import { getSelectedGuildId } from "@/lib/guild-selection";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,12 +23,16 @@ type TicketFormQuestion = {
   key?: string | null;
   label?: string | null;
   question?: string | null;
+  name?: string | null;
+  title?: string | null;
   placeholder?: string | null;
   description?: string | null;
+  help_text?: string | null;
   required?: boolean | null;
   style?: string | null;
   type?: string | null;
   max_length?: number | null;
+  maxLength?: number | null;
 };
 
 type SessionLike = {
@@ -90,41 +94,11 @@ const PRESET_KEYWORDS: Record<string, string[]> = {
     "vc verify",
     "face check",
   ],
-  appeal: [
-    "appeal",
-    "ban appeal",
-    "timeout appeal",
-    "unban",
-    "unmute",
-  ],
-  report: [
-    "report",
-    "incident",
-    "scam",
-    "abuse",
-    "harassment",
-    "threat",
-  ],
-  partnership: [
-    "partnership",
-    "partner",
-    "collab",
-    "collaboration",
-    "sponsor",
-  ],
-  question: [
-    "question",
-    "questions",
-    "help question",
-    "how to",
-    "how do i",
-  ],
-  general: [
-    "support",
-    "help",
-    "general support",
-    "assistance",
-  ],
+  appeal: ["appeal", "ban appeal", "timeout appeal", "unban", "unmute"],
+  report: ["report", "incident", "scam", "abuse", "harassment", "threat"],
+  partnership: ["partnership", "partner", "collab", "collaboration", "sponsor"],
+  question: ["question", "questions", "help question", "how to", "how do i"],
+  general: ["support", "help", "general support", "assistance"],
   custom: [],
 };
 
@@ -218,15 +192,13 @@ function slugify(value: unknown): string {
     .slice(0, 80);
 }
 
+function selectedGuildId(): string {
+  return normalizeString(getSelectedGuildId());
+}
+
 function normalizeKeywords(value: unknown): string[] {
   if (Array.isArray(value)) {
-    return [
-      ...new Set(
-        value
-          .map((item) => normalizeString(item))
-          .filter(Boolean)
-      ),
-    ];
+    return [...new Set(value.map((item) => normalizeString(item)).filter(Boolean))];
   }
 
   return [
@@ -261,7 +233,7 @@ function normalizeFormQuestions(value: unknown): TicketFormQuestion[] {
   const out: TicketFormQuestion[] = [];
 
   for (const item of raw) {
-    const record = safeObject<JsonRecord>(item);
+    const record = safeObject<TicketFormQuestion>(item);
     const label = normalizeString(
       record.label || record.question || record.name || record.title
     ).slice(0, 45);
@@ -322,7 +294,6 @@ function mergeKeywords(...groups: unknown[]): string[] {
     for (const item of items) {
       const clean = normalizeString(item);
       if (!clean) continue;
-
       if (!out.some((existing) => existing.toLowerCase() === clean.toLowerCase())) {
         out.push(clean);
       }
@@ -368,13 +339,8 @@ function buildCategoryPayload(
   const name = normalizeString(body?.name ?? existingRow?.name);
   const slug = slugify(body?.slug ?? existingRow?.slug ?? name);
 
-  if (!name) {
-    throw new Error("Category name is required.");
-  }
-
-  if (!slug) {
-    throw new Error("Category slug is required.");
-  }
+  if (!name) throw new Error("Category name is required.");
+  if (!slug) throw new Error("Category slug is required.");
 
   const basePayload: TicketCategoryRow = {
     guild_id: guildId,
@@ -383,9 +349,7 @@ function buildCategoryPayload(
     color: normalizeString(body?.color ?? existingRow?.color) || "#45d483",
     description: normalizeString(body?.description ?? existingRow?.description),
     intake_type: normalizeIntakeType(body?.intake_type ?? existingRow?.intake_type),
-    match_keywords: normalizeKeywords(
-      body?.match_keywords ?? existingRow?.match_keywords ?? []
-    ),
+    match_keywords: normalizeKeywords(body?.match_keywords ?? existingRow?.match_keywords ?? []),
     button_label: normalizeString(body?.button_label ?? existingRow?.button_label),
     sort_order: parseSortOrder(body?.sort_order ?? existingRow?.sort_order),
     is_default: normalizeBoolean(body?.is_default ?? existingRow?.is_default ?? false),
@@ -407,10 +371,7 @@ function buildCategoryPayload(
 
   return {
     ...basePayload,
-    match_keywords: mergeKeywords(
-      basePayload.match_keywords,
-      buildPresetKeywords(basePayload)
-    ),
+    match_keywords: mergeKeywords(basePayload.match_keywords, buildPresetKeywords(basePayload)),
   };
 }
 
@@ -449,9 +410,21 @@ function buildJsonResponse(
 function buildErrorResponse(
   message: string,
   status = 400,
-  refreshedTokens: RefreshedTokens = null
+  refreshedTokens: RefreshedTokens = null,
+  extra: Record<string, unknown> = {}
 ) {
-  return buildJsonResponse({ error: message }, status, refreshedTokens);
+  return buildJsonResponse({ error: message, ...extra }, status, refreshedTokens);
+}
+
+function requireSelectedGuild(refreshedTokens: RefreshedTokens = null): string | NextResponse {
+  const guildId = selectedGuildId();
+  if (guildId) return guildId;
+  return buildErrorResponse(
+    "Select a server before managing ticket categories.",
+    428,
+    refreshedTokens,
+    { needsServerSelection: true }
+  );
 }
 
 async function parseRequestBody(request: Request): Promise<JsonRecord> {
@@ -463,25 +436,17 @@ async function parseRequestBody(request: Request): Promise<JsonRecord> {
   }
 }
 
-async function clearOtherDefaults(
-  supabase: ReturnType<typeof createServerSupabase>,
-  guildId: string,
-  excludeId: string | null = null
-) {
+async function clearOtherDefaults(supabase: ReturnType<typeof createServerSupabase>, guildId: string, excludeId: string | null = null) {
   let query = supabase
     .from("ticket_categories")
     .update({ is_default: false })
     .eq("guild_id", guildId)
     .eq("is_default", true);
 
-  if (excludeId) {
-    query = query.neq("id", excludeId);
-  }
+  if (excludeId) query = query.neq("id", excludeId);
 
   const { error } = await query;
-  if (error) {
-    throw new Error(error.message);
-  }
+  if (error) throw new Error(error.message);
 }
 
 async function getCategoryById(
@@ -524,16 +489,11 @@ async function assertSlugAvailable(
 ) {
   const existing = await getCategoryBySlug(supabase, guildId, slug);
   if (!existing) return;
-
   if (excludeId && normalizeString(existing.id) === excludeId) return;
-
   throw new Error("That category slug is already in use.");
 }
 
-function buildCategoryUsage(
-  categories: TicketCategoryRow[],
-  tickets: TicketRow[]
-) {
+function buildCategoryUsage(categories: TicketCategoryRow[], tickets: TicketRow[]) {
   const byId = new Map<
     string,
     {
@@ -544,14 +504,12 @@ function buildCategoryUsage(
       deleted: number;
       manualOverrideCount: number;
       latestTicketAt: string | null;
-      linkedTicketIds: string[];
     }
   >();
 
   for (const category of categories) {
     const id = normalizeString(category.id);
     if (!id) continue;
-
     byId.set(id, {
       total: 0,
       open: 0,
@@ -560,48 +518,24 @@ function buildCategoryUsage(
       deleted: 0,
       manualOverrideCount: 0,
       latestTicketAt: null,
-      linkedTicketIds: [],
     });
   }
 
   for (const ticket of tickets) {
-    const linkedIds = [
-      normalizeString(ticket.category_id),
-      normalizeString(ticket.matched_category_id),
-    ].filter(Boolean);
-
+    const linkedIds = [normalizeString(ticket.category_id), normalizeString(ticket.matched_category_id)].filter(Boolean);
     for (const categoryId of linkedIds) {
       const stats = byId.get(categoryId);
       if (!stats) continue;
-
       stats.total += 1;
-
       const status = normalizeLower(ticket.status);
       if (status === "open") stats.open += 1;
       else if (status === "claimed") stats.claimed += 1;
       else if (status === "closed") stats.closed += 1;
       else if (status === "deleted") stats.deleted += 1;
-
-      if (ticket.category_override === true) {
-        stats.manualOverrideCount += 1;
-      }
-
-      const latestAt =
-        normalizeString(ticket.updated_at) ||
-        normalizeString(ticket.created_at) ||
-        null;
-
-      if (
-        latestAt &&
-        (!stats.latestTicketAt ||
-          new Date(latestAt).getTime() > new Date(stats.latestTicketAt).getTime())
-      ) {
+      if (ticket.category_override === true) stats.manualOverrideCount += 1;
+      const latestAt = normalizeString(ticket.updated_at) || normalizeString(ticket.created_at) || null;
+      if (latestAt && (!stats.latestTicketAt || new Date(latestAt).getTime() > new Date(stats.latestTicketAt).getTime())) {
         stats.latestTicketAt = latestAt;
-      }
-
-      const ticketId = normalizeString(ticket.id);
-      if (ticketId && !stats.linkedTicketIds.includes(ticketId)) {
-        stats.linkedTicketIds.push(ticketId);
       }
     }
   }
@@ -615,37 +549,24 @@ async function fetchCategoryTickets(
 ): Promise<TicketRow[]> {
   const { data, error } = await supabase
     .from("tickets")
-    .select(
-      "id,title,status,category,category_id,matched_category_id,matched_category_name,matched_category_slug,category_override,created_at,updated_at"
-    )
+    .select("id,title,status,category,category_id,matched_category_id,matched_category_name,matched_category_slug,category_override,created_at,updated_at")
     .eq("guild_id", guildId);
 
-  if (error) {
-    throw new Error(error.message);
-  }
-
+  if (error) throw new Error(error.message);
   return safeArray<TicketRow>(data || []);
 }
 
-function enrichCategories(
-  categories: TicketCategoryRow[],
-  tickets: TicketRow[]
-) {
+function enrichCategories(categories: TicketCategoryRow[], tickets: TicketRow[]) {
   const usage = buildCategoryUsage(categories, tickets);
 
   return categories
     .map((category) => {
       const id = normalizeString(category.id);
       const stats = usage.get(id);
-
       return {
         ...category,
-        keyword_count: Array.isArray(category.match_keywords)
-          ? category.match_keywords.length
-          : 0,
-        form_question_count: Array.isArray(category.form_questions)
-          ? category.form_questions.length
-          : 0,
+        keyword_count: Array.isArray(category.match_keywords) ? category.match_keywords.length : 0,
+        form_question_count: Array.isArray(category.form_questions) ? category.form_questions.length : 0,
         usage: {
           total: stats?.total || 0,
           open: stats?.open || 0,
@@ -668,11 +589,9 @@ function enrichCategories(
 export async function GET() {
   try {
     const supabase = createServerSupabase();
-    const guildId = normalizeString(env.guildId);
-
-    if (!guildId) {
-      return buildErrorResponse("Missing guild id.", 500);
-    }
+    const scopedGuild = requireSelectedGuild();
+    if (typeof scopedGuild !== "string") return scopedGuild;
+    const guildId = scopedGuild;
 
     const [categoriesRes, tickets] = await Promise.all([
       supabase
@@ -684,29 +603,20 @@ export async function GET() {
       fetchCategoryTickets(supabase, guildId),
     ]);
 
-    if (categoriesRes.error) {
-      return buildErrorResponse(categoriesRes.error.message, 500);
-    }
+    if (categoriesRes.error) return buildErrorResponse(categoriesRes.error.message, 500, null, { selectedGuildId: guildId });
 
-    const categories = enrichCategories(
-      safeArray<TicketCategoryRow>(categoriesRes.data || []),
-      tickets
-    );
-
-    const defaultCategory =
-      categories.find((row) => row.is_default) || null;
+    const categories = enrichCategories(safeArray<TicketCategoryRow>(categoriesRes.data || []), tickets);
+    const defaultCategory = categories.find((row) => row.is_default) || null;
 
     return buildJsonResponse({
+      selectedGuildId: guildId,
       categories,
       defaultCategoryId: defaultCategory?.id || null,
       presets: PRESET_KEYWORDS,
       codServiceKeywords: COD_SERVICE_KEYWORDS,
     });
   } catch (error) {
-    return buildErrorResponse(
-      error instanceof Error ? error.message : "Failed to load categories.",
-      500
-    );
+    return buildErrorResponse(error instanceof Error ? error.message : "Failed to load categories.", 500);
   }
 }
 
@@ -714,55 +624,38 @@ export async function POST(request: Request) {
   try {
     const { session, refreshedTokens } = await requireStaffSessionForRoute();
     const typedSession = session as SessionLike;
+    const scopedGuild = requireSelectedGuild(refreshedTokens);
+    if (typeof scopedGuild !== "string") return scopedGuild;
+    const guildId = scopedGuild;
     const body = await parseRequestBody(request);
     const supabase = createServerSupabase();
-    const guildId = normalizeString(env.guildId);
     const { actorId, actorName } = getActorIdentity(typedSession);
-
-    if (!guildId) {
-      return buildErrorResponse("Missing guild id.", 500, refreshedTokens);
-    }
-
     const payload = buildCategoryPayload(body, guildId, null, actorId);
 
     await assertSlugAvailable(supabase, guildId, normalizeString(payload.slug));
-
-    if (payload.is_default) {
-      await clearOtherDefaults(supabase, guildId);
-    }
+    if (payload.is_default) await clearOtherDefaults(supabase, guildId);
 
     const { data, error } = await supabase
       .from("ticket_categories")
-      .insert({
-        ...payload,
-        created_at: new Date().toISOString(),
-      })
+      .insert({ ...payload, created_at: new Date().toISOString() })
       .select("*")
       .single();
 
-    if (error) {
-      return buildErrorResponse(error.message, 500, refreshedTokens);
-    }
+    if (error) return buildErrorResponse(error.message, 500, refreshedTokens, { selectedGuildId: guildId });
 
     return buildJsonResponse(
       {
         ok: true,
+        selectedGuildId: guildId,
         category: data,
-        audit: {
-          action: "category_created",
-          actorId,
-          actorName,
-        },
+        audit: { action: "category_created", actorId, actorName },
       },
       200,
       refreshedTokens
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unauthorized";
-    return buildErrorResponse(
-      message,
-      message === "Unauthorized" ? 401 : 400
-    );
+    return buildErrorResponse(message, message === "Unauthorized" ? 401 : 400);
   }
 }
 
@@ -770,37 +663,22 @@ export async function PATCH(request: Request) {
   try {
     const { session, refreshedTokens } = await requireStaffSessionForRoute();
     const typedSession = session as SessionLike;
+    const scopedGuild = requireSelectedGuild(refreshedTokens);
+    if (typeof scopedGuild !== "string") return scopedGuild;
+    const guildId = scopedGuild;
     const body = await parseRequestBody(request);
     const supabase = createServerSupabase();
-    const guildId = normalizeString(env.guildId);
     const { actorId, actorName } = getActorIdentity(typedSession);
-
-    if (!guildId) {
-      return buildErrorResponse("Missing guild id.", 500, refreshedTokens);
-    }
-
     const categoryId = normalizeString(body?.id);
-    if (!categoryId) {
-      return buildErrorResponse("Category id is required.", 400, refreshedTokens);
-    }
+
+    if (!categoryId) return buildErrorResponse("Category id is required.", 400, refreshedTokens, { selectedGuildId: guildId });
 
     const existing = await getCategoryById(supabase, guildId, categoryId);
-    if (!existing) {
-      return buildErrorResponse("Category not found.", 404, refreshedTokens);
-    }
+    if (!existing) return buildErrorResponse("Category not found.", 404, refreshedTokens, { selectedGuildId: guildId });
 
     const payload = buildCategoryPayload(body, guildId, existing, actorId);
-
-    await assertSlugAvailable(
-      supabase,
-      guildId,
-      normalizeString(payload.slug),
-      categoryId
-    );
-
-    if (payload.is_default) {
-      await clearOtherDefaults(supabase, guildId, categoryId);
-    }
+    await assertSlugAvailable(supabase, guildId, normalizeString(payload.slug), categoryId);
+    if (payload.is_default) await clearOtherDefaults(supabase, guildId, categoryId);
 
     const { data, error } = await supabase
       .from("ticket_categories")
@@ -810,13 +688,12 @@ export async function PATCH(request: Request) {
       .select("*")
       .single();
 
-    if (error) {
-      return buildErrorResponse(error.message, 500, refreshedTokens);
-    }
+    if (error) return buildErrorResponse(error.message, 500, refreshedTokens, { selectedGuildId: guildId });
 
     return buildJsonResponse(
       {
         ok: true,
+        selectedGuildId: guildId,
         category: data,
         audit: {
           action: "category_updated",
@@ -831,10 +708,7 @@ export async function PATCH(request: Request) {
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unauthorized";
-    return buildErrorResponse(
-      message,
-      message === "Unauthorized" ? 401 : 400
-    );
+    return buildErrorResponse(message, message === "Unauthorized" ? 401 : 400);
   }
 }
 
@@ -842,34 +716,26 @@ export async function DELETE(request: Request) {
   try {
     const { session, refreshedTokens } = await requireStaffSessionForRoute();
     const typedSession = session as SessionLike;
+    const scopedGuild = requireSelectedGuild(refreshedTokens);
+    if (typeof scopedGuild !== "string") return scopedGuild;
+    const guildId = scopedGuild;
     const supabase = createServerSupabase();
-    const guildId = normalizeString(env.guildId);
     const { actorId, actorName } = getActorIdentity(typedSession);
     const url = new URL(request.url);
     const body = await parseRequestBody(request);
+    const categoryId = normalizeString(url.searchParams.get("id")) || normalizeString(body?.id);
 
-    if (!guildId) {
-      return buildErrorResponse("Missing guild id.", 500, refreshedTokens);
-    }
-
-    const categoryId =
-      normalizeString(url.searchParams.get("id")) ||
-      normalizeString(body?.id);
-
-    if (!categoryId) {
-      return buildErrorResponse("Category id is required.", 400, refreshedTokens);
-    }
+    if (!categoryId) return buildErrorResponse("Category id is required.", 400, refreshedTokens, { selectedGuildId: guildId });
 
     const existing = await getCategoryById(supabase, guildId, categoryId);
-    if (!existing) {
-      return buildErrorResponse("Category not found.", 404, refreshedTokens);
-    }
+    if (!existing) return buildErrorResponse("Category not found.", 404, refreshedTokens, { selectedGuildId: guildId });
 
     if (existing.is_default) {
       return buildErrorResponse(
         "You cannot delete the default category until another default is set.",
         409,
-        refreshedTokens
+        refreshedTokens,
+        { selectedGuildId: guildId }
       );
     }
 
@@ -880,16 +746,14 @@ export async function DELETE(request: Request) {
       .or(`category_id.eq.${categoryId},matched_category_id.eq.${categoryId}`)
       .limit(20);
 
-    if (ticketError) {
-      return buildErrorResponse(ticketError.message, 500, refreshedTokens);
-    }
+    if (ticketError) return buildErrorResponse(ticketError.message, 500, refreshedTokens, { selectedGuildId: guildId });
 
     const linked = safeArray<TicketRow>(linkedTickets || []);
     if (linked.length > 0) {
       return buildJsonResponse(
         {
-          error:
-            "This category is still linked to tickets. Reassign those tickets before deleting it.",
+          error: "This category is still linked to tickets. Reassign those tickets before deleting it.",
+          selectedGuildId: guildId,
           linkedTickets: linked.map((ticket) => ({
             id: ticket.id || null,
             title: ticket.title || "Untitled",
@@ -907,13 +771,12 @@ export async function DELETE(request: Request) {
       .eq("guild_id", guildId)
       .eq("id", categoryId);
 
-    if (error) {
-      return buildErrorResponse(error.message, 500, refreshedTokens);
-    }
+    if (error) return buildErrorResponse(error.message, 500, refreshedTokens, { selectedGuildId: guildId });
 
     return buildJsonResponse(
       {
         ok: true,
+        selectedGuildId: guildId,
         deletedId: categoryId,
         audit: {
           action: "category_deleted",
@@ -928,9 +791,6 @@ export async function DELETE(request: Request) {
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unauthorized";
-    return buildErrorResponse(
-      message,
-      message === "Unauthorized" ? 401 : 400
-    );
+    return buildErrorResponse(message, message === "Unauthorized" ? 401 : 400);
   }
 }
