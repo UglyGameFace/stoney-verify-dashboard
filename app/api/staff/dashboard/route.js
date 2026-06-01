@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { getSession } from "@/lib/auth-server";
 import { derivePriority, sortTickets } from "@/lib/priority";
-import { env } from "@/lib/env";
+import { getSelectedGuildId } from "@/lib/guild-selection";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function normalizeString(value) {
   return String(value || "").trim();
@@ -26,23 +29,6 @@ function safeObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
-function dedupeStrings(values) {
-  const seen = new Set();
-  const out = [];
-
-  for (const value of safeArray(values)) {
-    const clean = normalizeString(value);
-    if (!clean) continue;
-
-    const key = clean.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(clean);
-  }
-
-  return out;
-}
-
 function isClosedLikeStatus(status) {
   const value = normalizeString(status).toLowerCase();
   return value === "closed" || value === "deleted";
@@ -60,17 +46,14 @@ function hasUsableChannel(ticket) {
 function shouldHideStaleTicket(ticket) {
   const status = normalizeString(ticket?.status).toLowerCase();
   const missingChannel = !hasUsableChannel(ticket);
-
   if (!missingChannel) return false;
   if (!isClosedLikeStatus(status)) return false;
-
-  const closedAtMs = parseDateMs(ticket?.closed_at);
-  const updatedAtMs = parseDateMs(ticket?.updated_at);
-  const createdAtMs = parseDateMs(ticket?.created_at);
-  const newestMs = Math.max(closedAtMs, updatedAtMs, createdAtMs);
-  const ageMs = Date.now() - newestMs;
-
-  return ageMs > 5 * 60 * 1000;
+  const newestMs = Math.max(
+    parseDateMs(ticket?.closed_at),
+    parseDateMs(ticket?.updated_at),
+    parseDateMs(ticket?.created_at)
+  );
+  return Date.now() - newestMs > 5 * 60 * 1000;
 }
 
 async function safeSupabaseRows(queryFactory) {
@@ -79,15 +62,6 @@ async function safeSupabaseRows(queryFactory) {
     return Array.isArray(response?.data) ? response.data : [];
   } catch {
     return [];
-  }
-}
-
-async function safeSupabaseSingle(queryFactory) {
-  try {
-    const response = await queryFactory();
-    return response?.data && typeof response.data === "object" ? response.data : null;
-  } catch {
-    return null;
   }
 }
 
@@ -101,36 +75,27 @@ async function safeSupabaseCount(queryFactory) {
 }
 
 function resolveDisplayName(memberRow, fallback = "Unknown") {
-  return (
-    memberRow?.display_name ||
-    memberRow?.nickname ||
-    memberRow?.username ||
-    fallback
-  );
+  return memberRow?.display_name || memberRow?.nickname || memberRow?.username || fallback;
 }
 
 function sanitizeCategory(category) {
   return {
     id: category?.id || null,
+    guild_id: category?.guild_id || null,
     name: category?.name || "Support",
     slug: category?.slug || "support",
     color: category?.color || "#45d483",
     description: category?.description || "",
     intake_type: category?.intake_type || "general",
-    button_label:
-      category?.button_label ||
-      `Open ${String(category?.name || "Support").trim()} Ticket`,
+    button_label: category?.button_label || `Open ${String(category?.name || "Support").trim()} Ticket`,
     is_default: Boolean(category?.is_default),
     sort_order: category?.sort_order ?? null,
-    staff_role_ids: Array.isArray(category?.staff_role_ids)
-      ? category.staff_role_ids
-      : [],
-    staff_role_names: Array.isArray(category?.staff_role_names)
-      ? category.staff_role_names
-      : [],
-    match_keywords: Array.isArray(category?.match_keywords)
-      ? category.match_keywords
-      : [],
+    staff_role_ids: Array.isArray(category?.staff_role_ids) ? category.staff_role_ids : [],
+    staff_role_names: Array.isArray(category?.staff_role_names) ? category.staff_role_names : [],
+    match_keywords: Array.isArray(category?.match_keywords) ? category.match_keywords : [],
+    form_enabled: category?.form_enabled !== false,
+    form_questions: Array.isArray(category?.form_questions) ? category.form_questions : [],
+    form_config: safeObject(category?.form_config),
   };
 }
 
@@ -177,15 +142,9 @@ function sanitizeGuildMember(member) {
     role_state_reason: member?.role_state_reason || null,
     avatar_hash: member?.avatar_hash || null,
     joined_at: member?.joined_at || null,
-    previous_usernames: Array.isArray(member?.previous_usernames)
-      ? member.previous_usernames
-      : [],
-    previous_display_names: Array.isArray(member?.previous_display_names)
-      ? member.previous_display_names
-      : [],
-    previous_nicknames: Array.isArray(member?.previous_nicknames)
-      ? member.previous_nicknames
-      : [],
+    previous_usernames: Array.isArray(member?.previous_usernames) ? member.previous_usernames : [],
+    previous_display_names: Array.isArray(member?.previous_display_names) ? member.previous_display_names : [],
+    previous_nicknames: Array.isArray(member?.previous_nicknames) ? member.previous_nicknames : [],
     last_seen_username: member?.last_seen_username || null,
     last_seen_display_name: member?.last_seen_display_name || null,
     last_seen_nickname: member?.last_seen_nickname || null,
@@ -216,7 +175,6 @@ function sanitizeTicket(ticket, memberLookup = {}) {
   const claimedBy = normalizeString(ticket?.claimed_by);
   const assignedTo = normalizeString(ticket?.assigned_to);
   const closedBy = normalizeString(ticket?.closed_by);
-
   const claimedMember = claimedBy ? memberLookup[claimedBy] : null;
   const assignedMember = assignedTo ? memberLookup[assignedTo] : null;
   const closedMember = closedBy ? memberLookup[closedBy] : null;
@@ -232,17 +190,11 @@ function sanitizeTicket(ticket, memberLookup = {}) {
     status: ticket?.status || "open",
     priority: ticket?.priority || "medium",
     claimed_by: claimedBy || null,
-    claimed_by_name: claimedMember
-      ? resolveDisplayName(claimedMember, claimedBy)
-      : claimedBy || null,
+    claimed_by_name: claimedMember ? resolveDisplayName(claimedMember, claimedBy) : claimedBy || null,
     assigned_to: assignedTo || null,
-    assigned_to_name: assignedMember
-      ? resolveDisplayName(assignedMember, assignedTo)
-      : assignedTo || null,
+    assigned_to_name: assignedMember ? resolveDisplayName(assignedMember, assignedTo) : assignedTo || null,
     closed_by: closedBy || null,
-    closed_by_name: closedMember
-      ? resolveDisplayName(closedMember, closedBy)
-      : closedBy || null,
+    closed_by_name: closedMember ? resolveDisplayName(closedMember, closedBy) : closedBy || null,
     closed_reason: ticket?.closed_reason || null,
     created_at: ticket?.created_at || null,
     updated_at: ticket?.updated_at || null,
@@ -308,7 +260,6 @@ function sanitizeFraudFlag(row) {
 function sanitizeJoin(memberJoin, memberLookup = {}) {
   const userId = normalizeString(memberJoin?.user_id);
   const member = userId ? memberLookup[userId] : null;
-
   return {
     ...(member || {}),
     ...(memberJoin || {}),
@@ -320,8 +271,7 @@ function sanitizeJoin(memberJoin, memberLookup = {}) {
     joined_at: memberJoin?.joined_at || member?.joined_at || memberJoin?.created_at || null,
     updated_at: memberJoin?.updated_at || member?.updated_at || member?.last_seen_at || null,
     created_at: memberJoin?.created_at || member?.created_at || null,
-    role_names:
-      Array.isArray(member?.role_names) ? member.role_names : [],
+    role_names: Array.isArray(member?.role_names) ? member.role_names : [],
     has_verified_role: Boolean(member?.has_verified_role),
     has_unverified: Boolean(member?.has_unverified),
     has_staff_role: Boolean(member?.has_staff_role),
@@ -345,14 +295,8 @@ function sanitizeJoin(memberJoin, memberLookup = {}) {
 function sanitizeActivityFeedEvent(row, memberLookup = {}) {
   const actorId = normalizeString(row?.actor_user_id);
   const actorMember = actorId ? memberLookup[actorId] : null;
-  const actorName =
-    row?.actor_name ||
-    (actorMember ? resolveDisplayName(actorMember, actorId) : null) ||
-    "System";
-
   const targetUserId = normalizeString(row?.target_user_id);
   const targetMember = targetUserId ? memberLookup[targetUserId] : null;
-
   return {
     id: row?.id || null,
     title: row?.title || "Activity",
@@ -363,12 +307,9 @@ function sanitizeActivityFeedEvent(row, memberLookup = {}) {
     related_id: row?.related_id || null,
     created_at: row?.created_at || null,
     actor_id: actorId || null,
-    actor_name: actorName,
+    actor_name: row?.actor_name || (actorMember ? resolveDisplayName(actorMember, actorId) : null) || "System",
     target_user_id: targetUserId || null,
-    target_name:
-      row?.target_name ||
-      (targetMember ? resolveDisplayName(targetMember, targetUserId) : null) ||
-      null,
+    target_name: row?.target_name || (targetMember ? resolveDisplayName(targetMember, targetUserId) : null) || null,
     channel_id: row?.channel_id || null,
     channel_name: row?.channel_name || null,
     ticket_id: row?.ticket_id || null,
@@ -377,85 +318,18 @@ function sanitizeActivityFeedEvent(row, memberLookup = {}) {
   };
 }
 
-function sanitizeAuditLogEvent(row, memberLookup = {}) {
-  const meta = safeObject(row?.meta);
-  const actorId = normalizeString(row?.staff_id || meta?.staff_id);
-  const actorMember = actorId ? memberLookup[actorId] : null;
-  const actorName =
-    meta?.staff_name ||
-    row?.staff_name ||
-    (actorMember ? resolveDisplayName(actorMember, actorId) : null) ||
-    actorId ||
-    "Staff";
-
-  return {
-    id: `audit-log-${row?.id || row?.created_at}`,
-    title: String(row?.action || "Audit Log")
-      .replace(/[_-]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .replace(/\b\w/g, (m) => m.toUpperCase()),
-    description:
-      meta?.reason ||
-      meta?.message ||
-      "Dashboard/bot audit log entry.",
-    reason: meta?.reason || meta?.message || "",
-    event_type: row?.action || "audit_log",
-    event_family: "audit",
-    related_id: row?.staff_id || null,
-    created_at: row?.created_at || null,
-    actor_id: actorId || null,
-    actor_name: actorName,
-    target_user_id: normalizeString(meta?.user_id || meta?.target_user_id) || null,
-    target_name: null,
-    channel_id: meta?.channel_id || null,
-    channel_name: null,
-    ticket_id: meta?.ticket_id || meta?.source_ticket_id || null,
-    metadata: meta,
-    source: "audit_logs",
-  };
-}
-
-function sanitizeAuditEvent(row) {
-  return {
-    id: `audit-event-${row?.id || row?.created_at}`,
-    title: row?.title || "Audit Event",
-    description: row?.description || "",
-    reason: row?.description || "",
-    event_type: row?.event_type || "audit_event",
-    event_family: "audit",
-    related_id: row?.related_id || null,
-    created_at: row?.created_at || null,
-    actor_id: null,
-    actor_name: "System",
-    target_user_id: null,
-    target_name: null,
-    channel_id: null,
-    channel_name: null,
-    ticket_id: null,
-    metadata: {},
-    source: "audit_events",
-  };
-}
-
 function buildRecentJoins(memberJoins = [], memberLookup = {}) {
   return safeArray(memberJoins)
     .map((row) => sanitizeJoin(row, memberLookup))
-    .sort(
-      (a, b) =>
-        parseDateMs(b?.joined_at || b?.created_at || b?.updated_at) -
-        parseDateMs(a?.joined_at || a?.created_at || a?.updated_at)
-    )
+    .sort((a, b) => parseDateMs(b?.joined_at || b?.created_at || b?.updated_at) - parseDateMs(a?.joined_at || a?.created_at || a?.updated_at))
     .slice(0, 50);
 }
 
 function deriveMetricsFromTickets(tickets = [], existingMetrics = [], memberLookup = {}) {
   const byStaff = new Map();
-
   function ensureRow(key, fallbackName = "Unknown Staff") {
     const safeKey = normalizeString(key);
     if (!safeKey) return null;
-
     if (!byStaff.has(safeKey)) {
       const member = memberLookup[safeKey];
       byStaff.set(safeKey, {
@@ -468,21 +342,16 @@ function deriveMetricsFromTickets(tickets = [], existingMetrics = [], memberLook
         last_active: null,
       });
     }
-
     return byStaff.get(safeKey);
   }
 
   for (const row of safeArray(existingMetrics)) {
     const key = normalizeString(row?.staff_id || row?.staff_name);
     if (!key) continue;
-
     const member = memberLookup[key];
-
     byStaff.set(key, {
       staff_id: key,
-      staff_name:
-        row?.staff_name ||
-        (member ? resolveDisplayName(member, key) : key),
+      staff_name: row?.staff_name || (member ? resolveDisplayName(member, key) : key),
       tickets_handled: normalizeNumber(row?.tickets_handled, 0),
       approvals: normalizeNumber(row?.approvals, 0),
       denials: normalizeNumber(row?.denials, 0),
@@ -493,88 +362,57 @@ function deriveMetricsFromTickets(tickets = [], existingMetrics = [], memberLook
 
   for (const ticket of safeArray(tickets)) {
     const status = normalizeString(ticket?.status).toLowerCase();
-    const category = normalizeString(
-      ticket?.matched_intake_type || ticket?.category
-    ).toLowerCase();
-
-    const staffId = normalizeString(
-      ticket?.closed_by || ticket?.claimed_by || ticket?.assigned_to
-    );
-
+    const category = normalizeString(ticket?.matched_intake_type || ticket?.category).toLowerCase();
+    const staffId = normalizeString(ticket?.closed_by || ticket?.claimed_by || ticket?.assigned_to);
     if (!staffId) continue;
-
     const row = ensureRow(staffId, staffId);
     if (!row) continue;
-
-    const updatedAt =
-      ticket?.updated_at || ticket?.closed_at || ticket?.created_at || null;
-
-    if (
-      updatedAt &&
-      (!row.last_active || parseDateMs(updatedAt) > parseDateMs(row.last_active))
-    ) {
+    const updatedAt = ticket?.updated_at || ticket?.closed_at || ticket?.created_at || null;
+    if (updatedAt && (!row.last_active || parseDateMs(updatedAt) > parseDateMs(row.last_active))) {
       row.last_active = updatedAt;
     }
-
     if (status === "closed" || status === "deleted") {
       row.tickets_handled += 1;
-
-      const reasonText = normalizeString(
-        ticket?.closed_reason || ticket?.reason || ticket?.mod_suggestion
-      ).toLowerCase();
-
-      const denied = /\b(deny|denied|reject|rejected|decline|declined|failed)\b/.test(
-        reasonText
-      );
-
+      const reasonText = normalizeString(ticket?.closed_reason || ticket?.reason || ticket?.mod_suggestion).toLowerCase();
+      const denied = /\b(deny|denied|reject|rejected|decline|declined|failed)\b/.test(reasonText);
       if (category.includes("verification")) {
-        if (denied) {
-          row.denials += 1;
-        } else {
-          row.approvals += 1;
-        }
+        if (denied) row.denials += 1;
+        else row.approvals += 1;
       }
     }
   }
 
   return [...byStaff.values()].sort((a, b) => {
-    const handledDiff =
-      normalizeNumber(b?.tickets_handled, 0) - normalizeNumber(a?.tickets_handled, 0);
+    const handledDiff = normalizeNumber(b?.tickets_handled, 0) - normalizeNumber(a?.tickets_handled, 0);
     if (handledDiff !== 0) return handledDiff;
-
-    const approvalsDiff =
-      normalizeNumber(b?.approvals, 0) - normalizeNumber(a?.approvals, 0);
+    const approvalsDiff = normalizeNumber(b?.approvals, 0) - normalizeNumber(a?.approvals, 0);
     if (approvalsDiff !== 0) return approvalsDiff;
+    return normalizeString(a?.staff_name || a?.staff_id).localeCompare(normalizeString(b?.staff_name || b?.staff_id));
+  });
+}
 
-    return normalizeString(a?.staff_name || a?.staff_id).localeCompare(
-      normalizeString(b?.staff_name || b?.staff_id)
-    );
+function json(payload, status = 200) {
+  return NextResponse.json(payload, {
+    status,
+    headers: { "Cache-Control": "no-store, max-age=0" },
   });
 }
 
 export async function GET() {
   try {
     const session = await getSession();
+    if (!session) return json({ ok: false, error: "Unauthorized" }, 401);
+    if (!session?.isStaff) return json({ ok: false, error: "Forbidden" }, 403);
 
-    if (!session) {
-      return NextResponse.json(
-        { ok: false, error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    if (!session?.isStaff) {
-      return NextResponse.json(
-        { ok: false, error: "Forbidden" },
-        { status: 403 }
-      );
-    }
-
-    const guildId = normalizeString(env.guildId);
+    const guildId = normalizeString(getSelectedGuildId());
     if (!guildId) {
-      return NextResponse.json(
-        { ok: false, error: "Missing guild id." },
-        { status: 500 }
+      return json(
+        {
+          ok: false,
+          error: "Select a server before opening the staff dashboard.",
+          needsServerSelection: true,
+        },
+        428
       );
     }
 
@@ -583,8 +421,6 @@ export async function GET() {
 
     const [
       rawTickets,
-      rawAuditLogs,
-      rawAuditEvents,
       rawRoles,
       rawMetrics,
       rawCategories,
@@ -606,209 +442,72 @@ export async function GET() {
       rawActivityFeed,
     ] = await Promise.all([
       safeSupabaseRows(() =>
-        supabase
-          .from("tickets")
-          .select("*")
-          .eq("guild_id", guildId)
-          .order("updated_at", { ascending: false })
-          .limit(300)
+        supabase.from("tickets").select("*").eq("guild_id", guildId).order("updated_at", { ascending: false }).limit(300)
       ),
-
       safeSupabaseRows(() =>
-        supabase
-          .from("audit_logs")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(40)
+        supabase.from("guild_roles").select("*").eq("guild_id", guildId).order("position", { ascending: false }).limit(100)
       ),
-
       safeSupabaseRows(() =>
-        supabase
-          .from("audit_events")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(40)
+        supabase.from("staff_metrics").select("*").eq("guild_id", guildId).order("tickets_handled", { ascending: false }).limit(25)
       ),
-
       safeSupabaseRows(() =>
-        supabase
-          .from("guild_roles")
-          .select("*")
-          .eq("guild_id", guildId)
-          .order("position", { ascending: false })
-          .limit(100)
+        supabase.from("ticket_categories").select("*").eq("guild_id", guildId).order("sort_order", { ascending: true }).order("name", { ascending: true })
       ),
-
       safeSupabaseRows(() =>
-        supabase
-          .from("staff_metrics")
-          .select("*")
-          .eq("guild_id", guildId)
-          .order("tickets_handled", { ascending: false })
-          .limit(25)
+        supabase.from("member_joins").select("*").eq("guild_id", guildId).order("joined_at", { ascending: false }).limit(50)
       ),
-
       safeSupabaseRows(() =>
-        supabase
-          .from("ticket_categories")
-          .select("*")
-          .eq("guild_id", guildId)
-          .order("sort_order", { ascending: true })
-          .order("name", { ascending: true })
+        supabase.from("guild_members").select("*").eq("guild_id", guildId).eq("in_guild", true).order("joined_at", { ascending: false }).limit(25)
       ),
-
       safeSupabaseRows(() =>
-        supabase
-          .from("member_joins")
-          .select("*")
-          .eq("guild_id", guildId)
-          .order("joined_at", { ascending: false })
-          .limit(50)
+        supabase.from("guild_members").select("*").eq("guild_id", guildId).eq("in_guild", false).order("updated_at", { ascending: false }).limit(25)
       ),
-
       safeSupabaseRows(() =>
-        supabase
-          .from("guild_members")
-          .select("*")
-          .eq("guild_id", guildId)
-          .eq("in_guild", true)
-          .order("joined_at", { ascending: false })
-          .limit(25)
+        supabase.from("guild_members").select("*").eq("guild_id", guildId).order("updated_at", { ascending: false }).limit(2000)
       ),
-
-      safeSupabaseRows(() =>
-        supabase
-          .from("guild_members")
-          .select("*")
-          .eq("guild_id", guildId)
-          .eq("in_guild", false)
-          .order("updated_at", { ascending: false })
-          .limit(25)
-      ),
-
-      safeSupabaseRows(() =>
-        supabase
-          .from("guild_members")
-          .select("*")
-          .eq("guild_id", guildId)
-          .order("updated_at", { ascending: false })
-          .limit(2000)
-      ),
-
       safeSupabaseCount(() =>
-        supabase
-          .from("warns")
-          .select("*", { count: "exact", head: true })
-          .eq("guild_id", guildId)
-          .gte("created_at", since24h)
+        supabase.from("warns").select("*", { count: "exact", head: true }).eq("guild_id", guildId).gte("created_at", since24h)
       ),
-
       safeSupabaseCount(() =>
-        supabase
-          .from("raid_events")
-          .select("*", { count: "exact", head: true })
-          .eq("guild_id", guildId)
-          .gte("created_at", since24h)
+        supabase.from("raid_events").select("*", { count: "exact", head: true }).eq("guild_id", guildId).gte("created_at", since24h)
       ),
-
       safeSupabaseCount(() =>
-        supabase
-          .from("verification_flags")
-          .select("*", { count: "exact", head: true })
-          .eq("guild_id", guildId)
-          .eq("flagged", true)
+        supabase.from("verification_flags").select("*", { count: "exact", head: true }).eq("guild_id", guildId).eq("flagged", true)
       ),
-
       safeSupabaseCount(() =>
-        supabase
-          .from("guild_members")
-          .select("*", { count: "exact", head: true })
-          .eq("guild_id", guildId)
-          .eq("in_guild", true)
+        supabase.from("guild_members").select("*", { count: "exact", head: true }).eq("guild_id", guildId).eq("in_guild", true)
       ),
-
       safeSupabaseCount(() =>
-        supabase
-          .from("guild_members")
-          .select("*", { count: "exact", head: true })
-          .eq("guild_id", guildId)
-          .eq("in_guild", false)
+        supabase.from("guild_members").select("*", { count: "exact", head: true }).eq("guild_id", guildId).eq("in_guild", false)
       ),
-
       safeSupabaseCount(() =>
-        supabase
-          .from("guild_members")
-          .select("*", { count: "exact", head: true })
-          .eq("guild_id", guildId)
-          .eq("in_guild", true)
-          .eq("has_unverified", true)
+        supabase.from("guild_members").select("*", { count: "exact", head: true }).eq("guild_id", guildId).eq("in_guild", true).eq("has_unverified", true)
       ),
-
       safeSupabaseCount(() =>
-        supabase
-          .from("guild_members")
-          .select("*", { count: "exact", head: true })
-          .eq("guild_id", guildId)
-          .eq("in_guild", true)
-          .eq("has_verified_role", true)
+        supabase.from("guild_members").select("*", { count: "exact", head: true }).eq("guild_id", guildId).eq("in_guild", true).eq("has_verified_role", true)
       ),
-
       safeSupabaseCount(() =>
-        supabase
-          .from("guild_members")
-          .select("*", { count: "exact", head: true })
-          .eq("guild_id", guildId)
-          .eq("in_guild", true)
-          .eq("has_staff_role", true)
+        supabase.from("guild_members").select("*", { count: "exact", head: true }).eq("guild_id", guildId).eq("in_guild", true).eq("has_staff_role", true)
       ),
-
       safeSupabaseRows(() =>
-        supabase
-          .from("warns")
-          .select("*")
-          .eq("guild_id", guildId)
-          .gte("created_at", since24h)
-          .order("created_at", { ascending: false })
-          .limit(25)
+        supabase.from("warns").select("*").eq("guild_id", guildId).gte("created_at", since24h).order("created_at", { ascending: false }).limit(25)
       ),
-
       safeSupabaseRows(() =>
-        supabase
-          .from("raid_events")
-          .select("*")
-          .eq("guild_id", guildId)
-          .gte("created_at", since24h)
-          .order("created_at", { ascending: false })
-          .limit(25)
+        supabase.from("raid_events").select("*").eq("guild_id", guildId).gte("created_at", since24h).order("created_at", { ascending: false }).limit(25)
       ),
-
       safeSupabaseRows(() =>
-        supabase
-          .from("verification_flags")
-          .select("*")
-          .eq("guild_id", guildId)
-          .eq("flagged", true)
-          .order("created_at", { ascending: false })
-          .limit(25)
+        supabase.from("verification_flags").select("*").eq("guild_id", guildId).eq("flagged", true).order("created_at", { ascending: false }).limit(25)
       ),
-
       safeSupabaseRows(() =>
-        supabase
-          .from("activity_feed_events")
-          .select("*")
-          .eq("guild_id", guildId)
-          .order("created_at", { ascending: false })
-          .limit(80)
+        supabase.from("activity_feed_events").select("*").eq("guild_id", guildId).order("created_at", { ascending: false }).limit(80)
       ),
     ]);
 
     const guildMembers = safeArray(rawAllGuildMembers).map(sanitizeGuildMember);
-
     const memberLookup = {};
     for (const member of guildMembers) {
       const id = normalizeString(member?.user_id);
-      if (!id) continue;
-      memberLookup[id] = member;
+      if (id) memberLookup[id] = member;
     }
 
     const visibleTickets = safeArray(rawTickets)
@@ -834,78 +533,52 @@ export async function GET() {
     const warns = safeArray(rawWarns).map(sanitizeWarn);
     const raids = safeArray(rawRaids).map(sanitizeRaid);
     const fraud = safeArray(rawFraudFlags).map(sanitizeFraudFlag);
-
     const recentActiveMembers = safeArray(rawRecentActiveMembers).map(sanitizeGuildMember);
     const recentFormerMembers = safeArray(rawRecentFormerMembers).map(sanitizeGuildMember);
     const recentJoins = buildRecentJoins(rawMemberJoins, memberLookup);
-
-    const metrics = deriveMetricsFromTickets(
-      visibleTickets,
-      rawMetrics,
-      memberLookup
-    );
-
-    const events = [
-      ...safeArray(rawActivityFeed).map((row) =>
-        sanitizeActivityFeedEvent(row, memberLookup)
-      ),
-      ...safeArray(rawAuditLogs).map((row) =>
-        sanitizeAuditLogEvent(row, memberLookup)
-      ),
-      ...safeArray(rawAuditEvents).map(sanitizeAuditEvent),
-    ]
+    const metrics = deriveMetricsFromTickets(visibleTickets, rawMetrics, memberLookup);
+    const events = safeArray(rawActivityFeed)
+      .map((row) => sanitizeActivityFeedEvent(row, memberLookup))
       .sort((a, b) => parseDateMs(b?.created_at) - parseDateMs(a?.created_at))
       .slice(0, 80);
 
-    return NextResponse.json(
-      {
-        ok: true,
-        generated_at: new Date().toISOString(),
-        tickets: sortedTickets,
-        activeTickets,
-        events,
-        warns,
-        raids,
-        fraud,
-        fraudFlagsList: fraud,
-        roles,
-        metrics,
-        categories,
-        recentJoins,
-        recentActiveMembers,
-        recentFormerMembers,
-        guildMembers,
-        members: guildMembers,
-        memberRows: guildMembers,
-        memberCounts: {
-          tracked: activeMembersCount + formerMembersCount,
-          active: activeMembersCount,
-          former: formerMembersCount,
-          pendingVerification: pendingVerificationCount,
-          verified: verifiedMembersCount,
-          staff: staffMembersCount,
-        },
-        counts: {
-          openTickets: activeTickets.length,
-          warnsToday: warnsTodayCount,
-          raidAlerts: raidAlertsCount,
-          fraudFlags: fraudFlagsCount,
-        },
+    return json({
+      ok: true,
+      selectedGuildId: guildId,
+      generated_at: new Date().toISOString(),
+      tickets: sortedTickets,
+      activeTickets,
+      events,
+      warns,
+      raids,
+      fraud,
+      fraudFlagsList: fraud,
+      roles,
+      metrics,
+      categories,
+      recentJoins,
+      recentActiveMembers,
+      recentFormerMembers,
+      guildMembers,
+      members: guildMembers,
+      memberRows: guildMembers,
+      memberCounts: {
+        tracked: activeMembersCount + formerMembersCount,
+        active: activeMembersCount,
+        former: formerMembersCount,
+        pendingVerification: pendingVerificationCount,
+        verified: verifiedMembersCount,
+        staff: staffMembersCount,
       },
-      {
-        status: 200,
-        headers: {
-          "Cache-Control": "no-store, max-age=0",
-        },
-      }
-    );
+      counts: {
+        openTickets: activeTickets.length,
+        warnsToday: warnsTodayCount,
+        raidAlerts: raidAlertsCount,
+        fraudFlags: fraudFlagsCount,
+      },
+    });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to load staff dashboard.";
-
-    return NextResponse.json(
-      { ok: false, error: message },
-      { status: 500 }
-    );
+    const message = error instanceof Error ? error.message : "Failed to load staff dashboard.";
+    return json({ ok: false, error: message }, 500);
   }
 }
