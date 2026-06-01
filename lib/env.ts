@@ -90,9 +90,11 @@ export const env: AppEnv = {
   supabaseServiceRole:
     process.env.SUPABASE_SERVICE_ROLE ||
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_KEY ||
     "",
 
-  supabaseDbUrl: process.env.SUPABASE_DB_URL || "",
+  supabaseDbUrl: process.env.SUPABASE_DB_URL || process.env.DATABASE_URL || "",
 
   discordToken:
     process.env.DISCORD_TOKEN ||
@@ -103,11 +105,20 @@ export const env: AppEnv = {
   discordClientId:
     process.env.DISCORD_CLIENT_ID ||
     process.env.CLIENT_ID ||
+    process.env.NEXT_PUBLIC_DISCORD_CLIENT_ID ||
     "",
 
-  discordClientSecret: process.env.DISCORD_CLIENT_SECRET || "",
+  discordClientSecret:
+    process.env.DISCORD_CLIENT_SECRET ||
+    process.env.DISCORD_CLIENT_SECRET_KEY ||
+    "",
 
-  discordRedirectUri: process.env.DISCORD_REDIRECT_URI || "",
+  discordRedirectUri:
+    process.env.DISCORD_REDIRECT_URI ||
+    process.env.DISCORD_DIRECT_URI ||
+    process.env.DISCORD_CALLBACK_URL ||
+    process.env.DISCORD_CALLBACK_URI ||
+    "",
 
   appUrl: cleanUrl(
     process.env.APP_URL ||
@@ -146,12 +157,14 @@ export const env: AppEnv = {
   guildId: cleanId(
     process.env.DISCORD_GUILD_ID ||
       process.env.GUILD_ID ||
+      process.env.NEXT_PUBLIC_DISCORD_GUILD_ID ||
       ""
   ),
 
   discordGuildId: cleanId(
     process.env.DISCORD_GUILD_ID ||
       process.env.GUILD_ID ||
+      process.env.NEXT_PUBLIC_DISCORD_GUILD_ID ||
       ""
   ),
 
@@ -204,7 +217,7 @@ export function assertServerEnv(): true {
   );
 
   required(
-    "SUPABASE_SERVICE_ROLE or SUPABASE_SERVICE_ROLE_KEY",
+    "SUPABASE_SERVICE_ROLE or SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ROLE_KEY",
     env.supabaseServiceRole
   );
 
