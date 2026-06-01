@@ -89,6 +89,11 @@ type BuiltSession = {
     verification_label: string;
   };
   isStaff: boolean;
+  authContext?: {
+    guild_id: string | null;
+    guild_checked: boolean;
+    guild_check_error: string | null;
+  };
 };
 
 type AuthError = Error & {
@@ -116,7 +121,6 @@ export function hasDiscordOAuthConfig(): boolean {
     env.discordClientId &&
       env.discordClientSecret &&
       env.discordRedirectUri &&
-      env.guildId &&
       (env.appUrl || env.siteUrl || env.baseUrl || env.publicUrl)
   );
 }
@@ -258,8 +262,8 @@ function deriveMemberAccessFlags(
     (name) => name === "unverified" || name.includes("unverified")
   );
 
-  let accessLabel = "Unknown";
-  let verificationLabel = "Unknown";
+  let accessLabel = "Signed In";
+  let verificationLabel = "Server Access Not Checked";
 
   if (hasStaffRole) {
     accessLabel = "Staff";
@@ -281,19 +285,49 @@ function deriveMemberAccessFlags(
   };
 }
 
+async function buildGuildMemberContext(user: DiscordUser): Promise<{
+  member: DiscordMember | null;
+  roles: DiscordRole[];
+  error: string | null;
+}> {
+  const guildId = safeText(env.guildId || env.discordGuildId);
+  const userId = safeText(user?.id);
+
+  if (!guildId || !userId) {
+    return { member: null, roles: [], error: "No default guild configured." };
+  }
+
+  try {
+    const [member, roles] = await Promise.all([
+      discordBotFetch(`/guilds/${guildId}/members/${userId}`) as Promise<DiscordMember>,
+      fetchGuildRoles(guildId) as Promise<DiscordRole[]>,
+    ]);
+
+    return { member, roles: Array.isArray(roles) ? roles : [], error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Guild member check failed.";
+    return { member: null, roles: [], error: message };
+  }
+}
+
 export async function buildSession(accessToken: string): Promise<BuiltSession> {
+  // This must stay independent from any one server. For public production, a
+  // valid Discord login should create a user session first; server access is the
+  // next layer and can be checked per selected guild.
   const user = (await discordUserFetch(
     "/users/@me",
     accessToken
   )) as DiscordUser;
-  const member = (await discordBotFetch(
-    `/guilds/${env.guildId}/members/${user.id}`
-  )) as DiscordMember;
-  const roles = (await fetchGuildRoles(env.guildId)) as DiscordRole[];
 
-  const roleMap = new Map(roles.map((r) => [String(r.id), r]));
-  const memberRoleIds = Array.isArray(member.roles)
-    ? member.roles.map(String)
+  const avatarUrl = buildDiscordAvatarUrl(user);
+  const bannerUrl = buildBannerUrl(user);
+  const guildContext = await buildGuildMemberContext(user);
+
+  const roleMap = new Map(
+    guildContext.roles.map((role) => [String(role.id), role])
+  );
+  const memberRoleIds = Array.isArray(guildContext.member?.roles)
+    ? guildContext.member.roles.map(String)
     : [];
 
   const memberRolesDetailed = memberRoleIds
@@ -302,14 +336,14 @@ export async function buildSession(accessToken: string): Promise<BuiltSession> {
     .sort(
       (a, b) => Number(b?.position || 0) - Number(a?.position || 0)
     )
-    .map((r) => ({
-      id: String(r?.id),
-      name: safeText(r?.name),
-      position: Number(r?.position || 0),
+    .map((role) => ({
+      id: String(role?.id),
+      name: safeText(role?.name),
+      position: Number(role?.position || 0),
     }));
 
   const memberRoleNames = memberRolesDetailed
-    .map((r) => safeText(r.name))
+    .map((role) => safeText(role.name))
     .filter(Boolean);
 
   const memberRoleNamesLower = memberRoleNames.map((name) =>
@@ -317,8 +351,10 @@ export async function buildSession(accessToken: string): Promise<BuiltSession> {
   );
 
   const access = deriveMemberAccessFlags(memberRoleIds, memberRoleNamesLower);
-  const avatarUrl = buildDiscordAvatarUrl(user);
-  const bannerUrl = buildBannerUrl(user);
+  const displayName = safeText(
+    guildContext.member?.nick || user.global_name || user.username,
+    "Member"
+  );
 
   return {
     user: {
@@ -346,11 +382,8 @@ export async function buildSession(accessToken: string): Promise<BuiltSession> {
     },
     member: {
       id: String(user.id),
-      nickname: member.nick || null,
-      display_name: safeText(
-        member.nick || user.global_name || user.username,
-        "Member"
-      ),
+      nickname: guildContext.member?.nick || null,
+      display_name: displayName,
       avatar_url: avatarUrl,
       roleIds: memberRoleIds,
       roles: memberRoleNames,
@@ -362,6 +395,11 @@ export async function buildSession(accessToken: string): Promise<BuiltSession> {
       verification_label: access.verificationLabel,
     },
     isStaff: access.hasStaffRole,
+    authContext: {
+      guild_id: safeText(env.guildId || env.discordGuildId) || null,
+      guild_checked: !guildContext.error,
+      guild_check_error: guildContext.error,
+    },
   };
 }
 
