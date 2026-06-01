@@ -1,4 +1,5 @@
 import "@/app/globals.css"
+import "@/app/readability.css"
 import { env } from "@/lib/env"
 
 export const metadata = {
