@@ -6,6 +6,7 @@ import {
   hasDiscordOAuthConfig,
 } from "@/lib/auth-server";
 
+
 type SearchParams = {
   authError?: string | string[];
 };
@@ -77,7 +78,7 @@ export default async function AuthStatusPage({ searchParams }: { searchParams?: 
   const authError = firstParam(searchParams?.authError);
   const session = await getSession();
 
-  if (session?.isStaff && !authError) {
+  if (session && !authError) {
     redirect("/");
   }
 
@@ -91,7 +92,7 @@ export default async function AuthStatusPage({ searchParams }: { searchParams?: 
           Discord login did not finish
         </h1>
         <p style={{ color: "rgba(255,255,255,0.72)", lineHeight: 1.55 }}>
-          The dashboard got an auth error instead of a working staff session. This page shows the reason so it does not silently loop back to sign-in.
+          The dashboard got an auth error instead of a working Discord session. This page shows the reason so it does not silently loop back to sign-in.
         </p>
         <pre
           style={{
@@ -134,26 +135,5 @@ export default async function AuthStatusPage({ searchParams }: { searchParams?: 
     );
   }
 
-  return (
-    <Card>
-      <div style={{ fontSize: 13, color: session.isStaff ? "#86efac" : "#fde68a", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-        {session.isStaff ? "Signed in" : "Signed in, not staff"}
-      </div>
-      <h1 style={{ margin: "8px 0 0", fontSize: "clamp(30px, 5vw, 44px)", letterSpacing: "-0.05em" }}>
-        {session.isStaff ? "Dashboard access ready" : "Staff access required"}
-      </h1>
-      <p style={{ color: "rgba(255,255,255,0.72)", lineHeight: 1.55 }}>
-        Signed in as <strong>{session.user?.username || session.discordUser?.username || "Discord user"}</strong>.
-      </p>
-      {!session.isStaff ? (
-        <p style={{ color: "rgba(255,255,255,0.72)", lineHeight: 1.55 }}>
-          Your Discord account was found, but the dashboard does not see a configured staff role on your member profile. Check <code>STAFF_ROLE_IDS</code>, <code>STAFF_ROLE_NAMES</code>, bot guild access, and the bot token permissions.
-        </p>
-      ) : null}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
-        <ButtonLink href="/" primary>Open dashboard</ButtonLink>
-        {hasDiscordOAuthConfig() ? <ButtonLink href={getDiscordLoginUrl()}>Sign in again</ButtonLink> : null}
-      </div>
-    </Card>
-  );
+  return null;
 }
