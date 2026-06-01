@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
 
 type ServerRow = {
   id: string;
@@ -26,6 +27,10 @@ function normalizeString(value: unknown): string {
   return String(value || "").trim();
 }
 
+function getServerInitial(name: string) {
+  return normalizeString(name).slice(0, 1).toUpperCase() || "S";
+}
+
 export default function ServerSelector() {
   const [servers, setServers] = useState<ServerRow[]>([]);
   const [selectedGuildId, setSelectedGuildId] = useState("");
@@ -33,6 +38,16 @@ export default function ServerSelector() {
   const [savingId, setSavingId] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+
+  const selectedServer = useMemo(
+    () => servers.find((row) => row.id === selectedGuildId || row.selected) || null,
+    [servers, selectedGuildId]
+  );
+
+  const installedCount = useMemo(
+    () => servers.filter((server) => server.bot_installed).length,
+    [servers]
+  );
 
   async function loadServers() {
     setLoading(true);
@@ -60,7 +75,7 @@ export default function ServerSelector() {
 
   async function selectServer(server: ServerRow) {
     if (!server.bot_installed) {
-      setError("Dank Shield is not installed in that server yet. Invite the bot there first, then refresh.");
+      setError("Dank Shield is not installed in that server yet. Invite the bot there first, then refresh this page.");
       return;
     }
     setSavingId(server.id);
@@ -79,7 +94,7 @@ export default function ServerSelector() {
       if (!res.ok || json?.error) throw new Error(json?.error || "Failed to select server.");
       setSelectedGuildId(server.id);
       setServers((prev) => prev.map((row) => ({ ...row, selected: row.id === server.id })));
-      setMessage(`${server.name} is now selected.`);
+      setMessage(`${server.name} is selected. Dashboard tools will now use this server only.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to select server.");
     } finally {
@@ -89,18 +104,49 @@ export default function ServerSelector() {
 
   return (
     <div className="space">
-      <div className="card">
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
+      <div className="card server-flow-card">
+        <div className="server-flow-head">
           <div>
-            <h2 style={{ margin: 0 }}>Choose a Server</h2>
-            <div className="muted" style={{ marginTop: 6, lineHeight: 1.5 }}>
-              Pick a server you can manage where Dank Shield is installed. This becomes the dashboard context for tickets, categories, forms, and settings.
+            <div className="muted server-eyebrow">Step 1 of 2</div>
+            <h2 style={{ margin: 0 }}>Choose a server</h2>
+            <div className="muted server-copy">
+              Pick the server you want to manage. Tickets, categories, forms, member data, and settings will load from the selected server only.
             </div>
           </div>
-          <button type="button" className="button ghost" onClick={() => void loadServers()} disabled={loading || Boolean(savingId)} style={{ width: "auto" }}>
+          <button type="button" className="button ghost server-refresh" onClick={() => void loadServers()} disabled={loading || Boolean(savingId)}>
             {loading ? "Refreshing..." : "Refresh"}
           </button>
         </div>
+
+        <div className="server-status-strip">
+          <div>
+            <span className="server-status-label">Selected</span>
+            <strong>{selectedServer?.name || "None yet"}</strong>
+          </div>
+          <div>
+            <span className="server-status-label">Manageable</span>
+            <strong>{servers.length}</strong>
+          </div>
+          <div>
+            <span className="server-status-label">Bot installed</span>
+            <strong>{installedCount}</strong>
+          </div>
+        </div>
+
+        {selectedServer ? (
+          <div className="info-banner server-next-step">
+            <div>
+              <strong>{selectedServer.name} is active.</strong>
+              <div>Next: open the dashboard or set up ticket categories/forms for this server.</div>
+            </div>
+            <div className="server-next-actions">
+              <a className="button primary" href="/">Open Dashboard</a>
+              <a className="button ghost" href="/ticket-categories">Manage Categories</a>
+              <a className="button ghost" href="/ticket-forms">Manage Forms</a>
+            </div>
+          </div>
+        ) : null}
+
         {error ? <div className="error-banner" style={{ marginTop: 12 }}>{error}</div> : null}
         {message ? <div className="info-banner" style={{ marginTop: 12 }}>{message}</div> : null}
       </div>
@@ -116,7 +162,7 @@ export default function ServerSelector() {
               <div key={server.id} className={`server-card ${selected ? "selected" : ""} ${!installed ? "disabled" : ""}`}>
                 <div className="server-main">
                   <div className="server-icon">
-                    {server.icon_url ? <img src={server.icon_url} alt="" /> : <span>{server.name.slice(0, 1).toUpperCase()}</span>}
+                    {server.icon_url ? <img src={server.icon_url} alt="" /> : <span>{getServerInitial(server.name)}</span>}
                   </div>
                   <div style={{ minWidth: 0 }}>
                     <div className="server-name">{server.name}</div>
@@ -126,15 +172,21 @@ export default function ServerSelector() {
                     </div>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  className={selected ? "button ghost" : "button primary"}
-                  disabled={!installed || savingId === server.id}
-                  onClick={() => void selectServer(server)}
-                  style={{ width: "auto", minWidth: 140 }}
-                >
-                  {savingId === server.id ? "Selecting..." : selected ? "Selected" : installed ? "Select" : "Install Bot First"}
-                </button>
+
+                <div className="server-card-footer">
+                  <div className={`server-pill ${installed ? "installed" : "missing"}`}>
+                    {installed ? "Ready" : "Install needed"}
+                  </div>
+                  <button
+                    type="button"
+                    className={selected ? "button ghost" : "button primary"}
+                    disabled={!installed || savingId === server.id}
+                    onClick={() => void selectServer(server)}
+                    style={{ width: "auto", minWidth: 140 }}
+                  >
+                    {savingId === server.id ? "Selecting..." : selected ? "Selected" : installed ? "Select Server" : "Install Bot First"}
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -146,25 +198,84 @@ export default function ServerSelector() {
       )}
 
       <style jsx>{`
+        .server-flow-card {
+          display: grid;
+          gap: 14px;
+        }
+        .server-flow-head {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 14px;
+          flex-wrap: wrap;
+        }
+        .server-eyebrow {
+          margin-bottom: 8px;
+          font-size: 12px;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          font-weight: 900;
+        }
+        .server-copy {
+          margin-top: 6px;
+          line-height: 1.55;
+          max-width: 760px;
+        }
+        .server-refresh {
+          width: auto;
+          min-width: 130px;
+        }
+        .server-status-strip {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 10px;
+        }
+        .server-status-strip > div {
+          border: 1px solid rgba(255,255,255,0.14);
+          border-radius: 16px;
+          padding: 12px;
+          background: rgba(255,255,255,0.055);
+          min-width: 0;
+        }
+        .server-status-label {
+          display: block;
+          color: var(--muted, #c7ddcf);
+          font-size: 12px;
+          margin-bottom: 4px;
+        }
+        .server-status-strip strong {
+          display: block;
+          color: var(--text-strong, #fff);
+          overflow-wrap: anywhere;
+        }
+        .server-next-step {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+        .server-next-actions {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+        .server-next-actions :global(.button) {
+          width: auto;
+          min-width: 150px;
+        }
         .server-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
           gap: 14px;
         }
         .server-card {
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 20px;
-          padding: 14px;
-          background: rgba(255,255,255,0.035);
+          border: 1px solid rgba(255,255,255,0.14);
+          border-radius: 22px;
+          padding: 16px;
+          background: rgba(255,255,255,0.055);
           display: grid;
-          gap: 14px;
-        }
-        .server-card.selected {
-          border-color: rgba(93,255,141,0.34);
-          box-shadow: 0 0 0 1px rgba(93,255,141,0.12) inset;
-        }
-        .server-card.disabled {
-          opacity: 0.72;
+          gap: 16px;
         }
         .server-main {
           display: flex;
@@ -173,16 +284,17 @@ export default function ServerSelector() {
           min-width: 0;
         }
         .server-icon {
-          width: 48px;
-          height: 48px;
-          min-width: 48px;
-          border-radius: 16px;
+          width: 52px;
+          height: 52px;
+          min-width: 52px;
+          border-radius: 18px;
           overflow: hidden;
           display: grid;
           place-items: center;
-          background: rgba(93,255,141,0.10);
-          color: #d9ffe6;
+          background: rgba(93,255,141,0.14);
+          color: #e8fff0;
           font-weight: 900;
+          font-size: 20px;
         }
         .server-icon img {
           width: 100%;
@@ -193,12 +305,53 @@ export default function ServerSelector() {
           font-weight: 900;
           color: var(--text-strong, #fff);
           overflow-wrap: anywhere;
+          font-size: 18px;
         }
         .server-meta {
-          margin-top: 4px;
-          color: var(--muted, #9fb0c3);
+          margin-top: 5px;
+          color: var(--muted, #c7ddcf);
+          font-size: 13px;
+          line-height: 1.4;
+        }
+        .server-card-footer {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+        .server-pill {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 34px;
+          padding: 7px 11px;
+          border-radius: 999px;
           font-size: 12px;
-          line-height: 1.35;
+          font-weight: 900;
+          border: 1px solid rgba(255,255,255,0.14);
+        }
+        .server-pill.installed {
+          color: #e7fff0;
+          background: rgba(93,255,141,0.14);
+          border-color: rgba(93,255,141,0.28);
+        }
+        .server-pill.missing {
+          color: #fff1c8;
+          background: rgba(255,211,107,0.13);
+          border-color: rgba(255,211,107,0.26);
+        }
+        @media (max-width: 720px) {
+          .server-status-strip {
+            grid-template-columns: 1fr;
+          }
+          .server-next-actions,
+          .server-next-actions :global(.button),
+          .server-card-footer,
+          .server-card-footer :global(.button),
+          .server-refresh {
+            width: 100%;
+          }
         }
       `}</style>
     </div>
