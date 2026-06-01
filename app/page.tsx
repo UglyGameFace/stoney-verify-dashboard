@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import Sidebar from "@/components/Sidebar";
 import DashboardClient from "@/components/DashboardClient";
 import UserDashboardClient from "@/components/UserDashboardClient";
+import SetupLaunchChecklist from "@/components/dashboard/SetupLaunchChecklist";
 import {
   getSession,
   getDiscordLoginUrl,
@@ -388,6 +389,7 @@ export default async function HomePage() {
     return (
       <StaffShell>
         <StaffQuickToolsCard />
+        <SetupLaunchChecklist data={staffData} selectedGuildId={guildId} />
         <DashboardClient
           initialData={staffData}
           staffName={session?.user?.username || session?.discordUser?.username || env?.defaultStaffName || "Staff"}
