@@ -1,11 +1,32 @@
+import { NextResponse } from "next/server"
 import { createServerSupabase } from "@/lib/supabase-server"
-import { env } from "@/lib/env"
+import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server"
+import { getSelectedGuildId } from "@/lib/guild-selection"
 
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
 function normalizeSearchValue(value) {
   return String(value || "").trim().toLowerCase()
+}
+
+function normalizeString(value) {
+  return String(value || "").trim()
+}
+
+function selectedGuildId() {
+  return normalizeString(getSelectedGuildId())
+}
+
+function jsonWithCookies(body, status = 200, refreshedTokens = null) {
+  const response = NextResponse.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    },
+  })
+  applyAuthCookies(response, refreshedTokens)
+  return response
 }
 
 function extractRoleSearchTerms(member) {
@@ -43,7 +64,7 @@ function buildHaystack(member) {
     member.nickname,
     member.top_role,
     member.highest_role_name,
-    ...extractRoleSearchTerms(member)
+    ...extractRoleSearchTerms(member),
   ]
     .filter(Boolean)
     .map((value) => normalizeSearchValue(value))
@@ -54,7 +75,7 @@ function exactScore(member, query) {
     member.user_id,
     member.username,
     member.display_name,
-    member.nickname
+    member.nickname,
   ].map(normalizeSearchValue)
 
   return exactFields.some((value) => value === query) ? 1 : 0
@@ -68,7 +89,7 @@ function prefixScore(member, query) {
     member.nickname,
     member.top_role,
     member.highest_role_name,
-    ...extractRoleSearchTerms(member)
+    ...extractRoleSearchTerms(member),
   ]
     .filter(Boolean)
     .map(normalizeSearchValue)
@@ -77,13 +98,29 @@ function prefixScore(member, query) {
 }
 
 export async function GET(req) {
+  let refreshedTokens = null
+
   try {
+    const auth = await requireStaffSessionForRoute()
+    refreshedTokens = auth?.refreshedTokens || null
+
     const url = new URL(req.url)
     const q = String(url.searchParams.get("q") || "").trim()
-    const guildId = env.guildId || "demo"
+    const guildId = selectedGuildId()
+
+    if (!guildId) {
+      return jsonWithCookies(
+        {
+          error: "Select a server before searching members.",
+          needsServerSelection: true,
+        },
+        428,
+        refreshedTokens
+      )
+    }
 
     if (!q) {
-      return Response.json({ results: [] })
+      return jsonWithCookies({ ok: true, selectedGuildId: guildId, results: [] }, 200, refreshedTokens)
     }
 
     const supabase = createServerSupabase()
@@ -96,7 +133,11 @@ export async function GET(req) {
       .limit(200)
 
     if (error) {
-      return Response.json({ error: error.message || "Search failed" }, { status: 500 })
+      return jsonWithCookies(
+        { error: error.message || "Search failed", selectedGuildId: guildId },
+        500,
+        refreshedTokens
+      )
     }
 
     const results = (data || [])
@@ -135,11 +176,12 @@ export async function GET(req) {
       })
       .slice(0, 20)
 
-    return Response.json({ results })
+    return jsonWithCookies({ ok: true, selectedGuildId: guildId, results }, 200, refreshedTokens)
   } catch (error) {
-    return Response.json(
-      { error: error.message || "Search failed" },
-      { status: 500 }
+    return jsonWithCookies(
+      { error: error?.message || "Search failed" },
+      Number(error?.status) || (error?.message === "Unauthorized" ? 401 : 500),
+      refreshedTokens
     )
   }
 }
