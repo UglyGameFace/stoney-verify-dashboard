@@ -9,6 +9,10 @@ import {
 const ACCESS_COOKIE = "discord_access_token";
 const REFRESH_COOKIE = "discord_refresh_token";
 const EXPIRES_COOKIE = "discord_expires_at";
+const SELECTED_GUILD_COOKIE = "dank_selected_guild_id";
+
+const MANAGE_GUILD = BigInt(1 << 5);
+const ADMINISTRATOR = BigInt(1 << 3);
 
 type CookieOptions = {
   httpOnly: boolean;
@@ -44,6 +48,13 @@ type DiscordRole = {
   id?: string | number | null;
   name?: string | null;
   position?: number | null;
+};
+
+type DiscordUserGuild = {
+  id?: string | null;
+  name?: string | null;
+  owner?: boolean | null;
+  permissions?: string | number | null;
 };
 
 type BuiltSession = {
@@ -85,14 +96,18 @@ type BuiltSession = {
     has_staff_role: boolean;
     has_verified_role: boolean;
     has_unverified_role: boolean;
+    has_manage_server: boolean;
     access_label: string;
     verification_label: string;
   };
   isStaff: boolean;
+  isServerManager: boolean;
   authContext?: {
     guild_id: string | null;
     guild_checked: boolean;
     guild_check_error: string | null;
+    selected_guild_id: string | null;
+    staff_reason: string | null;
   };
 };
 
@@ -104,6 +119,54 @@ function makeAuthError(message: string, status: number): AuthError {
   const error = new Error(message) as AuthError;
   error.status = status;
   return error;
+}
+
+function safeText(value: unknown, fallback = ""): string {
+  const text = String(value ?? "").trim();
+  return text || fallback;
+}
+
+function normalizeRoleName(value: unknown): string {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getCookieValue(name: string): string {
+  try {
+    return safeText(cookies().get(name)?.value);
+  } catch {
+    return "";
+  }
+}
+
+function getSelectedAuthGuildId(): string {
+  return (
+    getCookieValue(SELECTED_GUILD_COOKIE) ||
+    safeText(env.guildId || env.discordGuildId)
+  );
+}
+
+function hasManageGuildPermission(guild: DiscordUserGuild | null | undefined): boolean {
+  if (!guild) return false;
+  if (guild.owner) return true;
+  try {
+    const raw = BigInt(safeText(guild.permissions || "0"));
+    return (raw & ADMINISTRATOR) === ADMINISTRATOR || (raw & MANAGE_GUILD) === MANAGE_GUILD;
+  } catch {
+    return false;
+  }
+}
+
+async function fetchSelectedGuildManagerAccess(accessToken: string, guildId: string): Promise<boolean> {
+  if (!accessToken || !guildId) return false;
+  try {
+    const guilds = (await discordUserFetch("/users/@me/guilds", accessToken)) as DiscordUserGuild[];
+    const match = Array.isArray(guilds)
+      ? guilds.find((guild) => safeText(guild?.id) === guildId)
+      : null;
+    return hasManageGuildPermission(match);
+  } catch {
+    return false;
+  }
 }
 
 export function getCookieOptions(maxAgeSec: number): CookieOptions {
@@ -191,24 +254,13 @@ export async function refreshAccessToken(
   return (await res.json()) as DiscordTokenPayload;
 }
 
-function normalizeRoleName(value: unknown): string {
-  return String(value || "").trim().toLowerCase();
-}
-
-function safeText(value: unknown, fallback = ""): string {
-  const text = String(value ?? "").trim();
-  return text || fallback;
-}
-
 function getDiscordDefaultAvatarIndex(user: DiscordUser): number {
   try {
     const discriminator = safeText(user?.discriminator, "0");
 
     if (discriminator && discriminator !== "0") {
       const parsed = Number.parseInt(discriminator, 10);
-      if (Number.isFinite(parsed)) {
-        return ((parsed % 5) + 5) % 5;
-      }
+      if (Number.isFinite(parsed)) return ((parsed % 5) + 5) % 5;
     }
 
     const snowflake = BigInt(String(user?.id || "0"));
@@ -238,25 +290,19 @@ function buildDiscordAvatarUrl(user: DiscordUser): string | null {
 function buildBannerUrl(user: DiscordUser): string | null {
   const userId = safeText(user?.id);
   const banner = safeText(user?.banner);
-
   if (!userId || !banner) return null;
-
   const isAnimated = banner.startsWith("a_");
   return `https://cdn.discordapp.com/banners/${userId}/${banner}.${isAnimated ? "gif" : "png"}?size=512`;
 }
 
-function deriveMemberAccessFlags(
-  memberRoleIds: string[],
-  memberRoleNamesLower: string[]
-) {
+function deriveMemberAccessFlags(memberRoleIds: string[], memberRoleNamesLower: string[], hasManageServer: boolean) {
   const hasStaffRole =
     memberRoleIds.some((id) => env.staffRoleIds.includes(String(id))) ||
     memberRoleNamesLower.some((name) => env.staffRoleNames.includes(name));
 
   const hasVerifiedRole =
-    memberRoleNamesLower.some((name) =>
-      ["verified", "resident", "member"].includes(name)
-    ) || memberRoleNamesLower.some((name) => name.includes("verified"));
+    memberRoleNamesLower.some((name) => ["verified", "resident", "member"].includes(name)) ||
+    memberRoleNamesLower.some((name) => name.includes("verified"));
 
   const hasUnverifiedRole = memberRoleNamesLower.some(
     (name) => name === "unverified" || name.includes("unverified")
@@ -265,7 +311,10 @@ function deriveMemberAccessFlags(
   let accessLabel = "Signed In";
   let verificationLabel = "Server Access Not Checked";
 
-  if (hasStaffRole) {
+  if (hasManageServer) {
+    accessLabel = "Server Manager";
+    verificationLabel = "Server Manager";
+  } else if (hasStaffRole) {
     accessLabel = "Staff";
     verificationLabel = "Staff";
   } else if (hasVerifiedRole) {
@@ -276,25 +325,18 @@ function deriveMemberAccessFlags(
     verificationLabel = "Pending Verification";
   }
 
-  return {
-    hasStaffRole,
-    hasVerifiedRole,
-    hasUnverifiedRole,
-    accessLabel,
-    verificationLabel,
-  };
+  return { hasStaffRole, hasVerifiedRole, hasUnverifiedRole, hasManageServer, accessLabel, verificationLabel };
 }
 
-async function buildGuildMemberContext(user: DiscordUser): Promise<{
+async function buildGuildMemberContext(user: DiscordUser, guildId: string): Promise<{
   member: DiscordMember | null;
   roles: DiscordRole[];
   error: string | null;
 }> {
-  const guildId = safeText(env.guildId || env.discordGuildId);
   const userId = safeText(user?.id);
 
   if (!guildId || !userId) {
-    return { member: null, roles: [], error: "No default guild configured." };
+    return { member: null, roles: [], error: "No selected guild configured." };
   }
 
   try {
@@ -311,21 +353,17 @@ async function buildGuildMemberContext(user: DiscordUser): Promise<{
 }
 
 export async function buildSession(accessToken: string): Promise<BuiltSession> {
-  // This must stay independent from any one server. For public production, a
-  // valid Discord login should create a user session first; server access is the
-  // next layer and can be checked per selected guild.
-  const user = (await discordUserFetch(
-    "/users/@me",
-    accessToken
-  )) as DiscordUser;
-
+  const user = (await discordUserFetch("/users/@me", accessToken)) as DiscordUser;
+  const selectedGuildId = getSelectedAuthGuildId();
   const avatarUrl = buildDiscordAvatarUrl(user);
   const bannerUrl = buildBannerUrl(user);
-  const guildContext = await buildGuildMemberContext(user);
 
-  const roleMap = new Map(
-    guildContext.roles.map((role) => [String(role.id), role])
-  );
+  const [guildContext, hasManageServer] = await Promise.all([
+    buildGuildMemberContext(user, selectedGuildId),
+    fetchSelectedGuildManagerAccess(accessToken, selectedGuildId),
+  ]);
+
+  const roleMap = new Map(guildContext.roles.map((role) => [String(role.id), role]));
   const memberRoleIds = Array.isArray(guildContext.member?.roles)
     ? guildContext.member.roles.map(String)
     : [];
@@ -333,28 +371,19 @@ export async function buildSession(accessToken: string): Promise<BuiltSession> {
   const memberRolesDetailed = memberRoleIds
     .map((roleId) => roleMap.get(String(roleId)))
     .filter(Boolean)
-    .sort(
-      (a, b) => Number(b?.position || 0) - Number(a?.position || 0)
-    )
+    .sort((a, b) => Number(b?.position || 0) - Number(a?.position || 0))
     .map((role) => ({
       id: String(role?.id),
       name: safeText(role?.name),
       position: Number(role?.position || 0),
     }));
 
-  const memberRoleNames = memberRolesDetailed
-    .map((role) => safeText(role.name))
-    .filter(Boolean);
-
-  const memberRoleNamesLower = memberRoleNames.map((name) =>
-    normalizeRoleName(name)
-  );
-
-  const access = deriveMemberAccessFlags(memberRoleIds, memberRoleNamesLower);
-  const displayName = safeText(
-    guildContext.member?.nick || user.global_name || user.username,
-    "Member"
-  );
+  const memberRoleNames = memberRolesDetailed.map((role) => safeText(role.name)).filter(Boolean);
+  const memberRoleNamesLower = memberRoleNames.map((name) => normalizeRoleName(name));
+  const access = deriveMemberAccessFlags(memberRoleIds, memberRoleNamesLower, hasManageServer);
+  const displayName = safeText(guildContext.member?.nick || user.global_name || user.username, "Member");
+  const hasDashboardStaffAccess = access.hasStaffRole || access.hasManageServer;
+  const staffReason = access.hasManageServer ? "manage_server_permission" : access.hasStaffRole ? "configured_staff_role" : null;
 
   return {
     user: {
@@ -391,20 +420,24 @@ export async function buildSession(accessToken: string): Promise<BuiltSession> {
       has_staff_role: access.hasStaffRole,
       has_verified_role: access.hasVerifiedRole,
       has_unverified_role: access.hasUnverifiedRole,
+      has_manage_server: access.hasManageServer,
       access_label: access.accessLabel,
       verification_label: access.verificationLabel,
     },
-    isStaff: access.hasStaffRole,
+    isStaff: hasDashboardStaffAccess,
+    isServerManager: access.hasManageServer,
     authContext: {
-      guild_id: safeText(env.guildId || env.discordGuildId) || null,
+      guild_id: selectedGuildId || null,
+      selected_guild_id: selectedGuildId || null,
       guild_checked: !guildContext.error,
       guild_check_error: guildContext.error,
+      staff_reason: staffReason,
     },
   };
 }
 
 export async function getSession(): Promise<BuiltSession | null> {
-  const accessToken = cookies().get(ACCESS_COOKIE)?.value;
+  const accessToken = getCookieValue(ACCESS_COOKIE);
   if (!accessToken) return null;
 
   try {
@@ -424,70 +457,39 @@ export async function requireStaffSessionForRoute(): Promise<{
   const expiresAt = Number(cookieStore.get(EXPIRES_COOKIE)?.value || 0);
   let refreshedTokens: DiscordTokenPayload | null = null;
 
-  if (!accessToken && !refreshToken) {
-    throw makeAuthError("Unauthorized", 401);
-  }
+  if (!accessToken && !refreshToken) throw makeAuthError("Unauthorized", 401);
 
-  const shouldRefresh =
-    !accessToken || (expiresAt && Date.now() > expiresAt - 60000);
-
+  const shouldRefresh = !accessToken || (expiresAt && Date.now() > expiresAt - 60000);
   if (shouldRefresh) {
-    if (!refreshToken) {
-      throw makeAuthError("Unauthorized", 401);
-    }
-
+    if (!refreshToken) throw makeAuthError("Unauthorized", 401);
     refreshedTokens = await refreshAccessToken(refreshToken);
     accessToken = refreshedTokens.access_token;
   }
 
-  if (!accessToken) {
-    throw makeAuthError("Unauthorized", 401);
-  }
+  if (!accessToken) throw makeAuthError("Unauthorized", 401);
 
   const session = await buildSession(accessToken);
-
-  if (!session?.isStaff) {
-    throw makeAuthError("Unauthorized", 403);
-  }
+  if (!session?.isStaff) throw makeAuthError("Unauthorized", 403);
 
   return { session, refreshedTokens };
 }
 
-export function applyAuthCookies<T extends { cookies: { set: Function } }>(
-  response: T,
-  tokenPayload: DiscordTokenPayload | null
-): T {
+export function applyAuthCookies<T extends { cookies: { set: Function } }>(response: T, tokenPayload: DiscordTokenPayload | null): T {
   if (!tokenPayload) return response;
 
-  const expiresAtMs =
-    Date.now() + (tokenPayload.expires_in || 604800) * 1000;
+  const expiresAtMs = Date.now() + (tokenPayload.expires_in || 604800) * 1000;
 
-  response.cookies.set(
-    ACCESS_COOKIE,
-    tokenPayload.access_token,
-    getCookieOptions(tokenPayload.expires_in || 604800)
-  );
+  response.cookies.set(ACCESS_COOKIE, tokenPayload.access_token, getCookieOptions(tokenPayload.expires_in || 604800));
 
   if (tokenPayload.refresh_token) {
-    response.cookies.set(
-      REFRESH_COOKIE,
-      tokenPayload.refresh_token,
-      getCookieOptions(60 * 60 * 24 * 30)
-    );
+    response.cookies.set(REFRESH_COOKIE, tokenPayload.refresh_token, getCookieOptions(60 * 60 * 24 * 30));
   }
 
-  response.cookies.set(
-    EXPIRES_COOKIE,
-    String(expiresAtMs),
-    getCookieOptions(60 * 60 * 24 * 30)
-  );
-
+  response.cookies.set(EXPIRES_COOKIE, String(expiresAtMs), getCookieOptions(60 * 60 * 24 * 30));
   return response;
 }
 
-export function clearAuthCookies<T extends { cookies: { set: Function } }>(
-  response: T
-): T {
+export function clearAuthCookies<T extends { cookies: { set: Function } }>(response: T): T {
   response.cookies.set(ACCESS_COOKIE, "", getCookieOptions(0));
   response.cookies.set(REFRESH_COOKIE, "", getCookieOptions(0));
   response.cookies.set(EXPIRES_COOKIE, "", getCookieOptions(0));
