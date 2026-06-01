@@ -109,6 +109,7 @@ export default async function AuthStatusPage({ searchParams }: { searchParams?: 
         </pre>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
           {hasDiscordOAuthConfig() ? <ButtonLink href={getDiscordLoginUrl()} primary>Try Discord login again</ButtonLink> : null}
+          <ButtonLink href="/api/auth/logout">Reset login</ButtonLink>
           <ButtonLink href="/">Back to dashboard</ButtonLink>
         </div>
       </Card>
@@ -129,6 +130,7 @@ export default async function AuthStatusPage({ searchParams }: { searchParams?: 
         </p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
           {hasDiscordOAuthConfig() ? <ButtonLink href={getDiscordLoginUrl()} primary>Sign in with Discord</ButtonLink> : null}
+          <ButtonLink href="/api/auth/logout">Reset login</ButtonLink>
           <ButtonLink href="/">Back</ButtonLink>
         </div>
       </Card>
