@@ -27,6 +27,16 @@ function cleanStringList(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function cleanMergedStringList(...values: unknown[]): string[] {
+  const out: string[] = [];
+  for (const value of values) {
+    for (const item of cleanStringList(value)) {
+      if (!out.includes(item)) out.push(item);
+    }
+  }
+  return out;
+}
+
 function cleanNumber(value: unknown, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -84,9 +94,16 @@ export const env: AppEnv = {
 
   supabaseDbUrl: process.env.SUPABASE_DB_URL || "",
 
-  discordToken: process.env.DISCORD_TOKEN || "",
+  discordToken:
+    process.env.DISCORD_TOKEN ||
+    process.env.BOT_TOKEN ||
+    process.env.CLIENT_TOKEN ||
+    "",
 
-  discordClientId: process.env.DISCORD_CLIENT_ID || "",
+  discordClientId:
+    process.env.DISCORD_CLIENT_ID ||
+    process.env.CLIENT_ID ||
+    "",
 
   discordClientSecret: process.env.DISCORD_CLIENT_SECRET || "",
 
@@ -138,13 +155,25 @@ export const env: AppEnv = {
       ""
   ),
 
-  staffRoleIds: cleanStringList(process.env.STAFF_ROLE_IDS).map((value) =>
-    cleanId(value)
-  ),
+  // Dashboard staff access accepts both dashboard-style env names and the
+  // bot-style names already used in the Discloud .env. This avoids the common
+  // sign-in trap where Discord auth succeeds but everyone is treated as non-staff.
+  staffRoleIds: cleanMergedStringList(
+    process.env.STAFF_ROLE_IDS,
+    process.env.STAFF_ROLE_ID,
+    process.env.VC_STAFF_ROLE_ID,
+    process.env.TICKET_STAFF_ROLE_ID,
+    process.env.SERVER_CONTROL_ROLE_ID,
+    process.env.ADMIN_ROLE_ID
+  ).map((value) => cleanId(value)),
 
-  staffRoleNames: cleanStringList(process.env.STAFF_ROLE_NAMES).map((value) =>
-    cleanRoleName(value)
-  ),
+  staffRoleNames: cleanMergedStringList(
+    process.env.STAFF_ROLE_NAMES,
+    process.env.STAFF_ROLE_NAME,
+    process.env.TICKET_STAFF_ROLE_NAME,
+    process.env.SERVER_CONTROL_ROLE_NAME,
+    process.env.ADMIN_ROLE_NAME
+  ).map((value) => cleanRoleName(value)),
 
   defaultStaffName:
     process.env.DEFAULT_STAFF_NAME ||
