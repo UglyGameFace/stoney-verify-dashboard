@@ -168,9 +168,8 @@ export const env: AppEnv = {
       ""
   ),
 
-  // Dashboard staff access accepts both dashboard-style env names and the
-  // bot-style names already used in the Discloud .env. This avoids the common
-  // sign-in trap where Discord auth succeeds but everyone is treated as non-staff.
+  // Staff envs are only the default/dev server fallback. Public production uses
+  // server selection plus per-guild role/config checks after Discord login.
   staffRoleIds: cleanMergedStringList(
     process.env.STAFF_ROLE_IDS,
     process.env.STAFF_ROLE_ID,
@@ -226,11 +225,6 @@ export function assertServerEnv(): true {
     env.discordToken
   );
 
-  required(
-    "DISCORD_GUILD_ID or GUILD_ID",
-    env.guildId
-  );
-
   return true;
 }
 
@@ -253,11 +247,6 @@ export function assertOAuthEnv(): true {
   required(
     "APP_URL or NEXT_PUBLIC_SITE_URL or SITE_URL",
     env.appUrl || env.siteUrl || env.baseUrl || env.publicUrl
-  );
-
-  required(
-    "DISCORD_GUILD_ID or GUILD_ID",
-    env.guildId
   );
 
   return true;
