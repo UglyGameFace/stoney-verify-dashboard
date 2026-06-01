@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
+import { getSelectedGuildId } from "@/lib/guild-selection";
 import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
@@ -58,10 +59,11 @@ function normalizeString(value: unknown): string {
 }
 
 function normalizeMultiline(value: unknown): string {
-  return String(value || "")
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .trim();
+  return String(value || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+}
+
+function selectedGuildId(): string {
+  return normalizeString(getSelectedGuildId());
 }
 
 function buildJsonResponse(
@@ -71,11 +73,8 @@ function buildJsonResponse(
 ) {
   const response = NextResponse.json(payload, {
     status,
-    headers: {
-      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-    },
+    headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
   });
-
   applyAuthCookies(response, refreshedTokens);
   return response;
 }
@@ -129,14 +128,15 @@ function mapTicket(ticket: TicketRow | null | undefined) {
 
 async function fetchTicketOrNull(
   supabase: ReturnType<typeof createServerSupabase>,
-  ticketId: string
+  ticketId: string,
+  guildId: string
 ): Promise<TicketRow | null> {
   const { data, error } = await supabase
     .from("tickets")
     .select("*")
     .eq("id", ticketId)
+    .eq("guild_id", guildId)
     .single();
-
   if (error || !data) return null;
   return data as TicketRow;
 }
@@ -155,9 +155,7 @@ async function createAuditEvent(
       event_type: "ticket_deleted",
       related_id: ticketId,
     });
-  } catch {
-    // best-effort only
-  }
+  } catch {}
 }
 
 async function createActivityFeedEvent(
@@ -167,23 +165,8 @@ async function createActivityFeedEvent(
   actorName: string,
   reason: string
 ): Promise<void> {
-  const guildId = normalizeString(ticket?.guild_id || env?.guildId || "");
+  const guildId = normalizeString(ticket?.guild_id);
   if (!guildId) return;
-
-  const metadata = {
-    ticket_id: ticket?.id || null,
-    ticket_number: ticket?.ticket_number || null,
-    channel_id: ticket?.channel_id || ticket?.discord_thread_id || null,
-    channel_name: ticket?.channel_name || null,
-    ticket_status: ticket?.status || null,
-    deleted_reason: reason,
-    transcript_url: ticket?.transcript_url || null,
-    transcript_message_id: ticket?.transcript_message_id || null,
-    transcript_channel_id: ticket?.transcript_channel_id || null,
-    staff_id: actorId || null,
-    staff_name: actorName,
-    source: "dashboard_delete_route",
-  };
 
   try {
     await supabase.from("activity_feed_events").insert({
@@ -203,24 +186,16 @@ async function createActivityFeedEvent(
       title: "Ticket Deleted",
       description: `${actorName} deleted ticket ${ticket?.ticket_number || ticket?.id || ""}`.trim(),
       reason,
-      search_text: [
-        "ticket deleted",
-        actorName,
-        actorId,
-        ticket?.id,
-        ticket?.ticket_number,
-        ticket?.username,
-        ticket?.user_id,
-        ticket?.channel_name,
-        reason,
-      ]
-        .filter(Boolean)
-        .join(" "),
-      metadata,
+      metadata: {
+        ticket_id: ticket?.id || null,
+        ticket_number: ticket?.ticket_number || null,
+        deleted_reason: reason,
+        staff_id: actorId || null,
+        staff_name: actorName,
+        source: "dashboard_delete_route",
+      },
     });
-  } catch {
-    // best-effort only
-  }
+  } catch {}
 }
 
 async function createSystemNote(
@@ -230,27 +205,13 @@ async function createSystemNote(
   actorName: string,
   reason: string
 ): Promise<void> {
+  const content = `Ticket deleted from dashboard${reason ? ` • Reason: ${reason}` : ""}`;
   try {
-    await supabase.from("ticket_notes").insert({
-      ticket_id: ticketId,
-      staff_id: actorId || "",
-      staff_name: actorName,
-      content: `Ticket deleted from dashboard${reason ? ` • Reason: ${reason}` : ""}`,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    });
+    await supabase.from("ticket_notes").insert({ ticket_id: ticketId, staff_id: actorId || "", staff_name: actorName, content, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
   } catch {
     try {
-      await supabase.from("ticket_notes").insert({
-        ticket_id: ticketId,
-        staff_id: actorId || "",
-        staff_name: actorName,
-        content: `Ticket deleted from dashboard${reason ? ` • Reason: ${reason}` : ""}`,
-        created_at: new Date().toISOString(),
-      });
-    } catch {
-      // best-effort only
-    }
+      await supabase.from("ticket_notes").insert({ ticket_id: ticketId, staff_id: actorId || "", staff_name: actorName, content, created_at: new Date().toISOString() });
+    } catch {}
   }
 }
 
@@ -262,35 +223,20 @@ export async function POST(
     const { session, refreshedTokens } = await requireStaffSessionForRoute();
     const supabase = createServerSupabase();
     const ticketId = normalizeString(context?.params?.id);
+    const guildId = selectedGuildId();
 
-    if (!ticketId) {
-      return buildJsonResponse({ error: "Missing ticket id." }, 400, refreshedTokens);
-    }
+    if (!guildId) return buildJsonResponse({ error: "Select a server before deleting a ticket.", needsServerSelection: true }, 428, refreshedTokens);
+    if (!ticketId) return buildJsonResponse({ error: "Missing ticket id.", selectedGuildId: guildId }, 400, refreshedTokens);
 
-    const ticket = await fetchTicketOrNull(supabase, ticketId);
-    if (!ticket) {
-      return buildJsonResponse({ error: "Ticket not found." }, 404, refreshedTokens);
-    }
+    const ticket = await fetchTicketOrNull(supabase, ticketId, guildId);
+    if (!ticket) return buildJsonResponse({ error: "Ticket not found.", selectedGuildId: guildId }, 404, refreshedTokens);
 
     const status = getTicketStatus(ticket);
     const { actorId, actorName } = getActorIdentity(session as SessionLike);
-
-    if (!actorId) {
-      return buildJsonResponse({ error: "Missing staff identity." }, 401, refreshedTokens);
-    }
+    if (!actorId) return buildJsonResponse({ error: "Missing staff identity.", selectedGuildId: guildId }, 401, refreshedTokens);
 
     if (status === "deleted") {
-      return buildJsonResponse(
-        {
-          ok: true,
-          ticket: mapTicket(ticket),
-          staffId: actorId,
-          staffName: actorName,
-          alreadyDeleted: true,
-        },
-        200,
-        refreshedTokens
-      );
+      return buildJsonResponse({ ok: true, selectedGuildId: guildId, ticket: mapTicket(ticket), staffId: actorId, staffName: actorName, alreadyDeleted: true }, 200, refreshedTokens);
     }
 
     const body = (await request.json().catch(() => ({}))) as {
@@ -304,7 +250,6 @@ export async function POST(
     const transcriptUrl = normalizeString(body?.transcript_url) || null;
     const transcriptMessageId = normalizeString(body?.transcript_message_id) || null;
     const transcriptChannelId = normalizeString(body?.transcript_channel_id) || null;
-
     const nowIso = new Date().toISOString();
 
     const { data: updatedTicket, error: updateError } = await supabase
@@ -324,40 +269,23 @@ export async function POST(
         last_activity_at: nowIso,
       })
       .eq("id", ticketId)
+      .eq("guild_id", guildId)
       .select("*")
       .single();
 
     if (updateError || !updatedTicket) {
-      return buildJsonResponse(
-        { error: updateError?.message || "Failed to delete ticket." },
-        500,
-        refreshedTokens
-      );
+      return buildJsonResponse({ error: updateError?.message || "Failed to delete ticket.", selectedGuildId: guildId }, 500, refreshedTokens);
     }
 
     const deletedTicket = updatedTicket as TicketRow;
-
     await Promise.allSettled([
       createAuditEvent(supabase, ticketId, actorName, deletedTicket, reason),
       createActivityFeedEvent(supabase, deletedTicket, actorId, actorName, reason),
       createSystemNote(supabase, ticketId, actorId, actorName, reason),
     ]);
 
-    return buildJsonResponse(
-      {
-        ok: true,
-        ticket: mapTicket(deletedTicket),
-        staffId: actorId,
-        staffName: actorName,
-        alreadyDeleted: false,
-      },
-      200,
-      refreshedTokens
-    );
+    return buildJsonResponse({ ok: true, selectedGuildId: guildId, ticket: mapTicket(deletedTicket), staffId: actorId, staffName: actorName, alreadyDeleted: false }, 200, refreshedTokens);
   } catch (error) {
-    return buildJsonResponse(
-      { error: error instanceof Error ? error.message : "Failed to delete ticket" },
-      error instanceof Error && error.message === "Unauthorized" ? 401 : 500
-    );
+    return buildJsonResponse({ error: error instanceof Error ? error.message : "Failed to delete ticket" }, error instanceof Error && error.message === "Unauthorized" ? 401 : 500);
   }
 }
