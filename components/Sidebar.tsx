@@ -13,6 +13,7 @@ type SidebarLink = {
 
 const links: SidebarLink[] = [
   { href: "/", label: "Dashboard", icon: "🏠", match: "exact" },
+  { href: "/servers", label: "Servers", icon: "🛰️", match: "startsWith" },
   { href: "/#overview", label: "Overview", icon: "📊", match: "home-section" },
   { href: "/#tickets", label: "Tickets", icon: "🎫", match: "ticket-detail" },
   { href: "/#members", label: "Members", icon: "👥", match: "home-section" },
@@ -61,7 +62,7 @@ function isLinkActive(pathname: string, link: SidebarLink): boolean {
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const guildId = normalizeString(env.guildId) || "Missing guild id";
+  const guildId = normalizeString(env.guildId) || "Select a server";
   const appName =
     normalizeString(env.appName) || "Stoney Verify Dashboard v3.8";
 
@@ -101,7 +102,7 @@ export default function Sidebar() {
                 overflowWrap: "anywhere",
               }}
             >
-              Green-room command center
+              Multi-server command center
             </div>
           </div>
         </div>
@@ -153,7 +154,7 @@ export default function Sidebar() {
                 marginBottom: 8,
               }}
             >
-              Server Session
+              Default Server
             </div>
 
             <div
