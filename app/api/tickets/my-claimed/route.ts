@@ -1,74 +1,60 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireStaffSessionForRoute } from "@/lib/auth-server";
-import { env } from "@/lib/env";
+import { getSelectedGuildId } from "@/lib/guild-selection";
 import { getMyClaimedTicketsAction } from "@/lib/dashboardActions";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+type SessionLike = {
+  user?: {
+    discord_id?: string | null;
+    id?: string | null;
+    user_id?: string | null;
+    username?: string | null;
+    name?: string | null;
+  } | null;
+  discordUser?: {
+    id?: string | null;
+    username?: string | null;
+  } | null;
+};
 
 function normalizeNullable(value: unknown): string | null {
   const text = String(value ?? "").trim();
   return text || null;
 }
 
-function resolveGuildIdFromRequest(
-  req: NextRequest,
-  body?: Record<string, unknown> | null
-): string {
-  return (
-    normalizeNullable(body?.guildId) ||
-    normalizeNullable(body?.guild_id) ||
-    normalizeNullable(req.nextUrl.searchParams.get("guildId")) ||
-    normalizeNullable(req.nextUrl.searchParams.get("guild_id")) ||
-    normalizeNullable(env.guildId) ||
-    ""
-  );
+function resolveSelectedGuildId(): string {
+  return normalizeNullable(getSelectedGuildId()) || "";
 }
 
-function resolveStaffIdFromRequest(
-  req: NextRequest,
-  body?: Record<string, unknown> | null
-): string {
+function resolveStaffIdFromSession(session: SessionLike): string {
   return (
-    normalizeNullable(body?.staffId) ||
-    normalizeNullable(body?.staff_id) ||
-    normalizeNullable(req.nextUrl.searchParams.get("staffId")) ||
-    normalizeNullable(req.nextUrl.searchParams.get("staff_id")) ||
+    normalizeNullable(session?.user?.discord_id) ||
+    normalizeNullable(session?.user?.id) ||
+    normalizeNullable(session?.user?.user_id) ||
+    normalizeNullable(session?.discordUser?.id) ||
     ""
   );
 }
 
 function buildUnauthorizedResponse() {
   return NextResponse.json(
-    {
-      ok: false,
-      error: "Unauthorized",
-    },
-    {
-      status: 401,
-      headers: {
-        "Cache-Control": "no-store, max-age=0",
-      },
-    }
+    { ok: false, error: "Unauthorized" },
+    { status: 401, headers: { "Cache-Control": "no-store, max-age=0" } }
   );
 }
 
-function buildErrorResponse(message: string, status = 500) {
+function buildErrorResponse(message: string, status = 500, extra: Record<string, unknown> = {}) {
   return NextResponse.json(
-    {
-      ok: false,
-      error: message,
-    },
-    {
-      status,
-      headers: {
-        "Cache-Control": "no-store, max-age=0",
-      },
-    }
+    { ok: false, error: message, ...extra },
+    { status, headers: { "Cache-Control": "no-store, max-age=0" } }
   );
 }
 
 function buildSuccessResponse(payload: {
+  selectedGuildId: string;
   queue?: unknown[];
   tickets?: unknown[];
   total?: number;
@@ -86,57 +72,52 @@ function buildSuccessResponse(payload: {
   return NextResponse.json(
     {
       ok: true,
+      selectedGuildId: payload.selectedGuildId,
       queue: rows,
       tickets: rows,
       total: Number(payload.total || rows.length || 0),
       unclaimed: Number(payload.unclaimed || 0),
-      claimed:
-        typeof payload.claimed === "number"
-          ? payload.claimed
-          : rows.length,
+      claimed: typeof payload.claimed === "number" ? payload.claimed : rows.length,
       staff_id: payload.staff_id || null,
       staff_name: payload.staff_name || null,
     },
-    {
-      status: 200,
-      headers: {
-        "Cache-Control": "no-store, max-age=0",
-      },
-    }
+    { status: 200, headers: { "Cache-Control": "no-store, max-age=0" } }
   );
 }
 
-async function handleRequest(
-  req: NextRequest,
-  body?: Record<string, unknown> | null
-) {
+async function handleRequest(_req: NextRequest) {
   try {
-    await requireStaffSessionForRoute();
-
-    const guildId = resolveGuildIdFromRequest(req, body);
-    const staffId = resolveStaffIdFromRequest(req, body);
+    const { session } = await requireStaffSessionForRoute();
+    const typedSession = session as SessionLike;
+    const guildId = resolveSelectedGuildId();
+    const staffId = resolveStaffIdFromSession(typedSession);
 
     if (!guildId) {
-      return buildErrorResponse("Missing guildId", 400);
+      return buildErrorResponse(
+        "Select a server before loading your claimed tickets.",
+        428,
+        { needsServerSelection: true }
+      );
     }
 
     if (!staffId) {
-      return buildErrorResponse("Missing staffId", 400);
+      return buildErrorResponse("Could not identify signed-in staff member.", 400, {
+        selectedGuildId: guildId,
+      });
     }
 
-    const result = await getMyClaimedTicketsAction({
-      guildId,
-      staffId,
-    });
+    const result = await getMyClaimedTicketsAction({ guildId, staffId });
 
     if (!result.ok) {
       return buildErrorResponse(
         result.error || "Failed to load claimed tickets for this staff member.",
-        500
+        500,
+        { selectedGuildId: guildId }
       );
     }
 
     return buildSuccessResponse({
+      selectedGuildId: guildId,
       queue: result.queue,
       tickets: result.tickets,
       total: result.total,
@@ -146,32 +127,16 @@ async function handleRequest(
       staff_name: result.staff_name,
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unexpected server error";
-
-    if (message === "Unauthorized") {
-      return buildUnauthorizedResponse();
-    }
-
+    const message = error instanceof Error ? error.message : "Unexpected server error";
+    if (message === "Unauthorized") return buildUnauthorizedResponse();
     return buildErrorResponse(message, 500);
   }
 }
 
 export async function GET(req: NextRequest) {
-  return handleRequest(req, null);
+  return handleRequest(req);
 }
 
 export async function POST(req: NextRequest) {
-  try {
-    const body = (await req.json().catch(() => null)) as
-      | Record<string, unknown>
-      | null;
-
-    return handleRequest(req, body);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Invalid JSON body";
-
-    return buildErrorResponse(message || "Invalid JSON body", 400);
-  }
+  return handleRequest(req);
 }
