@@ -9,6 +9,7 @@ import {
   getDiscordLoginUrl,
   hasDiscordOAuthConfig,
 } from "@/lib/auth-server";
+import { getSelectedGuildId } from "@/lib/guild-selection";
 import { env } from "@/lib/env";
 
 type SessionLike = {
@@ -39,6 +40,7 @@ type SessionLike = {
     has_unverified_role?: boolean | null;
     has_verified_role?: boolean | null;
     has_staff_role?: boolean | null;
+    has_manage_server?: boolean | null;
   } | null;
 } | null;
 
@@ -79,6 +81,7 @@ function buildFallbackUserData(session: SessionLike, guildId: string): Dashboard
 
   return {
     ok: true,
+    selectedGuildId: guildId || null,
     viewer: {
       discord_id: discordId || null,
       username,
@@ -107,7 +110,7 @@ function buildFallbackUserData(session: SessionLike, guildId: string): Dashboard
       role_ids: [],
       has_unverified: Boolean(session?.member?.has_unverified_role),
       has_verified_role: Boolean(session?.member?.has_verified_role),
-      has_staff_role: Boolean(session?.member?.has_staff_role),
+      has_staff_role: Boolean(session?.member?.has_staff_role || session?.member?.has_manage_server),
       has_secondary_verified_role: false,
       role_state: "not_synced",
       role_state_reason: "Dashboard API fallback payload was used.",
@@ -124,7 +127,7 @@ function buildFallbackUserData(session: SessionLike, guildId: string): Dashboard
       role_ids: [],
       has_unverified: Boolean(session?.member?.has_unverified_role),
       has_verified_role: Boolean(session?.member?.has_verified_role),
-      has_staff_role: Boolean(session?.member?.has_staff_role),
+      has_staff_role: Boolean(session?.member?.has_staff_role || session?.member?.has_manage_server),
       has_secondary_verified_role: false,
       role_state: "not_synced",
       role_state_reason: "Dashboard API fallback payload was used.",
@@ -172,7 +175,7 @@ function buildFallbackUserData(session: SessionLike, guildId: string): Dashboard
       has_unverified: Boolean(session?.member?.has_unverified_role),
       has_verified_role: Boolean(session?.member?.has_verified_role),
       has_secondary_verified_role: false,
-      has_staff_role: Boolean(session?.member?.has_staff_role),
+      has_staff_role: Boolean(session?.member?.has_staff_role || session?.member?.has_manage_server),
       flag_count: 0,
       flagged_count: 0,
       latest_flag_at: null,
@@ -212,9 +215,10 @@ function buildFallbackUserData(session: SessionLike, guildId: string): Dashboard
   };
 }
 
-function buildFallbackStaffData(): DashboardPayload {
+function buildFallbackStaffData(guildId: string): DashboardPayload {
   return {
     ok: true,
+    selectedGuildId: guildId || null,
     generated_at: new Date().toISOString(),
     tickets: [],
     activeTickets: [],
@@ -278,17 +282,11 @@ function resolveAppOrigin(): string {
       ? "http"
       : "https");
 
-  if (host) {
-    return `${proto}://${host}`;
-  }
-
+  if (host) return `${proto}://${host}`;
   return "http://127.0.0.1:3000";
 }
 
-async function fetchDashboardJson(
-  pathname: string,
-  fallbackData: DashboardPayload
-): Promise<DashboardPayload> {
+async function fetchDashboardJson(pathname: string, fallbackData: DashboardPayload): Promise<DashboardPayload> {
   try {
     const headerStore = headers();
     const origin = resolveAppOrigin();
@@ -307,15 +305,9 @@ async function fetchDashboardJson(
       next: { revalidate: 0 },
     });
 
-    if (!response.ok) {
-      return fallbackData;
-    }
-
+    if (!response.ok) return fallbackData;
     const json = (await response.json().catch(() => null)) as DashboardPayload | null;
-    if (!json || typeof json !== "object") {
-      return fallbackData;
-    }
-
+    if (!json || typeof json !== "object") return fallbackData;
     return json;
   } catch {
     return fallbackData;
@@ -326,26 +318,8 @@ function LoginRequiredState() {
   const loginUrl = hasDiscordOAuthConfig() ? getDiscordLoginUrl() : "";
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        padding: "24px",
-        background: "#09090b",
-        color: "white",
-      }}
-    >
-      <div
-        style={{
-          width: "100%",
-          maxWidth: 560,
-          border: "1px solid rgba(255,255,255,0.08)",
-          background: "rgba(255,255,255,0.03)",
-          borderRadius: 20,
-          padding: 24,
-        }}
-      >
+    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: "24px", background: "#09090b", color: "white" }}>
+      <div style={{ width: "100%", maxWidth: 560, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", borderRadius: 20, padding: 24 }}>
         <div style={{ color: "#86efac", fontWeight: 900, fontSize: 13, letterSpacing: "0.08em", textTransform: "uppercase" }}>
           Dank Shield Dashboard
         </div>
@@ -359,14 +333,8 @@ function LoginRequiredState() {
           </p>
         ) : null}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
-          {loginUrl ? (
-            <Link href={loginUrl} className="button primary" style={{ width: "auto", minWidth: 180 }}>
-              Sign in with Discord
-            </Link>
-          ) : null}
-          <Link href="/auth-status" className="button ghost" style={{ width: "auto", minWidth: 170 }}>
-            Check Auth Status
-          </Link>
+          {loginUrl ? <Link href={loginUrl} className="button primary" style={{ width: "auto", minWidth: 180 }}>Sign in with Discord</Link> : null}
+          <Link href="/auth-status" className="button ghost" style={{ width: "auto", minWidth: 170 }}>Check Auth Status</Link>
         </div>
       </div>
     </main>
@@ -375,84 +343,19 @@ function LoginRequiredState() {
 
 function StaffQuickToolsCard() {
   return (
-    <div
-      className="card"
-      style={{
-        marginBottom: 18,
-        background:
-          "radial-gradient(circle at top right, rgba(93,255,141,0.08), transparent 28%), radial-gradient(circle at bottom left, rgba(99,213,255,0.06), transparent 24%), linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015)), linear-gradient(180deg, rgba(14, 25, 35, 0.98), rgba(7, 13, 21, 0.98))",
-      }}
-    >
-      <div
-        className="row"
-        style={{
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          gap: 14,
-          flexWrap: "wrap",
-        }}
-      >
+    <div className="card" style={{ marginBottom: 18, background: "radial-gradient(circle at top right, rgba(93,255,141,0.08), transparent 28%), radial-gradient(circle at bottom left, rgba(99,213,255,0.06), transparent 24%), linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015)), linear-gradient(180deg, rgba(14, 25, 35, 0.98), rgba(7, 13, 21, 0.98))" }}>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="muted" style={{ marginBottom: 8 }}>
-            Staff Tools
-          </div>
-
-          <h1
-            style={{
-              margin: 0,
-              fontSize: "clamp(30px, 5vw, 46px)",
-              lineHeight: 0.96,
-              letterSpacing: "-0.05em",
-            }}
-          >
-            Control the ticket system
-          </h1>
-
-          <div
-            className="muted"
-            style={{
-              marginTop: 12,
-              maxWidth: 820,
-              lineHeight: 1.55,
-            }}
-          >
-            Jump straight into category routing and matching rules without digging
-            through the dashboard. This is where you tune intake types, keyword
-            matching, default category behavior, and safe deletion rules.
-          </div>
+          <div className="muted" style={{ marginBottom: 8 }}>Staff Tools</div>
+          <h2 style={{ margin: 0 }}>Server control center</h2>
+          <p className="muted" style={{ marginTop: 8, maxWidth: 720 }}>
+            Pick a server, manage ticket categories/forms, and review live support activity. Dank Shield uses the selected server as dashboard context.
+          </p>
         </div>
-
-        <div
-          className="row"
-          style={{
-            gap: 10,
-            flexWrap: "wrap",
-            alignItems: "center",
-          }}
-        >
-          <Link
-            href="/ticket-categories"
-            className="button primary"
-            style={{ width: "auto", minWidth: 220 }}
-          >
-            Open Category Manager
-          </Link>
-
-          <Link
-            href="/ticket-forms"
-            className="button ghost"
-            style={{ width: "auto", minWidth: 160 }}
-          >
-            Ticket Forms
-          </Link>
-
-          <Link
-            href="/#categories"
-            className="button ghost"
-            style={{ width: "auto", minWidth: 160 }}
-          >
-            View Category Stats
-          </Link>
+        <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+          <Link href="/servers" className="button primary" style={{ width: "auto" }}>Servers</Link>
+          <Link href="/ticket-categories" className="button ghost" style={{ width: "auto" }}>Ticket Categories</Link>
+          <Link href="/ticket-forms" className="button ghost" style={{ width: "auto" }}>Ticket Forms</Link>
         </div>
       </div>
     </div>
@@ -461,12 +364,12 @@ function StaffQuickToolsCard() {
 
 function StaffShell({ children }: { children: ReactNode }) {
   return (
-    <div className="shell staff-shell">
+    <>
       <Sidebar />
-      <main className="content staff-content">
-        <div className="content-inner">{children}</div>
+      <main className="content">
+        {children}
       </main>
-    </div>
+    </>
   );
 }
 
@@ -476,39 +379,24 @@ export const revalidate = 0;
 export default async function HomePage() {
   const session = (await getSession()) as SessionLike;
 
-  if (!session) {
-    return <LoginRequiredState />;
-  }
+  if (!session) return <LoginRequiredState />;
 
-  const guildId = normalizeString(env?.guildId);
+  const guildId = normalizeString(getSelectedGuildId());
 
   if (session?.isStaff) {
-    const staffData = await fetchDashboardJson(
-      "/api/staff/dashboard",
-      buildFallbackStaffData()
-    );
-
+    const staffData = await fetchDashboardJson("/api/staff/dashboard", buildFallbackStaffData(guildId));
     return (
       <StaffShell>
         <StaffQuickToolsCard />
         <DashboardClient
           initialData={staffData}
-          staffName={
-            session?.user?.username ||
-            session?.discordUser?.username ||
-            env?.defaultStaffName ||
-            "Staff"
-          }
+          staffName={session?.user?.username || session?.discordUser?.username || env?.defaultStaffName || "Staff"}
         />
       </StaffShell>
     );
   }
 
-  const userData = await fetchDashboardJson(
-    "/api/user/dashboard",
-    buildFallbackUserData(session, guildId)
-  );
-
+  const userData = await fetchDashboardJson("/api/user/dashboard", buildFallbackUserData(session, guildId));
   return (
     <main className="content" style={{ minHeight: "100vh" }}>
       <UserDashboardClient initialData={userData} />
