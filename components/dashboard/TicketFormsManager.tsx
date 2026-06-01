@@ -15,6 +15,7 @@ type TicketCategory = {
   id?: string | null;
   name?: string | null;
   slug?: string | null;
+  color?: string | null;
   intake_type?: string | null;
   description?: string | null;
   form_enabled?: boolean | null;
@@ -163,6 +164,14 @@ const TEMPLATE_QUESTIONS: Record<string, QuestionState[]> = {
   ],
 };
 
+const TEMPLATE_LABELS: Record<string, string> = {
+  support: "Support",
+  verification: "Verification",
+  report: "Report",
+  appeal: "Appeal",
+  cod: "COD / Service",
+};
+
 function normalizeString(value: unknown): string {
   return String(value || "").trim();
 }
@@ -216,15 +225,9 @@ function questionToApi(question: QuestionState): TicketFormQuestion | null {
 }
 
 function templateKey(category: TicketCategory | null): string {
-  const haystack = [
-    category?.slug,
-    category?.name,
-    category?.intake_type,
-    category?.description,
-  ]
+  const haystack = [category?.slug, category?.name, category?.intake_type, category?.description]
     .map(normalizeLower)
     .join(" ");
-
   if (/(cod|call of duty|bo2|bo3|mw2|mw3|modded|lobby)/.test(haystack)) return "cod";
   if (/verify|verification/.test(haystack)) return "verification";
   if (/appeal|ban|mute|timeout/.test(haystack)) return "appeal";
@@ -235,6 +238,24 @@ function templateKey(category: TicketCategory | null): string {
 function formConfig(category: TicketCategory | null): Record<string, unknown> {
   const config = category?.form_config;
   return config && typeof config === "object" && !Array.isArray(config) ? config : {};
+}
+
+function cloneQuestions(key: string): QuestionState[] {
+  return (TEMPLATE_QUESTIONS[key] || TEMPLATE_QUESTIONS.support).map((question) => ({ ...question }));
+}
+
+function questionStatusLabel(category: TicketCategory): string {
+  const disabled = category.form_enabled === false || Boolean(formConfig(category).forms_disabled);
+  if (disabled) return "Form off";
+  const count = Number(category.form_question_count || category.form_questions?.length || 0);
+  return count ? `${count} custom` : "Smart default";
+}
+
+function questionStatusClass(category: TicketCategory): string {
+  const disabled = category.form_enabled === false || Boolean(formConfig(category).forms_disabled);
+  if (disabled) return "off";
+  const count = Number(category.form_question_count || category.form_questions?.length || 0);
+  return count ? "custom" : "smart";
 }
 
 export default function TicketFormsManager() {
@@ -253,12 +274,24 @@ export default function TicketFormsManager() {
     [categories, selectedId]
   );
 
+  const selectedTemplateKey = useMemo(() => templateKey(selectedCategory), [selectedCategory]);
+  const smartTemplateQuestions = useMemo(() => cloneQuestions(selectedTemplateKey), [selectedTemplateKey]);
   const effectiveQuestions = useMemo(() => {
     if (!selectedCategory) return [];
     if (questions.length) return questions;
     if (disableDefaultTemplate) return [];
-    return TEMPLATE_QUESTIONS[templateKey(selectedCategory)] || TEMPLATE_QUESTIONS.support;
-  }, [selectedCategory, questions, disableDefaultTemplate]);
+    return smartTemplateQuestions;
+  }, [selectedCategory, questions, disableDefaultTemplate, smartTemplateQuestions]);
+
+  const customReadyCount = useMemo(
+    () => categories.filter((category) => Number(category.form_question_count || category.form_questions?.length || 0) > 0).length,
+    [categories]
+  );
+
+  const smartDefaultCount = useMemo(
+    () => categories.filter((category) => category.form_enabled !== false && !Number(category.form_question_count || category.form_questions?.length || 0)).length,
+    [categories]
+  );
 
   async function loadCategories() {
     setLoading(true);
@@ -274,6 +307,9 @@ export default function TicketFormsManager() {
       const next = safeArray<TicketCategory>(json?.categories || []);
       setCategories(next);
       if (!selectedId && next[0]?.id) setSelectedId(normalizeString(next[0].id));
+      if (selectedId && !next.some((category) => normalizeString(category.id) === selectedId) && next[0]?.id) {
+        setSelectedId(normalizeString(next[0].id));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load categories.");
     } finally {
@@ -304,9 +340,7 @@ export default function TicketFormsManager() {
   }, [selectedId, selectedCategory]);
 
   function updateQuestion(index: number, patch: Partial<QuestionState>) {
-    setQuestions((prev) =>
-      prev.map((question, i) => (i === index ? { ...question, ...patch } : question))
-    );
+    setQuestions((prev) => prev.map((question, i) => (i === index ? { ...question, ...patch } : question)));
   }
 
   function addQuestion() {
@@ -327,11 +361,19 @@ export default function TicketFormsManager() {
     setQuestions((prev) => prev.filter((_, i) => i !== index));
   }
 
-  function loadTemplate() {
+  function loadTemplate(key = selectedTemplateKey) {
     if (!selectedCategory) return;
-    setQuestions((TEMPLATE_QUESTIONS[templateKey(selectedCategory)] || TEMPLATE_QUESTIONS.support).map((q) => ({ ...q })));
+    setQuestions(cloneQuestions(key));
     setDisableDefaultTemplate(false);
     setFormEnabled(true);
+    setMessage(`${TEMPLATE_LABELS[key] || "Smart"} template loaded. Save it to make it custom for this category.`);
+  }
+
+  function clearCustomQuestions() {
+    setQuestions([]);
+    setDisableDefaultTemplate(false);
+    setFormEnabled(true);
+    setMessage("Custom questions cleared locally. Save to return this category to smart defaults.");
   }
 
   async function handleSave() {
@@ -341,9 +383,7 @@ export default function TicketFormsManager() {
     setMessage("");
 
     try {
-      const apiQuestions = questions
-        .map(questionToApi)
-        .filter(Boolean) as TicketFormQuestion[];
+      const apiQuestions = questions.map(questionToApi).filter(Boolean) as TicketFormQuestion[];
       const config = {
         ...formConfig(selectedCategory),
         disable_default_template: disableDefaultTemplate,
@@ -360,7 +400,7 @@ export default function TicketFormsManager() {
           id: selectedCategory.id,
           name: selectedCategory.name,
           slug: selectedCategory.slug,
-          color: selectedCategory["color" as keyof TicketCategory],
+          color: selectedCategory.color || "#45d483",
           description: selectedCategory.description,
           intake_type: selectedCategory.intake_type,
           match_keywords: selectedCategory["match_keywords" as keyof TicketCategory] || [],
@@ -386,213 +426,192 @@ export default function TicketFormsManager() {
 
   return (
     <div className="space">
-      <div className="card">
-        <div className="row" style={{ justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <div className="card form-workflow-card">
+        <div className="form-workflow-head">
           <div>
+            <div className="muted form-eyebrow">Step 3 of 3</div>
             <h2 style={{ margin: 0 }}>Ticket Forms</h2>
-            <div className="muted" style={{ marginTop: 6 }}>
-              Control the questions members answer after choosing an issue from the ticket menu.
+            <div className="muted form-copy">
+              Control what members answer after they choose a ticket category. Smart defaults keep setup fast; custom questions make categories more precise.
             </div>
           </div>
-          <button className="button ghost" type="button" onClick={() => void loadCategories()} disabled={loading || saving} style={{ width: "auto" }}>
-            {loading ? "Refreshing..." : "Refresh"}
-          </button>
+          <div className="form-top-actions">
+            <button className="button ghost" type="button" onClick={() => void loadCategories()} disabled={loading || saving}>
+              {loading ? "Refreshing..." : "Refresh"}
+            </button>
+            <a className="button ghost" href="/ticket-categories">Back to Categories</a>
+            <a className="button primary" href="/">Open Dashboard</a>
+          </div>
+        </div>
+
+        <div className="form-status-strip">
+          <div><span>Categories</span><strong>{categories.length}</strong></div>
+          <div><span>Custom Forms</span><strong>{customReadyCount}</strong></div>
+          <div><span>Smart Defaults</span><strong>{smartDefaultCount}</strong></div>
         </div>
 
         {error ? <div className="error-banner" style={{ marginTop: 12 }}>{error}</div> : null}
         {message ? <div className="info-banner" style={{ marginTop: 12 }}>{message}</div> : null}
       </div>
 
-      <div className="ticket-form-shell">
-        <div className="card">
-          <div className="ticket-preset-title">Issue Types</div>
-          <div className="ticket-form-category-list">
-            {categories.map((category) => {
-              const id = normalizeString(category.id);
-              const selected = selectedId === id;
-              const questionCount = Number(category.form_question_count || category.form_questions?.length || 0);
-              return (
-                <button
-                  key={id || normalizeString(category.slug)}
-                  type="button"
-                  className={`ticket-form-category ${selected ? "active" : ""}`}
-                  onClick={() => setSelectedId(id)}
-                >
-                  <div style={{ fontWeight: 850 }}>{normalizeString(category.name) || "Unnamed"}</div>
-                  <div className="muted" style={{ fontSize: 12, marginTop: 5 }}>
-                    {normalizeString(category.slug) || "no-slug"} • {questionCount ? `${questionCount} custom question(s)` : "smart default"}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
-            <div>
-              <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>Editing</div>
-              <h3 style={{ margin: "6px 0 0" }}>{selectedCategory?.name || "Select a category"}</h3>
+      {!loading && categories.length === 0 ? (
+        <div className="card empty-form-state">
+          <div>
+            <div className="muted form-eyebrow">Categories Needed</div>
+            <h2 style={{ margin: "0 0 8px" }}>Create ticket categories first</h2>
+            <div className="muted form-copy">
+              Forms attach to categories. Create your Support, Verification, Appeals, or COD categories first, then return here to tune questions.
             </div>
-            <button type="button" className="button ghost" onClick={loadTemplate} disabled={!selectedCategory || saving} style={{ width: "auto" }}>
-              Load Smart Template
-            </button>
+          </div>
+          <a className="button primary" href="/ticket-categories">Create Categories</a>
+        </div>
+      ) : null}
+
+      {categories.length ? (
+        <div className="ticket-form-shell">
+          <div className="card form-category-card">
+            <div className="ticket-preset-title">Issue Types</div>
+            <div className="ticket-form-category-list">
+              {categories.map((category) => {
+                const id = normalizeString(category.id);
+                const selected = selectedId === id;
+                return (
+                  <button key={id || normalizeString(category.slug)} type="button" className={`ticket-form-category ${selected ? "active" : ""}`} onClick={() => setSelectedId(id)}>
+                    <div className="form-category-row-head">
+                      <span className="form-category-dot" style={{ background: normalizeString(category.color) || "#45d483" }} />
+                      <span style={{ fontWeight: 900 }}>{normalizeString(category.name) || "Unnamed"}</span>
+                    </div>
+                    <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                      {normalizeString(category.slug) || "no-slug"}
+                    </div>
+                    <div className={`form-status-pill ${questionStatusClass(category)}`}>{questionStatusLabel(category)}</div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          <div className="ticket-form-controls">
-            <label className="ticket-check-row">
-              <input type="checkbox" checked={formEnabled} onChange={(e) => setFormEnabled(e.target.checked)} />
-              <span>Enable form for this issue type</span>
-            </label>
-            <label className="ticket-check-row">
-              <input type="checkbox" checked={disableDefaultTemplate} onChange={(e) => setDisableDefaultTemplate(e.target.checked)} />
-              <span>Disable built-in smart template when no custom questions are saved</span>
-            </label>
-          </div>
-
-          <div className="ticket-form-question-list">
-            {questions.length ? (
-              questions.map((question, index) => (
-                <div className="ticket-form-question" key={`${index}-${question.key}`}>
-                  <div className="row" style={{ justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                    <strong>Question {index + 1}</strong>
-                    <button type="button" className="ticket-keyword-chip ghost" onClick={() => removeQuestion(index)}>
-                      Remove
-                    </button>
+          <div className="card form-editor-card">
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>Editing</div>
+                <h3 style={{ margin: "6px 0 0" }}>{selectedCategory?.name || "Select a category"}</h3>
+                {selectedCategory ? (
+                  <div className="muted" style={{ marginTop: 6, lineHeight: 1.45 }}>
+                    Recommended template: <strong>{TEMPLATE_LABELS[selectedTemplateKey] || "Support"}</strong>
                   </div>
-                  <div className="ticket-form-grid">
-                    <label>
-                      <span className="ticket-info-label">Label</span>
-                      <input className="input" value={question.label} onChange={(e) => updateQuestion(index, { label: e.target.value })} maxLength={45} />
-                    </label>
-                    <label>
-                      <span className="ticket-info-label">Key</span>
-                      <input className="input" value={question.key} onChange={(e) => updateQuestion(index, { key: slugify(e.target.value) })} />
-                    </label>
-                    <label className="full">
-                      <span className="ticket-info-label">Placeholder</span>
-                      <input className="input" value={question.placeholder} onChange={(e) => updateQuestion(index, { placeholder: e.target.value })} maxLength={100} />
-                    </label>
-                    <label>
-                      <span className="ticket-info-label">Style</span>
-                      <select className="input" value={question.style} onChange={(e) => updateQuestion(index, { style: e.target.value === "short" ? "short" : "paragraph" })}>
-                        <option value="paragraph">Paragraph</option>
-                        <option value="short">Short answer</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span className="ticket-info-label">Max Length</span>
-                      <input className="input" value={question.max_length} onChange={(e) => updateQuestion(index, { max_length: e.target.value })} />
-                    </label>
-                    <label className="ticket-check-row full">
-                      <input type="checkbox" checked={question.required} onChange={(e) => updateQuestion(index, { required: e.target.checked })} />
-                      <span>Required</span>
-                    </label>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="empty-state">
-                No custom questions saved. Dank Shield will use the built-in smart template unless disabled above.
+                ) : null}
               </div>
-            )}
-          </div>
+              <button type="button" className="button ghost" onClick={() => loadTemplate()} disabled={!selectedCategory || saving} style={{ width: "auto" }}>
+                Load Smart Template
+              </button>
+            </div>
 
-          <div className="ticket-editor-actions">
-            <button type="button" className="button ghost" onClick={addQuestion} disabled={questions.length >= 5 || saving} style={{ width: "auto" }}>
-              Add Question
-            </button>
-            <button type="button" className="button primary" onClick={() => void handleSave()} disabled={!selectedCategory || saving} style={{ width: "auto", minWidth: 160 }}>
-              {saving ? "Saving..." : "Save Form"}
-            </button>
-          </div>
+            <div className="template-chip-row">
+              {Object.keys(TEMPLATE_QUESTIONS).map((key) => (
+                <button key={key} type="button" className={`ticket-keyword-chip ${key === selectedTemplateKey ? "active" : "ghost"}`} onClick={() => loadTemplate(key)} disabled={!selectedCategory || saving}>
+                  {TEMPLATE_LABELS[key] || key}
+                </button>
+              ))}
+            </div>
 
-          <div className="ticket-editor-footnote">
-            Discord forms support up to 5 questions. Saved custom questions override smart defaults.
+            <div className="ticket-form-controls">
+              <label className="ticket-check-row">
+                <input type="checkbox" checked={formEnabled} onChange={(e) => setFormEnabled(e.target.checked)} />
+                <span>Enable form for this issue type</span>
+              </label>
+              <label className="ticket-check-row">
+                <input type="checkbox" checked={disableDefaultTemplate} onChange={(e) => setDisableDefaultTemplate(e.target.checked)} />
+                <span>Disable built-in smart template when no custom questions are saved</span>
+              </label>
+            </div>
+
+            {!questions.length && effectiveQuestions.length ? (
+              <div className="smart-preview-box">
+                <div className="ticket-preset-title">Smart Template Preview</div>
+                <div className="smart-preview-list">
+                  {effectiveQuestions.map((question, index) => (
+                    <div key={`${question.key}-${index}`} className="smart-preview-question">
+                      <strong>{index + 1}. {question.label}</strong>
+                      <span>{question.required ? "Required" : "Optional"} • {question.style === "short" ? "Short answer" : "Paragraph"}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="muted" style={{ marginTop: 10, lineHeight: 1.45 }}>
+                  This template is used automatically until you save custom questions. Hit “Load Smart Template” if you want to edit it.
+                </div>
+              </div>
+            ) : null}
+
+            <div className="ticket-form-question-list">
+              {questions.length ? (
+                questions.map((question, index) => (
+                  <div className="ticket-form-question" key={`${index}-${question.key}`}>
+                    <div className="row" style={{ justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                      <strong>Question {index + 1}</strong>
+                      <button type="button" className="ticket-keyword-chip ghost" onClick={() => removeQuestion(index)}>
+                        Remove
+                      </button>
+                    </div>
+                    <div className="ticket-form-grid">
+                      <label>
+                        <span className="ticket-info-label">Label</span>
+                        <input className="input" value={question.label} onChange={(e) => updateQuestion(index, { label: e.target.value })} maxLength={45} />
+                      </label>
+                      <label>
+                        <span className="ticket-info-label">Key</span>
+                        <input className="input" value={question.key} onChange={(e) => updateQuestion(index, { key: slugify(e.target.value) })} />
+                      </label>
+                      <label className="full">
+                        <span className="ticket-info-label">Placeholder</span>
+                        <input className="input" value={question.placeholder} onChange={(e) => updateQuestion(index, { placeholder: e.target.value })} maxLength={100} />
+                      </label>
+                      <label>
+                        <span className="ticket-info-label">Style</span>
+                        <select className="input" value={question.style} onChange={(e) => updateQuestion(index, { style: e.target.value === "short" ? "short" : "paragraph" })}>
+                          <option value="paragraph">Paragraph</option>
+                          <option value="short">Short answer</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span className="ticket-info-label">Max Length</span>
+                        <input className="input" value={question.max_length} onChange={(e) => updateQuestion(index, { max_length: e.target.value })} />
+                      </label>
+                      <label className="ticket-check-row full">
+                        <input type="checkbox" checked={question.required} onChange={(e) => updateQuestion(index, { required: e.target.checked })} />
+                        <span>Required</span>
+                      </label>
+                    </div>
+                  </div>
+                ))
+              ) : !effectiveQuestions.length ? (
+                <div className="empty-state">No custom questions or smart template enabled. Members will open this ticket without extra questions.</div>
+              ) : null}
+            </div>
+
+            <div className="ticket-editor-actions">
+              <button type="button" className="button ghost" onClick={addQuestion} disabled={questions.length >= 5 || saving} style={{ width: "auto" }}>
+                Add Question
+              </button>
+              {questions.length ? (
+                <button type="button" className="button ghost" onClick={clearCustomQuestions} disabled={saving} style={{ width: "auto" }}>
+                  Use Smart Default
+                </button>
+              ) : null}
+              <button type="button" className="button primary" onClick={() => void handleSave()} disabled={!selectedCategory || saving} style={{ width: "auto", minWidth: 160 }}>
+                {saving ? "Saving..." : "Save Form"}
+              </button>
+            </div>
+
+            <div className="ticket-editor-footnote">
+              Discord forms support up to 5 questions. Smart defaults keep setup fast; custom questions override smart defaults.
+            </div>
           </div>
         </div>
-      </div>
+      ) : null}
 
       <style jsx>{`
-        .ticket-form-shell {
-          display: grid;
-          grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.4fr);
-          gap: 16px;
-        }
-        .ticket-form-category-list,
-        .ticket-form-question-list {
-          display: grid;
-          gap: 10px;
-        }
-        .ticket-form-category,
-        .ticket-form-question {
-          width: 100%;
-          text-align: left;
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 16px;
-          padding: 12px;
-          background: rgba(255,255,255,0.025);
-          color: var(--text, #dbe4ee);
-        }
-        .ticket-form-category {
-          cursor: pointer;
-        }
-        .ticket-form-category.active {
-          border-color: rgba(93,255,141,0.28);
-          box-shadow: 0 0 0 1px rgba(93,255,141,0.12) inset;
-        }
-        .ticket-form-controls {
-          display: grid;
-          gap: 10px;
-          margin: 16px 0;
-          padding: 12px;
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 16px;
-          background: rgba(255,255,255,0.02);
-        }
-        .ticket-form-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 12px;
-          margin-top: 12px;
-        }
-        .full {
-          grid-column: 1 / -1;
-        }
-        .ticket-preset-title {
-          font-size: 12px;
-          font-weight: 800;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-          color: var(--muted, #9fb0c3);
-          margin-bottom: 10px;
-        }
-        .ticket-check-row {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-        .ticket-editor-actions {
-          margin-top: 16px;
-          display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
-        }
-        .ticket-editor-footnote {
-          margin-top: 14px;
-          color: var(--muted, #9fb0c3);
-          font-size: 12px;
-        }
-        @media (max-width: 1024px) {
-          .ticket-form-shell {
-            grid-template-columns: 1fr;
-          }
-        }
-        @media (max-width: 720px) {
-          .ticket-form-grid {
-            grid-template-columns: 1fr;
-          }
-        }
+        .form-workflow-card,.empty-form-state{display:grid;gap:14px}.form-workflow-head,.empty-form-state{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap}.form-eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:950;margin-bottom:8px}.form-copy{margin-top:6px;line-height:1.55;max-width:800px}.form-top-actions{display:flex;gap:10px;flex-wrap:wrap}.form-top-actions .button,.empty-form-state .button{width:auto;min-width:150px}.form-status-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.form-status-strip>div{border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:12px;background:rgba(255,255,255,.055)}.form-status-strip span{display:block;color:var(--muted,#c7ddcf);font-size:12px;margin-bottom:4px}.form-status-strip strong{color:var(--text-strong,#fff);font-size:20px}.ticket-form-shell{display:grid;grid-template-columns:minmax(300px,.8fr) minmax(0,1.4fr);gap:16px}.ticket-form-category-list,.ticket-form-question-list,.smart-preview-list{display:grid;gap:10px}.ticket-form-category,.ticket-form-question,.smart-preview-box{width:100%;text-align:left;border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:12px;background:rgba(255,255,255,.055);color:var(--text,#dbe4ee)}.ticket-form-category{cursor:pointer;display:grid;gap:6px}.ticket-form-category.active{border-color:rgba(93,255,141,.42);box-shadow:0 0 0 1px rgba(93,255,141,.16) inset,0 0 22px rgba(93,255,141,.08)}.form-category-row-head{display:flex;align-items:center;gap:9px;min-width:0}.form-category-dot{width:11px;height:11px;border-radius:999px;flex-shrink:0}.form-status-pill{justify-self:start;border-radius:999px;padding:6px 9px;font-size:12px;font-weight:900;border:1px solid rgba(255,255,255,.14)}.form-status-pill.smart{background:rgba(120,221,255,.13);border-color:rgba(120,221,255,.26)}.form-status-pill.custom{background:rgba(109,255,157,.13);border-color:rgba(109,255,157,.28)}.form-status-pill.off{background:rgba(255,111,142,.14);border-color:rgba(255,111,142,.28)}.template-chip-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.ticket-form-controls{display:grid;gap:10px;margin:16px 0;padding:12px;border:1px solid rgba(255,255,255,.14);border-radius:16px;background:rgba(255,255,255,.055)}.smart-preview-box{margin-bottom:14px}.smart-preview-question{display:grid;gap:4px;border:1px solid rgba(255,255,255,.10);border-radius:14px;padding:10px;background:rgba(0,0,0,.12)}.smart-preview-question strong{color:var(--text-strong,#fff)}.smart-preview-question span{color:var(--muted,#c7ddcf);font-size:12px}.ticket-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}.full{grid-column:1/-1}.ticket-preset-title{font-size:12px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#c7ddcf);margin-bottom:10px}.ticket-check-row{display:flex;align-items:center;gap:10px}.ticket-editor-actions{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap}.ticket-editor-footnote{margin-top:14px;color:var(--muted,#c7ddcf);font-size:12px}.ticket-keyword-chip.active{border-color:rgba(109,255,157,.38);background:rgba(109,255,157,.16)}@media(max-width:1024px){.ticket-form-shell,.form-status-strip{grid-template-columns:1fr}}@media(max-width:720px){.ticket-form-grid{grid-template-columns:1fr}.form-top-actions,.ticket-editor-actions{display:grid;grid-template-columns:1fr}.form-top-actions .button,.ticket-editor-actions .button,.empty-form-state .button{width:100%!important}}
       `}</style>
     </div>
   );
