@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { queueCreateTicket } from "@/lib/botCommands";
 import { requireStaffSessionForRoute } from "@/lib/auth-server";
 import { insertMemberEvent } from "@/lib/memberEventWrites";
-import { env } from "@/lib/env";
+import { getSelectedGuildId } from "@/lib/guild-selection";
 import {
   buildRouteJson,
   getActorId,
@@ -29,6 +29,10 @@ function getActorName(session: any): string {
 function normalizeNullable(value: unknown): string | null {
   const text = String(value ?? "").trim();
   return text || null;
+}
+
+function selectedGuildId(): string {
+  return String(getSelectedGuildId() || "").trim();
 }
 
 function readStringArray(
@@ -72,10 +76,22 @@ export async function POST(req: NextRequest) {
 
     const actorId = getActorId(auth?.session);
     const actorName = getActorName(auth?.session);
-    const guildId = env.guildId || "";
+    const guildId = selectedGuildId();
 
     if (!actorId) {
       return unauthorizedRouteResponse(refreshedTokens);
+    }
+
+    if (!guildId) {
+      return buildRouteJson(
+        {
+          ok: false,
+          error: "Select a server before creating a ticket.",
+          needsServerSelection: true,
+        },
+        428,
+        refreshedTokens
+      );
     }
 
     const body = await parseRouteBody(req);
@@ -155,6 +171,7 @@ export async function POST(req: NextRequest) {
     }
 
     const command = await queueCreateTicket({
+      guildId,
       userId,
       category,
       priority,
@@ -179,40 +196,39 @@ export async function POST(req: NextRequest) {
       approvalReason,
     });
 
-    if (guildId) {
-      await insertMemberEvent({
-        guildId,
-        userId,
-        actorId,
-        actorName,
-        eventType: "ticket_created_from_dashboard",
-        title: "Ticket Created From Dashboard",
-        reason: openingMessage || `Dashboard created ${category} ticket.`,
-        metadata: {
-          category,
-          priority,
-          source_ticket_id: sourceTicketId,
-          verification_ticket_id: verificationTicketId,
-          entry_method: entryMethod,
-          verification_source: verificationSource,
-          invited_by: invitedBy,
-          invited_by_name: invitedByName,
-          invite_code: inviteCode,
-          vouched_by: vouchedBy,
-          vouched_by_name: vouchedByName,
-          approved_by: approvedBy,
-          approved_by_name: approvedByName,
-          command_id: command?.id || null,
-          allow_duplicate: allowDuplicate,
-          parent_category_id: normalizeNullable(parentCategoryId),
-          staff_role_ids: staffRoleIds || [],
-        },
-      });
-    }
+    await insertMemberEvent({
+      guildId,
+      userId,
+      actorId,
+      actorName,
+      eventType: "ticket_created_from_dashboard",
+      title: "Ticket Created From Dashboard",
+      reason: openingMessage || `Dashboard created ${category} ticket.`,
+      metadata: {
+        category,
+        priority,
+        source_ticket_id: sourceTicketId,
+        verification_ticket_id: verificationTicketId,
+        entry_method: entryMethod,
+        verification_source: verificationSource,
+        invited_by: invitedBy,
+        invited_by_name: invitedByName,
+        invite_code: inviteCode,
+        vouched_by: vouchedBy,
+        vouched_by_name: vouchedByName,
+        approved_by: approvedBy,
+        approved_by_name: approvedByName,
+        command_id: command?.id || null,
+        allow_duplicate: allowDuplicate,
+        parent_category_id: normalizeNullable(parentCategoryId),
+        staff_role_ids: staffRoleIds || [],
+      },
+    });
 
     return buildRouteJson(
       {
         ok: true,
+        selectedGuildId: guildId,
         queued: true,
         command,
         userId,
