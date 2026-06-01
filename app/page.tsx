@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import Sidebar from "@/components/Sidebar";
 import DashboardClient from "@/components/DashboardClient";
@@ -324,6 +323,8 @@ async function fetchDashboardJson(
 }
 
 function LoginRequiredState() {
+  const loginUrl = hasDiscordOAuthConfig() ? getDiscordLoginUrl() : "";
+
   return (
     <main
       style={{
@@ -338,20 +339,35 @@ function LoginRequiredState() {
       <div
         style={{
           width: "100%",
-          maxWidth: 520,
+          maxWidth: 560,
           border: "1px solid rgba(255,255,255,0.08)",
           background: "rgba(255,255,255,0.03)",
           borderRadius: 20,
           padding: 24,
         }}
       >
-        <h1 style={{ marginTop: 0 }}>Login Required</h1>
+        <div style={{ color: "#86efac", fontWeight: 900, fontSize: 13, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+          Dank Shield Dashboard
+        </div>
+        <h1 style={{ margin: "8px 0 0" }}>Login Required</h1>
         <p style={{ color: "rgba(255,255,255,0.72)", lineHeight: 1.5 }}>
-          Discord login is required to use this dashboard.
+          Discord login is required to use this dashboard. The page no longer redirects automatically, so login problems will not trap you in a Discord authorize loop.
         </p>
-        <p style={{ color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>
-          OAuth configuration is currently missing or incomplete.
-        </p>
+        {!loginUrl ? (
+          <p style={{ color: "#fecaca", lineHeight: 1.5 }}>
+            OAuth configuration is missing or incomplete. Check Discord client, redirect URL, guild ID, and site URL environment variables.
+          </p>
+        ) : null}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
+          {loginUrl ? (
+            <Link href={loginUrl} className="button primary" style={{ width: "auto", minWidth: 180 }}>
+              Sign in with Discord
+            </Link>
+          ) : null}
+          <Link href="/auth-status" className="button ghost" style={{ width: "auto", minWidth: 170 }}>
+            Check Auth Status
+          </Link>
+        </div>
       </div>
     </main>
   );
@@ -423,6 +439,14 @@ function StaffQuickToolsCard() {
           </Link>
 
           <Link
+            href="/ticket-forms"
+            className="button ghost"
+            style={{ width: "auto", minWidth: 160 }}
+          >
+            Ticket Forms
+          </Link>
+
+          <Link
             href="/#categories"
             className="button ghost"
             style={{ width: "auto", minWidth: 160 }}
@@ -453,10 +477,6 @@ export default async function HomePage() {
   const session = (await getSession()) as SessionLike;
 
   if (!session) {
-    if (hasDiscordOAuthConfig()) {
-      redirect(getDiscordLoginUrl());
-    }
-
     return <LoginRequiredState />;
   }
 
