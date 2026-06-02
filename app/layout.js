@@ -1,5 +1,6 @@
 import "@/app/globals.css"
 import "@/app/readability.css"
+import "@/app/portal-responsive.css"
 import { env } from "@/lib/env"
 
 export const metadata = {
