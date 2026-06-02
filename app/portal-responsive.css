@@ -5,6 +5,169 @@
   Loaded after readability.css so it can safely override generic card/badge rules.
 */
 
+.launch-card {
+  margin-bottom: 18px;
+  display: grid;
+  gap: 16px;
+}
+
+.launch-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.launch-eyebrow {
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.launch-title {
+  margin: 0;
+  color: var(--text-strong, #ffffff);
+}
+
+.launch-copy {
+  margin: 8px 0 0;
+  max-width: 760px;
+  line-height: 1.55;
+}
+
+.launch-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.launch-actions .button {
+  width: auto;
+  min-width: 130px;
+}
+
+.launch-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.launch-step {
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 13px;
+  border-radius: 18px;
+  text-decoration: none;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--text, #f5fff9);
+}
+
+.launch-step.done {
+  border-color: rgba(109, 255, 157, 0.34);
+  background: rgba(109, 255, 157, 0.10);
+}
+
+.launch-step.todo:hover,
+.launch-step.done:hover {
+  border-color: rgba(120, 221, 255, 0.40);
+  transform: translateY(-1px);
+}
+
+.launch-step-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.launch-step-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-weight: 950;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.launch-step-badge.done {
+  background: rgba(109, 255, 157, 0.22);
+  color: #ffffff;
+}
+
+.launch-step-badge.todo {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted, #c7ddcf);
+}
+
+.launch-step-number {
+  color: var(--muted, #c7ddcf);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.launch-step strong {
+  color: var(--text-strong, #fff);
+  font-size: 15px;
+  line-height: 1.15;
+}
+
+.launch-step-helper {
+  color: var(--muted, #c7ddcf);
+  font-size: 12px;
+  line-height: 1.35;
+  flex: 1;
+}
+
+.launch-step-cta {
+  color: var(--accent, #6dff9d);
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.panel-command-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
+  gap: 14px;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  padding: 14px;
+  background:
+    radial-gradient(circle at top right, rgba(120, 221, 255, 0.12), transparent 34%),
+    rgba(255, 255, 255, 0.055);
+}
+
+.panel-command-title {
+  margin: 0;
+  color: var(--text-strong, #fff);
+}
+
+.command-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.command-stack code {
+  display: block;
+  border-radius: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(109, 255, 157, 0.24);
+  background: rgba(0, 0, 0, 0.24);
+  color: #eafff0;
+  font-weight: 900;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
 .user-dashboard-grid {
   display: grid;
   gap: 16px;
@@ -137,6 +300,12 @@
   }
 }
 
+@media (max-width: 1180px) {
+  .launch-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (min-width: 721px) and (max-width: 1279px) {
   .user-dashboard-grid {
     grid-template-columns: 1fr;
@@ -165,6 +334,20 @@
     padding-left: 10px !important;
     padding-right: 10px !important;
     padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .launch-actions,
+  .launch-actions .button {
+    width: 100%;
+  }
+
+  .launch-grid,
+  .panel-command-box {
+    grid-template-columns: 1fr;
+  }
+
+  .launch-step {
+    min-height: 132px;
   }
 
   .member-section.card {
