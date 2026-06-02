@@ -1,0 +1,320 @@
+/*
+  Appearance Stability Layer
+  --------------------------
+  Loaded last. Normalizes variable names and makes appearance/density settings
+  affect every dashboard page consistently.
+*/
+
+:root {
+  --accent2: var(--accent-2, #78ddff);
+  --text: var(--text-strong, #ffffff);
+  --muted: var(--text-muted, #c7ddcf);
+  --panel: var(--panel-bg, rgba(17,31,43,0.96));
+  --panel-2: var(--panel-bg, rgba(17,31,43,0.96));
+  --panel-3: var(--panel-bg-soft, rgba(255,255,255,0.075));
+  --line: var(--panel-border, rgba(255,255,255,0.16));
+  --line-soft: var(--panel-border, rgba(255,255,255,0.12));
+}
+
+html[data-dashboard-density="compact"] {
+  --app-gap: 10px;
+  --app-card-padding: 12px;
+  --app-radius: 16px;
+  --app-button-height: 42px;
+  --app-font-scale: 0.96;
+}
+
+html[data-dashboard-density="comfortable"],
+html:not([data-dashboard-density]) {
+  --app-gap: 14px;
+  --app-card-padding: 16px;
+  --app-radius: 20px;
+  --app-button-height: 48px;
+  --app-font-scale: 1;
+}
+
+html[data-dashboard-density="spacious"] {
+  --app-gap: 20px;
+  --app-card-padding: 22px;
+  --app-radius: 24px;
+  --app-button-height: 54px;
+  --app-font-scale: 1.04;
+}
+
+body {
+  color: var(--text-strong, #ffffff);
+}
+
+.card,
+.member-section,
+.ticket-row-card,
+.status-panel,
+.summary-tile,
+.mini-card,
+.launch-card,
+.form-workflow-card,
+.category-workflow-card,
+.starter-card,
+.form-category-card,
+.form-editor-card,
+.ticket-category-list-card,
+.ticket-category-editor-card,
+.sidebar-context-card,
+.sidebar-flow-card {
+  border-color: var(--panel-border, rgba(255,255,255,0.16)) !important;
+  color: var(--text-strong, #ffffff);
+}
+
+.card,
+.member-section.card,
+.launch-card,
+.form-workflow-card,
+.category-workflow-card,
+.starter-card {
+  padding: var(--app-card-padding) !important;
+  border-radius: var(--app-radius) !important;
+}
+
+.dashboard-home-grid,
+.dashboard-members-grid,
+.user-dashboard-grid,
+.space,
+.settings-content-stack,
+.advanced-stack {
+  gap: var(--app-gap) !important;
+}
+
+.button,
+button.button,
+a.button,
+.input,
+.textarea,
+select.input {
+  min-height: var(--app-button-height) !important;
+  font-size: calc(14px * var(--app-font-scale, 1));
+}
+
+h1, h2, h3,
+.sidebar-brand-title,
+.sidebar-link-label,
+.launch-title,
+.quick-appearance-title,
+.advanced-head h2,
+.profile-name,
+.status-title,
+.summary-value,
+.ticket-category-name,
+.ticket-form-category strong,
+.form-category-row-head,
+.member-section h2,
+.member-section h3 {
+  color: var(--text-strong, #ffffff) !important;
+  line-height: 1.12;
+}
+
+p,
+.muted,
+.sidebar-link-helper,
+.ticket-info-label,
+.launch-copy,
+.quick-appearance-copy,
+.advanced-muted,
+.advanced-section-head p,
+.advanced-disclosure-head p,
+.timeline-card-description,
+.timeline-card-meta,
+.timeline-card-actor,
+.timeline-card-target {
+  color: var(--text-muted, #c7ddcf) !important;
+}
+
+.badge,
+.timeline-pill,
+.server-pill,
+.ticket-keyword-chip,
+.form-status-pill,
+.advanced-profile-top strong,
+.advanced-profile-top em {
+  border-color: var(--panel-border, rgba(255,255,255,0.16)) !important;
+  max-width: 100%;
+}
+
+.quick-appearance-floating-button,
+.quick-appearance-dock-panel,
+.sv-mobile-nav-shell,
+.mobile-workspace-bar,
+.desktop-workspace-bar,
+.sidebar,
+.Topbar,
+.topbar {
+  color: var(--text-strong, #ffffff) !important;
+}
+
+/* Make density visibly affect quick appearance and advanced controls too. */
+html[data-dashboard-density="compact"] .quick-appearance-card,
+html[data-dashboard-density="compact"] .advanced-section-card,
+html[data-dashboard-density="compact"] .advanced-disclosure,
+html[data-dashboard-density="compact"] .advanced-profile-card,
+html[data-dashboard-density="compact"] .quick-preset-pill,
+html[data-dashboard-density="compact"] .quick-theme-card {
+  padding: 10px !important;
+  gap: 7px !important;
+}
+
+html[data-dashboard-density="spacious"] .quick-appearance-card,
+html[data-dashboard-density="spacious"] .advanced-section-card,
+html[data-dashboard-density="spacious"] .advanced-disclosure,
+html[data-dashboard-density="spacious"] .advanced-profile-card,
+html[data-dashboard-density="spacious"] .quick-preset-pill,
+html[data-dashboard-density="spacious"] .quick-theme-card {
+  padding: 18px !important;
+  gap: 13px !important;
+}
+
+/* Prevent text collisions seen on tablet/mobile. */
+* {
+  min-width: 0;
+}
+
+.card *,
+.member-section *,
+.launch-card *,
+.quick-appearance-card *,
+.advanced-sheet *,
+.timeline-card *,
+.ticket-row-card * {
+  overflow-wrap: anywhere;
+}
+
+.row {
+  min-width: 0;
+}
+
+/* Shared safe area: pages without MobileBottomNav still need room for browser UI + floating appearance. */
+.content,
+.dashboard-page-shell,
+.user-portal-shell,
+main.content {
+  padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px)) !important;
+}
+
+.sv-mobile-nav-wrap {
+  z-index: 155 !important;
+}
+
+.quick-appearance-dock {
+  z-index: 175 !important;
+}
+
+@media (max-width: 1024px) {
+  .quick-appearance-dock {
+    right: 12px !important;
+    bottom: calc(122px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .quick-appearance-floating-button {
+    min-height: 42px !important;
+    padding: 0 12px !important;
+  }
+
+  .card,
+  .member-section.card,
+  .launch-card,
+  .form-workflow-card,
+  .category-workflow-card,
+  .starter-card {
+    padding: max(12px, calc(var(--app-card-padding) - 4px)) !important;
+  }
+
+  .launch-head,
+  .form-workflow-head,
+  .category-workflow-head,
+  .starter-head,
+  .advanced-head {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+  }
+
+  .launch-actions,
+  .form-top-actions,
+  .category-top-actions,
+  .advanced-head-actions {
+    width: 100%;
+  }
+}
+
+@media (max-width: 720px) {
+  h1 { font-size: clamp(24px, 7vw, 34px) !important; }
+  h2 { font-size: clamp(21px, 6vw, 30px) !important; }
+  h3 { font-size: clamp(18px, 5vw, 24px) !important; }
+
+  .content,
+  .dashboard-page-shell,
+  .user-portal-shell,
+  main.content {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+    padding-bottom: calc(124px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .quick-appearance-dock {
+    right: 10px !important;
+    bottom: calc(98px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .quick-appearance-floating-button strong {
+    display: none;
+  }
+
+  .quick-appearance-floating-button {
+    width: 44px !important;
+    min-width: 44px !important;
+    justify-content: center;
+    padding: 0 !important;
+  }
+
+  .sv-mobile-nav-wrap {
+    width: min(calc(100vw - 14px), 520px) !important;
+  }
+
+  .mobile-workspace-bar,
+  .desktop-workspace-bar,
+  .launch-grid,
+  .form-status-strip,
+  .summary-grid,
+  .info-grid,
+  .action-grid,
+  .advanced-profile-grid,
+  .advanced-choice-grid,
+  .advanced-visibility-grid,
+  .advanced-manual-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .badge,
+  .timeline-pill,
+  .server-pill,
+  .ticket-keyword-chip,
+  .form-status-pill {
+    white-space: normal !important;
+    line-height: 1.2 !important;
+  }
+}
+
+html[data-dashboard-appearance="light"] {
+  --accent2: var(--accent-2, #06b6d4);
+  --text: #102033;
+  --muted: #475569;
+  --panel: rgba(255,255,255,0.96);
+  --panel-2: rgba(255,255,255,0.98);
+  --panel-3: rgba(241,247,251,0.98);
+}
+
+html[data-dashboard-appearance="high-contrast"] {
+  --accent2: var(--accent-2, #38bdf8);
+  --text: #ffffff;
+  --muted: #f4f4f5;
+  --panel: #000000;
+  --panel-2: #050505;
+  --panel-3: #0b0b0b;
+}
