@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { env } from "@/lib/env";
+import QuickAppearancePanel from "@/components/dashboard/QuickAppearancePanel";
 
 type SidebarLink = {
   href: string;
@@ -131,6 +132,8 @@ export default function Sidebar() {
             Change Server
           </Link>
         </div>
+
+        <QuickAppearancePanel />
 
         <nav className="sidebar-nav" aria-label="Dashboard navigation">
           {groups.map((group) => (
