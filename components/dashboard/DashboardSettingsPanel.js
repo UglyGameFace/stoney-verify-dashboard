@@ -1,6 +1,25 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import QuickAppearancePanel from "@/components/dashboard/QuickAppearancePanel";
+
+const HOME_SECTION_KEYS = [
+  "intelligence",
+  "stats",
+  "quickActions",
+  "activity",
+  "warns",
+  "raids",
+  "fraud",
+];
+
+const MEMBERS_SECTION_KEYS = [
+  "freshEntrants",
+  "memberSnapshot",
+  "staffMetrics",
+  "roleHierarchy",
+  "memberSearch",
+];
 
 const SECTION_LABELS = {
   intelligence: "Moderator Intelligence",
@@ -18,28 +37,38 @@ const SECTION_LABELS = {
   categories: "Categories",
 };
 
-const DEFAULT_THEME = {
-  accent: "#45d483",
-  accent2: "#3b82f6",
-  textStrong: "#f8fafc",
-  textMuted: "#b8c0cc",
-  effectsMode: "full",
-};
+const DENSITY_OPTIONS = [
+  {
+    id: "compact",
+    label: "Compact",
+    helper: "Shows more on one screen. Best for power users and desktop.",
+  },
+  {
+    id: "comfortable",
+    label: "Comfortable",
+    helper: "Balanced spacing for daily moderation. Recommended default.",
+  },
+  {
+    id: "spacious",
+    label: "Spacious",
+    helper: "More breathing room for tablets, touch, and readability.",
+  },
+];
 
-const DENSITY_OPTIONS = {
-  compact: "Compact",
-  comfortable: "Comfortable",
-  spacious: "Spacious",
-};
-
-const EFFECTS_MODES = {
-  full: "Full",
-  reduced: "Reduced",
-  minimal: "Minimal",
-};
+const COLOR_ROWS = [
+  { key: "accent", label: "Main Accent", helper: "Primary buttons, glow, and important actions." },
+  { key: "accent2", label: "Second Accent", helper: "Secondary glow and supporting highlights." },
+  { key: "textStrong", label: "Main Text", helper: "Headings and strong readable text." },
+  { key: "textMuted", label: "Muted Text", helper: "Helper copy, labels, and smaller notes." },
+];
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function safeText(value, fallback = "") {
+  const text = String(value || "").trim();
+  return text || fallback;
 }
 
 function formatUpdatedAt(value) {
@@ -51,643 +80,165 @@ function formatUpdatedAt(value) {
   }
 }
 
-function normalizeTheme(theme) {
-  return {
-    ...DEFAULT_THEME,
-    ...(theme || {}),
-    effectsMode:
-      theme?.effectsMode === "reduced" || theme?.effectsMode === "minimal"
-        ? theme.effectsMode
-        : "full",
-  };
-}
-
-function themesEqual(a, b) {
-  return (
-    a.accent === b.accent &&
-    a.accent2 === b.accent2 &&
-    a.textStrong === b.textStrong &&
-    a.textMuted === b.textMuted &&
-    a.effectsMode === b.effectsMode
-  );
-}
-
-function preserveScrollPosition(fn) {
-  if (typeof window === "undefined") {
-    fn();
-    return;
-  }
-
-  const root = document.scrollingElement || document.documentElement;
-  const pageX = window.scrollX;
-  const pageY = window.scrollY;
-  const activeEl = document.activeElement;
-
-  fn();
-
-  requestAnimationFrame(() => {
-    if (root) {
-      root.scrollTop = pageY;
-      root.scrollLeft = pageX;
-    }
-    window.scrollTo(pageX, pageY);
-
-    if (
-      activeEl &&
-      typeof activeEl.focus === "function" &&
-      document.contains(activeEl)
-    ) {
-      try {
-        activeEl.focus({ preventScroll: true });
-      } catch {
-        try {
-          activeEl.focus();
-        } catch {
-          // ignore
-        }
-      }
-    }
-  });
-}
-
-function useCompactSettingsLayout(breakpoint = 900) {
-  const [isCompact, setIsCompact] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.innerWidth <= breakpoint;
-  });
-
+function useLockBody(open) {
   useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-
-    const update = () => setIsCompact(window.innerWidth <= breakpoint);
-    update();
-
-    window.addEventListener("resize", update);
-    window.addEventListener("orientationchange", update);
-
+    if (!open || typeof document === "undefined") return undefined;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     return () => {
-      window.removeEventListener("resize", update);
-      window.removeEventListener("orientationchange", update);
-    };
-  }, [breakpoint]);
-
-  return isCompact;
-}
-
-function useFlashMessage() {
-  const [message, setMessage] = useState("");
-  const timerRef = useRef(null);
-
-  const flash = useCallback((text) => {
-    setMessage(text);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setMessage(""), 2200);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, []);
-
-  return [message, flash];
-}
-
-function usePreventBodyScroll(open) {
-  useEffect(() => {
-    if (!open) return undefined;
-
-    const html = document.documentElement;
-    const body = document.body;
-
-    const prevHtmlOverflow = html.style.overflow;
-    const prevBodyOverflow = body.style.overflow;
-    const prevBodyTouchAction = body.style.touchAction;
-
-    html.style.overflow = "hidden";
-    body.style.overflow = "hidden";
-    body.style.touchAction = "none";
-
-    return () => {
-      html.style.overflow = prevHtmlOverflow;
-      body.style.overflow = prevBodyOverflow;
-      body.style.touchAction = prevBodyTouchAction;
+      document.body.style.overflow = previous;
     };
   }, [open]);
 }
 
-function focusWithoutScroll(node) {
-  if (!node || typeof node.focus !== "function") return;
-  try {
-    node.focus({ preventScroll: true });
-  } catch {
-    try {
-      node.focus();
-    } catch {
-      // ignore
-    }
-  }
-}
-
-function useModalKeyboard(open, onClose, panelRef) {
-  const previousFocusRef = useRef(null);
-
-  useEffect(() => {
-    if (!open) return undefined;
-
-    previousFocusRef.current = document.activeElement;
-
-    const panel = panelRef?.current;
-
-    requestAnimationFrame(() => {
-      if (!panel) return;
-      focusWithoutScroll(panel);
-    });
-
-    const handleKeyDown = (e) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose?.();
-        return;
-      }
-
-      if (e.key !== "Tab" || !panel) return;
-
-      const nodes = Array.from(
-        panel.querySelectorAll(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        )
-      ).filter(
-        (el) =>
-          !el.hasAttribute("disabled") &&
-          el.getAttribute("aria-hidden") !== "true"
-      );
-
-      if (!nodes.length) return;
-
-      const first = nodes[0];
-      const last = nodes[nodes.length - 1];
-      const active = document.activeElement;
-
-      if (e.shiftKey) {
-        if (active === first || !panel.contains(active)) {
-          e.preventDefault();
-          focusWithoutScroll(last);
-        }
-      } else if (active === last) {
-        e.preventDefault();
-        focusWithoutScroll(first);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-
-      if (
-        previousFocusRef.current &&
-        typeof previousFocusRef.current.focus === "function" &&
-        document.contains(previousFocusRef.current)
-      ) {
-        focusWithoutScroll(previousFocusRef.current);
-      }
-    };
-  }, [open, onClose, panelRef]);
-}
-
-function ToneSwatch({ label, value, onChange, helper }) {
-  const inputRef = useRef(null);
-
+function SectionCard({ eyebrow, title, helper, children }) {
   return (
-    <div className="settings-lab-card">
-      <div className="ticket-info-label">{label}</div>
-
-      <input
-        ref={inputRef}
-        type="color"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="settings-color-input-hidden"
-        tabIndex={-1}
-        aria-hidden="true"
-      />
-
-      <button
-        type="button"
-        className="settings-color-trigger"
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => inputRef.current?.click()}
-        aria-label={`Choose ${label} color`}
-      >
-        <span
-          className="settings-color-preview"
-          style={{ background: value }}
-        />
-        <span className="settings-color-trigger-text">
-          {String(value || "").toUpperCase()}
-        </span>
-      </button>
-
-      {helper ? <div className="muted settings-helper-copy">{helper}</div> : null}
-    </div>
-  );
-}
-
-function VisibilityPill({ label, active, onToggle }) {
-  return (
-    <button
-      type="button"
-      className={`settings-pill ${active ? "active" : ""}`}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={onToggle}
-      aria-pressed={active}
-    >
-      <span className="settings-pill-label">{label}</span>
-      <span className={`settings-pill-badge ${active ? "active" : ""}`}>
-        {active ? "Shown" : "Hidden"}
-      </span>
-    </button>
-  );
-}
-
-function SectionVisibilityList({ title, keys, visibility, onToggle }) {
-  return (
-    <div className="settings-section-card">
-      <div className="settings-section-heading">
+    <section className="advanced-section-card">
+      <div className="advanced-section-head">
         <div>
-          <div className="settings-chip-row">
-            <span className="section-chip">Visibility</span>
-          </div>
-          <div className="settings-title-sm">{title}</div>
+          {eyebrow ? <div className="advanced-eyebrow">{eyebrow}</div> : null}
+          <h3>{title}</h3>
+          {helper ? <p>{helper}</p> : null}
         </div>
       </div>
-
-      <div className="settings-pill-grid">
-        {keys.map((key) => (
-          <VisibilityPill
-            key={key}
-            label={SECTION_LABELS[key] || key}
-            active={!!visibility[key]}
-            onToggle={() => onToggle(key)}
-          />
-        ))}
-      </div>
-    </div>
+      {children}
+    </section>
   );
 }
 
-function MoveButtons({ area, items, onMove }) {
-  return (
-    <div className="settings-section-card">
-      <div className="settings-section-heading">
-        <div>
-          <div className="settings-chip-row">
-            <span className="section-chip">Layout Order</span>
-          </div>
-          <div className="settings-title-sm">
-            {area === "home" ? "Home Layout Order" : "Members Layout Order"}
-          </div>
-        </div>
-      </div>
-
-      <div className="space">
-        {items.map((item, index) => (
-          <div key={`${area}-${item}`} className="settings-move-card">
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div className="settings-move-label">
-                {SECTION_LABELS[item] || item}
-              </div>
-              <div className="muted settings-helper-copy">Position {index + 1}</div>
-            </div>
-
-            <div className="settings-move-actions">
-              <button
-                type="button"
-                className="button ghost settings-mini-btn"
-                disabled={index === 0}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onMove(area, index, index - 1)}
-                aria-label="Move up"
-              >
-                ↑
-              </button>
-
-              <button
-                type="button"
-                className="button ghost settings-mini-btn"
-                disabled={index === items.length - 1}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onMove(area, index, index + 1)}
-                aria-label="Move down"
-              >
-                ↓
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function DensityPreview({ active, label, helper, onClick }) {
-  return (
-    <button
-      type="button"
-      className={`density-preview ${active ? "active" : ""}`}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={onClick}
-      aria-pressed={active}
-    >
-      <div className="density-preview-bars">
-        <span />
-        <span />
-        <span />
-      </div>
-      <div className="density-preview-title">{label}</div>
-      <div className="muted settings-helper-copy">{helper}</div>
-    </button>
-  );
-}
-
-function EffectsModeCard({ active, label, helper, onClick }) {
-  return (
-    <button
-      type="button"
-      className={`density-preview ${active ? "active" : ""}`}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={onClick}
-      aria-pressed={active}
-    >
-      <div className="density-preview-bars effects-bars">
-        <span />
-        <span />
-        <span />
-      </div>
-      <div className="density-preview-title">{label}</div>
-      <div className="muted settings-helper-copy">{helper}</div>
-    </button>
-  );
-}
-
-function ProfileCard({
-  profile,
-  isActive,
-  isLastUsed,
-  onLoad,
-  onSave,
-  onRename,
-  onDelete,
-}) {
-  const [renameValue, setRenameValue] = useState(profile.name || "");
-
-  useEffect(() => {
-    setRenameValue(profile.name || "");
-  }, [profile.name]);
-
-  const handleRename = () => {
-    const next = String(renameValue || "").trim();
-    if (next) onRename(profile.id, next);
-  };
-
-  const handleSave = () => {
-    onSave(profile.id, String(renameValue || "").trim());
-  };
-
-  return (
-    <div className={`profile-slot-card ${isActive ? "active" : ""}`}>
-      <div className="settings-chip-row" style={{ marginBottom: 8 }}>
-        <span className="section-chip">Slot {profile.slot}</span>
-        {isActive ? <span className="badge claimed">Active</span> : null}
-        {isLastUsed ? <span className="badge low">Last Used</span> : null}
-        {profile.isEmpty ? <span className="badge medium">Empty</span> : null}
-      </div>
-
-      <div className="profile-slot-title">{profile.name}</div>
-      <div className="muted settings-helper-copy" style={{ marginTop: 6 }}>
-        {formatUpdatedAt(profile.updatedAt)}
-      </div>
-
-      <div className="settings-profile-rename-row">
-        <input
-          className="input"
-          value={renameValue}
-          onChange={(e) => setRenameValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") handleRename();
-          }}
-          placeholder={`Profile ${profile.slot}`}
-          aria-label="Profile name"
-        />
-
-        <button
-          type="button"
-          className="button ghost"
-          style={{ width: "auto", minWidth: 96 }}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={handleRename}
-        >
-          Rename
-        </button>
-      </div>
-
-      <div className="settings-profile-action-row">
-        <button
-          type="button"
-          className={isActive ? "button" : "button ghost"}
-          style={{ width: "auto", minWidth: 96 }}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => onLoad(profile.id)}
-        >
-          Load
-        </button>
-
-        <button
-          type="button"
-          className="button ghost"
-          style={{ width: "auto", minWidth: 118 }}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={handleSave}
-        >
-          Save Current
-        </button>
-
-        <button
-          type="button"
-          className="button danger"
-          style={{ width: "auto", minWidth: 96 }}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => onDelete(profile.id)}
-        >
-          Clear
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function SettingsAccordion({ title, chip, defaultOpen = false, children }) {
+function Disclosure({ eyebrow, title, helper, defaultOpen = false, children }) {
   const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="advanced-disclosure">
+      <button type="button" className="advanced-disclosure-head" onClick={() => setOpen((prev) => !prev)} aria-expanded={open}>
+        <div>
+          {eyebrow ? <div className="advanced-eyebrow">{eyebrow}</div> : null}
+          <h3>{title}</h3>
+          {helper ? <p>{helper}</p> : null}
+        </div>
+        <span className={`advanced-chevron ${open ? "open" : ""}`}>⌄</span>
+      </button>
+      {open ? <div className="advanced-disclosure-body">{children}</div> : null}
+    </section>
+  );
+}
+
+function ProfileCard({ profile, active, lastUsed, onLoad, onSave, onRename, onDelete }) {
+  const [name, setName] = useState(profile?.name || "");
+
+  useEffect(() => {
+    setName(profile?.name || "");
+  }, [profile?.name]);
 
   return (
-    <div className="settings-accordion">
-      <button
-        type="button"
-        className="settings-accordion-head"
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => setOpen((prev) => !prev)}
-        aria-expanded={open}
-      >
-        <div>
-          <div className="settings-chip-row">
-            <span className="section-chip">{chip}</span>
-          </div>
-          <div className="settings-title-sm">{title}</div>
-        </div>
+    <div className={`advanced-profile-card ${active ? "active" : ""}`}>
+      <div className="advanced-profile-top">
+        <span>Slot {profile?.slot || "—"}</span>
+        {active ? <strong>Active</strong> : null}
+        {lastUsed ? <em>Last Used</em> : null}
+        {profile?.isEmpty ? <em>Empty</em> : null}
+      </div>
 
-        <span className={`settings-accordion-chevron ${open ? "open" : ""}`}>
-          ⌄
-        </span>
-      </button>
+      <div className="advanced-profile-title">{safeText(profile?.name, `Profile ${profile?.slot || ""}`)}</div>
+      <div className="advanced-muted">{formatUpdatedAt(profile?.updatedAt)}</div>
 
-      {open ? <div className="settings-accordion-body">{children}</div> : null}
+      <div className="advanced-profile-rename-row">
+        <input className="input" value={name} onChange={(event) => setName(event.target.value)} placeholder={`Profile ${profile?.slot || ""}`} />
+        <button type="button" className="button ghost" onClick={() => onRename(profile?.id, name)}>Rename</button>
+      </div>
+
+      <div className="advanced-profile-actions">
+        <button type="button" className={active ? "button" : "button ghost"} onClick={() => onLoad(profile?.id)}>Load</button>
+        <button type="button" className="button ghost" onClick={() => onSave(profile?.id, name)}>Save Current</button>
+        <button type="button" className="button danger" onClick={() => onDelete(profile?.id)}>Clear</button>
+      </div>
     </div>
   );
 }
 
-function DraftThemePanel({
-  draftTheme,
-  baselineTheme,
-  setDraftThemeValue,
-  applyDraftTheme,
-  resetDraftTheme,
-  hasDraftChanges,
-}) {
+function DensityChooser({ value, onChange }) {
   return (
-    <div className="settings-section-card">
-      <div className="settings-section-heading">
-        <div>
-          <div className="settings-chip-row">
-            <span className="section-chip">Color Engine</span>
-            {hasDraftChanges ? <span className="badge medium">Draft Changes</span> : null}
+    <div className="advanced-choice-grid">
+      {DENSITY_OPTIONS.map((option) => (
+        <button key={option.id} type="button" className={`advanced-choice-card ${value === option.id ? "active" : ""}`} onClick={() => onChange(option.id)}>
+          <strong>{option.label}</strong>
+          <span>{option.helper}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function VisibilityGrid({ title, keys, visibility, onToggle }) {
+  return (
+    <div className="advanced-subsection">
+      <div className="advanced-subtitle">{title}</div>
+      <div className="advanced-visibility-grid">
+        {keys.map((key) => {
+          const active = visibility?.[key] !== false;
+          return (
+            <button key={key} type="button" className={`advanced-visibility-pill ${active ? "active" : ""}`} onClick={() => onToggle(key)}>
+              <span>{SECTION_LABELS[key] || key}</span>
+              <strong>{active ? "Shown" : "Hidden"}</strong>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MoveList({ title, area, keys, onMove }) {
+  return (
+    <div className="advanced-subsection">
+      <div className="advanced-subtitle">{title}</div>
+      <div className="advanced-move-list">
+        {keys.map((key, index) => (
+          <div key={`${area}-${key}`} className="advanced-move-row">
+            <div>
+              <strong>{SECTION_LABELS[key] || key}</strong>
+              <span>Position {index + 1}</span>
+            </div>
+            <div className="advanced-move-actions">
+              <button type="button" className="button ghost" disabled={index === 0} onClick={() => onMove(area, index, index - 1)}>↑</button>
+              <button type="button" className="button ghost" disabled={index === keys.length - 1} onClick={() => onMove(area, index, index + 1)}>↓</button>
+            </div>
           </div>
-          <div className="settings-title-sm">Neon Palette</div>
-        </div>
-
-        <div className="settings-head-actions">
-          <button
-            type="button"
-            className="button ghost"
-            style={{ width: "auto", minWidth: 96 }}
-            disabled={!hasDraftChanges}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={resetDraftTheme}
-          >
-            Reset
-          </button>
-
-          <button
-            type="button"
-            className="button"
-            style={{ width: "auto", minWidth: 96 }}
-            disabled={!hasDraftChanges}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={applyDraftTheme}
-          >
-            Apply
-          </button>
-        </div>
+        ))}
       </div>
+    </div>
+  );
+}
 
-      <div className="settings-theme-grid">
-        <ToneSwatch
-          label="Accent"
-          value={draftTheme.accent}
-          onChange={(value) => setDraftThemeValue("accent", value)}
-          helper="Main green glow and primary dashboard energy."
-        />
-        <ToneSwatch
-          label="Accent 2"
-          value={draftTheme.accent2}
-          onChange={(value) => setDraftThemeValue("accent2", value)}
-          helper="Secondary neon balance for haze and highlights."
-        />
-        <ToneSwatch
-          label="Primary Text"
-          value={draftTheme.textStrong}
-          onChange={(value) => setDraftThemeValue("textStrong", value)}
-          helper="High-contrast headline and card text."
-        />
-        <ToneSwatch
-          label="Muted Text"
-          value={draftTheme.textMuted}
-          onChange={(value) => setDraftThemeValue("textMuted", value)}
-          helper="Subtext, labels, and helper copy."
-        />
-      </div>
+function ManualColorEngine({ theme, setThemeValue }) {
+  const effectsMode = safeText(theme?.effectsMode, "reduced");
 
-      <div className="settings-effects-wrap">
-        <div className="settings-title-sm" style={{ fontSize: 16, marginBottom: 10 }}>
-          Effects Mode
-        </div>
+  return (
+    <div className="advanced-manual-grid">
+      {COLOR_ROWS.map((row) => (
+        <label key={row.key} className="advanced-color-card">
+          <span>{row.label}</span>
+          <small>{row.helper}</small>
+          <div className="advanced-color-row">
+            <input type="color" value={safeText(theme?.[row.key], row.key.includes("text") ? "#ffffff" : "#6dff9d")} onChange={(event) => setThemeValue?.(row.key, event.target.value)} />
+            <code>{safeText(theme?.[row.key], "—")}</code>
+          </div>
+        </label>
+      ))}
 
-        <div className="settings-density-grid">
-          {Object.entries(EFFECTS_MODES).map(([mode, label]) => (
-            <EffectsModeCard
-              key={mode}
-              active={draftTheme.effectsMode === mode}
-              label={label}
-              helper={
-                mode === "full"
-                  ? "Maximum glow, blur, and visual atmosphere."
-                  : mode === "reduced"
-                    ? "Less extra glow and softer visual effects for cheaper devices."
-                    : "Lowest visual overhead. Best for weak phones or laggy browsers."
-              }
-              onClick={() => setDraftThemeValue("effectsMode", mode)}
-            />
+      <div className="advanced-subsection full">
+        <div className="advanced-subtitle">Visual Effects</div>
+        <div className="advanced-choice-grid">
+          {[
+            ["full", "Full", "Maximum glow and atmosphere."],
+            ["reduced", "Reduced", "Cleaner and easier on phones."],
+            ["minimal", "Minimal", "Fastest and least distracting."],
+          ].map(([id, label, helper]) => (
+            <button key={id} type="button" className={`advanced-choice-card ${effectsMode === id ? "active" : ""}`} onClick={() => setThemeValue?.("effectsMode", id)}>
+              <strong>{label}</strong>
+              <span>{helper}</span>
+            </button>
           ))}
-        </div>
-      </div>
-
-      <div className={`settings-preview-stage effects-${draftTheme.effectsMode}`}>
-        <div className="settings-preview-card">
-          <div className="settings-preview-title">Live Mood Preview</div>
-          <div className="settings-preview-sub">
-            Draft preview only. Colors and effects apply when you press{" "}
-            <strong>Apply</strong>.
-          </div>
-
-          <div className="settings-preview-chip-row">
-            <span className="badge low">Verified</span>
-            <span className="badge claimed">Claimed</span>
-            <span className="badge open">Open</span>
-            <span className="badge danger">High Risk</span>
-          </div>
-
-          <div className="settings-preview-swatch-grid">
-            <div className="settings-preview-swatch">
-              <span>Accent</span>
-              <code>{draftTheme.accent}</code>
-            </div>
-            <div className="settings-preview-swatch">
-              <span>Accent 2</span>
-              <code>{draftTheme.accent2}</code>
-            </div>
-            <div className="settings-preview-swatch">
-              <span>Primary Text</span>
-              <code>{draftTheme.textStrong}</code>
-            </div>
-            <div className="settings-preview-swatch">
-              <span>Muted Text</span>
-              <code>{draftTheme.textMuted}</code>
-            </div>
-          </div>
-
-          <div className="muted settings-helper-copy" style={{ marginTop: 12 }}>
-            Current applied effects mode: <strong>{baselineTheme.effectsMode}</strong>
-          </div>
         </div>
       </div>
     </div>
@@ -712,1129 +263,510 @@ export default function DashboardSettingsPanel({
   renameProfile,
   deleteProfile,
 }) {
-  const [message, flashMessage] = useFlashMessage();
-  const isCompact = useCompactSettingsLayout(900);
-  const panelRef = useRef(null);
-  const scrollRef = useRef(0);
-
-  const homeKeys = useMemo(
-    () => safeArray(preferences?.layout?.home),
-    [preferences?.layout?.home]
-  );
-  const membersKeys = useMemo(
-    () => safeArray(preferences?.layout?.members),
-    [preferences?.layout?.members]
-  );
-  const visibility = useMemo(
-    () => preferences?.sectionVisibility || {},
-    [preferences?.sectionVisibility]
-  );
-
-  const baselineTheme = useMemo(
-    () => normalizeTheme(preferences?.theme),
-    [preferences?.theme]
-  );
-
-  const [draftTheme, setDraftTheme] = useState(baselineTheme);
+  const [message, setMessage] = useState("");
+  useLockBody(open);
 
   const sortedProfiles = useMemo(() => {
-    return [...safeArray(profiles)]
-      .filter(Boolean)
-      .sort((a, b) => (a.slot || 0) - (b.slot || 0));
+    return [...safeArray(profiles)].filter(Boolean).sort((a, b) => (a?.slot || 0) - (b?.slot || 0));
   }, [profiles]);
 
-  const hasDraftChanges = useMemo(
-    () => !themesEqual(draftTheme, baselineTheme),
-    [draftTheme, baselineTheme]
-  );
+  const homeKeys = useMemo(() => {
+    const fromPrefs = safeArray(preferences?.layout?.home);
+    return fromPrefs.length ? fromPrefs : HOME_SECTION_KEYS;
+  }, [preferences?.layout?.home]);
 
-  useEffect(() => {
-    if (open) {
-      setDraftTheme(normalizeTheme(preferences?.theme));
-    }
-  }, [open, preferences?.theme]);
+  const membersKeys = useMemo(() => {
+    const fromPrefs = safeArray(preferences?.layout?.members);
+    return fromPrefs.length ? fromPrefs : MEMBERS_SECTION_KEYS;
+  }, [preferences?.layout?.members]);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const panel = panelRef.current;
-    if (!panel) return undefined;
+  const visibility = preferences?.sectionVisibility || {};
+  const density = safeText(preferences?.density, "comfortable");
+  const theme = preferences?.theme || {};
 
-    const onScroll = () => {
-      scrollRef.current = panel.scrollTop;
-    };
+  function flash(text) {
+    setMessage(text);
+    window.setTimeout(() => setMessage(""), 2200);
+  }
 
-    panel.addEventListener("scroll", onScroll, { passive: true });
-    return () => panel.removeEventListener("scroll", onScroll);
-  }, [open]);
+  function handleSaveActive() {
+    const ok = saveActiveProfile?.();
+    flash(ok ? "Current advanced layout saved." : "Could not save the current layout.");
+  }
 
-  useEffect(() => {
-    if (!open) return;
-    const panel = panelRef.current;
-    if (!panel) return;
+  function handleReset() {
+    resetPreferences?.();
+    flash("Advanced customization reset to defaults.");
+  }
 
-    requestAnimationFrame(() => {
-      panel.scrollTop = scrollRef.current || 0;
-    });
-  }, [
-    open,
-    draftTheme,
-    preferences?.density,
-    preferences?.layout?.home,
-    preferences?.layout?.members,
-    preferences?.sectionVisibility,
-    profiles,
-  ]);
-
-  usePreventBodyScroll(open);
-  useModalKeyboard(open, onClose, panelRef);
-
-  const noopToggleSectionVisibility = useCallback(() => {}, []);
-  const noopMoveSection = useCallback(() => {}, []);
-  const noopSetDensity = useCallback(() => {}, []);
-
-  const setDraftThemeValue = useCallback((key, value) => {
-    preserveScrollPosition(() => {
-      setDraftTheme((prev) => ({ ...prev, [key]: value }));
-    });
-  }, []);
-
-  const applyDraftTheme = useCallback(() => {
-    const next = normalizeTheme(draftTheme);
-
-    preserveScrollPosition(() => {
-      if (setThemeValue) {
-        setThemeValue("accent", next.accent);
-        setThemeValue("accent2", next.accent2);
-        setThemeValue("textStrong", next.textStrong);
-        setThemeValue("textMuted", next.textMuted);
-        setThemeValue("effectsMode", next.effectsMode);
-      }
-    });
-
-    flashMessage("Theme draft applied.");
-  }, [draftTheme, setThemeValue, flashMessage]);
-
-  const resetDraftTheme = useCallback(() => {
-    preserveScrollPosition(() => {
-      setDraftTheme(normalizeTheme(preferences?.theme));
-    });
-    flashMessage("Draft reset to current applied theme.");
-  }, [preferences?.theme, flashMessage]);
-
-  const handleRename = useCallback(
-    (profileId, nextName) => {
-      preserveScrollPosition(() => {
-        const ok = renameProfile?.(profileId, nextName);
-        flashMessage(ok ? "Profile renamed." : "Enter a valid profile name.");
-      });
-    },
-    [renameProfile, flashMessage]
-  );
-
-  const handleSave = useCallback(
-    (profileId, nextName) => {
-      preserveScrollPosition(() => {
-        const ok = saveProfile?.(profileId, nextName);
-        flashMessage(ok ? "Profile saved." : "Unable to save profile.");
-      });
-    },
-    [saveProfile, flashMessage]
-  );
-
-  const handleLoad = useCallback(
-    (profileId) => {
-      const target = sortedProfiles.find((profile) => profile.id === profileId) || null;
-
-      preserveScrollPosition(() => {
-        const ok = loadProfile?.(profileId);
-        if (ok && target?.preferences?.theme) {
-          setDraftTheme(normalizeTheme(target.preferences.theme));
-        }
-        flashMessage(ok ? "Profile loaded." : "Unable to load profile.");
-      });
-    },
-    [loadProfile, sortedProfiles, flashMessage]
-  );
-
-  const handleDelete = useCallback(
-    (profileId) => {
-      preserveScrollPosition(() => {
-        const ok = deleteProfile?.(profileId);
-        flashMessage(ok ? "Profile cleared." : "Unable to clear profile.");
-      });
-    },
-    [deleteProfile, flashMessage]
-  );
-
-  const handleQuickSave = useCallback(() => {
-    preserveScrollPosition(() => {
-      const ok = saveActiveProfile?.();
-      flashMessage(ok ? "Active profile saved." : "Unable to save active profile.");
-    });
-  }, [saveActiveProfile, flashMessage]);
-
-  const handleResetCurrent = useCallback(() => {
-    preserveScrollPosition(() => {
-      resetPreferences?.();
-    });
-    flashMessage("Current preferences reset.");
-  }, [resetPreferences, flashMessage]);
-
-  const handleDensityChange = useCallback(
-    (density) => {
-      preserveScrollPosition(() => {
-        (setDensity || noopSetDensity)(density);
-      });
-      flashMessage(`Layout feel set to ${String(density)}.`);
-    },
-    [setDensity, noopSetDensity, flashMessage]
-  );
-
-  const handleToggleVisibility = useCallback(
-    (key) => {
-      preserveScrollPosition(() => {
-        (toggleSectionVisibility || noopToggleSectionVisibility)(key);
-      });
-    },
-    [toggleSectionVisibility, noopToggleSectionVisibility]
-  );
-
-  const handleMoveSection = useCallback(
-    (area, from, to) => {
-      preserveScrollPosition(() => {
-        (moveSection || noopMoveSection)(area, from, to);
-      });
-    },
-    [moveSection, noopMoveSection]
-  );
+  function handleProfileAction(fn, success, failure) {
+    const ok = fn?.();
+    flash(ok ? success : failure);
+  }
 
   if (!open) return null;
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Dashboard personalization"
-      className="settings-overlay"
-      onClick={onClose}
-    >
-      <div
-        ref={panelRef}
-        className="settings-sheet"
-        onClick={(e) => e.stopPropagation()}
-        tabIndex={-1}
-      >
-        <div className="settings-sheet-handle" />
+    <div className="advanced-overlay" role="dialog" aria-modal="true" aria-label="Advanced customization" onClick={onClose}>
+      <div className="advanced-sheet" onClick={(event) => event.stopPropagation()}>
+        <div className="advanced-sheet-handle" />
 
-        <div className="settings-head">
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div className="settings-chip-row" style={{ marginBottom: 10 }}>
-              <span className="section-chip">420 Theme Lab</span>
-              <span className="badge claimed">Customization Studio</span>
-              {hasDraftChanges ? <span className="badge medium">Unsaved Draft</span> : null}
+        <header className="advanced-head">
+          <div>
+            <div className="advanced-eyebrow">Power User Settings</div>
+            <h2>Advanced Customization</h2>
+            <p>
+              Use the floating Appearance button for simple light/dark/color presets. This panel is for saved looks, dashboard layout, section visibility, and manual theme tuning.
+            </p>
+          </div>
+
+          <div className="advanced-head-actions">
+            <button type="button" className="button ghost" onClick={handleSaveActive}>Save Active Look</button>
+            <button type="button" className="button ghost" onClick={handleReset}>Reset Advanced</button>
+            <button type="button" className="button primary" onClick={onClose}>Done</button>
+          </div>
+        </header>
+
+        {message ? <div className="info-banner advanced-message">{message}</div> : null}
+
+        <div className="advanced-stack">
+          <SectionCard
+            eyebrow="Step 1"
+            title="Quick Appearance"
+            helper="These are the same simple controls as the floating Appearance button. Start here before touching advanced layout controls."
+          >
+            <QuickAppearancePanel />
+          </SectionCard>
+
+          <SectionCard
+            eyebrow="Step 2"
+            title="Saved Looks"
+            helper="Save different dashboard looks for different devices or staff styles. Example: Mobile High Contrast, Desktop Clean Blue, Compact Staff View."
+          >
+            <div className="advanced-profile-grid">
+              {sortedProfiles.map((profile) => (
+                <ProfileCard
+                  key={profile.id}
+                  profile={profile}
+                  active={profile.id === activeProfileId}
+                  lastUsed={profile.id === lastUsedProfileId}
+                  onLoad={(id) => handleProfileAction(() => loadProfile?.(id), "Saved look loaded.", "Could not load saved look.")}
+                  onSave={(id, name) => handleProfileAction(() => saveProfile?.(id, name), "Saved current look.", "Could not save look.")}
+                  onRename={(id, name) => handleProfileAction(() => renameProfile?.(id, name), "Saved look renamed.", "Enter a valid look name.")}
+                  onDelete={(id) => handleProfileAction(() => deleteProfile?.(id), "Saved look cleared.", "Could not clear look.")}
+                />
+              ))}
             </div>
+          </SectionCard>
 
-            <div className="settings-title-lg">Dashboard Personalization</div>
+          <SectionCard
+            eyebrow="Step 3"
+            title="Layout Spacing"
+            helper="Choose how tight the dashboard feels. This affects mobile, tablet, and desktop spacing."
+          >
+            <DensityChooser value={density} onChange={(value) => { setDensity?.(value); flash(`Spacing set to ${value}.`); }} />
+          </SectionCard>
 
-            <div className="muted settings-head-copy">
-              Cleaner opening behavior, lower device strain, draft-based theme editing,
-              and smoother control over how heavy the visuals feel on weaker phones.
-            </div>
-          </div>
+          <Disclosure
+            eyebrow="Optional"
+            title="Show / Hide Sections"
+            helper="Hide dashboard blocks your staff does not use. You can bring them back any time."
+          >
+            <VisibilityGrid title="Home Dashboard" keys={homeKeys} visibility={visibility} onToggle={toggleSectionVisibility || (() => {})} />
+            <VisibilityGrid title="Members Dashboard" keys={membersKeys} visibility={visibility} onToggle={toggleSectionVisibility || (() => {})} />
+          </Disclosure>
 
-          <div className="settings-head-actions">
-            <button
-              type="button"
-              className="button ghost"
-              style={{ width: "auto", minWidth: 132 }}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={handleQuickSave}
-            >
-              Save Active
-            </button>
+          <Disclosure
+            eyebrow="Optional"
+            title="Reorder Dashboard"
+            helper="Move important sections higher so staff see the right controls first."
+          >
+            <MoveList title="Home Order" area="home" keys={homeKeys} onMove={moveSection || (() => {})} />
+            <MoveList title="Members Order" area="members" keys={membersKeys} onMove={moveSection || (() => {})} />
+          </Disclosure>
 
-            <button
-              type="button"
-              className="button ghost"
-              style={{ width: "auto", minWidth: 124 }}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={handleResetCurrent}
-            >
-              Reset Current
-            </button>
-
-            <button
-              type="button"
-              className="button ghost"
-              style={{ width: "auto", minWidth: 110 }}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={onClose}
-            >
-              Close
-            </button>
-          </div>
+          <Disclosure
+            eyebrow="Advanced"
+            title="Manual Color Engine"
+            helper="Use this only if presets are not enough. Most servers should use Quick Appearance instead."
+          >
+            <ManualColorEngine theme={theme} setThemeValue={setThemeValue} />
+          </Disclosure>
         </div>
-
-        {message ? (
-          <div className="info-banner" style={{ marginBottom: 14 }} role="status">
-            {message}
-          </div>
-        ) : null}
-
-        <div className="settings-content-stack">
-          {isCompact ? (
-            <>
-              <SettingsAccordion title="Profile Slots" chip="Saved Looks" defaultOpen>
-                <div className="settings-profile-grid">
-                  {sortedProfiles.map((profile) => (
-                    <ProfileCard
-                      key={profile.id}
-                      profile={profile}
-                      isActive={profile.id === activeProfileId}
-                      isLastUsed={profile.id === lastUsedProfileId}
-                      onLoad={handleLoad}
-                      onSave={handleSave}
-                      onRename={handleRename}
-                      onDelete={handleDelete}
-                    />
-                  ))}
-                </div>
-              </SettingsAccordion>
-
-              <SettingsAccordion title="Neon Palette + Effects" chip="Color Engine" defaultOpen>
-                <DraftThemePanel
-                  draftTheme={draftTheme}
-                  baselineTheme={baselineTheme}
-                  setDraftThemeValue={setDraftThemeValue}
-                  applyDraftTheme={applyDraftTheme}
-                  resetDraftTheme={resetDraftTheme}
-                  hasDraftChanges={hasDraftChanges}
-                />
-              </SettingsAccordion>
-
-              <SettingsAccordion title="Density" chip="Layout Feel" defaultOpen>
-                <div className="settings-density-grid">
-                  {Object.entries(DENSITY_OPTIONS).map(([density, label]) => (
-                    <DensityPreview
-                      key={density}
-                      active={preferences?.density === density}
-                      label={label}
-                      helper={
-                        density === "compact"
-                          ? "Tighter spacing for more control on one screen."
-                          : density === "comfortable"
-                            ? "Balanced spacing for daily moderation use."
-                            : "More breathing room and stronger visual separation."
-                      }
-                      onClick={() => handleDensityChange(density)}
-                    />
-                  ))}
-                </div>
-              </SettingsAccordion>
-
-              <SettingsAccordion title="Home Visibility" chip="Visibility">
-                <SectionVisibilityList
-                  title="Home Section Visibility"
-                  keys={homeKeys}
-                  visibility={visibility}
-                  onToggle={handleToggleVisibility}
-                />
-              </SettingsAccordion>
-
-              <SettingsAccordion title="Members Visibility" chip="Visibility">
-                <SectionVisibilityList
-                  title="Members Section Visibility"
-                  keys={membersKeys}
-                  visibility={visibility}
-                  onToggle={handleToggleVisibility}
-                />
-              </SettingsAccordion>
-
-              <SettingsAccordion title="Home Layout Order" chip="Layout Order">
-                <MoveButtons
-                  area="home"
-                  items={homeKeys}
-                  onMove={handleMoveSection}
-                />
-              </SettingsAccordion>
-
-              <SettingsAccordion title="Members Layout Order" chip="Layout Order">
-                <MoveButtons
-                  area="members"
-                  items={membersKeys}
-                  onMove={handleMoveSection}
-                />
-              </SettingsAccordion>
-            </>
-          ) : (
-            <>
-              <div className="settings-section-card">
-                <div className="settings-section-heading">
-                  <div>
-                    <div className="settings-chip-row">
-                      <span className="section-chip">Saved Looks</span>
-                    </div>
-                    <div className="settings-title-sm">Profile Slots</div>
-                  </div>
-                </div>
-
-                <div className="settings-profile-grid">
-                  {sortedProfiles.map((profile) => (
-                    <ProfileCard
-                      key={profile.id}
-                      profile={profile}
-                      isActive={profile.id === activeProfileId}
-                      isLastUsed={profile.id === lastUsedProfileId}
-                      onLoad={handleLoad}
-                      onSave={handleSave}
-                      onRename={handleRename}
-                      onDelete={handleDelete}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <DraftThemePanel
-                draftTheme={draftTheme}
-                baselineTheme={baselineTheme}
-                setDraftThemeValue={setDraftThemeValue}
-                applyDraftTheme={applyDraftTheme}
-                resetDraftTheme={resetDraftTheme}
-                hasDraftChanges={hasDraftChanges}
-              />
-
-              <div className="settings-section-card">
-                <div className="settings-section-heading">
-                  <div>
-                    <div className="settings-chip-row">
-                      <span className="section-chip">Density</span>
-                    </div>
-                    <div className="settings-title-sm">Layout Feel</div>
-                  </div>
-                </div>
-
-                <div className="settings-density-grid">
-                  {Object.entries(DENSITY_OPTIONS).map(([density, label]) => (
-                    <DensityPreview
-                      key={density}
-                      active={preferences?.density === density}
-                      label={label}
-                      helper={
-                        density === "compact"
-                          ? "Tighter spacing for more control on one screen."
-                          : density === "comfortable"
-                            ? "Balanced spacing for daily moderation use."
-                            : "More breathing room and stronger visual separation."
-                      }
-                      onClick={() => handleDensityChange(density)}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <SectionVisibilityList
-                title="Home Section Visibility"
-                keys={homeKeys}
-                visibility={visibility}
-                onToggle={handleToggleVisibility}
-              />
-
-              <SectionVisibilityList
-                title="Members Section Visibility"
-                keys={membersKeys}
-                visibility={visibility}
-                onToggle={handleToggleVisibility}
-              />
-
-              <MoveButtons
-                area="home"
-                items={homeKeys}
-                onMove={handleMoveSection}
-              />
-
-              <MoveButtons
-                area="members"
-                items={membersKeys}
-                onMove={handleMoveSection}
-              />
-            </>
-          )}
-        </div>
-
-        <style jsx global>{`
-          .settings-overlay {
-            position: fixed;
-            inset: 0;
-            z-index: 130;
-            background: rgba(8, 12, 18, 0.82);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding:
-              max(16px, env(safe-area-inset-top, 0px))
-              12px
-              max(16px, env(safe-area-inset-bottom, 0px));
-            overscroll-behavior: contain;
-          }
-
-          .settings-sheet {
-            width: 100%;
-            max-width: 1080px;
-            max-height: min(90vh, 920px);
-            overflow-y: auto;
-            overflow-x: hidden;
-            -webkit-overflow-scrolling: touch;
-            border-radius: 24px;
-            border: 1px solid rgba(90, 255, 180, 0.12);
-            background:
-              radial-gradient(circle at top left, rgba(69, 212, 131, 0.08), transparent 28%),
-              radial-gradient(circle at top right, rgba(59, 130, 246, 0.08), transparent 30%),
-              linear-gradient(
-                180deg,
-                rgba(10, 18, 30, 0.985),
-                rgba(6, 12, 22, 0.985)
-              );
-            box-shadow:
-              0 14px 40px rgba(0, 0, 0, 0.34),
-              0 0 0 1px rgba(69, 212, 131, 0.04) inset;
-            color: var(--text-strong, #f8fafc);
-            padding: 14px;
-            backdrop-filter: blur(10px);
-            outline: none;
-            scroll-behavior: auto;
-          }
-
-          .settings-sheet-handle {
-            width: 52px;
-            height: 5px;
-            border-radius: 999px;
-            background: rgba(255, 255, 255, 0.16);
-            margin: 0 auto 14px;
-          }
-
-          .settings-head {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 12px;
-            margin-bottom: 16px;
-            flex-wrap: wrap;
-          }
-
-          .settings-head-actions {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-          }
-
-          .settings-title-lg {
-            font-weight: 900;
-            font-size: 28px;
-            line-height: 1.02;
-            letter-spacing: -0.04em;
-            color: var(--text-strong, #f8fafc);
-          }
-
-          .settings-title-sm {
-            font-weight: 900;
-            font-size: 18px;
-            line-height: 1.08;
-            letter-spacing: -0.02em;
-            color: var(--text-strong, #f8fafc);
-          }
-
-          .settings-head-copy {
-            margin-top: 8px;
-            font-size: 14px;
-            line-height: 1.55;
-            max-width: 860px;
-            color: var(--text-muted, #b8c0cc);
-          }
-
-          .settings-chip-row {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-          }
-
-          .settings-helper-copy,
-          .muted {
-            font-size: 12px;
-            line-height: 1.45;
-            color: var(--text-muted, #b8c0cc);
-          }
-
-          .settings-content-stack {
-            display: grid;
-            gap: 14px;
-          }
-
-          .settings-section-card {
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(255, 255, 255, 0.025);
-            border-radius: 20px;
-            padding: 16px;
-          }
-
-          .settings-section-heading {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 12px;
-            margin-bottom: 12px;
-            flex-wrap: wrap;
-          }
-
-          .settings-profile-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-            gap: 12px;
-          }
-
-          .profile-slot-card {
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(255, 255, 255, 0.03);
-            border-radius: 18px;
-            padding: 14px;
-          }
-
-          .profile-slot-card.active {
-            border-color: rgba(93, 255, 141, 0.22);
-            box-shadow: 0 0 0 1px rgba(93, 255, 141, 0.08);
-          }
-
-          .profile-slot-title {
-            font-weight: 900;
-            color: var(--text-strong, #f8fafc);
-            overflow-wrap: anywhere;
-            font-size: 18px;
-            letter-spacing: -0.02em;
-          }
-
-          .settings-profile-rename-row {
-            display: grid;
-            grid-template-columns: 1fr auto;
-            gap: 8px;
-            margin-top: 12px;
-          }
-
-          .settings-profile-action-row {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            margin-top: 10px;
-          }
-
-          .settings-theme-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 12px;
-          }
-
-          .settings-lab-card {
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(255, 255, 255, 0.025);
-            border-radius: 18px;
-            padding: 14px;
-          }
-
-          .ticket-info-label {
-            color: var(--text-muted, #b8c0cc);
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 0.02em;
-          }
-
-          .settings-color-input-hidden {
-            position: absolute;
-            opacity: 0;
-            pointer-events: none;
-            width: 0;
-            height: 0;
-          }
-
-          .settings-color-trigger {
-            margin-top: 12px;
-            width: 100%;
-            min-height: 56px;
-            border-radius: 14px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            background: rgba(255, 255, 255, 0.03);
-            padding: 10px 12px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            color: var(--text-strong, #f8fafc);
-            cursor: pointer;
-            text-align: left;
-          }
-
-          .settings-color-preview {
-            width: 34px;
-            height: 34px;
-            min-width: 34px;
-            border-radius: 10px;
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
-          }
-
-          .settings-color-trigger-text {
-            font-size: 12px;
-            font-weight: 800;
-            letter-spacing: 0.04em;
-            color: var(--text-strong, #f8fafc);
-          }
-
-          .settings-effects-wrap {
-            margin-top: 16px;
-          }
-
-          .settings-preview-stage {
-            margin-top: 14px;
-          }
-
-          .settings-preview-card {
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background:
-              radial-gradient(circle at top left, rgba(69, 212, 131, 0.12), transparent 42%),
-              radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), transparent 42%),
-              rgba(255, 255, 255, 0.03);
-            border-radius: 20px;
-            padding: 16px;
-            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
-            transition: box-shadow 0.18s ease, background 0.18s ease, filter 0.18s ease;
-          }
-
-          .effects-reduced .settings-preview-card {
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-            background: rgba(255, 255, 255, 0.03);
-            filter: saturate(0.94);
-          }
-
-          .effects-minimal .settings-preview-card {
-            box-shadow: none;
-            background: rgba(255, 255, 255, 0.02);
-            filter: saturate(0.88);
-          }
-
-          .settings-preview-title {
-            font-weight: 900;
-            font-size: 18px;
-            letter-spacing: -0.02em;
-            color: var(--text-strong, #f8fafc);
-          }
-
-          .settings-preview-sub {
-            margin-top: 6px;
-            color: var(--text-muted, rgba(255, 255, 255, 0.72));
-            font-size: 13px;
-            line-height: 1.5;
-          }
-
-          .settings-preview-chip-row {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            margin-top: 12px;
-          }
-
-          .settings-preview-swatch-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 10px;
-            margin-top: 14px;
-          }
-
-          .settings-preview-swatch {
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(255, 255, 255, 0.025);
-            border-radius: 14px;
-            padding: 10px 12px;
-            display: grid;
-            gap: 4px;
-          }
-
-          .settings-preview-swatch span {
-            font-size: 12px;
-            color: var(--text-muted, rgba(255, 255, 255, 0.72));
-          }
-
-          .settings-preview-swatch code {
-            font-size: 12px;
-            font-weight: 800;
-            color: var(--text-strong, #f8fafc);
-          }
-
-          .settings-density-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 12px;
-          }
-
-          .density-preview {
-            appearance: none;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(255, 255, 255, 0.03);
-            border-radius: 18px;
-            padding: 14px;
-            text-align: left;
-            color: var(--text-strong, #f8fafc);
-            cursor: pointer;
-            transition:
-              border-color 0.16s ease,
-              transform 0.16s ease,
-              box-shadow 0.16s ease;
-          }
-
-          .density-preview:hover,
-          .density-preview.active {
-            border-color: rgba(93, 255, 141, 0.2);
-            box-shadow: 0 0 0 1px rgba(93, 255, 141, 0.08);
-            transform: translateY(-1px);
-          }
-
-          .density-preview-bars {
-            display: grid;
-            gap: 6px;
-            margin-bottom: 12px;
-          }
-
-          .density-preview-bars span {
-            display: block;
-            height: 10px;
-            border-radius: 999px;
-            background: linear-gradient(
-              90deg,
-              rgba(93, 255, 141, 0.7),
-              rgba(99, 213, 255, 0.7)
-            );
-          }
-
-          .effects-bars span:nth-child(2) {
-            width: 86%;
-          }
-
-          .effects-bars span:nth-child(3) {
-            width: 72%;
-          }
-
-          .density-preview-title {
-            font-weight: 900;
-            font-size: 18px;
-            line-height: 1.05;
-            letter-spacing: -0.02em;
-            color: var(--text-strong, #f8fafc);
-          }
-
-          .settings-pill-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 10px;
-          }
-
-          .settings-pill {
-            appearance: none;
-            width: 100%;
-            min-height: 64px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(255, 255, 255, 0.025);
-            color: var(--text-strong, #f8fafc);
-            border-radius: 18px;
-            padding: 12px 14px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-            cursor: pointer;
-            text-align: left;
-            transition:
-              border-color 0.16s ease,
-              transform 0.16s ease,
-              box-shadow 0.16s ease;
-          }
-
-          .settings-pill.active,
-          .settings-pill:hover {
-            border-color: rgba(93, 255, 141, 0.18);
-            box-shadow: 0 0 0 1px rgba(93, 255, 141, 0.08);
-            transform: translateY(-1px);
-          }
-
-          .settings-pill-label {
-            min-width: 0;
-            flex: 1;
-            overflow-wrap: anywhere;
-            font-weight: 800;
-            line-height: 1.2;
-            color: var(--text-strong, #f8fafc);
-          }
-
-          .settings-pill-badge {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 30px;
-            padding: 7px 10px;
-            border-radius: 999px;
-            font-size: 12px;
-            font-weight: 800;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            background: rgba(255, 255, 255, 0.06);
-            color: var(--text-strong, #f8fafc);
-            white-space: nowrap;
-          }
-
-          .settings-pill-badge.active {
-            background: rgba(93, 255, 141, 0.14);
-            border-color: rgba(93, 255, 141, 0.18);
-            color: #d9ffe8;
-          }
-
-          .settings-move-card {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            padding: 12px 14px;
-            border-radius: 16px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(255, 255, 255, 0.025);
-            flex-wrap: wrap;
-          }
-
-          .settings-move-label {
-            font-weight: 800;
-            color: var(--text-strong, #f8fafc);
-          }
-
-          .settings-move-actions {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-          }
-
-          .settings-mini-btn {
-            min-width: 58px;
-          }
-
-          .settings-accordion {
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(255, 255, 255, 0.02);
-            border-radius: 20px;
-            overflow: hidden;
-          }
-
-          .settings-accordion-head {
-            appearance: none;
-            width: 100%;
-            border: 0;
-            background: transparent;
-            color: inherit;
-            text-align: left;
-            padding: 14px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-            cursor: pointer;
-          }
-
-          .settings-accordion-body {
-            padding: 0 12px 12px;
-          }
-
-          .settings-accordion-chevron {
-            font-size: 22px;
-            line-height: 1;
-            transition: transform 0.16s ease;
-            color: var(--text-strong, #f8fafc);
-          }
-
-          .settings-accordion-chevron.open {
-            transform: rotate(180deg);
-          }
-
-          .button,
-          .button.ghost,
-          .button.danger {
-            appearance: none;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(255, 255, 255, 0.04);
-            color: var(--text-strong, #f8fafc);
-            border-radius: 16px;
-            padding: 10px 14px;
-            font-weight: 800;
-            cursor: pointer;
-            min-height: 44px;
-          }
-
-          .button:hover,
-          .button.ghost:hover,
-          .button.danger:hover {
-            border-color: rgba(93, 255, 141, 0.18);
-          }
-
-          .button:disabled,
-          .button.ghost:disabled,
-          .button.danger:disabled,
-          .density-preview:disabled,
-          .settings-pill:disabled {
-            opacity: 0.55;
-            cursor: not-allowed;
-          }
-
-          .button.danger {
-            background: rgba(170, 55, 80, 0.22);
-            border-color: rgba(220, 90, 120, 0.22);
-          }
-
-          .input {
-            appearance: none;
-            width: 100%;
-            min-height: 46px;
-            border-radius: 14px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(255, 255, 255, 0.03);
-            color: var(--text-strong, #f8fafc);
-            padding: 0 14px;
-            outline: none;
-          }
-
-          .input::placeholder {
-            color: rgba(184, 192, 204, 0.7);
-          }
-
-          .input:focus {
-            border-color: rgba(93, 255, 141, 0.2);
-            box-shadow: 0 0 0 1px rgba(93, 255, 141, 0.08);
-          }
-
-          .badge {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 24px;
-            padding: 4px 10px;
-            border-radius: 999px;
-            font-size: 11px;
-            font-weight: 800;
-            letter-spacing: 0.02em;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            color: var(--text-strong, #f8fafc);
-            background: rgba(255, 255, 255, 0.05);
-          }
-
-          .badge.claimed {
-            background: rgba(69, 212, 131, 0.14);
-            border-color: rgba(69, 212, 131, 0.2);
-          }
-
-          .badge.low {
-            background: rgba(59, 130, 246, 0.14);
-            border-color: rgba(59, 130, 246, 0.2);
-          }
-
-          .badge.medium {
-            background: rgba(255, 196, 94, 0.14);
-            border-color: rgba(255, 196, 94, 0.2);
-          }
-
-          .badge.open {
-            background: rgba(82, 167, 255, 0.14);
-            border-color: rgba(82, 167, 255, 0.2);
-          }
-
-          .badge.danger {
-            background: rgba(214, 84, 113, 0.18);
-            border-color: rgba(214, 84, 113, 0.22);
-          }
-
-          .section-chip {
-            display: inline-flex;
-            align-items: center;
-            min-height: 24px;
-            padding: 4px 10px;
-            border-radius: 999px;
-            font-size: 11px;
-            font-weight: 800;
-            color: #e9fff3;
-            background: rgba(69, 212, 131, 0.12);
-            border: 1px solid rgba(69, 212, 131, 0.18);
-          }
-
-          .info-banner {
-            border: 1px solid rgba(69, 212, 131, 0.18);
-            background: rgba(69, 212, 131, 0.1);
-            color: #ebfff3;
-            padding: 12px 14px;
-            border-radius: 14px;
-            font-weight: 700;
-          }
-
-          .space {
-            display: grid;
-            gap: 10px;
-          }
-
-          @media (max-width: 900px) {
-            .settings-overlay {
-              align-items: stretch;
-              justify-content: stretch;
-              padding:
-                max(10px, env(safe-area-inset-top, 0px))
-                8px
-                max(10px, env(safe-area-inset-bottom, 0px));
-            }
-
-            .settings-sheet {
-              max-width: none;
-              max-height: none;
-              height: 100%;
-              border-radius: 22px;
-              padding: 12px;
-              backdrop-filter: none;
-            }
-
-            .settings-title-lg {
-              font-size: 24px;
-            }
-
-            .settings-profile-grid,
-            .settings-theme-grid,
-            .settings-density-grid,
-            .settings-pill-grid,
-            .settings-preview-swatch-grid {
-              grid-template-columns: 1fr;
-            }
-
-            .settings-profile-rename-row {
-              grid-template-columns: 1fr;
-            }
-
-            .settings-profile-action-row,
-            .settings-head-actions {
-              display: grid;
-              grid-template-columns: 1fr;
-            }
-
-            .settings-head-actions .button,
-            .settings-profile-action-row .button {
-              width: 100% !important;
-              min-width: 0 !important;
-            }
-
-            .settings-pill {
-              min-height: 72px;
-              align-items: flex-start;
-              flex-direction: column;
-            }
-
-            .settings-pill-badge {
-              align-self: flex-start;
-            }
-          }
-        `}</style>
       </div>
+
+      <style jsx global>{`
+        .advanced-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 180;
+          background: rgba(2, 6, 10, 0.78);
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          padding: max(14px, env(safe-area-inset-top, 0px)) 12px max(14px, env(safe-area-inset-bottom, 0px));
+        }
+
+        .advanced-sheet {
+          width: min(1120px, 100%);
+          max-height: min(92vh, 960px);
+          overflow: auto;
+          -webkit-overflow-scrolling: touch;
+          border: 1px solid rgba(255,255,255,0.18);
+          border-radius: 26px;
+          background:
+            radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #6dff9d) 9%, transparent), transparent 28%),
+            radial-gradient(circle at top right, color-mix(in srgb, var(--accent-2, #78ddff) 10%, transparent), transparent 30%),
+            rgba(8, 16, 24, 0.98);
+          color: var(--text-strong, #fff);
+          box-shadow: 0 24px 74px rgba(0,0,0,0.46);
+          padding: 16px;
+        }
+
+        .advanced-sheet-handle {
+          width: 56px;
+          height: 5px;
+          border-radius: 999px;
+          background: rgba(255,255,255,0.18);
+          margin: 0 auto 14px;
+        }
+
+        .advanced-head {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 14px;
+          flex-wrap: wrap;
+          margin-bottom: 14px;
+        }
+
+        .advanced-head h2 {
+          margin: 0;
+          font-size: clamp(28px, 5vw, 42px);
+          letter-spacing: -0.05em;
+          color: var(--text-strong, #fff);
+        }
+
+        .advanced-head p,
+        .advanced-muted,
+        .advanced-section-head p,
+        .advanced-disclosure-head p,
+        .advanced-choice-card span,
+        .advanced-color-card small {
+          color: var(--text-muted, #c7ddcf);
+          line-height: 1.48;
+        }
+
+        .advanced-head p,
+        .advanced-section-head p,
+        .advanced-disclosure-head p {
+          max-width: 820px;
+          margin: 8px 0 0;
+        }
+
+        .advanced-eyebrow {
+          color: var(--muted, #c7ddcf);
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          font-size: 11px;
+          font-weight: 950;
+          margin-bottom: 7px;
+        }
+
+        .advanced-head-actions,
+        .advanced-profile-actions,
+        .advanced-move-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .advanced-message {
+          margin-bottom: 14px;
+        }
+
+        .advanced-stack {
+          display: grid;
+          gap: 14px;
+        }
+
+        .advanced-section-card,
+        .advanced-disclosure {
+          border: 1px solid rgba(255,255,255,0.14);
+          border-radius: 22px;
+          background: rgba(255,255,255,0.055);
+          padding: 14px;
+        }
+
+        .advanced-section-head,
+        .advanced-disclosure-head {
+          width: 100%;
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 12px;
+          text-align: left;
+          color: inherit;
+        }
+
+        .advanced-disclosure-head {
+          appearance: none;
+          border: 0;
+          background: transparent;
+          cursor: pointer;
+          padding: 0;
+        }
+
+        .advanced-section-head h3,
+        .advanced-disclosure-head h3,
+        .advanced-subtitle {
+          margin: 0;
+          color: var(--text-strong, #fff);
+          font-weight: 950;
+        }
+
+        .advanced-section-head h3,
+        .advanced-disclosure-head h3 {
+          font-size: 22px;
+          letter-spacing: -0.03em;
+        }
+
+        .advanced-disclosure-body {
+          margin-top: 14px;
+          display: grid;
+          gap: 14px;
+        }
+
+        .advanced-chevron {
+          width: 34px;
+          height: 34px;
+          border-radius: 999px;
+          display: grid;
+          place-items: center;
+          background: rgba(255,255,255,0.08);
+          transition: transform 160ms ease;
+        }
+
+        .advanced-chevron.open {
+          transform: rotate(180deg);
+        }
+
+        .advanced-profile-grid,
+        .advanced-choice-grid,
+        .advanced-visibility-grid,
+        .advanced-manual-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: 10px;
+          margin-top: 12px;
+        }
+
+        .advanced-profile-card,
+        .advanced-choice-card,
+        .advanced-visibility-pill,
+        .advanced-move-row,
+        .advanced-color-card {
+          border: 1px solid rgba(255,255,255,0.14);
+          border-radius: 18px;
+          background: rgba(0,0,0,0.14);
+          padding: 12px;
+          color: var(--text-strong, #fff);
+        }
+
+        .advanced-choice-card,
+        .advanced-visibility-pill {
+          appearance: none;
+          text-align: left;
+          cursor: pointer;
+          display: grid;
+          gap: 6px;
+        }
+
+        .advanced-choice-card.active,
+        .advanced-visibility-pill.active,
+        .advanced-profile-card.active {
+          border-color: color-mix(in srgb, var(--accent, #6dff9d) 44%, transparent);
+          background: color-mix(in srgb, var(--accent, #6dff9d) 10%, transparent);
+        }
+
+        .advanced-profile-top {
+          display: flex;
+          gap: 6px;
+          flex-wrap: wrap;
+          align-items: center;
+          font-size: 11px;
+          text-transform: uppercase;
+          color: var(--muted, #c7ddcf);
+          font-weight: 900;
+        }
+
+        .advanced-profile-top strong,
+        .advanced-profile-top em {
+          border: 1px solid rgba(255,255,255,0.14);
+          border-radius: 999px;
+          padding: 3px 7px;
+          font-style: normal;
+          color: var(--text-strong, #fff);
+          background: rgba(255,255,255,0.07);
+        }
+
+        .advanced-profile-title {
+          margin-top: 9px;
+          font-weight: 950;
+          font-size: 18px;
+          overflow-wrap: anywhere;
+        }
+
+        .advanced-profile-rename-row {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 8px;
+          margin-top: 12px;
+        }
+
+        .advanced-profile-actions {
+          margin-top: 10px;
+        }
+
+        .advanced-subsection.full {
+          grid-column: 1 / -1;
+        }
+
+        .advanced-subtitle {
+          margin-bottom: 10px;
+          font-size: 16px;
+        }
+
+        .advanced-visibility-pill {
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: center;
+        }
+
+        .advanced-visibility-pill strong {
+          font-size: 12px;
+          color: var(--accent, #6dff9d);
+        }
+
+        .advanced-move-list {
+          display: grid;
+          gap: 8px;
+        }
+
+        .advanced-move-row {
+          display: flex;
+          justify-content: space-between;
+          gap: 10px;
+          align-items: center;
+        }
+
+        .advanced-move-row strong,
+        .advanced-move-row span {
+          display: block;
+        }
+
+        .advanced-move-row span {
+          color: var(--text-muted, #c7ddcf);
+          font-size: 12px;
+          margin-top: 3px;
+        }
+
+        .advanced-move-actions .button {
+          min-width: 48px !important;
+          width: 48px !important;
+          padding: 0 !important;
+        }
+
+        .advanced-color-card {
+          display: grid;
+          gap: 7px;
+        }
+
+        .advanced-color-card span {
+          font-weight: 900;
+        }
+
+        .advanced-color-row {
+          display: grid;
+          grid-template-columns: 52px minmax(0, 1fr);
+          gap: 10px;
+          align-items: center;
+          margin-top: 5px;
+        }
+
+        .advanced-color-row input[type="color"] {
+          width: 52px;
+          height: 42px;
+          border: 1px solid rgba(255,255,255,0.14);
+          border-radius: 12px;
+          background: transparent;
+          padding: 0;
+        }
+
+        .advanced-color-row code {
+          border: 1px solid rgba(255,255,255,0.12);
+          border-radius: 12px;
+          padding: 10px;
+          color: var(--text-strong, #fff);
+          background: rgba(0,0,0,0.18);
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        html[data-dashboard-appearance="light"] .advanced-sheet,
+        html[data-dashboard-appearance="light"] .advanced-section-card,
+        html[data-dashboard-appearance="light"] .advanced-disclosure,
+        html[data-dashboard-appearance="light"] .advanced-profile-card,
+        html[data-dashboard-appearance="light"] .advanced-choice-card,
+        html[data-dashboard-appearance="light"] .advanced-visibility-pill,
+        html[data-dashboard-appearance="light"] .advanced-move-row,
+        html[data-dashboard-appearance="light"] .advanced-color-card {
+          background: rgba(255,255,255,0.96) !important;
+          color: var(--text-strong, #0f172a) !important;
+          border-color: rgba(15,23,42,0.14) !important;
+          box-shadow: 0 12px 28px rgba(15,23,42,0.08);
+        }
+
+        html[data-dashboard-appearance="light"] .advanced-overlay {
+          background: rgba(15,23,42,0.30);
+        }
+
+        @media (max-width: 720px) {
+          .advanced-overlay {
+            align-items: flex-end;
+            padding: 8px 8px max(8px, env(safe-area-inset-bottom, 0px));
+          }
+
+          .advanced-sheet {
+            max-height: 92vh;
+            border-radius: 22px 22px 16px 16px;
+            padding: 12px;
+          }
+
+          .advanced-head-actions,
+          .advanced-head-actions .button,
+          .advanced-profile-actions,
+          .advanced-profile-actions .button,
+          .advanced-profile-rename-row,
+          .advanced-choice-grid,
+          .advanced-visibility-grid,
+          .advanced-manual-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            width: 100%;
+          }
+
+          .advanced-profile-rename-row .button,
+          .advanced-profile-actions .button,
+          .advanced-head-actions .button {
+            width: 100% !important;
+          }
+
+          .advanced-move-row {
+            display: grid;
+            grid-template-columns: 1fr;
+          }
+        }
+      `}</style>
     </div>
   );
 }
