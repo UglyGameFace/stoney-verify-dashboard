@@ -68,6 +68,7 @@ export type AppEnv = {
   publicUrl: string;
   guildId: string;
   discordGuildId: string;
+  allowDefaultGuildFallback: boolean;
   staffRoleIds: string[];
   staffRoleNames: string[];
   defaultStaffName: string;
@@ -76,6 +77,8 @@ export type AppEnv = {
   botAutoSyncIntervalMinutes: number;
   botAutoSyncBatchLimit: number;
 };
+
+const isProduction = process.env.NODE_ENV === "production";
 
 export const env: AppEnv = {
   appName: process.env.NEXT_PUBLIC_APP_NAME || "Stoney Verify Dashboard V3.8",
@@ -168,6 +171,13 @@ export const env: AppEnv = {
       ""
   ),
 
+  // Public production should be explicitly server-selected. Local/dev can still
+  // fall back to a single guild for easier testing unless disabled.
+  allowDefaultGuildFallback: cleanBoolean(
+    process.env.ALLOW_DEFAULT_GUILD_FALLBACK,
+    !isProduction
+  ),
+
   // Staff envs are only the default/dev server fallback. Public production uses
   // server selection plus per-guild role/config checks after Discord login.
   staffRoleIds: cleanMergedStringList(
@@ -191,7 +201,7 @@ export const env: AppEnv = {
     process.env.DEFAULT_STAFF_NAME ||
     "Dashboard Staff",
 
-  isProduction: process.env.NODE_ENV === "production",
+  isProduction,
 
   botAutoSyncEnabled: cleanBoolean(
     process.env.BOT_AUTO_SYNC_ENABLED,
@@ -256,11 +266,6 @@ export function assertBrowserEnv(): true {
   required(
     "NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL",
     env.supabaseUrl
-  );
-
-  required(
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-    env.supabaseAnonKey
   );
 
   return true;
