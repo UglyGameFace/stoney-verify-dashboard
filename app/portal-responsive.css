@@ -1,0 +1,298 @@
+/*
+  Member portal responsive polish
+  --------------------------------
+  Fixes the member-facing dashboard cards across phone, tablet, and desktop.
+  Loaded after readability.css so it can safely override generic card/badge rules.
+*/
+
+.user-dashboard-grid {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.member-section {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ticket-row-card,
+.status-panel,
+.summary-tile,
+.mini-card {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.ticket-row-card {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 18px;
+  padding: 14px;
+  background:
+    radial-gradient(circle at top right, rgba(109, 255, 157, 0.08), transparent 34%),
+    rgba(255, 255, 255, 0.055);
+}
+
+.ticket-card-button {
+  all: unset;
+  box-sizing: border-box;
+  width: 100%;
+  cursor: pointer;
+  display: block;
+  min-width: 0;
+  color: inherit;
+}
+
+.profile-name,
+.summary-value,
+.status-title {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.summary-grid,
+.info-grid,
+.action-grid {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.info-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.action-grid {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.mini-card,
+.summary-tile,
+.status-panel {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.ticket-row-card .badge,
+.member-section .badge,
+.activity-card .badge,
+.ticket-card-shell .badge {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: min(100%, 220px) !important;
+  min-height: 28px !important;
+  height: auto !important;
+  padding: 6px 10px !important;
+  border-radius: 999px !important;
+  font-size: 12px !important;
+  line-height: 1.1 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  text-align: center !important;
+}
+
+.activity-card > .row,
+.ticket-card-shell .ticket-card-button > .row,
+.ticket-row-card.emphasis > .row,
+.category-card > .row {
+  width: 100%;
+  min-width: 0;
+}
+
+.activity-card .mini-card,
+.ticket-card-shell .mini-card {
+  background: rgba(0, 0, 0, 0.13);
+}
+
+.sv-mobile-nav-wrap {
+  bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+}
+
+@media (min-width: 1280px) {
+  .user-dashboard-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .user-dashboard-grid > .member-section:first-child,
+  .user-dashboard-grid > .member-section:nth-child(3),
+  .user-dashboard-grid > .member-section:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .ticket-row-card {
+    padding: 16px;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1279px) {
+  .user-dashboard-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .info-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .action-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ticket-row-card {
+    padding: 15px;
+  }
+}
+
+@media (max-width: 720px) {
+  .content {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .member-section.card {
+    border-radius: 20px !important;
+    padding: 14px !important;
+  }
+
+  .user-dashboard-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .summary-grid,
+  .info-grid,
+  .action-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .ticket-row-card {
+    padding: 12px;
+    border-radius: 16px;
+  }
+
+  .ticket-row-card .row,
+  .activity-card > .row,
+  .ticket-card-shell .ticket-card-button > .row,
+  .ticket-row-card.emphasis > .row,
+  .category-card > .row {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    align-items: start !important;
+    gap: 10px !important;
+  }
+
+  .ticket-row-card .row > div,
+  .activity-card > .row > div,
+  .ticket-card-shell .ticket-card-button > .row > div,
+  .ticket-row-card.emphasis > .row > div,
+  .category-card > .row > div {
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .ticket-row-card .row > div[style*="display: flex"],
+  .activity-card > .row > div[style*="display: flex"],
+  .ticket-card-shell .ticket-card-button > .row > div[style*="display: flex"],
+  .ticket-row-card.emphasis > .row > div[style*="display: flex"],
+  .category-card > .row > div[style*="display: flex"] {
+    display: flex !important;
+    width: 100% !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    gap: 7px !important;
+    flex-wrap: wrap !important;
+  }
+
+  .ticket-row-card .badge,
+  .member-section .badge,
+  .activity-card .badge,
+  .ticket-card-shell .badge {
+    max-width: 100% !important;
+    min-height: 24px !important;
+    padding: 5px 8px !important;
+    border-radius: 9px !important;
+    font-size: 11px !important;
+  }
+
+  .activity-card .info-grid,
+  .ticket-card-shell .info-grid,
+  .ticket-row-card.emphasis .info-grid {
+    margin-top: 10px !important;
+    grid-template-columns: 1fr !important;
+  }
+
+  .mini-card,
+  .summary-tile,
+  .status-panel {
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  .profile-name {
+    font-size: 16px !important;
+    line-height: 1.18 !important;
+  }
+
+  .ticket-info-label {
+    font-size: 11px !important;
+    letter-spacing: 0.02em;
+  }
+
+  .button {
+    min-height: 50px !important;
+  }
+
+  .action-grid .button,
+  .action-grid a.button,
+  .action-grid button.button {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .roles .badge {
+    white-space: normal !important;
+    text-align: left !important;
+  }
+
+  .sv-mobile-nav-wrap {
+    width: min(calc(100vw - 12px), 430px) !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .content {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+
+  .member-section.card {
+    padding: 12px !important;
+  }
+
+  .ticket-row-card {
+    padding: 10px;
+  }
+
+  .sv-mobile-nav-shell {
+    border-radius: 14px !important;
+  }
+}
