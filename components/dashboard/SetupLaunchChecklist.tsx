@@ -2,6 +2,33 @@ import Link from "next/link";
 
 type DashboardData = Record<string, unknown> | null | undefined;
 
+type SetupCheck = {
+  key?: string | null;
+  label?: string | null;
+  description?: string | null;
+  ok?: boolean | null;
+  severity?: string | null;
+  action_label?: string | null;
+  action_href?: string | null;
+  detail?: string | null;
+};
+
+type SetupHealth = {
+  ok?: boolean | null;
+  score?: number | null;
+  total?: number | null;
+  passed?: number | null;
+  required_total?: number | null;
+  required_passed?: number | null;
+  ready_for_launch?: boolean | null;
+  needsServerSelection?: boolean | null;
+  selectedGuildId?: string | null;
+  next_fix?: SetupCheck | null;
+  checks?: SetupCheck[] | null;
+  summary?: Record<string, unknown> | null;
+  error?: string | null;
+};
+
 type SetupLaunchChecklistProps = {
   data?: DashboardData;
   selectedGuildId?: string | null;
@@ -30,58 +57,120 @@ function StepBadge({ done }: { done: boolean }) {
   return <span className={`launch-step-badge ${done ? "done" : "todo"}`}>{done ? "✓" : "•"}</span>;
 }
 
-export default function SetupLaunchChecklist({ data, selectedGuildId }: SetupLaunchChecklistProps) {
+async function loadSetupHealth(): Promise<SetupHealth | null> {
+  try {
+    const appUrl =
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      process.env.SITE_URL ||
+      process.env.APP_URL ||
+      process.env.VERCEL_URL && `https://${process.env.VERCEL_URL}` ||
+      "";
+
+    const url = appUrl ? `${String(appUrl).replace(/\/+$/, "")}/api/setup/health` : "/api/setup/health";
+    const response = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      headers: { accept: "application/json" },
+      next: { revalidate: 0 },
+    });
+    const json = (await response.json().catch(() => null)) as SetupHealth | null;
+    return json && typeof json === "object" ? json : null;
+  } catch {
+    return null;
+  }
+}
+
+function fallbackChecks(data: DashboardData, selectedGuildId?: string | null): SetupCheck[] {
   const guildId = getSelectedGuild(data, selectedGuildId);
   const categoryCount = countRows(data, "categories");
-  const hasServer = Boolean(guildId);
-  const hasCategories = categoryCount > 0;
-
-  const steps = [
+  const ticketCount = countRows(data, "tickets");
+  return [
     {
+      key: "server_selected",
       label: "Choose Server",
-      helper: hasServer ? "Dashboard context is active." : "Pick the Discord server you want to manage.",
-      href: "/servers",
-      cta: hasServer ? "Change" : "Choose",
-      done: hasServer,
+      description: guildId ? "Dashboard context is active." : "Pick the Discord server you want to manage.",
+      ok: Boolean(guildId),
+      severity: "required",
+      action_label: guildId ? "Change" : "Choose",
+      action_href: "/servers",
+      detail: guildId || "No selected server",
     },
     {
+      key: "categories_created",
       label: "Create Categories",
-      helper: hasCategories ? `${categoryCount} category${categoryCount === 1 ? "" : "ies"} found.` : "Add support, verification, appeals, and service categories.",
-      href: "/ticket-categories",
-      cta: hasCategories ? "Tune" : "Create",
-      done: hasCategories,
+      description: categoryCount ? `${categoryCount} category${categoryCount === 1 ? "" : "ies"} found.` : "Add support, verification, appeals, and service categories.",
+      ok: categoryCount > 0,
+      severity: "required",
+      action_label: categoryCount ? "Tune" : "Create",
+      action_href: "/ticket-categories",
+      detail: `${categoryCount} categories`,
     },
     {
+      key: "forms_configured",
       label: "Configure Forms",
-      helper: "Use smart defaults or add custom questions per category.",
-      href: "/ticket-forms",
-      cta: "Configure",
-      done: hasCategories,
+      description: "Use smart defaults or add custom questions per category.",
+      ok: categoryCount > 0,
+      severity: "recommended",
+      action_label: "Configure",
+      action_href: "/ticket-forms",
+      detail: categoryCount ? "Smart defaults available" : "Create categories first",
     },
     {
+      key: "panel_activity",
       label: "Post Discord Panel",
-      helper: "Run the panel command inside the server channel where members should open tickets.",
-      href: "#panel-command",
-      cta: "Copy steps",
-      done: false,
+      description: "Run the panel command inside the server channel where members should open tickets.",
+      ok: false,
+      severity: "recommended",
+      action_label: "Copy steps",
+      action_href: "#panel-command",
+      detail: "No live health result yet",
     },
     {
+      key: "test_ticket",
       label: "Test Ticket Flow",
-      helper: "Open a test ticket, confirm category routing, then close/reopen/delete from the dashboard.",
-      href: "/#tickets",
-      cta: "Test",
-      done: false,
+      description: "Open a test ticket, confirm category routing, then close/reopen/delete from the dashboard.",
+      ok: ticketCount > 0,
+      severity: "required",
+      action_label: "Test",
+      action_href: "/#tickets",
+      detail: `${ticketCount} tickets`,
     },
   ];
+}
+
+function compactChecks(checks: SetupCheck[]): SetupCheck[] {
+  const preferred = [
+    "server_selected",
+    "categories_created",
+    "forms_configured",
+    "panel_activity",
+    "test_ticket",
+    "command_queue_clear",
+  ];
+  const byKey = new Map(checks.map((check) => [normalizeString(check.key), check]));
+  const ordered = preferred.map((key) => byKey.get(key)).filter(Boolean) as SetupCheck[];
+  if (ordered.length >= 5) return ordered.slice(0, 6);
+  return checks.slice(0, 6);
+}
+
+export default async function SetupLaunchChecklist({ data, selectedGuildId }: SetupLaunchChecklistProps) {
+  const health = await loadSetupHealth();
+  const checks = safeArray<SetupCheck>(health?.checks).length ? safeArray<SetupCheck>(health?.checks) : fallbackChecks(data, selectedGuildId);
+  const visibleChecks = compactChecks(checks);
+  const passed = Number(health?.passed ?? checks.filter((check) => Boolean(check.ok)).length);
+  const total = Number(health?.total ?? checks.length);
+  const score = Number(health?.score ?? (total ? Math.round((passed / total) * 100) : 0));
+  const ready = Boolean(health?.ready_for_launch);
+  const nextFix = health?.next_fix || checks.find((check) => !check.ok && check.severity === "required") || checks.find((check) => !check.ok) || null;
 
   return (
     <section className="card launch-card" aria-label="Dank Shield setup checklist">
       <div className="launch-head">
         <div>
-          <div className="muted launch-eyebrow">Launch Checklist</div>
-          <h2 className="launch-title">Finish setup without guessing</h2>
+          <div className="muted launch-eyebrow">Live Setup Health</div>
+          <h2 className="launch-title">{ready ? "Ready to launch" : "Finish setup without guessing"}</h2>
           <p className="muted launch-copy">
-            Dank Shield keeps setup simple: pick a server, define ticket routes, configure forms, then publish the panel in Discord.
+            Dank Shield checks the selected server, categories, forms, ticket flow, command queue, and activity data so staff know what to fix next.
           </p>
         </div>
         <div className="launch-actions">
@@ -91,18 +180,52 @@ export default function SetupLaunchChecklist({ data, selectedGuildId }: SetupLau
         </div>
       </div>
 
-      <div className="launch-grid">
-        {steps.map((step, index) => (
-          <Link key={step.label} href={step.href} className={`launch-step ${step.done ? "done" : "todo"}`}>
-            <div className="launch-step-top">
-              <StepBadge done={step.done} />
-              <span className="launch-step-number">Step {index + 1}</span>
-            </div>
-            <strong>{step.label}</strong>
-            <span className="launch-step-helper">{step.helper}</span>
-            <span className="launch-step-cta">{step.cta} →</span>
+      <div className="setup-health-summary">
+        <div>
+          <span>Setup Score</span>
+          <strong>{score}%</strong>
+        </div>
+        <div>
+          <span>Checks Passing</span>
+          <strong>{passed}/{total}</strong>
+        </div>
+        <div>
+          <span>Launch Status</span>
+          <strong>{ready ? "Ready" : "Needs work"}</strong>
+        </div>
+      </div>
+
+      {nextFix ? (
+        <div className="setup-next-fix">
+          <div>
+            <div className="muted launch-eyebrow">Next Fix</div>
+            <strong>{normalizeString(nextFix.label) || "Review setup"}</strong>
+            <p>{normalizeString(nextFix.description) || normalizeString(nextFix.detail) || "Open the setup tools and review this server."}</p>
+          </div>
+          <Link href={normalizeString(nextFix.action_href) || "/servers"} className="button primary">
+            {normalizeString(nextFix.action_label) || "Fix Now"}
           </Link>
-        ))}
+        </div>
+      ) : null}
+
+      <div className="launch-grid">
+        {visibleChecks.map((check, index) => {
+          const done = Boolean(check.ok);
+          const label = normalizeString(check.label) || `Check ${index + 1}`;
+          const href = normalizeString(check.action_href) || "/";
+          return (
+            <Link key={normalizeString(check.key) || label} href={href} className={`launch-step ${done ? "done" : "todo"}`}>
+              <div className="launch-step-top">
+                <StepBadge done={done} />
+                <span className="launch-step-number">{normalizeString(check.severity) || "check"}</span>
+              </div>
+              <strong>{label}</strong>
+              <span className="launch-step-helper">{normalizeString(check.description) || normalizeString(check.detail) || "Review this setup item."}</span>
+              {check.detail ? <span className="launch-step-helper detail">{normalizeString(check.detail)}</span> : null}
+              <span className="launch-step-cta">{normalizeString(check.action_label) || "Open"} →</span>
+            </Link>
+          );
+        })}
       </div>
 
       <div id="panel-command" className="panel-command-box">
