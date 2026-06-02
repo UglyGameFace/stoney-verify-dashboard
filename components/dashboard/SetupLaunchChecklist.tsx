@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 
 type DashboardData = Record<string, unknown> | null | undefined;
 
@@ -57,20 +58,37 @@ function StepBadge({ done }: { done: boolean }) {
   return <span className={`launch-step-badge ${done ? "done" : "todo"}`}>{done ? "✓" : "•"}</span>;
 }
 
+function resolveAppOrigin(): string {
+  const headerStore = headers();
+  const envOrigin =
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.SITE_URL ||
+    process.env.APP_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+
+  if (envOrigin) return String(envOrigin).replace(/\/+$/, "");
+
+  const host = normalizeString(headerStore.get("x-forwarded-host")) || normalizeString(headerStore.get("host"));
+  const proto = normalizeString(headerStore.get("x-forwarded-proto")) || (host.includes("localhost") ? "http" : "https");
+  return host ? `${proto}://${host}` : "http://127.0.0.1:3000";
+}
+
 async function loadSetupHealth(): Promise<SetupHealth | null> {
   try {
-    const appUrl =
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      process.env.SITE_URL ||
-      process.env.APP_URL ||
-      process.env.VERCEL_URL && `https://${process.env.VERCEL_URL}` ||
-      "";
+    const headerStore = headers();
+    const origin = resolveAppOrigin();
+    const cookieHeader = normalizeString(headerStore.get("cookie"));
+    const authHeader = normalizeString(headerStore.get("authorization"));
 
-    const url = appUrl ? `${String(appUrl).replace(/\/+$/, "")}/api/setup/health` : "/api/setup/health";
-    const response = await fetch(url, {
+    const response = await fetch(`${origin}/api/setup/health`, {
       method: "GET",
       cache: "no-store",
-      headers: { accept: "application/json" },
+      headers: {
+        accept: "application/json",
+        ...(cookieHeader ? { cookie: cookieHeader } : {}),
+        ...(authHeader ? { authorization: authHeader } : {}),
+        "x-dashboard-internal": "1",
+      },
       next: { revalidate: 0 },
     });
     const json = (await response.json().catch(() => null)) as SetupHealth | null;
