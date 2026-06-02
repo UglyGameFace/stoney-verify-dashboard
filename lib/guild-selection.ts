@@ -7,6 +7,11 @@ function normalizeString(value: unknown): string {
   return String(value || "").trim();
 }
 
+function defaultGuildFallback(): string {
+  if (!env.allowDefaultGuildFallback) return "";
+  return normalizeString(env.guildId || env.discordGuildId);
+}
+
 export function getGuildCookieOptions(maxAgeSec = 60 * 60 * 24 * 30) {
   return {
     httpOnly: true,
@@ -19,7 +24,7 @@ export function getGuildCookieOptions(maxAgeSec = 60 * 60 * 24 * 30) {
 
 export function getSelectedGuildId(): string {
   const selected = normalizeString(cookies().get(SELECTED_GUILD_COOKIE)?.value);
-  return selected || normalizeString(env.guildId || env.discordGuildId);
+  return selected || defaultGuildFallback();
 }
 
 export function getExplicitSelectedGuildId(): string {
