@@ -65,19 +65,19 @@ export default function AuthStatePage({
   const loginUrl = hasDiscordOAuthConfig() ? getDiscordLoginUrl() : "";
 
   return (
-    <main className="auth-state-page auth-only-page" data-auth-state-page="true">
+    <main className={`auth-state-page auth-only-page tone-${variant === "error" ? "danger" : variant === "session" ? "warning" : "default"}`} data-auth-state="required" data-auth-state-page="true">
       <section className={`card auth-state-card variant-${variant}`}>
         <div className="auth-state-eyebrow">{eyebrow || defaults.eyebrow}</div>
         <h1>{title || defaults.title}</h1>
         <p>{message || defaults.message}</p>
 
         {!loginUrl ? (
-          <div className="auth-state-warning">
+          <div className="auth-state-detail danger">
             OAuth configuration is missing or incomplete. Check Discord client, redirect URL, guild ID, and site URL environment variables.
           </div>
         ) : null}
 
-        {errorDetail ? <pre className="auth-state-error-detail">{errorDetail}</pre> : null}
+        {errorDetail ? <pre className="auth-state-detail danger auth-state-error-detail">{errorDetail}</pre> : null}
 
         <div className="auth-state-actions">
           {loginUrl ? (
