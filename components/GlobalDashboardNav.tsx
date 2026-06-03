@@ -19,15 +19,22 @@ function isDashboardPath(pathname: string): boolean {
   return true;
 }
 
+function hasAuthRequiredState(): boolean {
+  if (typeof document === "undefined") return false;
+  return Boolean(document.querySelector('[data-auth-state="required"]'));
+}
+
 export default function GlobalDashboardNav() {
   const pathname = usePathname() || "/";
   const [localNavPresent, setLocalNavPresent] = useState(true);
+  const [authRequired, setAuthRequired] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
     const check = () => {
       setLocalNavPresent(Boolean(document.querySelector(".sv-mobile-nav-wrap")));
+      setAuthRequired(hasAuthRequiredState());
     };
 
     check();
@@ -39,7 +46,10 @@ export default function GlobalDashboardNav() {
     };
   }, [pathname]);
 
-  const shouldShow = useMemo(() => mounted && isDashboardPath(pathname) && !localNavPresent, [mounted, pathname, localNavPresent]);
+  const shouldShow = useMemo(
+    () => mounted && isDashboardPath(pathname) && !localNavPresent && !authRequired,
+    [mounted, pathname, localNavPresent, authRequired]
+  );
 
   if (!shouldShow) return null;
 
