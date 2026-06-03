@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+type BotInstallState = "installed" | "missing" | "unknown";
+
 type ServerRow = {
   id: string;
   name: string;
@@ -9,6 +11,10 @@ type ServerRow = {
   owner?: boolean;
   can_manage?: boolean;
   bot_installed?: boolean;
+  bot_install_state?: BotInstallState | string | null;
+  bot_check_ok?: boolean;
+  bot_check_error?: string | null;
+  bot_invite_url?: string | null;
   selected?: boolean;
   is_default_env_guild?: boolean;
 };
@@ -20,6 +26,8 @@ type ServerResponse = {
   servers?: ServerRow[];
   installedCount?: number;
   manageableCount?: number;
+  botCheckOk?: boolean;
+  botCheckError?: string | null;
 };
 
 function normalizeString(value: unknown): string {
@@ -28,6 +36,28 @@ function normalizeString(value: unknown): string {
 
 function getServerInitial(name: string) {
   return normalizeString(name).slice(0, 1).toUpperCase() || "S";
+}
+
+function getInstallState(server: ServerRow): BotInstallState {
+  if (server.bot_installed) return "installed";
+  const value = normalizeString(server.bot_install_state).toLowerCase();
+  if (value === "unknown") return "unknown";
+  if (value === "installed") return "installed";
+  return "missing";
+}
+
+function getInstallLabel(server: ServerRow): string {
+  const state = getInstallState(server);
+  if (state === "installed") return "Ready";
+  if (state === "unknown") return "Check blocked";
+  return "Invite needed";
+}
+
+function getInstallMeta(server: ServerRow): string {
+  const state = getInstallState(server);
+  if (state === "installed") return "Dank Shield installed";
+  if (state === "unknown") return "Bot status could not be verified";
+  return "Dank Shield not installed";
 }
 
 function friendlyServerError(raw: unknown): string {
@@ -60,6 +90,7 @@ export default function ServerSelector() {
   const [savingId, setSavingId] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [botCheckError, setBotCheckError] = useState("");
 
   const selectedServer = useMemo(
     () => servers.find((row) => row.id === selectedGuildId || row.selected) || null,
@@ -67,13 +98,15 @@ export default function ServerSelector() {
   );
 
   const installedCount = useMemo(
-    () => servers.filter((server) => server.bot_installed).length,
+    () => servers.filter((server) => getInstallState(server) === "installed").length,
     [servers]
   );
 
   async function loadServers() {
     setLoading(true);
     setError("");
+    setMessage("");
+    setBotCheckError("");
     try {
       const res = await fetch("/api/servers", {
         method: "GET",
@@ -84,6 +117,7 @@ export default function ServerSelector() {
       if (!res.ok || json?.error) throw new Error(json?.error || `Server list request failed with status ${res.status}.`);
       setServers(Array.isArray(json?.servers) ? json.servers : []);
       setSelectedGuildId(normalizeString(json?.selectedGuildId));
+      setBotCheckError(normalizeString(json?.botCheckError));
     } catch (err) {
       setError(friendlyServerError(err instanceof Error ? err.message : err));
     } finally {
@@ -96,8 +130,17 @@ export default function ServerSelector() {
   }, []);
 
   async function selectServer(server: ServerRow) {
-    if (!server.bot_installed) {
-      setError("Dank Shield is not installed in that server yet. Invite the bot there first, then refresh this page.");
+    const installState = getInstallState(server);
+    if (installState !== "installed") {
+      if (server.bot_invite_url) {
+        window.location.href = server.bot_invite_url;
+        return;
+      }
+      setError(
+        installState === "unknown"
+          ? "The dashboard could not verify bot access for this server. Refresh first. If it still says blocked, the bot token/env is wrong on Vercel or Discord is rate limiting the bot guild lookup."
+          : "Dank Shield is not installed in that server yet. Invite the bot there first, then refresh this page."
+      );
       return;
     }
     setSavingId(server.id);
@@ -112,8 +155,14 @@ export default function ServerSelector() {
         },
         body: JSON.stringify({ guild_id: server.id }),
       });
-      const json = (await res.json().catch(() => null)) as ServerResponse | null;
-      if (!res.ok || json?.error) throw new Error(json?.error || `Failed to select server. Status ${res.status}.`);
+      const json = (await res.json().catch(() => null)) as ServerResponse & { bot_invite_url?: string | null } | null;
+      if (!res.ok || json?.error) {
+        if (json?.bot_invite_url) {
+          window.location.href = json.bot_invite_url;
+          return;
+        }
+        throw new Error(json?.error || `Failed to select server. Status ${res.status}.`);
+      }
       setSelectedGuildId(server.id);
       setServers((prev) => prev.map((row) => ({ ...row, selected: row.id === server.id })));
       setMessage(`${server.name} is selected. Dashboard tools will now use this server only.`);
@@ -132,7 +181,7 @@ export default function ServerSelector() {
             <div className="muted server-eyebrow">Server Context</div>
             <h2 style={{ margin: 0 }}>Available servers</h2>
             <div className="muted server-copy">
-              Pick one server before using staff tools. Only servers where your Discord account can manage settings are shown here.
+              Select the server Dank Shield should manage. Servers with the bot installed become selectable; servers without it show an invite action.
             </div>
           </div>
           <button type="button" className="button ghost server-refresh" onClick={() => void loadServers()} disabled={loading || Boolean(savingId)}>
@@ -150,10 +199,16 @@ export default function ServerSelector() {
             <strong>{servers.length}</strong>
           </div>
           <div>
-            <span className="server-status-label">Bot installed</span>
+            <span className="server-status-label">Ready servers</span>
             <strong>{installedCount}</strong>
           </div>
         </div>
+
+        {botCheckError ? (
+          <div className="info-banner server-warning" style={{ marginTop: 12 }}>
+            Bot install check warning: {friendlyServerError(botCheckError)}
+          </div>
+        ) : null}
 
         {selectedServer ? (
           <div className="info-banner server-next-step">
@@ -178,10 +233,12 @@ export default function ServerSelector() {
       ) : servers.length ? (
         <div className="server-grid">
           {servers.map((server) => {
-            const installed = Boolean(server.bot_installed);
+            const installState = getInstallState(server);
+            const installed = installState === "installed";
             const selected = selectedGuildId === server.id || Boolean(server.selected);
+            const inviteUrl = normalizeString(server.bot_invite_url);
             return (
-              <div key={server.id} className={`server-card ${selected ? "selected" : ""} ${!installed ? "disabled" : ""}`}>
+              <div key={server.id} className={`server-card ${selected ? "selected" : ""} ${installed ? "" : "needs-install"}`}>
                 <div className="server-main">
                   <div className="server-icon">
                     {server.icon_url ? <img src={server.icon_url} alt="" /> : <span>{getServerInitial(server.name)}</span>}
@@ -189,25 +246,43 @@ export default function ServerSelector() {
                   <div style={{ minWidth: 0 }}>
                     <div className="server-name">{server.name}</div>
                     <div className="server-meta">
-                      {server.owner ? "Owner" : "Manage Server"} • {installed ? "Dank Shield installed" : "Bot not installed"}
-                      {server.is_default_env_guild ? " • Default dev server" : ""}
+                      {server.owner ? "Owner" : "Manage Server"} • {getInstallMeta(server)}
+                      {server.is_default_env_guild ? " • Default server" : ""}
                     </div>
+                    {installState === "unknown" && server.bot_check_error ? (
+                      <div className="server-subtle-warning">{friendlyServerError(server.bot_check_error)}</div>
+                    ) : null}
                   </div>
                 </div>
 
                 <div className="server-card-footer">
-                  <div className={`server-pill ${installed ? "installed" : "missing"}`}>
-                    {installed ? "Ready" : "Install needed"}
+                  <div className={`server-pill ${installed ? "installed" : installState === "unknown" ? "unknown" : "missing"}`}>
+                    {getInstallLabel(server)}
                   </div>
-                  <button
-                    type="button"
-                    className={selected ? "button ghost" : "button primary"}
-                    disabled={!installed || savingId === server.id}
-                    onClick={() => void selectServer(server)}
-                    style={{ width: "auto", minWidth: 140 }}
-                  >
-                    {savingId === server.id ? "Selecting..." : selected ? "Selected" : installed ? "Select Server" : "Install Bot First"}
-                  </button>
+                  {installed ? (
+                    <button
+                      type="button"
+                      className={selected ? "button ghost" : "button primary"}
+                      disabled={savingId === server.id}
+                      onClick={() => void selectServer(server)}
+                      style={{ width: "auto", minWidth: 140 }}
+                    >
+                      {savingId === server.id ? "Selecting..." : selected ? "Selected" : "Select Server"}
+                    </button>
+                  ) : inviteUrl ? (
+                    <a className="button primary" href={inviteUrl} style={{ width: "auto", minWidth: 140 }}>
+                      Invite Bot
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      className="button ghost"
+                      onClick={() => void loadServers()}
+                      style={{ width: "auto", minWidth: 140 }}
+                    >
+                      Recheck
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -272,7 +347,8 @@ export default function ServerSelector() {
           color: var(--text-strong, #fff);
           overflow-wrap: anywhere;
         }
-        .server-error {
+        .server-error,
+        .server-warning {
           overflow-wrap: anywhere;
           line-height: 1.45;
         }
@@ -304,6 +380,10 @@ export default function ServerSelector() {
           background: rgba(255,255,255,0.055);
           display: grid;
           gap: 16px;
+        }
+        .server-card.selected {
+          border-color: rgba(93,255,141,0.42);
+          box-shadow: 0 0 0 1px rgba(93,255,141,0.12) inset, 0 12px 36px rgba(93,255,141,0.08);
         }
         .server-main {
           display: flex;
@@ -341,6 +421,13 @@ export default function ServerSelector() {
           font-size: 13px;
           line-height: 1.4;
         }
+        .server-subtle-warning {
+          margin-top: 6px;
+          color: #fde68a;
+          font-size: 12px;
+          line-height: 1.35;
+          overflow-wrap: anywhere;
+        }
         .server-card-footer {
           display: flex;
           justify-content: space-between;
@@ -365,6 +452,11 @@ export default function ServerSelector() {
           border-color: rgba(93,255,141,0.28);
         }
         .server-pill.missing {
+          color: #bfdbfe;
+          background: rgba(96,165,250,0.13);
+          border-color: rgba(96,165,250,0.26);
+        }
+        .server-pill.unknown {
           color: #fff1c8;
           background: rgba(255,211,107,0.13);
           border-color: rgba(255,211,107,0.26);
@@ -388,6 +480,10 @@ export default function ServerSelector() {
           .server-card-footer :global(.button),
           .server-refresh {
             width: 100%;
+          }
+          .server-card-footer :global(a.button),
+          .server-card-footer :global(button.button) {
+            width: 100% !important;
           }
         }
       `}</style>
