@@ -1,0 +1,101 @@
+/*
+  Activity Workspace Prep
+  -----------------------
+  Safe CSS-only bridge before the JS tab split. It makes Activity/Warn/Raid/Fraud
+  read as one secondary workspace instead of four random panels dumped into Home.
+*/
+
+.dashboard-home-grid > div:nth-child(4),
+.dashboard-home-grid > div:nth-child(5),
+.dashboard-home-grid > div:nth-child(6),
+.dashboard-home-grid > div:nth-child(7) {
+  position: relative;
+}
+
+.dashboard-home-grid > div:nth-child(4) {
+  margin-top: 10px;
+}
+
+.dashboard-home-grid > div:nth-child(4)::before {
+  content: "Activity workspace";
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 2px;
+  color: var(--text-muted, #c7ddcf);
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.dashboard-home-grid > div:nth-child(4)::after {
+  content: "Logs, warnings, raid signals, and fraud checks are grouped here until the dedicated Activity tab is fully wired.";
+  display: block;
+  margin: -4px 2px 12px;
+  color: var(--text-muted, #c7ddcf);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.dashboard-home-grid > div:nth-child(n + 4) .dashboard-section-shell {
+  border-left: 3px solid color-mix(in srgb, var(--accent-2, #78ddff) 55%, transparent) !important;
+}
+
+.dashboard-home-grid > div:nth-child(n + 4) .dashboard-section-shell .badge {
+  font-size: 11px !important;
+  min-height: 28px !important;
+}
+
+.dashboard-home-grid > div:nth-child(n + 5) .dashboard-section-shell {
+  min-height: 0;
+}
+
+.dashboard-home-grid > div:nth-child(n + 5) .dashboard-section-body {
+  max-height: 340px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.dashboard-home-grid > div:nth-child(n + 5) .dashboard-section-body::-webkit-scrollbar {
+  width: 7px;
+}
+
+.dashboard-home-grid > div:nth-child(n + 5) .dashboard-section-body::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--accent-2, #78ddff) 28%, transparent);
+  border-radius: 999px;
+}
+
+/* Keep the actual "do work now" cards clearly above the activity block. */
+.dashboard-home-grid > div:nth-child(-n + 3) .dashboard-section-shell,
+.dashboard-home-grid > div:nth-child(-n + 3) .metrics-grid,
+.dashboard-home-grid > div:nth-child(-n + 3) :is(.quick-actions-grid, .action-grid) {
+  position: relative;
+  z-index: 1;
+}
+
+@media (min-width: 1024px) {
+  .dashboard-home-grid > div:nth-child(4) {
+    grid-column: span 8 !important;
+  }
+
+  .dashboard-home-grid > div:nth-child(5),
+  .dashboard-home-grid > div:nth-child(6),
+  .dashboard-home-grid > div:nth-child(7) {
+    grid-column: span 4 !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .dashboard-home-grid > div:nth-child(4)::after {
+    font-size: 11px;
+  }
+
+  .dashboard-home-grid > div:nth-child(n + 5) .dashboard-section-body {
+    max-height: 260px;
+  }
+}
+
+html[data-dashboard-appearance="light"] .dashboard-home-grid > div:nth-child(n + 4) .dashboard-section-shell {
+  border-left-color: color-mix(in srgb, var(--accent-2, #06b6d4) 65%, transparent) !important;
+}
