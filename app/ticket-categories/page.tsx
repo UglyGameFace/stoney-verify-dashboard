@@ -1,31 +1,28 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import TicketCategoriesManager from "@/components/dashboard/TicketCategoriesManager";
+import AuthStatePage from "@/components/dashboard/AuthStatePage";
 import SetupWorkspaceShell from "@/components/dashboard/SetupWorkspaceShell";
-import {
-  getSession,
-  getDiscordLoginUrl,
-  hasDiscordOAuthConfig,
-} from "@/lib/auth-server";
+import { getSession } from "@/lib/auth-server";
 import { getSelectedGuildId } from "@/lib/guild-selection";
 
 type SessionLike = {
   isStaff?: boolean;
 } | null;
 
-function LoginRequiredState() {
-  const loginUrl = hasDiscordOAuthConfig() ? getDiscordLoginUrl() : "";
-
+function ServerRequiredState() {
   return (
     <main className="auth-state-page">
       <div className="card auth-state-card">
-        <div className="muted auth-state-eyebrow">Dank Shield Dashboard</div>
-        <h1>Login Required</h1>
-        <p className="muted">Sign in with Discord to manage ticket categories. Navigation stays inside the dashboard until you choose to sign in.</p>
+        <div className="muted auth-state-eyebrow">Setup Step Locked</div>
+        <h1>Choose a server first</h1>
+        <p className="muted">
+          Ticket categories belong to one Discord server. Pick the server before creating or editing routing so data never mixes between communities.
+        </p>
         <div className="auth-state-actions">
-          {loginUrl ? <Link href={loginUrl} className="button primary">Sign in with Discord</Link> : null}
-          <Link href="/auth-status" className="button ghost">Check Auth Status</Link>
-          <Link href="/" className="button ghost">Back Home</Link>
+          <Link href="/servers" className="button primary">Choose Server</Link>
+          <Link href="/" className="button ghost">Dashboard</Link>
+          <Link href="/auth-status" className="button ghost">Auth Status</Link>
         </div>
       </div>
     </main>
@@ -38,10 +35,19 @@ export const revalidate = 0;
 export default async function TicketCategoriesPage() {
   const session = (await getSession()) as SessionLike;
 
-  if (!session) return <LoginRequiredState />;
+  if (!session) {
+    return (
+      <AuthStatePage
+        variant="login"
+        message="Sign in with Discord to manage ticket categories. The dashboard will not open Discord authorization until you press the sign-in button."
+        showReset={false}
+        showBack={false}
+      />
+    );
+  }
 
   if (!session?.isStaff) redirect("/");
-  if (!getSelectedGuildId()) redirect("/servers");
+  if (!getSelectedGuildId()) return <ServerRequiredState />;
 
   return (
     <SetupWorkspaceShell
