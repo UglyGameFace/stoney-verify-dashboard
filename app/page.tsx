@@ -4,12 +4,9 @@ import { headers } from "next/headers";
 import Sidebar from "@/components/Sidebar";
 import DashboardClient from "@/components/DashboardClient";
 import UserDashboardClient from "@/components/UserDashboardClient";
+import AuthStatePage from "@/components/dashboard/AuthStatePage";
 import SetupLaunchChecklist from "@/components/dashboard/SetupLaunchChecklist";
-import {
-  getSession,
-  getDiscordLoginUrl,
-  hasDiscordOAuthConfig,
-} from "@/lib/auth-server";
+import { getSession } from "@/lib/auth-server";
 import { getSelectedGuildId } from "@/lib/guild-selection";
 import { env } from "@/lib/env";
 
@@ -315,33 +312,6 @@ async function fetchDashboardJson(pathname: string, fallbackData: DashboardPaylo
   }
 }
 
-function LoginRequiredState() {
-  const loginUrl = hasDiscordOAuthConfig() ? getDiscordLoginUrl() : "";
-
-  return (
-    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: "24px", background: "#09090b", color: "white" }}>
-      <div style={{ width: "100%", maxWidth: 560, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", borderRadius: 20, padding: 24 }}>
-        <div style={{ color: "#86efac", fontWeight: 900, fontSize: 13, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-          Dank Shield Dashboard
-        </div>
-        <h1 style={{ margin: "8px 0 0" }}>Login Required</h1>
-        <p style={{ color: "rgba(255,255,255,0.72)", lineHeight: 1.5 }}>
-          Discord login is required to use this dashboard. The page no longer redirects automatically, so login problems will not trap you in a Discord authorize loop.
-        </p>
-        {!loginUrl ? (
-          <p style={{ color: "#fecaca", lineHeight: 1.5 }}>
-            OAuth configuration is missing or incomplete. Check Discord client, redirect URL, guild ID, and site URL environment variables.
-          </p>
-        ) : null}
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
-          {loginUrl ? <Link href={loginUrl} className="button primary" style={{ width: "auto", minWidth: 180 }}>Sign in with Discord</Link> : null}
-          <Link href="/auth-status" className="button ghost" style={{ width: "auto", minWidth: 170 }}>Check Auth Status</Link>
-        </div>
-      </div>
-    </main>
-  );
-}
-
 function StaffQuickToolsCard() {
   return (
     <div className="card" style={{ marginBottom: 18, background: "radial-gradient(circle at top right, rgba(93,255,141,0.08), transparent 28%), radial-gradient(circle at bottom left, rgba(99,213,255,0.06), transparent 24%), linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015)), linear-gradient(180deg, rgba(14, 25, 35, 0.98), rgba(7, 13, 21, 0.98))" }}>
@@ -398,7 +368,7 @@ export const revalidate = 0;
 export default async function HomePage() {
   const session = (await getSession()) as SessionLike;
 
-  if (!session) return <LoginRequiredState />;
+  if (!session) return <AuthStatePage variant="login" showReset={false} showBack={false} />;
 
   const guildId = normalizeString(getSelectedGuildId());
 
