@@ -363,6 +363,24 @@ function StaffQuickToolsCard() {
   );
 }
 
+function SelectServerOnlyCard() {
+  return (
+    <section className="card setup-gated-card" style={{ marginTop: 18 }}>
+      <div className="muted" style={{ marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 900 }}>
+        Setup Mode
+      </div>
+      <h2 style={{ margin: 0 }}>Choose a server to unlock staff operations</h2>
+      <p className="muted" style={{ marginTop: 8, lineHeight: 1.55, maxWidth: 760 }}>
+        Staff tools are hidden until a server is selected. This keeps tickets, categories, forms, activity, and member data from mixing across servers.
+      </p>
+      <div className="row" style={{ gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+        <Link href="/servers" className="button primary" style={{ width: "auto", minWidth: 180 }}>Choose Server</Link>
+        <Link href="/auth-status" className="button ghost" style={{ width: "auto", minWidth: 160 }}>Check Access</Link>
+      </div>
+    </section>
+  );
+}
+
 function StaffShell({ children }: { children: ReactNode }) {
   return (
     <>
@@ -385,15 +403,22 @@ export default async function HomePage() {
   const guildId = normalizeString(getSelectedGuildId());
 
   if (session?.isStaff) {
-    const staffData = await fetchDashboardJson("/api/staff/dashboard", buildFallbackStaffData(guildId));
+    const staffData = guildId
+      ? await fetchDashboardJson("/api/staff/dashboard", buildFallbackStaffData(guildId))
+      : buildFallbackStaffData("");
+
     return (
       <StaffShell>
         <StaffQuickToolsCard />
         <SetupLaunchChecklist data={staffData} selectedGuildId={guildId} />
-        <DashboardClient
-          initialData={staffData}
-          staffName={session?.user?.username || session?.discordUser?.username || env?.defaultStaffName || "Staff"}
-        />
+        {guildId ? (
+          <DashboardClient
+            initialData={staffData}
+            staffName={session?.user?.username || session?.discordUser?.username || env?.defaultStaffName || "Staff"}
+          />
+        ) : (
+          <SelectServerOnlyCard />
+        )}
       </StaffShell>
     );
   }
