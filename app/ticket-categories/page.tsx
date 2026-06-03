@@ -7,6 +7,7 @@ import {
   getDiscordLoginUrl,
   hasDiscordOAuthConfig,
 } from "@/lib/auth-server";
+import { getSelectedGuildId } from "@/lib/guild-selection";
 
 type SessionLike = {
   isStaff?: boolean;
@@ -40,6 +41,7 @@ export default async function TicketCategoriesPage() {
   if (!session) return <LoginRequiredState />;
 
   if (!session?.isStaff) redirect("/");
+  if (!getSelectedGuildId()) redirect("/servers");
 
   return (
     <SetupWorkspaceShell
