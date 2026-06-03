@@ -91,8 +91,7 @@ function buildFallbackUserData(session: SessionLike, guildId: string): Dashboard
       picture: avatarUrl,
       isStaff: false,
       guild_id: guildId || null,
-      verification_label:
-        session?.member?.verification_label || "Not Synced Yet",
+      verification_label: session?.member?.verification_label || "Not Synced Yet",
       access_label: session?.member?.access_label || "Not Synced Yet",
       role_names: Array.isArray(session?.member?.roles) ? session.member.roles : [],
     },
@@ -276,9 +275,7 @@ function resolveAppOrigin(): string {
 
   const proto =
     normalizeString(headerStore.get("x-forwarded-proto")) ||
-    (host.includes("localhost") || host.startsWith("127.0.0.1")
-      ? "http"
-      : "https");
+    (host.includes("localhost") || host.startsWith("127.0.0.1") ? "http" : "https");
 
   if (host) return `${proto}://${host}`;
   return "http://127.0.0.1:3000";
@@ -312,42 +309,41 @@ async function fetchDashboardJson(pathname: string, fallbackData: DashboardPaylo
   }
 }
 
-function StaffQuickToolsCard() {
+function StaffQuickToolsCard({ hasSelectedGuild }: { hasSelectedGuild: boolean }) {
   return (
-    <div className="card" style={{ marginBottom: 18, background: "radial-gradient(circle at top right, rgba(93,255,141,0.08), transparent 28%), radial-gradient(circle at bottom left, rgba(99,213,255,0.06), transparent 24%), linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015)), linear-gradient(180deg, rgba(14, 25, 35, 0.98), rgba(7, 13, 21, 0.98))" }}>
+    <div
+      className="card staff-quick-tools-card"
+      style={{
+        marginBottom: 18,
+        background:
+          "radial-gradient(circle at top right, rgba(93,255,141,0.08), transparent 28%), radial-gradient(circle at bottom left, rgba(99,213,255,0.06), transparent 24%), linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015)), linear-gradient(180deg, rgba(14, 25, 35, 0.98), rgba(7, 13, 21, 0.98))",
+      }}
+    >
       <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="muted" style={{ marginBottom: 8 }}>Staff Tools</div>
           <h2 style={{ margin: 0 }}>Server control center</h2>
           <p className="muted" style={{ marginTop: 8, maxWidth: 720 }}>
-            Pick a server, manage ticket categories/forms, and review live support activity. Dank Shield uses the selected server as dashboard context.
+            {hasSelectedGuild
+              ? "Manage the selected server without mixing tickets, categories, forms, activity, or member data across servers."
+              : "Choose one Discord server first. Categories, forms, tickets, activity, and member tools unlock after the dashboard has a server context."}
           </p>
         </div>
         <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
-          <Link href="/servers" className="button primary" style={{ width: "auto" }}>Servers</Link>
-          <Link href="/ticket-categories" className="button ghost" style={{ width: "auto" }}>Ticket Categories</Link>
-          <Link href="/ticket-forms" className="button ghost" style={{ width: "auto" }}>Ticket Forms</Link>
+          <Link href="/servers" className="button primary" style={{ width: "auto" }}>
+            {hasSelectedGuild ? "Change Server" : "Choose Server"}
+          </Link>
+          {hasSelectedGuild ? (
+            <>
+              <Link href="/ticket-categories" className="button ghost" style={{ width: "auto" }}>Categories</Link>
+              <Link href="/ticket-forms" className="button ghost" style={{ width: "auto" }}>Forms</Link>
+            </>
+          ) : (
+            <Link href="/auth-status" className="button ghost" style={{ width: "auto" }}>Check Access</Link>
+          )}
         </div>
       </div>
     </div>
-  );
-}
-
-function SelectServerOnlyCard() {
-  return (
-    <section className="card setup-gated-card" style={{ marginTop: 18 }}>
-      <div className="muted" style={{ marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 900 }}>
-        Setup Mode
-      </div>
-      <h2 style={{ margin: 0 }}>Choose a server to unlock staff operations</h2>
-      <p className="muted" style={{ marginTop: 8, lineHeight: 1.55, maxWidth: 760 }}>
-        Staff tools are hidden until a server is selected. This keeps tickets, categories, forms, activity, and member data from mixing across servers.
-      </p>
-      <div className="row" style={{ gap: 10, flexWrap: "wrap", marginTop: 16 }}>
-        <Link href="/servers" className="button primary" style={{ width: "auto", minWidth: 180 }}>Choose Server</Link>
-        <Link href="/auth-status" className="button ghost" style={{ width: "auto", minWidth: 160 }}>Check Access</Link>
-      </div>
-    </section>
   );
 }
 
@@ -371,24 +367,23 @@ export default async function HomePage() {
   if (!session) return <AuthStatePage variant="login" showReset={false} showBack={false} />;
 
   const guildId = normalizeString(getSelectedGuildId());
+  const hasSelectedGuild = Boolean(guildId);
 
   if (session?.isStaff) {
-    const staffData = guildId
+    const staffData = hasSelectedGuild
       ? await fetchDashboardJson("/api/staff/dashboard", buildFallbackStaffData(guildId))
       : buildFallbackStaffData("");
 
     return (
       <StaffShell>
-        <StaffQuickToolsCard />
+        <StaffQuickToolsCard hasSelectedGuild={hasSelectedGuild} />
         <SetupLaunchChecklist data={staffData} selectedGuildId={guildId} />
-        {guildId ? (
+        {hasSelectedGuild ? (
           <DashboardClient
             initialData={staffData}
             staffName={session?.user?.username || session?.discordUser?.username || env?.defaultStaffName || "Staff"}
           />
-        ) : (
-          <SelectServerOnlyCard />
-        )}
+        ) : null}
       </StaffShell>
     );
   }
