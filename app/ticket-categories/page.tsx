@@ -20,10 +20,11 @@ function LoginRequiredState() {
       <div className="card auth-state-card">
         <div className="muted auth-state-eyebrow">Dank Shield Dashboard</div>
         <h1>Login Required</h1>
-        <p className="muted">Discord login is required to manage ticket categories.</p>
+        <p className="muted">Sign in with Discord to manage ticket categories. Navigation stays inside the dashboard until you choose to sign in.</p>
         <div className="auth-state-actions">
           {loginUrl ? <Link href={loginUrl} className="button primary">Sign in with Discord</Link> : null}
           <Link href="/auth-status" className="button ghost">Check Auth Status</Link>
+          <Link href="/" className="button ghost">Back Home</Link>
         </div>
       </div>
     </main>
@@ -36,10 +37,7 @@ export const revalidate = 0;
 export default async function TicketCategoriesPage() {
   const session = (await getSession()) as SessionLike;
 
-  if (!session) {
-    if (hasDiscordOAuthConfig()) redirect(getDiscordLoginUrl());
-    return <LoginRequiredState />;
-  }
+  if (!session) return <LoginRequiredState />;
 
   if (!session?.isStaff) redirect("/");
 
