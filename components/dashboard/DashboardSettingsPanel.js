@@ -2,24 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import QuickAppearancePanel from "@/components/dashboard/QuickAppearancePanel";
+import {
+  HOME_WORKSPACE_KEYS,
+  ACTIVITY_WORKSPACE_KEYS,
+  MEMBERS_WORKSPACE_KEYS,
+} from "@/components/dashboard/workspaceModel";
 
-const HOME_SECTION_KEYS = [
-  "intelligence",
-  "stats",
-  "quickActions",
-  "activity",
-  "warns",
-  "raids",
-  "fraud",
-];
-
-const MEMBERS_SECTION_KEYS = [
-  "freshEntrants",
-  "memberSnapshot",
-  "staffMetrics",
-  "roleHierarchy",
-  "memberSearch",
-];
+const HOME_SECTION_KEYS = [...HOME_WORKSPACE_KEYS];
+const ACTIVITY_SECTION_KEYS = [...ACTIVITY_WORKSPACE_KEYS];
+const MEMBERS_SECTION_KEYS = [...MEMBERS_WORKSPACE_KEYS];
 
 const SECTION_LABELS = {
   intelligence: "Moderator Intelligence",
@@ -38,21 +29,9 @@ const SECTION_LABELS = {
 };
 
 const DENSITY_OPTIONS = [
-  {
-    id: "compact",
-    label: "Compact",
-    helper: "Shows more on one screen. Best for power users and desktop.",
-  },
-  {
-    id: "comfortable",
-    label: "Comfortable",
-    helper: "Balanced spacing for daily moderation. Recommended default.",
-  },
-  {
-    id: "spacious",
-    label: "Spacious",
-    helper: "More breathing room for tablets, touch, and readability.",
-  },
+  { id: "compact", label: "Compact", helper: "Shows more on one screen. Best for power users and desktop." },
+  { id: "comfortable", label: "Comfortable", helper: "Balanced spacing for daily moderation. Recommended default." },
+  { id: "spacious", label: "Spacious", helper: "More breathing room for tablets, touch, and readability." },
 ];
 
 const COLOR_ROWS = [
@@ -275,6 +254,11 @@ export default function DashboardSettingsPanel({
     return fromPrefs.length ? fromPrefs : HOME_SECTION_KEYS;
   }, [preferences?.layout?.home]);
 
+  const activityKeys = useMemo(() => {
+    const fromPrefs = safeArray(preferences?.layout?.activity);
+    return fromPrefs.length ? fromPrefs : ACTIVITY_SECTION_KEYS;
+  }, [preferences?.layout?.activity]);
+
   const membersKeys = useMemo(() => {
     const fromPrefs = safeArray(preferences?.layout?.members);
     return fromPrefs.length ? fromPrefs : MEMBERS_SECTION_KEYS;
@@ -370,18 +354,20 @@ export default function DashboardSettingsPanel({
           <Disclosure
             eyebrow="Optional"
             title="Show / Hide Sections"
-            helper="Hide dashboard blocks your staff does not use. You can bring them back any time."
+            helper="Hide dashboard blocks your staff does not use. You can bring them back any time. Activity is now separate from Home, so logs and risk signals are easier to manage."
           >
-            <VisibilityGrid title="Home Dashboard" keys={homeKeys} visibility={visibility} onToggle={toggleSectionVisibility || (() => {})} />
-            <VisibilityGrid title="Members Dashboard" keys={membersKeys} visibility={visibility} onToggle={toggleSectionVisibility || (() => {})} />
+            <VisibilityGrid title="Home Workspace" keys={homeKeys} visibility={visibility} onToggle={toggleSectionVisibility || (() => {})} />
+            <VisibilityGrid title="Activity Workspace" keys={activityKeys} visibility={visibility} onToggle={toggleSectionVisibility || (() => {})} />
+            <VisibilityGrid title="Members Workspace" keys={membersKeys} visibility={visibility} onToggle={toggleSectionVisibility || (() => {})} />
           </Disclosure>
 
           <Disclosure
             eyebrow="Optional"
             title="Reorder Dashboard"
-            helper="Move important sections higher so staff see the right controls first."
+            helper="Move important sections higher inside each workspace. Home, Activity, and Members now have separate ordering."
           >
             <MoveList title="Home Order" area="home" keys={homeKeys} onMove={moveSection || (() => {})} />
+            <MoveList title="Activity Order" area="activity" keys={activityKeys} onMove={moveSection || (() => {})} />
             <MoveList title="Members Order" area="members" keys={membersKeys} onMove={moveSection || (() => {})} />
           </Disclosure>
 
