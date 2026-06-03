@@ -1,12 +1,163 @@
 /*
   Setup cleanup overrides
   -----------------------
-  Keeps the staff home page as one guided setup flow instead of stacking
-  duplicate server/category/form controls on mobile.
+  Keeps the staff home page as a real dashboard shell, keeps server setup on
+  /servers, and prevents duplicate setup/account controls from stacking on mobile.
 */
 
 .staff-quick-tools-card .row > .row {
   flex: 0 0 auto;
+}
+
+.dashboard-locked-home {
+  display: grid;
+  gap: 16px;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--accent, #6dff9d) 13%, transparent), transparent 34%),
+    radial-gradient(circle at bottom left, color-mix(in srgb, var(--accent-2, #78ddff) 10%, transparent), transparent 28%),
+    var(--panel-bg, rgba(17,31,43,0.96)) !important;
+}
+
+.dashboard-locked-eyebrow,
+.account-eyebrow {
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.dashboard-locked-home h1,
+.account-hero-card h1 {
+  margin: 0;
+  color: var(--text-strong, #fff);
+  font-size: clamp(30px, 5vw, 48px);
+  line-height: 0.98;
+  letter-spacing: -0.055em;
+}
+
+.dashboard-locked-home p,
+.account-hero-card p {
+  margin: 0;
+  max-width: 860px;
+  line-height: 1.55;
+}
+
+.dashboard-locked-actions,
+.account-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dashboard-locked-actions .button,
+.account-actions .button {
+  width: auto;
+  min-width: 150px;
+}
+
+.dashboard-locked-grid,
+.account-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dashboard-locked-grid > div,
+.account-info-card {
+  border: 1px solid var(--panel-border, rgba(255,255,255,0.16));
+  border-radius: 18px;
+  padding: 14px;
+  background: rgba(255,255,255,0.055);
+  min-width: 0;
+}
+
+.dashboard-locked-grid strong,
+.account-info-row strong {
+  display: block;
+  color: var(--text-strong, #fff);
+  overflow-wrap: anywhere;
+}
+
+.dashboard-locked-grid span,
+.account-info-row span {
+  display: block;
+  color: var(--text-muted, #c7ddcf);
+  line-height: 1.4;
+  margin-top: 5px;
+}
+
+.account-page-content {
+  display: grid;
+  gap: 16px;
+}
+
+.account-hero-card {
+  display: grid;
+  gap: 16px;
+}
+
+.account-hero-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.account-avatar {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 64px;
+  border-radius: 22px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent, #6dff9d) 16%, transparent);
+  color: var(--text-strong, #fff);
+  font-size: 26px;
+  font-weight: 950;
+}
+
+.account-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.account-info-card {
+  display: grid;
+  gap: 10px;
+}
+
+.account-info-wide {
+  grid-column: 1 / -1;
+}
+
+.account-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+
+.account-warning,
+.account-error-pre {
+  border: 1px solid rgba(252, 211, 77, 0.26);
+  border-radius: 14px;
+  background: rgba(252, 211, 77, 0.10);
+  color: #fde68a;
+  padding: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.account-role-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .launch-card.server-required .setup-health-summary {
@@ -83,6 +234,13 @@
   }
 }
 
+@media (max-width: 900px) {
+  .dashboard-locked-grid,
+  .account-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 720px) {
   .staff-quick-tools-card {
     margin-bottom: 12px !important;
@@ -100,12 +258,32 @@
   }
 
   .staff-quick-tools-card .button,
-  .launch-card .button {
+  .launch-card .button,
+  .dashboard-locked-actions .button,
+  .account-actions .button {
     width: 100% !important;
   }
 
+  .dashboard-locked-home,
+  .account-hero-card,
   .launch-card {
     gap: 12px !important;
+  }
+
+  .account-hero-main {
+    align-items: flex-start;
+  }
+
+  .account-avatar {
+    width: 52px;
+    height: 52px;
+    flex-basis: 52px;
+    border-radius: 18px;
+  }
+
+  .account-info-row {
+    display: grid;
+    gap: 4px;
   }
 
   .launch-card.server-required .setup-health-summary,
@@ -143,7 +321,9 @@
   }
 }
 
-html[data-dashboard-appearance="light"] .setup-check-details {
+html[data-dashboard-appearance="light"] .setup-check-details,
+html[data-dashboard-appearance="light"] .dashboard-locked-grid > div,
+html[data-dashboard-appearance="light"] .account-info-card {
   background: rgba(255,255,255,0.78) !important;
   border-color: rgba(15,23,42,0.14) !important;
 }
