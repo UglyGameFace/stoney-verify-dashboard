@@ -64,19 +64,16 @@
   max-width: 100%;
 }
 
-/* Global nav appears only when page-specific MobileBottomNav is absent. */
 @media (max-width: 1023px) {
   .global-bottom-nav-wrap {
     display: block;
   }
 }
 
-/* Keep floating appearance away from global/local nav. */
 .quick-appearance-dock {
   bottom: calc(102px + env(safe-area-inset-bottom, 0px)) !important;
 }
 
-/* Stronger page separation: setup, launch health, staff workspace, member portal. */
 .content > .card,
 .content > .launch-card,
 .content > .dashboard-page-shell,
@@ -92,7 +89,8 @@ main.content > .dashboard-page-shell {
 .dashboard-page-shell,
 .user-dashboard-grid > .member-section,
 .ticket-category-shell,
-.ticket-form-shell {
+.ticket-form-shell,
+.setup-workspace-shell {
   isolation: isolate;
 }
 
@@ -101,10 +99,163 @@ main.content > .dashboard-page-shell {
   padding-top: 10px;
 }
 
-/* Staff dashboard should not feel like it is merged into setup checklist. */
 .content > .launch-card + .dashboard-page-shell,
 .content > .launch-card + div .dashboard-page-shell {
   margin-top: 20px;
+}
+
+.setup-workspace-inner {
+  display: grid;
+  gap: var(--app-gap, 16px);
+}
+
+.setup-workspace-hero {
+  display: grid;
+  gap: 16px;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--accent, #6dff9d) 11%, transparent), transparent 30%),
+    radial-gradient(circle at bottom left, color-mix(in srgb, var(--accent-2, #78ddff) 9%, transparent), transparent 28%),
+    var(--panel-bg, rgba(17,31,43,0.96)) !important;
+}
+
+.setup-workspace-hero-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.setup-workspace-eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 950;
+  margin-bottom: 8px;
+}
+
+.setup-workspace-hero h1 {
+  margin: 0;
+  font-size: clamp(30px, 5vw, 48px);
+  line-height: 0.98;
+  letter-spacing: -0.055em;
+  color: var(--text-strong, #fff);
+}
+
+.setup-workspace-hero p {
+  margin: 12px 0 0;
+  max-width: 880px;
+  line-height: 1.55;
+}
+
+.setup-workspace-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.setup-workspace-actions .button {
+  width: auto;
+  min-width: 150px;
+}
+
+.setup-step-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.setup-step-link {
+  min-width: 0;
+  border: 1px solid var(--panel-border, rgba(255,255,255,0.16));
+  border-radius: 18px;
+  padding: 12px;
+  text-decoration: none;
+  color: var(--text-strong, #fff);
+  background: rgba(255,255,255,0.055);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.setup-step-link.active {
+  border-color: color-mix(in srgb, var(--accent, #6dff9d) 42%, transparent);
+  background: color-mix(in srgb, var(--accent, #6dff9d) 13%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #6dff9d) 18%, transparent) inset;
+}
+
+.setup-step-number {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid var(--panel-border, rgba(255,255,255,0.16));
+  font-weight: 950;
+}
+
+.setup-step-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.setup-step-copy strong {
+  color: var(--text-strong, #fff);
+  line-height: 1.1;
+}
+
+.setup-step-copy small {
+  color: var(--text-muted, #c7ddcf);
+  line-height: 1.15;
+}
+
+.setup-workspace-body {
+  display: grid;
+  gap: var(--app-gap, 16px);
+}
+
+.auth-state-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-state-card {
+  width: min(100%, 560px);
+}
+
+.auth-state-eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 950;
+  margin-bottom: 8px;
+}
+
+.auth-state-card h1 {
+  margin: 0;
+}
+
+.auth-state-card p {
+  margin-top: 10px;
+  line-height: 1.5;
+}
+
+.auth-state-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.auth-state-actions .button {
+  width: auto;
+  min-width: 170px;
 }
 
 .setup-health-summary {
@@ -154,7 +305,6 @@ main.content > .dashboard-page-shell {
   line-height: 1.45;
 }
 
-/* More readable launch cards; avoid tiny compressed setup text. */
 .launch-grid {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)) !important;
 }
@@ -168,7 +318,6 @@ main.content > .dashboard-page-shell {
   font-weight: 800;
 }
 
-/* Mobile: make setup health read like a wizard, not database columns. */
 @media (max-width: 720px) {
   .content,
   main.content {
@@ -197,6 +346,20 @@ main.content > .dashboard-page-shell {
     bottom: calc(92px + env(safe-area-inset-bottom, 0px)) !important;
   }
 
+  .setup-workspace-hero-main,
+  .setup-workspace-actions,
+  .auth-state-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .setup-workspace-actions .button,
+  .auth-state-actions .button {
+    width: 100% !important;
+  }
+
+  .setup-step-nav,
   .setup-health-summary,
   .setup-next-fix,
   .launch-grid {
@@ -244,4 +407,11 @@ html[data-dashboard-appearance="light"] .global-bottom-nav-item {
 
 html[data-dashboard-appearance="light"] .global-bottom-nav-item.active {
   color: #0f172a !important;
+}
+
+html[data-dashboard-appearance="light"] .setup-step-link,
+html[data-dashboard-appearance="light"] .setup-health-summary > div,
+html[data-dashboard-appearance="light"] .setup-next-fix {
+  background: rgba(255,255,255,0.82) !important;
+  border-color: rgba(15,23,42,0.14) !important;
 }
