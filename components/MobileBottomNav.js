@@ -22,15 +22,6 @@ const TAB_META = {
       </svg>
     ),
   },
-  account: {
-    label: "Account",
-    icon: (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 12a3.25 3.25 0 1 0-3.25-3.25A3.25 3.25 0 0 0 12 12Z" />
-        <path d="M6.75 18.5a5.25 5.25 0 0 1 10.5 0" />
-      </svg>
-    ),
-  },
   members: {
     label: "Members",
     icon: (
@@ -44,8 +35,8 @@ const TAB_META = {
       </svg>
     ),
   },
-  signals: {
-    label: "Signals",
+  activity: {
+    label: "Activity",
     icon: (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M4 19h16" />
@@ -61,6 +52,15 @@ const TAB_META = {
     icon: (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M4 6.5A1.5 1.5 0 0 1 5.5 5H11l2 2h5.5A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5z" />
+      </svg>
+    ),
+  },
+  account: {
+    label: "Account",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 12a3.25 3.25 0 1 0-3.25-3.25A3.25 3.25 0 0 0 12 12Z" />
+        <path d="M6.75 18.5a5.25 5.25 0 0 1 10.5 0" />
       </svg>
     ),
   },
@@ -109,39 +109,6 @@ function uniqueTabs(tabs) {
   return out;
 }
 
-function addSignalsJump(tabs) {
-  const raw = uniqueTabs(tabs);
-  if (!raw.includes("home") || raw.includes("signals") || raw.includes("activity")) return raw;
-
-  const membersIndex = raw.indexOf("members");
-  const ticketsIndex = raw.indexOf("tickets");
-  const insertAfter = membersIndex >= 0 ? membersIndex : ticketsIndex;
-
-  if (insertAfter < 0) return [...raw, "signals"];
-
-  const next = [...raw];
-  next.splice(insertAfter + 1, 0, "signals");
-  return next;
-}
-
-function scrollToSignalsWorkspace() {
-  if (typeof window === "undefined" || typeof document === "undefined") return;
-
-  const findTarget = () =>
-    document.querySelector(".dashboard-home-grid > div:nth-child(4)") ||
-    document.querySelector(".dashboard-home-grid") ||
-    document.querySelector("main");
-
-  window.requestAnimationFrame(() => {
-    window.requestAnimationFrame(() => {
-      const target = findTarget();
-      if (target && "scrollIntoView" in target) {
-        target.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
-    });
-  });
-}
-
 export default function MobileBottomNav({
   activeTab,
   onChange,
@@ -161,7 +128,7 @@ export default function MobileBottomNav({
   );
 
   const visibleTabs = useMemo(() => {
-    const rawTabs = addSignalsJump(Array.isArray(tabs) ? tabs.filter(Boolean) : []);
+    const rawTabs = uniqueTabs(Array.isArray(tabs) ? tabs.filter(Boolean) : []);
     const maxTabs = visibleActions.length ? 4 : 5;
     return rawTabs.slice(0, maxTabs);
   }, [tabs, visibleActions.length]);
@@ -198,17 +165,6 @@ export default function MobileBottomNav({
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-
-  function handleTabClick(tab) {
-    if (tab === "signals") {
-      onChange?.("home");
-      setActionsOpen(false);
-      scrollToSignalsWorkspace();
-      return;
-    }
-
-    onChange?.(tab);
-  }
 
   if (!visibleTabs.length && !visibleActions.length) return null;
 
@@ -289,8 +245,8 @@ export default function MobileBottomNav({
               <button
                 key={tab}
                 type="button"
-                className={`sv-mobile-nav-item ${active ? "active" : ""} ${tab === "signals" ? "signals" : ""}`}
-                onClick={() => handleTabClick(tab)}
+                className={`sv-mobile-nav-item ${active ? "active" : ""}`}
+                onClick={() => onChange?.(tab)}
                 aria-current={active ? "page" : undefined}
                 title={meta.label}
               >
@@ -513,8 +469,7 @@ export default function MobileBottomNav({
           transform: scale(0.985);
         }
 
-        .sv-mobile-nav-item.active,
-        .sv-mobile-nav-item.signals:active {
+        .sv-mobile-nav-item.active {
           color: #ffffff;
           border-color: rgba(99, 213, 255, 0.24);
           background: linear-gradient(
