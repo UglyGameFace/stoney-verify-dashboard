@@ -14,7 +14,6 @@ const NAV_ITEMS = [
 
 function isDashboardPath(pathname: string): boolean {
   if (!pathname) return false;
-  if (pathname === "/") return false;
   if (pathname.startsWith("/api")) return false;
   if (pathname.startsWith("/auth/")) return false;
   return true;
@@ -22,9 +21,11 @@ function isDashboardPath(pathname: string): boolean {
 
 export default function GlobalDashboardNav() {
   const pathname = usePathname() || "/";
-  const [localNavPresent, setLocalNavPresent] = useState(false);
+  const [localNavPresent, setLocalNavPresent] = useState(true);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     const check = () => {
       setLocalNavPresent(Boolean(document.querySelector(".sv-mobile-nav-wrap")));
     };
@@ -38,7 +39,7 @@ export default function GlobalDashboardNav() {
     };
   }, [pathname]);
 
-  const shouldShow = useMemo(() => isDashboardPath(pathname) && !localNavPresent, [pathname, localNavPresent]);
+  const shouldShow = useMemo(() => mounted && isDashboardPath(pathname) && !localNavPresent, [mounted, pathname, localNavPresent]);
 
   if (!shouldShow) return null;
 
