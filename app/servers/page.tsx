@@ -26,12 +26,9 @@ export default async function ServersPage() {
       activeStep="servers"
       eyebrow="Step 1 of 3"
       title="Choose your server"
-      description="Pick the Discord server you can manage. Dank Shield will load tickets, forms, categories, and settings for that server only."
+      description="This page only handles server selection and bot installation. After one server is selected, Home becomes the live dashboard for that server."
       actions={
-        <>
-          <Link href="/" className="button primary">Dashboard</Link>
-          <Link href="/auth-status" className="button ghost">Auth Status</Link>
-        </>
+        <Link href="/" className="button ghost">Back to Home</Link>
       }
     >
       <ServerSelector />
