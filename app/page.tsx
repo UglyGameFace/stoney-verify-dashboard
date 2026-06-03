@@ -309,7 +309,7 @@ async function fetchDashboardJson(pathname: string, fallbackData: DashboardPaylo
   }
 }
 
-function StaffQuickToolsCard({ hasSelectedGuild }: { hasSelectedGuild: boolean }) {
+function StaffQuickToolsCard() {
   return (
     <div
       className="card staff-quick-tools-card"
@@ -324,26 +324,45 @@ function StaffQuickToolsCard({ hasSelectedGuild }: { hasSelectedGuild: boolean }
           <div className="muted" style={{ marginBottom: 8 }}>Staff Tools</div>
           <h2 style={{ margin: 0 }}>Server control center</h2>
           <p className="muted" style={{ marginTop: 8, maxWidth: 720 }}>
-            {hasSelectedGuild
-              ? "Manage the selected server without mixing tickets, categories, forms, activity, or member data across servers."
-              : "Choose one Discord server first. Categories, forms, tickets, activity, and member tools unlock after the dashboard has a server context."}
+            Manage the selected server without mixing tickets, categories, forms, activity, or member data across servers.
           </p>
         </div>
         <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
-          <Link href="/servers" className="button primary" style={{ width: "auto" }}>
-            {hasSelectedGuild ? "Change Server" : "Choose Server"}
-          </Link>
-          {hasSelectedGuild ? (
-            <>
-              <Link href="/ticket-categories" className="button ghost" style={{ width: "auto" }}>Categories</Link>
-              <Link href="/ticket-forms" className="button ghost" style={{ width: "auto" }}>Forms</Link>
-            </>
-          ) : (
-            <Link href="/auth-status" className="button ghost" style={{ width: "auto" }}>Check Access</Link>
-          )}
+          <Link href="/servers" className="button ghost" style={{ width: "auto" }}>Change Server</Link>
+          <Link href="/ticket-categories" className="button ghost" style={{ width: "auto" }}>Categories</Link>
+          <Link href="/ticket-forms" className="button ghost" style={{ width: "auto" }}>Forms</Link>
         </div>
       </div>
     </div>
+  );
+}
+
+function DashboardLockedHome() {
+  return (
+    <section className="card dashboard-locked-home" aria-label="Dashboard locked until server selection">
+      <div className="muted dashboard-locked-eyebrow">Dashboard</div>
+      <h1>Pick a server before the dashboard loads</h1>
+      <p className="muted">
+        Home is the live control room. It will stay clean until a server is selected, so it does not pretend to show tickets, forms, members, or activity from the wrong place.
+      </p>
+      <div className="dashboard-locked-actions">
+        <Link href="/servers" className="button primary">Go to Servers</Link>
+      </div>
+      <div className="dashboard-locked-grid">
+        <div>
+          <strong>Home</strong>
+          <span>Live tickets, activity, members, and staff tools after selection.</span>
+        </div>
+        <div>
+          <strong>Servers</strong>
+          <span>Only place to pick or invite the bot into a Discord server.</span>
+        </div>
+        <div>
+          <strong>Account</strong>
+          <span>Discord session, selected server, and reset-login controls.</span>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -370,20 +389,24 @@ export default async function HomePage() {
   const hasSelectedGuild = Boolean(guildId);
 
   if (session?.isStaff) {
-    const staffData = hasSelectedGuild
-      ? await fetchDashboardJson("/api/staff/dashboard", buildFallbackStaffData(guildId))
-      : buildFallbackStaffData("");
+    if (!hasSelectedGuild) {
+      return (
+        <StaffShell>
+          <DashboardLockedHome />
+        </StaffShell>
+      );
+    }
+
+    const staffData = await fetchDashboardJson("/api/staff/dashboard", buildFallbackStaffData(guildId));
 
     return (
       <StaffShell>
-        <StaffQuickToolsCard hasSelectedGuild={hasSelectedGuild} />
+        <StaffQuickToolsCard />
         <SetupLaunchChecklist data={staffData} selectedGuildId={guildId} />
-        {hasSelectedGuild ? (
-          <DashboardClient
-            initialData={staffData}
-            staffName={session?.user?.username || session?.discordUser?.username || env?.defaultStaffName || "Staff"}
-          />
-        ) : null}
+        <DashboardClient
+          initialData={staffData}
+          staffName={session?.user?.username || session?.discordUser?.username || env?.defaultStaffName || "Staff"}
+        />
       </StaffShell>
     );
   }
