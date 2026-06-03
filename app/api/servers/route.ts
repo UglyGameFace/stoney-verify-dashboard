@@ -6,6 +6,7 @@ import {
   getSelectedGuildId,
   setSelectedGuildCookie,
 } from "@/lib/guild-selection";
+import { createServerSupabase } from "@/lib/supabase-server";
 import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +15,7 @@ export const revalidate = 0;
 const ACCESS_COOKIE = "discord_access_token";
 const MANAGE_GUILD = BigInt(1 << 5);
 const ADMINISTRATOR = BigInt(1 << 3);
+const DEFAULT_BOT_INVITE_PERMISSIONS = "8";
 
 type DiscordUserGuild = {
   id?: string | null;
@@ -27,6 +29,12 @@ type BotGuild = {
   id?: string | null;
   name?: string | null;
   icon?: string | null;
+};
+
+type BotGuildLookup = {
+  ok: boolean;
+  error: string | null;
+  guilds: Map<string, BotGuild>;
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -52,13 +60,83 @@ function hasManageGuildPermission(guild: DiscordUserGuild): boolean {
   }
 }
 
-async function fetchBotGuilds(): Promise<Map<string, BotGuild>> {
+function buildBotInviteUrl(guildId: string): string | null {
+  const clientId = normalizeString(env.discordClientId || process.env.NEXT_PUBLIC_DISCORD_CLIENT_ID);
+  if (!clientId) return null;
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    permissions: normalizeString(process.env.DISCORD_BOT_INVITE_PERMISSIONS) || DEFAULT_BOT_INVITE_PERMISSIONS,
+    scope: "bot applications.commands",
+  });
+
+  if (guildId) {
+    params.set("guild_id", guildId);
+    params.set("disable_guild_select", "true");
+  }
+
+  return `https://discord.com/oauth2/authorize?${params.toString()}`;
+}
+
+async function fetchBotGuilds(): Promise<BotGuildLookup> {
+  if (!normalizeString(env.discordToken)) {
+    return {
+      ok: false,
+      error: "Dashboard bot token is missing, so bot installation could not be verified from Discord.",
+      guilds: new Map(),
+    };
+  }
+
   try {
     const rows = (await discordBotFetch("/users/@me/guilds")) as BotGuild[];
-    return new Map((Array.isArray(rows) ? rows : []).map((guild) => [normalizeString(guild.id), guild]));
-  } catch {
-    return new Map();
+    const guilds = new Map(
+      (Array.isArray(rows) ? rows : [])
+        .map((guild) => [normalizeString(guild.id), guild] as const)
+        .filter(([id]) => Boolean(id))
+    );
+    return { ok: true, error: null, guilds };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Bot guild check failed.",
+      guilds: new Map(),
+    };
   }
+}
+
+async function fetchKnownDashboardGuildIds(guildIds: string[]): Promise<Set<string>> {
+  const ids = guildIds.map(normalizeString).filter(Boolean);
+  const found = new Set<string>();
+  if (!ids.length) return found;
+
+  try {
+    const supabase = createServerSupabase();
+    const tables = ["guild_members", "guild_roles", "ticket_categories", "tickets", "activity_feed_events"];
+
+    await Promise.all(
+      tables.map(async (table) => {
+        try {
+          const response = await supabase
+            .from(table)
+            .select("guild_id")
+            .in("guild_id", ids)
+            .limit(ids.length);
+
+          const rows = Array.isArray(response?.data) ? response.data : [];
+          for (const row of rows) {
+            const id = normalizeString(row?.guild_id);
+            if (id) found.add(id);
+          }
+        } catch {
+          // Some deployments do not have every table yet. Other tables can still prove bot presence.
+        }
+      })
+    );
+  } catch {
+    // If Supabase is not available, Discord bot membership remains the source of truth.
+  }
+
+  return found;
 }
 
 function buildJsonResponse(payload: JsonRecord, status = 200) {
@@ -70,6 +148,20 @@ function buildJsonResponse(payload: JsonRecord, status = 200) {
   });
 }
 
+function resolveInstallState(guildId: string, botLookup: BotGuildLookup, knownDashboardGuildIds: Set<string>): "installed" | "missing" | "unknown" {
+  const defaultGuildId = normalizeString(env.guildId || env.discordGuildId);
+
+  if (botLookup.guilds.has(guildId)) return "installed";
+  if (knownDashboardGuildIds.has(guildId)) return "installed";
+
+  // If Discord's bot-guild lookup is unavailable, the configured default guild is very likely
+  // the live bot server. Do not incorrectly show "Bot not installed" for it.
+  if (!botLookup.ok && defaultGuildId && defaultGuildId === guildId) return "installed";
+
+  if (!botLookup.ok) return "unknown";
+  return "missing";
+}
+
 export async function GET() {
   const session = await getSession();
   const accessToken = normalizeString(cookies().get(ACCESS_COOKIE)?.value);
@@ -79,19 +171,24 @@ export async function GET() {
   }
 
   try {
-    const [userGuildsRaw, botGuilds] = await Promise.all([
+    const [userGuildsRaw, botLookup] = await Promise.all([
       discordUserFetch("/users/@me/guilds", accessToken) as Promise<DiscordUserGuild[]>,
       fetchBotGuilds(),
     ]);
 
     const userGuilds = Array.isArray(userGuildsRaw) ? userGuildsRaw : [];
     const selectedGuildId = getSelectedGuildId();
-    const manageable = userGuilds
-      .filter(hasManageGuildPermission)
+    const manageableSource = userGuilds.filter(hasManageGuildPermission);
+    const knownDashboardGuildIds = await fetchKnownDashboardGuildIds(
+      manageableSource.map((guild) => normalizeString(guild.id))
+    );
+
+    const manageable = manageableSource
       .map((guild) => {
         const id = normalizeString(guild.id);
-        const botGuild = botGuilds.get(id);
-        const installed = Boolean(botGuild);
+        const botGuild = botLookup.guilds.get(id);
+        const installState = resolveInstallState(id, botLookup, knownDashboardGuildIds);
+        const installed = installState === "installed";
         const name = normalizeString(botGuild?.name || guild.name || "Unknown Server");
         const icon = normalizeString(botGuild?.icon || guild.icon || "");
         return {
@@ -102,6 +199,10 @@ export async function GET() {
           owner: Boolean(guild.owner),
           can_manage: true,
           bot_installed: installed,
+          bot_install_state: installState,
+          bot_check_ok: botLookup.ok,
+          bot_check_error: botLookup.error,
+          bot_invite_url: installed ? null : buildBotInviteUrl(id),
           selected: selectedGuildId === id,
           is_default_env_guild: normalizeString(env.guildId || env.discordGuildId) === id,
         };
@@ -119,6 +220,8 @@ export async function GET() {
       servers: manageable,
       installedCount: manageable.filter((guild) => guild.bot_installed).length,
       manageableCount: manageable.length,
+      botCheckOk: botLookup.ok,
+      botCheckError: botLookup.error,
     });
   } catch (error) {
     return buildJsonResponse(
@@ -145,9 +248,10 @@ export async function POST(request: Request) {
       return buildJsonResponse({ error: "Server id is required." }, 400);
     }
 
-    const [userGuildsRaw, botGuilds] = await Promise.all([
+    const [userGuildsRaw, botLookup, knownDashboardGuildIds] = await Promise.all([
       discordUserFetch("/users/@me/guilds", accessToken) as Promise<DiscordUserGuild[]>,
       fetchBotGuilds(),
+      fetchKnownDashboardGuildIds([requestedGuildId]),
     ]);
 
     const userGuild = (Array.isArray(userGuildsRaw) ? userGuildsRaw : []).find(
@@ -161,10 +265,20 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!botGuilds.has(requestedGuildId)) {
+    const installState = resolveInstallState(requestedGuildId, botLookup, knownDashboardGuildIds);
+    if (installState !== "installed") {
+      const inviteUrl = buildBotInviteUrl(requestedGuildId);
       return buildJsonResponse(
-        { error: "Dank Shield is not installed in that server yet." },
-        409
+        {
+          error:
+            installState === "unknown"
+              ? "The dashboard could not verify bot access for that server. Refresh, then use the invite link if needed."
+              : "Dank Shield is not installed in that server yet.",
+          bot_install_state: installState,
+          bot_invite_url: inviteUrl,
+          bot_check_error: botLookup.error,
+        },
+        installState === "unknown" ? 503 : 409
       );
     }
 
