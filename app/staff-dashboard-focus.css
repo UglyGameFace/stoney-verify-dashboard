@@ -1,0 +1,181 @@
+/*
+  Staff Dashboard Focus Layer
+  ---------------------------
+  Keeps every staff feature reachable, but reduces the visual pile-up on the
+  default dashboard by making deep logs/signals feel secondary.
+*/
+
+.dashboard-page-shell {
+  container-type: inline-size;
+}
+
+.dashboard-home-grid {
+  align-items: start;
+}
+
+/* The first three home widgets are the normal operator path. */
+.dashboard-home-grid > div:nth-child(-n + 3) {
+  position: relative;
+}
+
+/* Deep intelligence/log widgets should feel secondary, not like the main task. */
+.dashboard-home-grid > div:nth-child(n + 4) .dashboard-section-shell {
+  border-color: color-mix(in srgb, var(--panel-border, rgba(255,255,255,0.16)) 70%, transparent) !important;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--accent-2, #78ddff) 5%, transparent), transparent 30%),
+    color-mix(in srgb, var(--panel-bg, rgba(17,31,43,0.96)) 88%, transparent) !important;
+}
+
+.dashboard-home-grid > div:nth-child(n + 4) .panel-header {
+  min-height: 54px;
+}
+
+.dashboard-home-grid > div:nth-child(n + 4) .panel-header > div:first-child > div:first-child {
+  font-size: 14px !important;
+}
+
+.dashboard-home-grid > div:nth-child(n + 4) .panel-header .muted {
+  font-size: 12px !important;
+  line-height: 1.35 !important;
+}
+
+/* Activity is useful, but it should not swallow the whole dashboard home. */
+.dashboard-home-grid > div:nth-child(4) .dashboard-section-body {
+  max-height: min(520px, 62vh);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.dashboard-home-grid > div:nth-child(4) .dashboard-section-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.dashboard-home-grid > div:nth-child(4) .dashboard-section-body::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--accent, #6dff9d) 26%, transparent);
+  border-radius: 999px;
+}
+
+/* Make the staff home visually explain itself. */
+.dashboard-home-grid::before {
+  content: "Today\2019s command path";
+  grid-column: 1 / -1;
+  display: block;
+  color: var(--text-muted, #c7ddcf);
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 2px 0 -4px;
+}
+
+.dashboard-home-grid > div:nth-child(4)::before {
+  content: "Deep logs and signals";
+  display: block;
+  color: var(--text-muted, #c7ddcf);
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 6px 0 10px;
+}
+
+/* Buttons should not look disabled just because the site is in dark mode. */
+.dashboard-page-shell .button.ghost,
+.dashboard-page-shell button.button.ghost,
+.dashboard-page-shell a.button.ghost {
+  background: color-mix(in srgb, var(--panel-bg-soft, rgba(255,255,255,0.075)) 72%, transparent) !important;
+  border-color: color-mix(in srgb, var(--panel-border, rgba(255,255,255,0.16)) 90%, transparent) !important;
+}
+
+.dashboard-page-shell .button.ghost:hover,
+.dashboard-page-shell button.button.ghost:hover,
+.dashboard-page-shell a.button.ghost:hover {
+  border-color: color-mix(in srgb, var(--accent, #6dff9d) 42%, transparent) !important;
+}
+
+/* Workspace action buttons now point users to the real split: easy appearance vs advanced customization. */
+.mobile-workspace-actions,
+.desktop-workspace-cta-row {
+  align-items: stretch;
+}
+
+.mobile-workspace-actions .button,
+.desktop-workspace-cta-row .button {
+  font-weight: 950 !important;
+}
+
+/* The modal already says Advanced Customization; make the opener visually read as advanced. */
+.mobile-workspace-actions .button.ghost:first-child,
+.desktop-workspace-cta-row .button.ghost:first-child {
+  border-style: dashed !important;
+}
+
+/* Reduce accidental panel pile-up on mobile/tablet. */
+@media (max-width: 1023px) {
+  .dashboard-page-shell {
+    padding-top: 4px;
+  }
+
+  .mobile-workspace-bar {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .mobile-workspace-bar::after {
+    content: "Use bottom tabs to switch workspaces";
+    display: block;
+    margin-top: 10px;
+    color: var(--text-muted, #c7ddcf);
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .dashboard-home-grid {
+    display: grid;
+    gap: 12px !important;
+  }
+
+  .dashboard-home-grid > div:nth-child(n + 4) .dashboard-section-shell {
+    border-radius: 18px !important;
+  }
+
+  .dashboard-home-grid > div:nth-child(4) .dashboard-section-body {
+    max-height: 420px;
+  }
+
+  .metrics-grid,
+  .intelligence-grid,
+  .detail-grid-3 {
+    grid-template-columns: 1fr !important;
+  }
+
+  .mobile-ticket-shell,
+  .dashboard-section-shell,
+  .compact-panel {
+    overflow: hidden;
+  }
+}
+
+@media (max-width: 720px) {
+  .dashboard-home-grid::before,
+  .dashboard-home-grid > div:nth-child(4)::before {
+    margin-left: 2px;
+  }
+
+  .dashboard-home-grid > div:nth-child(4) .dashboard-section-body {
+    max-height: 360px;
+  }
+
+  .mobile-workspace-actions .button:first-child::after {
+    content: "Advanced";
+    display: block;
+    font-size: 10px;
+    opacity: 0.72;
+    margin-top: 2px;
+  }
+}
+
+html[data-dashboard-appearance="light"] .dashboard-home-grid > div:nth-child(n + 4) .dashboard-section-shell {
+  background: rgba(255,255,255,0.84) !important;
+  border-color: rgba(15,23,42,0.12) !important;
+}
