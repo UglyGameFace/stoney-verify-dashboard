@@ -35,12 +35,6 @@ type SetupLaunchChecklistProps = {
   selectedGuildId?: string | null;
 };
 
-const SETUP_NAV_LINKS = [
-  { key: "servers", label: "Servers", href: "/servers" },
-  { key: "categories", label: "Categories", href: "/ticket-categories" },
-  { key: "forms", label: "Forms", href: "/ticket-forms" },
-];
-
 function safeArray<T = unknown>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
@@ -108,46 +102,52 @@ function fallbackChecks(data: DashboardData, selectedGuildId?: string | null): S
   const guildId = getSelectedGuild(data, selectedGuildId);
   const categoryCount = countRows(data, "categories");
   const ticketCount = countRows(data, "tickets");
+
+  if (!guildId) {
+    return [
+      {
+        key: "server_selected",
+        label: "Choose Server",
+        description: "Pick the Discord server this dashboard should manage.",
+        ok: false,
+        severity: "required",
+        action_label: "Choose Server",
+        action_href: "/servers",
+        detail: "No selected server",
+      },
+    ];
+  }
+
   return [
     {
       key: "server_selected",
-      label: "Choose Server",
-      description: guildId ? "Dashboard context is active." : "Pick the Discord server you want to manage.",
-      ok: Boolean(guildId),
+      label: "Server Selected",
+      description: "Dashboard context is active for one Discord server.",
+      ok: true,
       severity: "required",
-      action_label: guildId ? "Change" : "Choose",
+      action_label: "Change Server",
       action_href: "/servers",
-      detail: guildId || "No selected server",
+      detail: guildId,
     },
     {
       key: "categories_created",
-      label: "Create Categories",
+      label: "Ticket Categories",
       description: categoryCount ? `${categoryCount} category${categoryCount === 1 ? "" : "ies"} found.` : "Add support, verification, appeals, and service categories.",
       ok: categoryCount > 0,
       severity: "required",
-      action_label: categoryCount ? "Tune" : "Create",
+      action_label: categoryCount ? "Tune Categories" : "Create Categories",
       action_href: "/ticket-categories",
       detail: `${categoryCount} categories`,
     },
     {
       key: "forms_configured",
-      label: "Configure Forms",
+      label: "Forms / Smart Templates",
       description: "Use smart defaults or add custom questions per category.",
       ok: categoryCount > 0,
       severity: "recommended",
-      action_label: "Configure",
+      action_label: "Configure Forms",
       action_href: "/ticket-forms",
       detail: categoryCount ? "Smart defaults available" : "Create categories first",
-    },
-    {
-      key: "panel_activity",
-      label: "Post Discord Panel",
-      description: "Run the panel command inside the server channel where members should open tickets.",
-      ok: false,
-      severity: "recommended",
-      action_label: "Copy steps",
-      action_href: "#panel-command",
-      detail: "No live health result yet",
     },
     {
       key: "test_ticket",
@@ -155,73 +155,73 @@ function fallbackChecks(data: DashboardData, selectedGuildId?: string | null): S
       description: "Open a test ticket, confirm category routing, then close/reopen/delete from the dashboard.",
       ok: ticketCount > 0,
       severity: "required",
-      action_label: "Test",
+      action_label: "Test Ticket Flow",
       action_href: "/#tickets",
       detail: `${ticketCount} tickets`,
     },
   ];
 }
 
-function compactChecks(checks: SetupCheck[]): SetupCheck[] {
+function compactChecks(checks: SetupCheck[], hasSelectedGuild: boolean): SetupCheck[] {
+  if (!hasSelectedGuild) return checks.filter((check) => normalizeString(check.key) === "server_selected").slice(0, 1);
+
   const preferred = [
     "server_selected",
     "categories_created",
+    "categories_named",
+    "default_category",
     "forms_configured",
-    "panel_activity",
     "test_ticket",
     "command_queue_clear",
   ];
   const byKey = new Map(checks.map((check) => [normalizeString(check.key), check]));
   const ordered = preferred.map((key) => byKey.get(key)).filter(Boolean) as SetupCheck[];
-  if (ordered.length >= 5) return ordered.slice(0, 6);
+  if (ordered.length >= 4) return ordered.slice(0, 6);
   return checks.slice(0, 6);
 }
 
-function resolveActiveSetupHref(nextFix: SetupCheck | null, checks: SetupCheck[]): string {
-  const nextHref = normalizeString(nextFix?.action_href);
-  if (nextHref.startsWith("/servers")) return "/servers";
-  if (nextHref.startsWith("/ticket-categories")) return "/ticket-categories";
-  if (nextHref.startsWith("/ticket-forms")) return "/ticket-forms";
+function getPanelReadiness(checks: SetupCheck[]): boolean {
+  const categoryCheck = checks.find((check) => normalizeString(check.key) === "categories_created");
+  const formCheck = checks.find((check) => normalizeString(check.key) === "forms_configured");
+  return Boolean(categoryCheck?.ok) && Boolean(formCheck?.ok);
+}
 
-  const firstUnfinished = checks.find((check) => !check.ok);
-  const fallbackHref = normalizeString(firstUnfinished?.action_href);
-  if (fallbackHref.startsWith("/servers")) return "/servers";
-  if (fallbackHref.startsWith("/ticket-categories")) return "/ticket-categories";
-  if (fallbackHref.startsWith("/ticket-forms")) return "/ticket-forms";
-
-  return "/servers";
+function getSetupStage(hasSelectedGuild: boolean, nextFix: SetupCheck | null): string {
+  if (!hasSelectedGuild) return "Step 1 of 3";
+  const href = normalizeString(nextFix?.action_href);
+  if (href.startsWith("/ticket-categories")) return "Step 2 of 3";
+  if (href.startsWith("/ticket-forms")) return "Step 3 of 3";
+  return "Setup Health";
 }
 
 export default async function SetupLaunchChecklist({ data, selectedGuildId }: SetupLaunchChecklistProps) {
   const health = await loadSetupHealth();
+  const guildId = normalizeString(selectedGuildId || health?.selectedGuildId || getSelectedGuild(data, selectedGuildId));
+  const hasSelectedGuild = Boolean(guildId);
   const checks = safeArray<SetupCheck>(health?.checks).length ? safeArray<SetupCheck>(health?.checks) : fallbackChecks(data, selectedGuildId);
-  const visibleChecks = compactChecks(checks);
+  const visibleChecks = compactChecks(checks, hasSelectedGuild);
   const passed = Number(health?.passed ?? checks.filter((check) => Boolean(check.ok)).length);
   const total = Number(health?.total ?? checks.length);
   const score = Number(health?.score ?? (total ? Math.round((passed / total) * 100) : 0));
   const ready = Boolean(health?.ready_for_launch);
   const nextFix = health?.next_fix || checks.find((check) => !check.ok && check.severity === "required") || checks.find((check) => !check.ok) || null;
-  const activeSetupHref = resolveActiveSetupHref(nextFix, checks);
+  const nextFixHref = normalizeString(nextFix?.action_href) || (hasSelectedGuild ? "/ticket-categories" : "/servers");
+  const nextFixLabel = normalizeString(nextFix?.action_label) || (hasSelectedGuild ? "Fix Next" : "Choose Server");
+  const canShowPanelCommands = hasSelectedGuild && getPanelReadiness(checks);
 
   return (
-    <section className="card launch-card" aria-label="Dank Shield setup checklist">
+    <section className={`card launch-card ${hasSelectedGuild ? "server-selected" : "server-required"}`} aria-label="Dank Shield setup checklist">
       <div className="launch-head">
         <div>
-          <div className="muted launch-eyebrow">Live Setup Health</div>
-          <h2 className="launch-title">{ready ? "Ready to launch" : "Finish setup without guessing"}</h2>
+          <div className="muted launch-eyebrow">{getSetupStage(hasSelectedGuild, nextFix)}</div>
+          <h2 className="launch-title">
+            {hasSelectedGuild ? (ready ? "Ready to launch" : "Finish setup without guessing") : "Choose a server to continue"}
+          </h2>
           <p className="muted launch-copy">
-            Dank Shield checks the selected server, categories, forms, ticket flow, command queue, and activity data so staff know what to fix next.
+            {hasSelectedGuild
+              ? "Dank Shield checks categories, forms, ticket flow, command queue, and activity data for the selected server."
+              : "Staff tools stay locked until one Discord server is selected. That prevents tickets, forms, activity, and member data from mixing across servers."}
           </p>
-        </div>
-        <div className="launch-actions" aria-label="Setup shortcuts">
-          {SETUP_NAV_LINKS.map((item) => {
-            const active = activeSetupHref === item.href;
-            return (
-              <Link key={item.key} href={item.href} className={active ? "button primary" : "button ghost"} aria-current={active ? "step" : undefined}>
-                {item.label}
-              </Link>
-            );
-          })}
         </div>
       </div>
 
@@ -236,56 +236,59 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
         </div>
         <div>
           <span>Launch Status</span>
-          <strong>{ready ? "Ready" : "Needs work"}</strong>
+          <strong>{hasSelectedGuild ? (ready ? "Ready" : "Needs work") : "Server required"}</strong>
         </div>
       </div>
 
-      {nextFix ? (
-        <div className="setup-next-fix">
+      <div className="setup-next-fix">
+        <div>
+          <div className="muted launch-eyebrow">Next Fix</div>
+          <strong>{normalizeString(nextFix?.label) || (hasSelectedGuild ? "Review setup" : "Choose Server")}</strong>
+          <p>{normalizeString(nextFix?.description) || normalizeString(nextFix?.detail) || "Open the setup tools and review this server."}</p>
+        </div>
+        <Link href={nextFixHref} className="button primary">
+          {nextFixLabel}
+        </Link>
+      </div>
+
+      <details className="setup-check-details" open={hasSelectedGuild}>
+        <summary>{hasSelectedGuild ? "View setup checks" : "Why this is required"}</summary>
+        <div className="launch-grid">
+          {visibleChecks.map((check, index) => {
+            const done = Boolean(check.ok);
+            const label = normalizeString(check.label) || `Check ${index + 1}`;
+            const href = normalizeString(check.action_href) || "/";
+            return (
+              <Link key={normalizeString(check.key) || label} href={href} className={`launch-step ${done ? "done" : "todo"}`}>
+                <div className="launch-step-top">
+                  <StepBadge done={done} />
+                  <span className="launch-step-number">{normalizeString(check.severity) || "check"}</span>
+                </div>
+                <strong>{label}</strong>
+                <span className="launch-step-helper">{normalizeString(check.description) || normalizeString(check.detail) || "Review this setup item."}</span>
+                {check.detail ? <span className="launch-step-helper detail">{normalizeString(check.detail)}</span> : null}
+                <span className="launch-step-cta">{normalizeString(check.action_label) || "Open"} →</span>
+              </Link>
+            );
+          })}
+        </div>
+      </details>
+
+      {canShowPanelCommands ? (
+        <div id="panel-command" className="panel-command-box">
           <div>
-            <div className="muted launch-eyebrow">Next Fix</div>
-            <strong>{normalizeString(nextFix.label) || "Review setup"}</strong>
-            <p>{normalizeString(nextFix.description) || normalizeString(nextFix.detail) || "Open the setup tools and review this server."}</p>
+            <div className="muted launch-eyebrow">Discord Panel</div>
+            <h3 className="panel-command-title">Publish the member-facing ticket panel</h3>
+            <p className="muted launch-copy">
+              Go to the Discord channel where members should open tickets, then run the panel command. Use the doctor command after posting to verify setup health.
+            </p>
           </div>
-          <Link href={normalizeString(nextFix.action_href) || "/servers"} className="button primary">
-            {normalizeString(nextFix.action_label) || "Fix Now"}
-          </Link>
+          <div className="command-stack">
+            <code>/ticket-panel post</code>
+            <code>/ticket-panel doctor</code>
+          </div>
         </div>
       ) : null}
-
-      <div className="launch-grid">
-        {visibleChecks.map((check, index) => {
-          const done = Boolean(check.ok);
-          const label = normalizeString(check.label) || `Check ${index + 1}`;
-          const href = normalizeString(check.action_href) || "/";
-          return (
-            <Link key={normalizeString(check.key) || label} href={href} className={`launch-step ${done ? "done" : "todo"}`}>
-              <div className="launch-step-top">
-                <StepBadge done={done} />
-                <span className="launch-step-number">{normalizeString(check.severity) || "check"}</span>
-              </div>
-              <strong>{label}</strong>
-              <span className="launch-step-helper">{normalizeString(check.description) || normalizeString(check.detail) || "Review this setup item."}</span>
-              {check.detail ? <span className="launch-step-helper detail">{normalizeString(check.detail)}</span> : null}
-              <span className="launch-step-cta">{normalizeString(check.action_label) || "Open"} →</span>
-            </Link>
-          );
-        })}
-      </div>
-
-      <div id="panel-command" className="panel-command-box">
-        <div>
-          <div className="muted launch-eyebrow">Discord Panel</div>
-          <h3 className="panel-command-title">Publish the member-facing ticket panel</h3>
-          <p className="muted launch-copy">
-            Go to the Discord channel where members should open tickets, then run the panel command. Use the doctor command after posting to verify setup health.
-          </p>
-        </div>
-        <div className="command-stack">
-          <code>/ticket-panel post</code>
-          <code>/ticket-panel doctor</code>
-        </div>
-      </div>
     </section>
   );
 }
