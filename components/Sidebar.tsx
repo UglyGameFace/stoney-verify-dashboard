@@ -12,6 +12,7 @@ type SidebarLink = {
   helper?: string;
   icon: string;
   match: "exact" | "home-section" | "startsWith" | "ticket-detail";
+  requiresServer?: boolean;
 };
 
 type LinkGroup = {
@@ -29,23 +30,25 @@ type ServerRow = {
 type ServersPayload = {
   selectedGuildId?: string;
   servers?: ServerRow[];
+  installedCount?: number;
+  botCheckError?: string | null;
 };
 
 const groups: LinkGroup[] = [
   {
     title: "Command Center",
     links: [
-      { href: "/", label: "Dashboard", helper: "Overview + live queues", icon: "🏠", match: "exact" },
-      { href: "/#tickets", label: "Tickets", helper: "Open, claim, close", icon: "🎫", match: "ticket-detail" },
-      { href: "/#members", label: "Members", helper: "Search + history", icon: "👥", match: "home-section" },
+      { href: "/", label: "Dashboard", helper: "Live control room", icon: "🏠", match: "exact" },
+      { href: "/#tickets", label: "Tickets", helper: "Open, claim, close", icon: "🎫", match: "ticket-detail", requiresServer: true },
+      { href: "/#members", label: "Members", helper: "Search + history", icon: "👥", match: "home-section", requiresServer: true },
     ],
   },
   {
     title: "Setup Flow",
     links: [
-      { href: "/servers", label: "Servers", helper: "Pick active server", icon: "🛰️", match: "startsWith" },
-      { href: "/ticket-categories", label: "Categories", helper: "Ticket routing", icon: "🧩", match: "startsWith" },
-      { href: "/ticket-forms", label: "Forms", helper: "Questions + intake", icon: "📝", match: "startsWith" },
+      { href: "/servers", label: "Servers", helper: "Select or invite bot", icon: "🛰️", match: "startsWith" },
+      { href: "/ticket-categories", label: "Categories", helper: "Ticket routing", icon: "🧩", match: "startsWith", requiresServer: true },
+      { href: "/ticket-forms", label: "Forms", helper: "Questions + intake", icon: "📝", match: "startsWith", requiresServer: true },
     ],
   },
 ];
@@ -74,6 +77,8 @@ export default function Sidebar() {
   const pathname = usePathname();
   const [selectedServerName, setSelectedServerName] = useState("");
   const [installedCount, setInstalledCount] = useState<number | null>(null);
+  const [hasSelectedServer, setHasSelectedServer] = useState(false);
+  const [botCheckError, setBotCheckError] = useState("");
   const appName = normalizeString(env.appName) || "Dank Shield Dashboard";
 
   useEffect(() => {
@@ -92,7 +97,9 @@ export default function Sidebar() {
         const selectedId = normalizeString(json.selectedGuildId);
         const selected = rows.find((row) => row.selected || row.id === selectedId) || null;
         setSelectedServerName(normalizeString(selected?.name));
-        setInstalledCount(rows.filter((row) => row.bot_installed).length);
+        setHasSelectedServer(Boolean(selectedId || selected));
+        setInstalledCount(Number(json.installedCount ?? rows.filter((row) => row.bot_installed).length));
+        setBotCheckError(normalizeString(json.botCheckError));
       } catch {
         if (!active) return;
       }
@@ -108,8 +115,8 @@ export default function Sidebar() {
     if (pathname === "/servers") return "Step 1: Server";
     if (pathname.startsWith("/ticket-categories")) return "Step 2: Categories";
     if (pathname.startsWith("/ticket-forms")) return "Step 3: Forms";
-    return "Ready";
-  }, [pathname]);
+    return hasSelectedServer ? "Ready" : "Server required";
+  }, [pathname, hasSelectedServer]);
 
   return (
     <aside className="sidebar stoner-sidebar">
@@ -124,49 +131,54 @@ export default function Sidebar() {
 
         <div className="sidebar-context-card">
           <div className="sidebar-context-label">Selected Server</div>
-          <div className="sidebar-context-name">{selectedServerName || "Choose a server"}</div>
+          <div className="sidebar-context-name">{selectedServerName || "None selected"}</div>
           <div className="sidebar-context-meta">
-            {installedCount === null ? "Checking bot access…" : `${installedCount} installed server${installedCount === 1 ? "" : "s"} available`}
+            {installedCount === null ? "Checking bot access…" : `${installedCount} ready server${installedCount === 1 ? "" : "s"} available`}
           </div>
+          {botCheckError ? <div className="sidebar-context-warning">Bot check warning. Open Servers and refresh.</div> : null}
           <Link href="/servers" className="button ghost sidebar-mini-button">
-            Change Server
+            {hasSelectedServer ? "Change Server" : "Choose Server"}
           </Link>
         </div>
 
         <QuickAppearancePanel />
 
         <nav className="sidebar-nav" aria-label="Dashboard navigation">
-          {groups.map((group) => (
-            <div key={group.title} className="sidebar-group">
-              <div className="sidebar-group-title">{group.title}</div>
-              <div className="sidebar-group-links">
-                {group.links.map((item) => {
-                  const active = isLinkActive(pathname, item);
-                  return (
-                    <Link key={`${group.title}:${item.href}`} href={item.href} className={`sidebar-link ${active ? "active" : ""}`}>
-                      <span className="sidebar-link-icon" aria-hidden="true">{item.icon}</span>
-                      <span className="sidebar-link-copy">
-                        <span className="sidebar-link-label">{item.label}</span>
-                        {item.helper ? <span className="sidebar-link-helper">{item.helper}</span> : null}
-                      </span>
-                    </Link>
-                  );
-                })}
+          {groups.map((group) => {
+            const links = group.links.filter((item) => !item.requiresServer || hasSelectedServer);
+            if (!links.length) return null;
+            return (
+              <div key={group.title} className="sidebar-group">
+                <div className="sidebar-group-title">{group.title}</div>
+                <div className="sidebar-group-links">
+                  {links.map((item) => {
+                    const active = isLinkActive(pathname, item);
+                    return (
+                      <Link key={`${group.title}:${item.href}`} href={item.href} className={`sidebar-link ${active ? "active" : ""}`}>
+                        <span className="sidebar-link-icon" aria-hidden="true">{item.icon}</span>
+                        <span className="sidebar-link-copy">
+                          <span className="sidebar-link-label">{item.label}</span>
+                          {item.helper ? <span className="sidebar-link-helper">{item.helper}</span> : null}
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </nav>
 
         {isSetupPath(pathname) ? (
           <div className="sidebar-flow-card">
             <div className="sidebar-flow-title">Setup Progress</div>
             <div className="sidebar-flow-current">{setupStep}</div>
-            <div className="sidebar-flow-copy">Use Servers → Categories → Forms, then post your ticket panel in Discord.</div>
+            <div className="sidebar-flow-copy">Servers unlock dashboard data. Categories and forms unlock after a server is selected.</div>
           </div>
         ) : null}
 
         <div className="sidebar-bottom">
-          <Link href="/auth-status" className="button ghost sidebar-bottom-button">Auth Status</Link>
+          <Link href="/auth-status" className="button ghost sidebar-bottom-button">Account</Link>
           <Link href="/api/auth/logout" className="button ghost sidebar-bottom-button">Reset Login</Link>
         </div>
       </div>
@@ -223,11 +235,15 @@ export default function Sidebar() {
           overflow-wrap: anywhere;
         }
         .sidebar-context-meta,
-        .sidebar-flow-copy {
+        .sidebar-flow-copy,
+        .sidebar-context-warning {
           margin-top: 4px;
           color: var(--muted, #c7ddcf);
           font-size: 12px;
           line-height: 1.35;
+        }
+        .sidebar-context-warning {
+          color: #fde68a;
         }
         .sidebar-mini-button {
           margin-top: 10px;
