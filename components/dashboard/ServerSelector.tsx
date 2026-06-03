@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-
 type ServerRow = {
   id: string;
   name: string;
@@ -29,6 +28,29 @@ function normalizeString(value: unknown): string {
 
 function getServerInitial(name: string) {
   return normalizeString(name).slice(0, 1).toUpperCase() || "S";
+}
+
+function friendlyServerError(raw: unknown): string {
+  const text = normalizeString(raw);
+  const lower = text.toLowerCase();
+
+  if (!text) return "Failed to load servers. Please try again.";
+
+  if (lower.includes("429") || lower.includes("rate limit") || lower.includes("retry_after")) {
+    const retryMatch = text.match(/retry_after["']?\s*[:=]\s*([0-9.]+)/i);
+    const retryText = retryMatch?.[1] ? ` Wait about ${Math.ceil(Number(retryMatch[1])) || 1} second and refresh.` : " Wait a moment and refresh.";
+    return `Discord is rate limiting the server list right now.${retryText}`;
+  }
+
+  if (lower.includes("401") || lower.includes("unauthorized") || lower.includes("session")) {
+    return "Your Discord session is not active. Sign in again, then return to Servers.";
+  }
+
+  if (lower.includes("403") || lower.includes("forbidden")) {
+    return "Discord did not allow this server list request. Make sure you are signed into the right Discord account.";
+  }
+
+  return text.length > 180 ? `${text.slice(0, 180)}…` : text;
 }
 
 export default function ServerSelector() {
@@ -59,11 +81,11 @@ export default function ServerSelector() {
         headers: { "Cache-Control": "no-store" },
       });
       const json = (await res.json().catch(() => null)) as ServerResponse | null;
-      if (!res.ok || json?.error) throw new Error(json?.error || "Failed to load servers.");
+      if (!res.ok || json?.error) throw new Error(json?.error || `Server list request failed with status ${res.status}.`);
       setServers(Array.isArray(json?.servers) ? json.servers : []);
       setSelectedGuildId(normalizeString(json?.selectedGuildId));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load servers.");
+      setError(friendlyServerError(err instanceof Error ? err.message : err));
     } finally {
       setLoading(false);
     }
@@ -91,12 +113,12 @@ export default function ServerSelector() {
         body: JSON.stringify({ guild_id: server.id }),
       });
       const json = (await res.json().catch(() => null)) as ServerResponse | null;
-      if (!res.ok || json?.error) throw new Error(json?.error || "Failed to select server.");
+      if (!res.ok || json?.error) throw new Error(json?.error || `Failed to select server. Status ${res.status}.`);
       setSelectedGuildId(server.id);
       setServers((prev) => prev.map((row) => ({ ...row, selected: row.id === server.id })));
       setMessage(`${server.name} is selected. Dashboard tools will now use this server only.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to select server.");
+      setError(friendlyServerError(err instanceof Error ? err.message : err));
     } finally {
       setSavingId("");
     }
@@ -107,10 +129,10 @@ export default function ServerSelector() {
       <div className="card server-flow-card">
         <div className="server-flow-head">
           <div>
-            <div className="muted server-eyebrow">Step 1 of 2</div>
-            <h2 style={{ margin: 0 }}>Choose a server</h2>
+            <div className="muted server-eyebrow">Server Context</div>
+            <h2 style={{ margin: 0 }}>Available servers</h2>
             <div className="muted server-copy">
-              Pick the server you want to manage. Tickets, categories, forms, member data, and settings will load from the selected server only.
+              Pick one server before using staff tools. Only servers where your Discord account can manage settings are shown here.
             </div>
           </div>
           <button type="button" className="button ghost server-refresh" onClick={() => void loadServers()} disabled={loading || Boolean(savingId)}>
@@ -147,7 +169,7 @@ export default function ServerSelector() {
           </div>
         ) : null}
 
-        {error ? <div className="error-banner" style={{ marginTop: 12 }}>{error}</div> : null}
+        {error ? <div className="error-banner server-error" style={{ marginTop: 12 }}>{error}</div> : null}
         {message ? <div className="info-banner" style={{ marginTop: 12 }}>{message}</div> : null}
       </div>
 
@@ -192,8 +214,10 @@ export default function ServerSelector() {
           })}
         </div>
       ) : (
-        <div className="card empty-state">
-          No manageable servers were found. Make sure you are signed into the right Discord account and have Manage Server or Administrator permission.
+        <div className="card empty-state server-empty-state">
+          <strong>No manageable servers found.</strong>
+          <span>Make sure you are signed into the right Discord account and have Manage Server or Administrator permission.</span>
+          <span>If Discord is rate limiting requests, wait a moment and tap Refresh.</span>
         </div>
       )}
 
@@ -247,6 +271,10 @@ export default function ServerSelector() {
           display: block;
           color: var(--text-strong, #fff);
           overflow-wrap: anywhere;
+        }
+        .server-error {
+          overflow-wrap: anywhere;
+          line-height: 1.45;
         }
         .server-next-step {
           display: flex;
@@ -340,6 +368,15 @@ export default function ServerSelector() {
           color: #fff1c8;
           background: rgba(255,211,107,0.13);
           border-color: rgba(255,211,107,0.26);
+        }
+        .server-empty-state {
+          display: grid;
+          gap: 8px;
+          text-align: left;
+          line-height: 1.45;
+        }
+        .server-empty-state strong {
+          color: var(--text-strong, #fff);
         }
         @media (max-width: 720px) {
           .server-status-strip {
