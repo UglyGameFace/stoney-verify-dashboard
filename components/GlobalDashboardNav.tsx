@@ -14,6 +14,7 @@ const NAV_ITEMS = [
 
 function isDashboardPath(pathname: string): boolean {
   if (!pathname) return false;
+  if (pathname === "/") return false;
   if (pathname.startsWith("/api")) return false;
   if (pathname.startsWith("/auth/")) return false;
   return true;
