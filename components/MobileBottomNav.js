@@ -44,6 +44,18 @@ const TAB_META = {
       </svg>
     ),
   },
+  signals: {
+    label: "Signals",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 19h16" />
+        <path d="M6 16v-4" />
+        <path d="M12 16V7" />
+        <path d="M18 16v-7" />
+        <path d="M4.5 8.5 8 5l4 3 4-5 3.5 3.5" />
+      </svg>
+    ),
+  },
   categories: {
     label: "Categories",
     icon: (
@@ -85,6 +97,51 @@ function getActionLabel(action) {
   return normalizeText(action?.label) || "Action";
 }
 
+function uniqueTabs(tabs) {
+  const seen = new Set();
+  const out = [];
+  for (const tab of tabs) {
+    const key = normalizeText(tab).toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out;
+}
+
+function addSignalsJump(tabs) {
+  const raw = uniqueTabs(tabs);
+  if (!raw.includes("home") || raw.includes("signals") || raw.includes("activity")) return raw;
+
+  const membersIndex = raw.indexOf("members");
+  const ticketsIndex = raw.indexOf("tickets");
+  const insertAfter = membersIndex >= 0 ? membersIndex : ticketsIndex;
+
+  if (insertAfter < 0) return [...raw, "signals"];
+
+  const next = [...raw];
+  next.splice(insertAfter + 1, 0, "signals");
+  return next;
+}
+
+function scrollToSignalsWorkspace() {
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+
+  const findTarget = () =>
+    document.querySelector(".dashboard-home-grid > div:nth-child(4)") ||
+    document.querySelector(".dashboard-home-grid") ||
+    document.querySelector("main");
+
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      const target = findTarget();
+      if (target && "scrollIntoView" in target) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+  });
+}
+
 export default function MobileBottomNav({
   activeTab,
   onChange,
@@ -104,7 +161,7 @@ export default function MobileBottomNav({
   );
 
   const visibleTabs = useMemo(() => {
-    const rawTabs = Array.isArray(tabs) ? tabs.filter(Boolean) : [];
+    const rawTabs = addSignalsJump(Array.isArray(tabs) ? tabs.filter(Boolean) : []);
     const maxTabs = visibleActions.length ? 4 : 5;
     return rawTabs.slice(0, maxTabs);
   }, [tabs, visibleActions.length]);
@@ -141,6 +198,17 @@ export default function MobileBottomNav({
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  function handleTabClick(tab) {
+    if (tab === "signals") {
+      onChange?.("home");
+      setActionsOpen(false);
+      scrollToSignalsWorkspace();
+      return;
+    }
+
+    onChange?.(tab);
+  }
 
   if (!visibleTabs.length && !visibleActions.length) return null;
 
@@ -221,8 +289,8 @@ export default function MobileBottomNav({
               <button
                 key={tab}
                 type="button"
-                className={`sv-mobile-nav-item ${active ? "active" : ""}`}
-                onClick={() => onChange?.(tab)}
+                className={`sv-mobile-nav-item ${active ? "active" : ""} ${tab === "signals" ? "signals" : ""}`}
+                onClick={() => handleTabClick(tab)}
                 aria-current={active ? "page" : undefined}
                 title={meta.label}
               >
@@ -445,7 +513,8 @@ export default function MobileBottomNav({
           transform: scale(0.985);
         }
 
-        .sv-mobile-nav-item.active {
+        .sv-mobile-nav-item.active,
+        .sv-mobile-nav-item.signals:active {
           color: #ffffff;
           border-color: rgba(99, 213, 255, 0.24);
           background: linear-gradient(
