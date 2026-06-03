@@ -1,0 +1,149 @@
+/*
+  Setup cleanup overrides
+  -----------------------
+  Keeps the staff home page as one guided setup flow instead of stacking
+  duplicate server/category/form controls on mobile.
+*/
+
+.staff-quick-tools-card .row > .row {
+  flex: 0 0 auto;
+}
+
+.launch-card.server-required .setup-health-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.launch-card.server-required .setup-check-details {
+  margin-top: -2px;
+}
+
+.setup-check-details {
+  border: 1px solid var(--panel-border, rgba(255,255,255,0.16));
+  border-radius: 18px;
+  background: rgba(255,255,255,0.035);
+  overflow: hidden;
+}
+
+.setup-check-details summary {
+  list-style: none;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 14px;
+  cursor: pointer;
+  color: var(--text-strong, #fff);
+  font-weight: 950;
+}
+
+.setup-check-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.setup-check-details summary::after {
+  content: "Show";
+  color: var(--accent, #6dff9d);
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.setup-check-details[open] summary::after {
+  content: "Hide";
+}
+
+.setup-check-details .launch-grid {
+  padding: 0 12px 12px;
+}
+
+.launch-card.server-required .launch-grid {
+  grid-template-columns: 1fr !important;
+}
+
+.launch-card.server-required .launch-step {
+  min-height: auto;
+}
+
+.launch-card.server-required #panel-command,
+.launch-card.server-required .panel-command-box {
+  display: none !important;
+}
+
+.setup-gated-card {
+  display: none !important;
+}
+
+@media (min-width: 721px) {
+  .launch-card.server-selected .setup-check-details summary::after {
+    content: "Collapse";
+  }
+
+  .launch-card.server-selected .setup-check-details:not([open]) summary::after {
+    content: "Expand";
+  }
+}
+
+@media (max-width: 720px) {
+  .staff-quick-tools-card {
+    margin-bottom: 12px !important;
+  }
+
+  .staff-quick-tools-card .row {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    width: 100%;
+  }
+
+  .staff-quick-tools-card .row > .row {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+  }
+
+  .staff-quick-tools-card .button,
+  .launch-card .button {
+    width: 100% !important;
+  }
+
+  .launch-card {
+    gap: 12px !important;
+  }
+
+  .launch-card.server-required .setup-health-summary,
+  .launch-card.server-selected .setup-health-summary {
+    grid-template-columns: 1fr !important;
+  }
+
+  .launch-card.server-selected .setup-check-details:not([open]) .launch-grid {
+    display: none !important;
+  }
+
+  .setup-check-details[open] .launch-grid {
+    display: grid;
+  }
+
+  .setup-check-details .launch-grid {
+    padding: 0 10px 10px;
+  }
+
+  .launch-step {
+    min-height: auto !important;
+    padding: 12px !important;
+  }
+
+  .launch-step-helper {
+    flex: 0 0 auto !important;
+  }
+
+  .panel-command-box {
+    display: none !important;
+  }
+
+  .global-bottom-nav-shell {
+    grid-template-columns: inherit;
+  }
+}
+
+html[data-dashboard-appearance="light"] .setup-check-details {
+  background: rgba(255,255,255,0.78) !important;
+  border-color: rgba(15,23,42,0.14) !important;
+}
