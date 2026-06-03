@@ -1,73 +1,151 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import Sidebar from "@/components/Sidebar";
 import {
   getSession,
   getDiscordLoginUrl,
   hasDiscordOAuthConfig,
 } from "@/lib/auth-server";
-
+import { getExplicitSelectedGuildId } from "@/lib/guild-selection";
 
 type SearchParams = {
   authError?: string | string[];
 };
 
+type SessionLike = {
+  isStaff?: boolean;
+  isServerManager?: boolean;
+  user?: {
+    username?: string | null;
+    global_name?: string | null;
+    avatar_url?: string | null;
+    discord_id?: string | null;
+    id?: string | null;
+  } | null;
+  discordUser?: {
+    username?: string | null;
+    global_name?: string | null;
+    avatar_url?: string | null;
+    id?: string | null;
+  } | null;
+  member?: {
+    display_name?: string | null;
+    access_label?: string | null;
+    verification_label?: string | null;
+    has_manage_server?: boolean | null;
+    has_staff_role?: boolean | null;
+    roles?: string[] | null;
+  } | null;
+  authContext?: {
+    selected_guild_id?: string | null;
+    guild_checked?: boolean | null;
+    guild_check_error?: string | null;
+    staff_reason?: string | null;
+  } | null;
+} | null;
+
 function firstParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] || "" : value || "";
 }
 
-function Card({ children }: { children: React.ReactNode }) {
+function normalizeString(value: unknown): string {
+  return String(value || "").trim();
+}
+
+function ActionLink({ href, children, primary = false }: { href: string; children: React.ReactNode; primary?: boolean }) {
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        padding: 24,
-        background: "#09090b",
-        color: "white",
-      }}
-    >
-      <div
-        style={{
-          width: "100%",
-          maxWidth: 680,
-          border: "1px solid rgba(255,255,255,0.08)",
-          background:
-            "radial-gradient(circle at top right, rgba(93,255,141,0.08), transparent 28%), rgba(255,255,255,0.035)",
-          borderRadius: 22,
-          padding: 24,
-          boxShadow: "0 24px 80px rgba(0,0,0,0.35)",
-        }}
-      >
-        {children}
-      </div>
-    </main>
+    <Link href={href} className={primary ? "button primary" : "button ghost"}>
+      {children}
+    </Link>
   );
 }
 
-function ButtonLink({ href, children, primary = false }: { href: string; children: React.ReactNode; primary?: boolean }) {
+function SessionCard({ session }: { session: Exclude<SessionLike, null> }) {
+  const displayName =
+    session.member?.display_name ||
+    session.user?.global_name ||
+    session.discordUser?.global_name ||
+    session.user?.username ||
+    session.discordUser?.username ||
+    "Discord user";
+  const avatarUrl = session.user?.avatar_url || session.discordUser?.avatar_url || "";
+  const explicitGuildId = getExplicitSelectedGuildId();
+  const selectedGuildId = explicitGuildId || normalizeString(session.authContext?.selected_guild_id);
+  const roles = Array.isArray(session.member?.roles) ? session.member.roles : [];
+
   return (
-    <Link
-      href={href}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        minHeight: 42,
-        padding: "10px 14px",
-        borderRadius: 14,
-        textDecoration: "none",
-        fontWeight: 800,
-        fontSize: 14,
-        border: primary
-          ? "1px solid rgba(93,255,141,0.30)"
-          : "1px solid rgba(255,255,255,0.10)",
-        background: primary ? "rgba(93,255,141,0.12)" : "rgba(255,255,255,0.05)",
-        color: "#f8fafc",
-      }}
-    >
-      {children}
-    </Link>
+    <>
+      <section className="card account-hero-card">
+        <div className="account-hero-main">
+          <div className="account-avatar" aria-hidden="true">
+            {avatarUrl ? <img src={avatarUrl} alt="" /> : <span>{displayName.slice(0, 1).toUpperCase()}</span>}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div className="muted account-eyebrow">Account</div>
+            <h1>{displayName}</h1>
+            <p className="muted">Your Discord session is active. Use this page to confirm account state, selected server context, and reset/re-authorize without getting bounced around.</p>
+          </div>
+        </div>
+        <div className="account-actions">
+          <ActionLink href="/" primary>Home</ActionLink>
+          <ActionLink href="/servers">Servers</ActionLink>
+          {hasDiscordOAuthConfig() ? <ActionLink href={getDiscordLoginUrl()}>Re-authorize Discord</ActionLink> : null}
+          <ActionLink href="/api/auth/logout">Reset Login</ActionLink>
+        </div>
+      </section>
+
+      <section className="account-grid">
+        <div className="card account-info-card">
+          <div className="muted account-eyebrow">Session</div>
+          <div className="account-info-row"><span>Status</span><strong>Signed in</strong></div>
+          <div className="account-info-row"><span>Dashboard access</span><strong>{session.isStaff ? "Staff / Manager" : "Member"}</strong></div>
+          <div className="account-info-row"><span>Access label</span><strong>{session.member?.access_label || "Signed In"}</strong></div>
+          <div className="account-info-row"><span>Selected server</span><strong>{selectedGuildId || "None selected"}</strong></div>
+        </div>
+
+        <div className="card account-info-card">
+          <div className="muted account-eyebrow">Server Check</div>
+          <div className="account-info-row"><span>Explicit server cookie</span><strong>{explicitGuildId ? "Set" : "Not set"}</strong></div>
+          <div className="account-info-row"><span>Guild member checked</span><strong>{session.authContext?.guild_checked ? "Yes" : "No"}</strong></div>
+          <div className="account-info-row"><span>Staff reason</span><strong>{session.authContext?.staff_reason || "—"}</strong></div>
+          {session.authContext?.guild_check_error ? (
+            <div className="account-warning">{session.authContext.guild_check_error}</div>
+          ) : null}
+        </div>
+
+        <div className="card account-info-card account-info-wide">
+          <div className="muted account-eyebrow">Roles</div>
+          {roles.length ? (
+            <div className="roles account-role-list">
+              {roles.slice(0, 18).map((role) => <span key={role} className="badge">{role}</span>)}
+            </div>
+          ) : (
+            <p className="muted">No role list is available for the selected server yet.</p>
+          )}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function LoginRequiredState({ authError }: { authError?: string }) {
+  return (
+    <main className="auth-state-page">
+      <div className="card auth-state-card">
+        <div className="muted auth-state-eyebrow">Dank Shield Dashboard</div>
+        <h1>{authError ? "Discord login did not finish" : "No active Discord session"}</h1>
+        <p className="muted">
+          {authError
+            ? "Discord returned an auth error. The reason is shown below so the dashboard does not silently loop back."
+            : "The dashboard does not see a valid Discord session cookie yet. Sign in with Discord to continue."}
+        </p>
+        {authError ? <pre className="account-error-pre">{decodeURIComponent(authError)}</pre> : null}
+        <div className="auth-state-actions">
+          {hasDiscordOAuthConfig() ? <ActionLink href={getDiscordLoginUrl()} primary>{authError ? "Try Discord login again" : "Sign in with Discord"}</ActionLink> : null}
+          <ActionLink href="/api/auth/logout">Reset login</ActionLink>
+          <ActionLink href="/">Back Home</ActionLink>
+        </div>
+      </div>
+    </main>
   );
 }
 
@@ -76,66 +154,18 @@ export const revalidate = 0;
 
 export default async function AuthStatusPage({ searchParams }: { searchParams?: SearchParams }) {
   const authError = firstParam(searchParams?.authError);
-  const session = await getSession();
+  const session = (await getSession()) as SessionLike;
 
-  if (session && !authError) {
-    redirect("/");
+  if (!session || authError) {
+    return <LoginRequiredState authError={authError} />;
   }
 
-  if (authError) {
-    return (
-      <Card>
-        <div style={{ fontSize: 13, color: "#fca5a5", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-          Sign-in failed
-        </div>
-        <h1 style={{ margin: "8px 0 0", fontSize: "clamp(30px, 5vw, 44px)", letterSpacing: "-0.05em" }}>
-          Discord login did not finish
-        </h1>
-        <p style={{ color: "rgba(255,255,255,0.72)", lineHeight: 1.55 }}>
-          The dashboard got an auth error instead of a working Discord session. This page shows the reason so it does not silently loop back to sign-in.
-        </p>
-        <pre
-          style={{
-            whiteSpace: "pre-wrap",
-            overflowWrap: "anywhere",
-            border: "1px solid rgba(255,255,255,0.08)",
-            background: "rgba(0,0,0,0.24)",
-            borderRadius: 14,
-            padding: 12,
-            color: "#fecaca",
-          }}
-        >
-          {decodeURIComponent(authError)}
-        </pre>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
-          {hasDiscordOAuthConfig() ? <ButtonLink href={getDiscordLoginUrl()} primary>Try Discord login again</ButtonLink> : null}
-          <ButtonLink href="/api/auth/logout">Reset login</ButtonLink>
-          <ButtonLink href="/">Back to dashboard</ButtonLink>
-        </div>
-      </Card>
-    );
-  }
-
-  if (!session) {
-    return (
-      <Card>
-        <div style={{ fontSize: 13, color: "#fde68a", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-          Not signed in
-        </div>
-        <h1 style={{ margin: "8px 0 0", fontSize: "clamp(30px, 5vw, 44px)", letterSpacing: "-0.05em" }}>
-          No active Discord session
-        </h1>
-        <p style={{ color: "rgba(255,255,255,0.72)", lineHeight: 1.55 }}>
-          The dashboard does not see a valid Discord session cookie yet. Sign in with Discord to continue.
-        </p>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
-          {hasDiscordOAuthConfig() ? <ButtonLink href={getDiscordLoginUrl()} primary>Sign in with Discord</ButtonLink> : null}
-          <ButtonLink href="/api/auth/logout">Reset login</ButtonLink>
-          <ButtonLink href="/">Back</ButtonLink>
-        </div>
-      </Card>
-    );
-  }
-
-  return null;
+  return (
+    <div className="shell account-page-shell">
+      <Sidebar />
+      <main className="content account-page-content">
+        <SessionCard session={session} />
+      </main>
+    </div>
+  );
 }
