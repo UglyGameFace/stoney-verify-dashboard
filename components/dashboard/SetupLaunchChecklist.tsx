@@ -35,6 +35,12 @@ type SetupLaunchChecklistProps = {
   selectedGuildId?: string | null;
 };
 
+const SETUP_NAV_LINKS = [
+  { key: "servers", label: "Servers", href: "/servers" },
+  { key: "categories", label: "Categories", href: "/ticket-categories" },
+  { key: "forms", label: "Forms", href: "/ticket-forms" },
+];
+
 function safeArray<T = unknown>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
@@ -171,6 +177,21 @@ function compactChecks(checks: SetupCheck[]): SetupCheck[] {
   return checks.slice(0, 6);
 }
 
+function resolveActiveSetupHref(nextFix: SetupCheck | null, checks: SetupCheck[]): string {
+  const nextHref = normalizeString(nextFix?.action_href);
+  if (nextHref.startsWith("/servers")) return "/servers";
+  if (nextHref.startsWith("/ticket-categories")) return "/ticket-categories";
+  if (nextHref.startsWith("/ticket-forms")) return "/ticket-forms";
+
+  const firstUnfinished = checks.find((check) => !check.ok);
+  const fallbackHref = normalizeString(firstUnfinished?.action_href);
+  if (fallbackHref.startsWith("/servers")) return "/servers";
+  if (fallbackHref.startsWith("/ticket-categories")) return "/ticket-categories";
+  if (fallbackHref.startsWith("/ticket-forms")) return "/ticket-forms";
+
+  return "/servers";
+}
+
 export default async function SetupLaunchChecklist({ data, selectedGuildId }: SetupLaunchChecklistProps) {
   const health = await loadSetupHealth();
   const checks = safeArray<SetupCheck>(health?.checks).length ? safeArray<SetupCheck>(health?.checks) : fallbackChecks(data, selectedGuildId);
@@ -180,6 +201,7 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
   const score = Number(health?.score ?? (total ? Math.round((passed / total) * 100) : 0));
   const ready = Boolean(health?.ready_for_launch);
   const nextFix = health?.next_fix || checks.find((check) => !check.ok && check.severity === "required") || checks.find((check) => !check.ok) || null;
+  const activeSetupHref = resolveActiveSetupHref(nextFix, checks);
 
   return (
     <section className="card launch-card" aria-label="Dank Shield setup checklist">
@@ -191,10 +213,15 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
             Dank Shield checks the selected server, categories, forms, ticket flow, command queue, and activity data so staff know what to fix next.
           </p>
         </div>
-        <div className="launch-actions">
-          <Link href="/servers" className="button ghost">Servers</Link>
-          <Link href="/ticket-categories" className="button ghost">Categories</Link>
-          <Link href="/ticket-forms" className="button primary">Forms</Link>
+        <div className="launch-actions" aria-label="Setup shortcuts">
+          {SETUP_NAV_LINKS.map((item) => {
+            const active = activeSetupHref === item.href;
+            return (
+              <Link key={item.key} href={item.href} className={active ? "button primary" : "button ghost"} aria-current={active ? "step" : undefined}>
+                {item.label}
+              </Link>
+            );
+          })}
         </div>
       </div>
 
