@@ -38,14 +38,7 @@ export default function SetupWorkspaceShell({ activeStep, eyebrow, title, descri
                 <h1>{title}</h1>
                 <p className="muted">{description}</p>
               </div>
-              <div className="setup-workspace-actions">
-                {actions || (
-                  <>
-                    <Link href="/" className="button primary">Dashboard</Link>
-                    <Link href="/auth-status" className="button ghost">Auth Status</Link>
-                  </>
-                )}
-              </div>
+              {actions ? <div className="setup-workspace-actions">{actions}</div> : null}
             </div>
 
             <nav className="setup-step-nav" aria-label="Setup steps">
