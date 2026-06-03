@@ -84,6 +84,20 @@ export async function GET() {
 
     const guildId = normalizeString(getSelectedGuildId());
     if (!guildId) {
+      const checks: HealthCheck[] = [
+        buildCheck({
+          key: "server_selected",
+          label: "Choose Server",
+          description: "Pick the Discord server this dashboard should manage before opening categories, forms, tickets, activity, or member tools.",
+          ok: false,
+          severity: "required",
+          action_label: "Choose Server",
+          action_href: "/servers",
+          detail: "No selected server",
+        }),
+      ];
+      const nextFix = checks[0];
+
       return noStoreJson(
         {
           ok: false,
@@ -91,21 +105,18 @@ export async function GET() {
           needsServerSelection: true,
           selectedGuildId: null,
           score: 0,
-          total: 0,
+          total: checks.length,
           passed: 0,
-          checks: [
-            buildCheck({
-              key: "server_selected",
-              label: "Choose Server",
-              description: "Pick the Discord server this dashboard should manage.",
-              ok: false,
-              severity: "required",
-              action_label: "Choose Server",
-              action_href: "/servers",
-            }),
-          ],
+          required_total: 1,
+          required_passed: 0,
+          ready_for_launch: false,
+          next_fix: nextFix,
+          summary: {
+            server_selected: false,
+          },
+          checks,
         },
-        428
+        200
       );
     }
 
