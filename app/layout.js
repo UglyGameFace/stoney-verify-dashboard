@@ -5,6 +5,7 @@ import "@/app/appearance.css"
 import "@/app/appearance-stability.css"
 import AppearanceHydrator from "@/components/dashboard/AppearanceHydrator"
 import QuickAppearanceDock from "@/components/dashboard/QuickAppearanceDock"
+import GlobalDashboardNav from "@/components/GlobalDashboardNav"
 import { env } from "@/lib/env"
 
 export const metadata = {
@@ -18,6 +19,7 @@ export default function RootLayout({ children }) {
       <body>
         <AppearanceHydrator />
         {children}
+        <GlobalDashboardNav />
         <QuickAppearanceDock />
       </body>
     </html>
