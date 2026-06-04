@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { requireStaffSessionForRoute } from "@/lib/auth-server";
 import { createServerSupabase } from "@/lib/supabase-server";
-import { env } from "@/lib/env";
+import { getSelectedGuildId } from "@/lib/guild-selection";
 import {
   buildRouteJson,
   getActorId,
@@ -22,6 +22,10 @@ function normalizeString(value: unknown): string {
 
 function normalizeStatus(value: unknown): string {
   return normalizeString(value).toLowerCase();
+}
+
+function selectedGuildId(): string {
+  return normalizeString(getSelectedGuildId());
 }
 
 function hasUsableChannel(ticket: any): boolean {
@@ -121,6 +125,7 @@ function buildTicketPatch(
 function summarizeCandidate(ticket: any, patch: Record<string, unknown> | null) {
   return {
     id: ticket?.id || null,
+    guild_id: ticket?.guild_id || null,
     channel_id: ticket?.channel_id || null,
     discord_thread_id: ticket?.discord_thread_id || null,
     title: ticket?.title || ticket?.channel_name || null,
@@ -141,11 +146,71 @@ function missingGuildIdResponse(refreshedTokens: RefreshedTokens | null) {
   return buildRouteJson(
     {
       ok: false,
-      error: "Missing guild id",
+      error: "Select a server before reconciling tickets.",
+      needsServerSelection: true,
     },
-    500,
+    428,
     refreshedTokens
   );
+}
+
+async function insertReconcileActivity(
+  supabase: ReturnType<typeof createServerSupabase>,
+  args: {
+    guildId: string;
+    actorId: string;
+    dryRun: boolean;
+    scanned: number;
+    candidates: number;
+    updated: number;
+  }
+) {
+  const now = new Date().toISOString();
+  const eventType = args.dryRun ? "ticket_reconcile_preview" : "ticket_reconcile";
+  const title = args.dryRun ? "Ticket reconcile preview" : "Ticket rows reconciled";
+  const description = args.dryRun
+    ? `Previewed ${args.candidates} ticket row(s) for reconciliation. Scanned ${args.scanned} row(s). Triggered by ${args.actorId}.`
+    : `Reconciled ${args.updated} ticket row(s). Scanned ${args.scanned} row(s). Triggered by ${args.actorId}.`;
+
+  const candidates = [
+    {
+      guild_id: args.guildId,
+      title,
+      description,
+      event_family: "ticket",
+      event_type: eventType,
+      source: "dashboard_ticket_reconcile",
+      actor_user_id: args.actorId,
+      actor_name: args.actorId,
+      related_id: args.actorId,
+      metadata: {
+        dry_run: args.dryRun,
+        scanned: args.scanned,
+        candidates: args.candidates,
+        updated: args.updated,
+      },
+      created_at: now,
+    },
+    {
+      guild_id: args.guildId,
+      title,
+      description,
+      event_type: eventType,
+      source: "dashboard_ticket_reconcile",
+      actor_user_id: args.actorId,
+      actor_name: args.actorId,
+      created_at: now,
+    },
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      const { error } = await supabase.from("activity_feed_events").insert(candidate);
+      if (!error) return;
+    } catch {
+      // Best-effort only. Reconcile should not fail because activity logging changed.
+    }
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -179,7 +244,7 @@ export async function POST(req: NextRequest) {
     const requestedBy =
       readString(body, ["requestedBy", "requested_by"], actorId) || actorId;
 
-    const guildId = normalizeString(env.guildId);
+    const guildId = selectedGuildId();
     if (!guildId) {
       return missingGuildIdResponse(refreshedTokens);
     }
@@ -220,27 +285,23 @@ export async function POST(req: NextRequest) {
         const { error: updateError } = await supabase
           .from("tickets")
           .update(entry.patch)
-          .eq("id", ticketId);
+          .eq("id", ticketId)
+          .eq("guild_id", guildId);
 
         if (!updateError) {
           updated += 1;
         }
       }
-
-      await supabase.from("audit_events").insert({
-        title: "Ticket rows reconciled",
-        description: `Reconciled ${updated} ticket row(s) from dashboard truth. Scanned ${rows.length} row(s). Triggered by ${actorId}.`,
-        event_type: "ticket_reconcile",
-        related_id: actorId,
-      });
-    } else {
-      await supabase.from("audit_events").insert({
-        title: "Ticket reconcile preview",
-        description: `Previewed ${candidates.length} ticket row(s) for reconciliation. Scanned ${rows.length} row(s). Triggered by ${actorId}.`,
-        event_type: "ticket_reconcile_preview",
-        related_id: actorId,
-      });
     }
+
+    await insertReconcileActivity(supabase, {
+      guildId,
+      actorId,
+      dryRun,
+      scanned: rows.length,
+      candidates: candidates.length,
+      updated,
+    });
 
     const hidden = rows.filter((ticket) => {
       const status = normalizeStatus(ticket?.status);
@@ -250,6 +311,7 @@ export async function POST(req: NextRequest) {
     return buildRouteJson(
       {
         ok: true,
+        selectedGuildId: guildId,
         dryRun,
         scanned: rows.length,
         hidden,
