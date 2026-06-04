@@ -91,12 +91,6 @@ function mapTicket(ticket: TicketRow | null | undefined) {
   };
 }
 
-async function createAuditEvent(supabase: ReturnType<typeof createServerSupabase>, ticketId: string, staffName: string, ticket: TicketRow): Promise<void> {
-  try {
-    await supabase.from("audit_events").insert({ title: "Ticket claimed", description: `${staffName} claimed ticket ${ticket?.ticket_number || ticketId}`, event_type: "ticket_claimed", related_id: ticketId });
-  } catch {}
-}
-
 async function createActivityFeedEvent(supabase: ReturnType<typeof createServerSupabase>, ticket: TicketRow, actorId: string | null, actorName: string): Promise<void> {
   const guildId = normalizeString(ticket?.guild_id);
   if (!guildId) return;
@@ -117,7 +111,16 @@ async function createActivityFeedEvent(supabase: ReturnType<typeof createServerS
       related_id: ticket?.id || null,
       title: "Ticket Claimed",
       description: `${actorName} claimed ticket ${ticket?.ticket_number || ticket?.id || ""}`.trim(),
-      metadata: { ticket_id: ticket?.id || null, ticket_number: ticket?.ticket_number || null, channel_id: ticket?.channel_id || ticket?.discord_thread_id || null, channel_name: ticket?.channel_name || null, ticket_status: ticket?.status || null, staff_id: actorId || null, staff_name: actorName, source: "dashboard_claim_route" },
+      metadata: {
+        ticket_id: ticket?.id || null,
+        ticket_number: ticket?.ticket_number || null,
+        channel_id: ticket?.channel_id || ticket?.discord_thread_id || null,
+        channel_name: ticket?.channel_name || null,
+        ticket_status: ticket?.status || null,
+        staff_id: actorId || null,
+        staff_name: actorName,
+        source: "dashboard_claim_route",
+      },
     });
   } catch {}
 }
@@ -169,7 +172,10 @@ export async function POST(_request: Request, context: { params: { id?: string }
     if (error || !data) return buildJsonResponse({ error: error?.message || "Failed to claim ticket.", selectedGuildId: guildId }, 500, refreshedTokens);
 
     const updatedTicket = data as TicketRow;
-    await Promise.allSettled([createAuditEvent(supabase, ticketId, actorName, updatedTicket), createActivityFeedEvent(supabase, updatedTicket, actorId, actorName), updateStaffMetrics(supabase, guildId, actorId, actorName)]);
+    await Promise.allSettled([
+      createActivityFeedEvent(supabase, updatedTicket, actorId, actorName),
+      updateStaffMetrics(supabase, guildId, actorId, actorName),
+    ]);
 
     return buildJsonResponse({ ok: true, selectedGuildId: guildId, ticket: mapTicket(updatedTicket), staffId: actorId, staffName: actorName, alreadyClaimed: false }, 200, refreshedTokens);
   } catch (error) {
