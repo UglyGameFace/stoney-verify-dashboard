@@ -146,12 +146,6 @@ async function bumpTicketFreshness(supabase: ReturnType<typeof createServerSupab
   }
 }
 
-async function createAuditEvent(supabase: ReturnType<typeof createServerSupabase>, ticketId: string, actorName: string | null, preview: string): Promise<void> {
-  try {
-    await supabase.from("audit_events").insert({ title: "Ticket reply added", description: `${actorName || "Staff"} replied to ticket ${ticketId}: ${preview}`, event_type: "ticket_reply", related_id: ticketId });
-  } catch {}
-}
-
 async function createActivityFeedEvent(supabase: ReturnType<typeof createServerSupabase>, ticket: TicketRow, actorId: string | null, actorName: string | null, content: string, attachments: NormalizedAttachment[]): Promise<void> {
   const guildId = normalizeString(ticket?.guild_id);
   if (!guildId) return;
@@ -227,7 +221,7 @@ export async function POST(request: Request, context: { params: { id?: string } 
 
     if (error || !data) return buildJsonResponse({ error: error?.message || "Failed to save message.", selectedGuildId: guildId }, 500, refreshedTokens);
 
-    await Promise.allSettled([bumpTicketFreshness(supabase, ticketId, guildId), createAuditEvent(supabase, ticketId, actorName, truncateText(content, 180)), createActivityFeedEvent(supabase, ticket, actorId, actorName, content, attachments)]);
+    await Promise.allSettled([bumpTicketFreshness(supabase, ticketId, guildId), createActivityFeedEvent(supabase, ticket, actorId, actorName, content, attachments)]);
 
     return buildJsonResponse({ ok: true, selectedGuildId: guildId, message: mapTicketMessage(data as TicketMessageRow) }, 200, refreshedTokens);
   } catch (error) {
