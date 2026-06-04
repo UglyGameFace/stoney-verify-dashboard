@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
-import { env } from "@/lib/env";
+import { getSelectedGuildId } from "@/lib/guild-selection";
 
 function normalizeString(value) {
   return String(value || "").trim();
@@ -58,17 +58,42 @@ function normalizeBoolean(value) {
   return clean === "true" || clean === "1" || clean === "yes" || clean === "on";
 }
 
+function selectedGuildId() {
+  return normalizeString(getSelectedGuildId());
+}
+
+function buildJsonResponse(payload, status = 200, refreshedTokens = null) {
+  const response = NextResponse.json(payload, {
+    status,
+    headers: {
+      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    },
+  });
+  applyAuthCookies(response, refreshedTokens);
+  return response;
+}
+
+function buildErrorResponse(message, status = 500, refreshedTokens = null, extra = {}) {
+  return buildJsonResponse({ error: message, ...extra }, status, refreshedTokens);
+}
+
+function requireSelectedGuild(refreshedTokens = null) {
+  const guildId = selectedGuildId();
+  if (guildId) return guildId;
+  return buildErrorResponse(
+    "Select a server before managing ticket categories.",
+    428,
+    refreshedTokens,
+    { needsServerSelection: true }
+  );
+}
+
 function buildCategoryPatch(body) {
   const name = normalizeString(body?.name);
   const slug = slugify(body?.slug || name);
 
-  if (!name) {
-    throw new Error("Category name is required.");
-  }
-
-  if (!slug) {
-    throw new Error("Category slug is required.");
-  }
+  if (!name) throw new Error("Category name is required.");
+  if (!slug) throw new Error("Category slug is required.");
 
   return {
     name,
@@ -90,30 +115,47 @@ async function clearOtherDefaults(supabase, guildId, excludeId = null) {
     .eq("guild_id", guildId)
     .eq("is_default", true);
 
-  if (excludeId) {
-    query = query.neq("id", excludeId);
-  }
+  if (excludeId) query = query.neq("id", excludeId);
 
   const { error } = await query;
-  if (error) {
-    throw new Error(error.message);
-  }
+  if (error) throw new Error(error.message);
+}
+
+async function getCategory(supabase, guildId, categoryId) {
+  const { data, error } = await supabase
+    .from("ticket_categories")
+    .select("*")
+    .eq("id", categoryId)
+    .eq("guild_id", guildId)
+    .single();
+
+  if (error || !data) return null;
+  return data;
 }
 
 export async function PATCH(request, { params }) {
+  let refreshedTokens = null;
   try {
-    const { refreshedTokens } = await requireStaffSessionForRoute();
+    const auth = await requireStaffSessionForRoute();
+    refreshedTokens = auth?.refreshedTokens || null;
+    const scopedGuild = requireSelectedGuild(refreshedTokens);
+    if (typeof scopedGuild !== "string") return scopedGuild;
+    const guildId = scopedGuild;
     const body = await request.json();
     const supabase = createServerSupabase();
-    const guildId = env.guildId;
-    const categoryId = params?.id;
-
-    if (!guildId) {
-      return NextResponse.json({ error: "Missing guild id." }, { status: 500 });
-    }
+    const categoryId = normalizeString(params?.id);
 
     if (!categoryId) {
-      return NextResponse.json({ error: "Missing category id." }, { status: 400 });
+      return buildErrorResponse("Missing category id.", 400, refreshedTokens, {
+        selectedGuildId: guildId,
+      });
+    }
+
+    const existing = await getCategory(supabase, guildId, categoryId);
+    if (!existing) {
+      return buildErrorResponse("Category not found.", 404, refreshedTokens, {
+        selectedGuildId: guildId,
+      });
     }
 
     const payload = buildCategoryPatch(body);
@@ -131,32 +173,79 @@ export async function PATCH(request, { params }) {
       .single();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return buildErrorResponse(error.message, 500, refreshedTokens, {
+        selectedGuildId: guildId,
+      });
     }
 
-    const response = NextResponse.json({ category: data });
-    applyAuthCookies(response, refreshedTokens);
-    return response;
+    return buildJsonResponse({ ok: true, selectedGuildId: guildId, category: data }, 200, refreshedTokens);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unauthorized";
     const status = message === "Unauthorized" ? 401 : 400;
-    return NextResponse.json({ error: message }, { status });
+    return buildErrorResponse(message, status, refreshedTokens);
   }
 }
 
-export async function DELETE(request, { params }) {
+export async function DELETE(_request, { params }) {
+  let refreshedTokens = null;
   try {
-    const { refreshedTokens } = await requireStaffSessionForRoute();
+    const auth = await requireStaffSessionForRoute();
+    refreshedTokens = auth?.refreshedTokens || null;
+    const scopedGuild = requireSelectedGuild(refreshedTokens);
+    if (typeof scopedGuild !== "string") return scopedGuild;
+    const guildId = scopedGuild;
     const supabase = createServerSupabase();
-    const guildId = env.guildId;
-    const categoryId = params?.id;
-
-    if (!guildId) {
-      return NextResponse.json({ error: "Missing guild id." }, { status: 500 });
-    }
+    const categoryId = normalizeString(params?.id);
 
     if (!categoryId) {
-      return NextResponse.json({ error: "Missing category id." }, { status: 400 });
+      return buildErrorResponse("Missing category id.", 400, refreshedTokens, {
+        selectedGuildId: guildId,
+      });
+    }
+
+    const existing = await getCategory(supabase, guildId, categoryId);
+    if (!existing) {
+      return buildErrorResponse("Category not found.", 404, refreshedTokens, {
+        selectedGuildId: guildId,
+      });
+    }
+
+    if (existing.is_default) {
+      return buildErrorResponse(
+        "You cannot delete the default category until another default is set.",
+        409,
+        refreshedTokens,
+        { selectedGuildId: guildId }
+      );
+    }
+
+    const { data: linkedTickets, error: linkedError } = await supabase
+      .from("tickets")
+      .select("id,title,status,category_id,matched_category_id")
+      .eq("guild_id", guildId)
+      .or(`category_id.eq.${categoryId},matched_category_id.eq.${categoryId}`)
+      .limit(20);
+
+    if (linkedError) {
+      return buildErrorResponse(linkedError.message, 500, refreshedTokens, {
+        selectedGuildId: guildId,
+      });
+    }
+
+    if (Array.isArray(linkedTickets) && linkedTickets.length > 0) {
+      return buildJsonResponse(
+        {
+          error: "This category is still linked to tickets. Reassign those tickets before deleting it.",
+          selectedGuildId: guildId,
+          linkedTickets: linkedTickets.map((ticket) => ({
+            id: ticket?.id || null,
+            title: ticket?.title || "Untitled",
+            status: ticket?.status || "unknown",
+          })),
+        },
+        409,
+        refreshedTokens
+      );
     }
 
     const { error } = await supabase
@@ -166,15 +255,15 @@ export async function DELETE(request, { params }) {
       .eq("guild_id", guildId);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return buildErrorResponse(error.message, 500, refreshedTokens, {
+        selectedGuildId: guildId,
+      });
     }
 
-    const response = NextResponse.json({ ok: true });
-    applyAuthCookies(response, refreshedTokens);
-    return response;
+    return buildJsonResponse({ ok: true, selectedGuildId: guildId, deletedId: categoryId }, 200, refreshedTokens);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unauthorized";
     const status = message === "Unauthorized" ? 401 : 400;
-    return NextResponse.json({ error: message }, { status });
+    return buildErrorResponse(message, status, refreshedTokens);
   }
 }
