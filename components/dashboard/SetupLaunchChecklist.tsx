@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { headers } from "next/headers";
+import SetupDoctorPanel from "@/components/dashboard/SetupDoctorPanel";
 
 type DashboardData = Record<string, unknown> | null | undefined;
 
@@ -210,85 +211,89 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
   const canShowPanelCommands = hasSelectedGuild && getPanelReadiness(checks);
 
   return (
-    <section className={`card launch-card ${hasSelectedGuild ? "server-selected" : "server-required"}`} aria-label="Dank Shield setup checklist">
-      <div className="launch-head">
-        <div>
-          <div className="muted launch-eyebrow">{getSetupStage(hasSelectedGuild, nextFix)}</div>
-          <h2 className="launch-title">
-            {hasSelectedGuild ? (ready ? "Ready to launch" : "Finish setup without guessing") : "Choose a server to continue"}
-          </h2>
-          <p className="muted launch-copy">
-            {hasSelectedGuild
-              ? "Dank Shield checks categories, forms, ticket flow, command queue, and activity data for the selected server."
-              : "Staff tools stay locked until one Discord server is selected. That prevents tickets, forms, activity, and member data from mixing across servers."}
-          </p>
-        </div>
-      </div>
-
-      <div className="setup-health-summary">
-        <div>
-          <span>Setup Score</span>
-          <strong>{score}%</strong>
-        </div>
-        <div>
-          <span>Checks Passing</span>
-          <strong>{passed}/{total}</strong>
-        </div>
-        <div>
-          <span>Launch Status</span>
-          <strong>{hasSelectedGuild ? (ready ? "Ready" : "Needs work") : "Server required"}</strong>
-        </div>
-      </div>
-
-      <div className="setup-next-fix">
-        <div>
-          <div className="muted launch-eyebrow">Next Fix</div>
-          <strong>{normalizeString(nextFix?.label) || (hasSelectedGuild ? "Review setup" : "Choose Server")}</strong>
-          <p>{normalizeString(nextFix?.description) || normalizeString(nextFix?.detail) || "Open the setup tools and review this server."}</p>
-        </div>
-        <Link href={nextFixHref} className="button primary">
-          {nextFixLabel}
-        </Link>
-      </div>
-
-      <details className="setup-check-details" open={hasSelectedGuild}>
-        <summary>{hasSelectedGuild ? "View setup checks" : "Why this is required"}</summary>
-        <div className="launch-grid">
-          {visibleChecks.map((check, index) => {
-            const done = Boolean(check.ok);
-            const label = normalizeString(check.label) || `Check ${index + 1}`;
-            const href = normalizeString(check.action_href) || "/";
-            return (
-              <Link key={normalizeString(check.key) || label} href={href} className={`launch-step ${done ? "done" : "todo"}`}>
-                <div className="launch-step-top">
-                  <StepBadge done={done} />
-                  <span className="launch-step-number">{normalizeString(check.severity) || "check"}</span>
-                </div>
-                <strong>{label}</strong>
-                <span className="launch-step-helper">{normalizeString(check.description) || normalizeString(check.detail) || "Review this setup item."}</span>
-                {check.detail ? <span className="launch-step-helper detail">{normalizeString(check.detail)}</span> : null}
-                <span className="launch-step-cta">{normalizeString(check.action_label) || "Open"} →</span>
-              </Link>
-            );
-          })}
-        </div>
-      </details>
-
-      {canShowPanelCommands ? (
-        <div id="panel-command" className="panel-command-box">
+    <div className="setup-launch-stack">
+      <section className={`card launch-card ${hasSelectedGuild ? "server-selected" : "server-required"}`} aria-label="Dank Shield setup checklist">
+        <div className="launch-head">
           <div>
-            <div className="muted launch-eyebrow">Discord Panel</div>
-            <h3 className="panel-command-title">Publish the member-facing ticket panel</h3>
+            <div className="muted launch-eyebrow">{getSetupStage(hasSelectedGuild, nextFix)}</div>
+            <h2 className="launch-title">
+              {hasSelectedGuild ? (ready ? "Ready to launch" : "Finish setup without guessing") : "Choose a server to continue"}
+            </h2>
             <p className="muted launch-copy">
-              Go to the Discord channel where members should open tickets, then run the panel command. Use the doctor command after posting to verify setup health.
+              {hasSelectedGuild
+                ? "Dank Shield checks categories, forms, ticket flow, command queue, and activity data for the selected server."
+                : "Staff tools stay locked until one Discord server is selected. That prevents tickets, forms, activity, and member data from mixing across servers."}
             </p>
           </div>
-          <div className="command-stack">
-            <code>/ticket-panel post</code>
-            <code>/ticket-panel doctor</code>
+        </div>
+
+        <div className="setup-health-summary">
+          <div>
+            <span>Setup Score</span>
+            <strong>{score}%</strong>
+          </div>
+          <div>
+            <span>Checks Passing</span>
+            <strong>{passed}/{total}</strong>
+          </div>
+          <div>
+            <span>Launch Status</span>
+            <strong>{hasSelectedGuild ? (ready ? "Ready" : "Needs work") : "Server required"}</strong>
           </div>
         </div>
-      ) : null}
-    </section>
+
+        <div className="setup-next-fix">
+          <div>
+            <div className="muted launch-eyebrow">Next Fix</div>
+            <strong>{normalizeString(nextFix?.label) || (hasSelectedGuild ? "Review setup" : "Choose Server")}</strong>
+            <p>{normalizeString(nextFix?.description) || normalizeString(nextFix?.detail) || "Open the setup tools and review this server."}</p>
+          </div>
+          <Link href={nextFixHref} className="button primary">
+            {nextFixLabel}
+          </Link>
+        </div>
+
+        <details className="setup-check-details" open={hasSelectedGuild}>
+          <summary>{hasSelectedGuild ? "View setup checks" : "Why this is required"}</summary>
+          <div className="launch-grid">
+            {visibleChecks.map((check, index) => {
+              const done = Boolean(check.ok);
+              const label = normalizeString(check.label) || `Check ${index + 1}`;
+              const href = normalizeString(check.action_href) || "/";
+              return (
+                <Link key={normalizeString(check.key) || label} href={href} className={`launch-step ${done ? "done" : "todo"}`}>
+                  <div className="launch-step-top">
+                    <StepBadge done={done} />
+                    <span className="launch-step-number">{normalizeString(check.severity) || "check"}</span>
+                  </div>
+                  <strong>{label}</strong>
+                  <span className="launch-step-helper">{normalizeString(check.description) || normalizeString(check.detail) || "Review this setup item."}</span>
+                  {check.detail ? <span className="launch-step-helper detail">{normalizeString(check.detail)}</span> : null}
+                  <span className="launch-step-cta">{normalizeString(check.action_label) || "Open"} →</span>
+                </Link>
+              );
+            })}
+          </div>
+        </details>
+
+        {canShowPanelCommands ? (
+          <div id="panel-command" className="panel-command-box">
+            <div>
+              <div className="muted launch-eyebrow">Discord Panel</div>
+              <h3 className="panel-command-title">Publish the member-facing ticket panel</h3>
+              <p className="muted launch-copy">
+                Go to the Discord channel where members should open tickets, then run the panel command. Use the doctor command after posting to verify setup health.
+              </p>
+            </div>
+            <div className="command-stack">
+              <code>/ticket-panel post</code>
+              <code>/ticket-panel doctor</code>
+            </div>
+          </div>
+        ) : null}
+      </section>
+
+      {hasSelectedGuild ? <SetupDoctorPanel initialHealth={health as any} /> : null}
+    </div>
   );
 }
