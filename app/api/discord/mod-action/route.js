@@ -2,10 +2,19 @@ import { NextResponse } from "next/server";
 import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { env } from "@/lib/env";
+import { getSelectedGuildId } from "@/lib/guild-selection";
 import { insertMemberEvent } from "@/lib/memberEventWrites";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+function normalizeString(value) {
+  return String(value || "").trim();
+}
+
+function selectedGuildId() {
+  return normalizeString(getSelectedGuildId());
+}
 
 function isoTimeout(minutes) {
   return new Date(Date.now() + minutes * 60 * 1000).toISOString();
@@ -17,9 +26,7 @@ function safeAuditReason(value) {
 
 async function discordApi(path, { method = "GET", body, reason } = {}) {
   const token = process.env.DISCORD_TOKEN || env.discordToken || "";
-  if (!token) {
-    throw new Error("Missing DISCORD_TOKEN");
-  }
+  if (!token) throw new Error("Missing DISCORD_TOKEN");
 
   const res = await fetch(`https://discord.com/api/v10${path}`, {
     method,
@@ -43,12 +50,47 @@ async function discordApi(path, { method = "GET", body, reason } = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+function getSessionUser(session) {
+  return session?.user || session?.discordUser || session?.staffUser || null;
+}
+
+function getStaffId(session) {
+  const user = getSessionUser(session);
+  return normalizeString(
+    user?.discord_id || user?.id || user?.user_id || session?.discordUser?.id || "unknown"
+  );
+}
+
+function getStaffName(session) {
+  const user = getSessionUser(session);
+  return normalizeString(
+    user?.global_name ||
+      user?.display_name ||
+      user?.username ||
+      user?.name ||
+      session?.discordUser?.username ||
+      env.defaultStaffName ||
+      "Dashboard Staff"
+  );
+}
+
+function json(payload, status = 200, refreshedTokens = null) {
+  const response = NextResponse.json(payload, {
+    status,
+    headers: {
+      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    },
+  });
+  applyAuthCookies(response, refreshedTokens);
+  return response;
+}
+
 function normalizeGuildRoles(rows) {
   return Array.isArray(rows)
     ? rows
         .map((role) => ({
-          id: String(role?.id || "").trim(),
-          name: String(role?.name || "").trim(),
+          id: String(role?.id || role?.role_id || "").trim(),
+          name: String(role?.name || role?.role_name || "").trim(),
           position: Number(role?.position || 0),
           managed: Boolean(role?.managed),
         }))
@@ -60,18 +102,15 @@ function resolveRoleGroups({ roleIds, roleNames, roleRules }) {
   const activeRules = Array.isArray(roleRules)
     ? roleRules.filter((rule) => rule?.active !== false)
     : [];
-
   const byId = new Map(
     activeRules.map((rule) => [String(rule.role_id), String(rule.role_group || "")])
   );
-
   const byName = new Map(
     activeRules.map((rule) => [
       String(rule.role_name || "").toLowerCase(),
       String(rule.role_group || ""),
     ])
   );
-
   const envStaffNames = env.staffRoleNames.map((value) =>
     String(value || "").toLowerCase()
   );
@@ -83,14 +122,12 @@ function resolveRoleGroups({ roleIds, roleNames, roleRules }) {
     staff: false,
     admin: false,
     cosmetic: false,
-    excluded: false,
   };
 
   for (let i = 0; i < Math.max(roleIds.length, roleNames.length); i += 1) {
     const roleId = String(roleIds[i] || "");
     const roleName = String(roleNames[i] || "").trim();
     const lowered = roleName.toLowerCase();
-
     let group = byId.get(roleId) || byName.get(lowered) || "";
 
     if (!group) {
@@ -102,11 +139,7 @@ function resolveRoleGroups({ roleIds, roleNames, roleRules }) {
         group = "verified";
       } else if (/\b(staff|mod|moderator|admin|owner)\b/i.test(roleName)) {
         group = "staff";
-      } else if (
-        /\b(booster|musicbot|nitro|resident|perm|dickheads|drunken|stoner)\b/i.test(
-          roleName
-        )
-      ) {
+      } else if (/\b(booster|musicbot|nitro|resident|supporter|vip|member)\b/i.test(roleName)) {
         group = "cosmetic";
       }
     }
@@ -178,31 +211,27 @@ function resolveRoleState({
     return {
       data_health: "ok",
       role_state: "unverified_only",
-      role_state_reason:
-        "Member is pending verification and only has unverified access.",
+      role_state_reason: "Member is pending verification and only has unverified access.",
     };
   }
   if (has_cosmetic_only) {
     return {
       data_health: "missing_role",
       role_state: "booster_only",
-      role_state_reason:
-        "Member has cosmetic roles but no core verification role.",
+      role_state_reason: "Member has cosmetic roles but no core verification role.",
     };
   }
   if (!hasAnyRole) {
     return {
       data_health: "missing_role",
       role_state: "missing_unverified",
-      role_state_reason:
-        "Member has no tracked roles. Expected at least an unverified role.",
+      role_state_reason: "Member has no tracked roles. Expected at least an unverified role.",
     };
   }
   return {
     data_health: "unknown",
     role_state: "unknown",
-    role_state_reason:
-      "Unable to determine member role state from current role set.",
+    role_state_reason: "Unable to determine member role state from current role set.",
   };
 }
 
@@ -210,11 +239,9 @@ function buildAvatarUrl(memberUser) {
   const avatar = memberUser?.avatar || "";
   const userId = String(memberUser?.id || "");
   const discrim = Number(memberUser?.discriminator || 0) % 5;
-
   if (avatar && userId) {
     return `https://cdn.discordapp.com/avatars/${userId}/${avatar}.png?size=128`;
   }
-
   return `https://cdn.discordapp.com/embed/avatars/${discrim}.png`;
 }
 
@@ -232,14 +259,47 @@ function extractVoiceSnapshot(discordMember) {
       ? {
           channel_id: voiceState?.channel_id || null,
           suppress: Boolean(voiceState?.suppress),
-          request_to_speak_timestamp:
-            voiceState?.request_to_speak_timestamp || null,
+          request_to_speak_timestamp: voiceState?.request_to_speak_timestamp || null,
           self_mute: Boolean(voiceState?.self_mute),
           self_deaf: Boolean(voiceState?.self_deaf),
           mute: Boolean(voiceState?.mute),
           deaf: Boolean(voiceState?.deaf),
         }
       : null,
+  };
+}
+
+function sanitizeMemberRow(row) {
+  return {
+    user_id: row.user_id,
+    username: row.username,
+    display_name: row.display_name,
+    global_name: row.display_name,
+    avatar: row.avatar_hash,
+    avatar_url: row.avatar_url,
+    nickname: row.nickname,
+    joined_at: row.joined_at,
+    role_ids: row.role_ids,
+    role_names: row.role_names,
+    top_role: row.top_role,
+    roles: row.roles,
+    in_guild: row.in_guild !== false,
+    discord_unavailable: row.in_guild === false,
+    data_health: row.data_health,
+    role_state: row.role_state,
+    role_state_reason: row.role_state_reason,
+    has_unverified: Boolean(row.has_unverified),
+    has_verified_role: Boolean(row.has_verified_role),
+    has_staff_role: Boolean(row.has_staff_role),
+    has_secondary_verified_role: Boolean(row.has_secondary_verified_role),
+    has_cosmetic_only: Boolean(row.has_cosmetic_only),
+    synced_at: row.synced_at,
+    updated_at: row.updated_at,
+    highest_role_id: row.highest_role_id,
+    highest_role_name: row.highest_role_name,
+    last_seen_at: row.last_seen_at,
+    voice_channel_id: row.voice_channel_id || null,
+    voice_state: row.voice_state || null,
   };
 }
 
@@ -262,11 +322,8 @@ async function buildFreshMemberSnapshot({ supabase, guildId, userId }) {
     ]);
 
   if (storedMemberRes?.error) {
-    throw new Error(
-      storedMemberRes.error.message || "Failed to load stored member record."
-    );
+    throw new Error(storedMemberRes.error.message || "Failed to load stored member record.");
   }
-
   if (roleRulesRes?.error) {
     throw new Error(roleRulesRes.error.message || "Failed to load role rules.");
   }
@@ -277,27 +334,22 @@ async function buildFreshMemberSnapshot({ supabase, guildId, userId }) {
   const roleIds = Array.isArray(discordMember?.roles)
     ? discordMember.roles.map(String)
     : [];
-
   const fullRoles = roleIds
     .map((roleId) => roleMap.get(roleId))
     .filter(Boolean)
     .sort((a, b) => b.position - a.position);
-
   const roleNames = fullRoles.map((role) => role.name);
   const highestRole = fullRoles[0] || null;
-
   const grouped = resolveRoleGroups({
     roleIds,
     roleNames,
     roleRules: roleRulesRes?.data || [],
   });
-
   const roleState = resolveRoleState({
     inGuild: true,
     hasAnyRole: roleIds.length > 0,
     ...grouped,
   });
-
   const now = new Date().toISOString();
   const currentUsername = String(discordMember?.user?.username || "").trim();
   const currentDisplayName = String(
@@ -346,47 +398,14 @@ async function buildFreshMemberSnapshot({ supabase, guildId, userId }) {
     .upsert(row, { onConflict: "guild_id,user_id" });
 
   if (upsertError) {
-    throw new Error(
-      upsertError.message || "Failed to persist member snapshot."
-    );
+    throw new Error(upsertError.message || "Failed to persist member snapshot.");
   }
 
-  return {
-    user_id: row.user_id,
-    username: row.username,
-    display_name: row.display_name,
-    global_name: row.display_name,
-    avatar: row.avatar_hash,
-    avatar_url: row.avatar_url,
-    nickname: row.nickname,
-    joined_at: row.joined_at,
-    role_ids: row.role_ids,
-    role_names: row.role_names,
-    top_role: row.top_role,
-    roles: row.roles,
-    in_guild: true,
-    discord_unavailable: false,
-    data_health: row.data_health,
-    role_state: row.role_state,
-    role_state_reason: row.role_state_reason,
-    has_unverified: row.has_unverified,
-    has_verified_role: row.has_verified_role,
-    has_staff_role: row.has_staff_role,
-    has_secondary_verified_role: row.has_secondary_verified_role,
-    has_cosmetic_only: row.has_cosmetic_only,
-    synced_at: row.synced_at,
-    updated_at: row.updated_at,
-    highest_role_id: row.highest_role_id,
-    highest_role_name: row.highest_role_name,
-    last_seen_at: row.last_seen_at,
-    voice_channel_id: row.voice_channel_id,
-    voice_state: row.voice_state,
-  };
+  return sanitizeMemberRow(row);
 }
 
 async function markMemberLeft({ supabase, guildId, userId }) {
   const now = new Date().toISOString();
-
   const { error } = await supabase
     .from("guild_members")
     .update({
@@ -419,10 +438,7 @@ async function markMemberLeft({ supabase, guildId, userId }) {
   }
 
   return data
-    ? {
-        ...data,
-        discord_unavailable: true,
-      }
+    ? sanitizeMemberRow({ ...data, discord_unavailable: true })
     : {
         user_id: userId,
         in_guild: false,
@@ -435,12 +451,10 @@ async function markMemberLeft({ supabase, guildId, userId }) {
 
 async function refreshMemberAfterAction({ supabase, guildId, userId, action }) {
   const leftGuildActions = new Set(["kick", "ban"]);
-
   try {
     if (leftGuildActions.has(action)) {
       return await markMemberLeft({ supabase, guildId, userId });
     }
-
     return await buildFreshMemberSnapshot({ supabase, guildId, userId });
   } catch (error) {
     if (Number(error?.status) === 404 || /unknown member/i.test(String(error?.message || ""))) {
@@ -462,12 +476,7 @@ function buildMemberEventDetails({
 }) {
   switch (normalizedAction) {
     case "warn":
-      return {
-        eventType: "warned",
-        title: "Warn Issued",
-        reason,
-        metadata: {},
-      };
+      return { eventType: "warned", title: "Warn Issued", reason, metadata: {} };
     case "timeout":
       return {
         eventType: "timed_out",
@@ -476,144 +485,134 @@ function buildMemberEventDetails({
         metadata: { timeout_minutes: timeoutMinutes },
       };
     case "untimeout":
-      return {
-        eventType: "timeout_removed",
-        title: "Timeout Removed",
-        reason,
-        metadata: {},
-      };
+      return { eventType: "timeout_removed", title: "Timeout Removed", reason, metadata: {} };
     case "kick":
-      return {
-        eventType: "kicked",
-        title: "Member Kicked",
-        reason,
-        metadata: {},
-      };
+      return { eventType: "kicked", title: "Member Kicked", reason, metadata: {} };
     case "ban":
-      return {
-        eventType: "banned",
-        title: "Member Banned",
-        reason,
-        metadata: {},
-      };
+      return { eventType: "banned", title: "Member Banned", reason, metadata: {} };
     case "add_role":
       return {
         eventType: "role_added",
         title: "Role Added",
         reason,
-        metadata: {
-          role_id: roleId || null,
-          role_name: roleName || null,
-        },
+        metadata: { role_id: roleId || null, role_name: roleName || null },
       };
     case "remove_role":
       return {
         eventType: "role_removed",
         title: "Role Removed",
         reason,
-        metadata: {
-          role_id: roleId || null,
-          role_name: roleName || null,
-        },
+        metadata: { role_id: roleId || null, role_name: roleName || null },
       };
     case "mute":
-      return {
-        eventType: "voice_muted",
-        title: "Server Mute Applied",
-        reason,
-        metadata: {},
-      };
+      return { eventType: "voice_muted", title: "Server Mute Applied", reason, metadata: {} };
     case "unmute":
-      return {
-        eventType: "voice_unmuted",
-        title: "Server Mute Removed",
-        reason,
-        metadata: {},
-      };
+      return { eventType: "voice_unmuted", title: "Server Mute Removed", reason, metadata: {} };
     case "deafen":
-      return {
-        eventType: "voice_deafened",
-        title: "Server Deafen Applied",
-        reason,
-        metadata: {},
-      };
+      return { eventType: "voice_deafened", title: "Server Deafen Applied", reason, metadata: {} };
     case "undeafen":
-      return {
-        eventType: "voice_undeafened",
-        title: "Server Deafen Removed",
-        reason,
-        metadata: {},
-      };
+      return { eventType: "voice_undeafened", title: "Server Deafen Removed", reason, metadata: {} };
     case "disconnect_voice":
-      return {
-        eventType: "voice_disconnected",
-        title: "Disconnected From Voice",
-        reason,
-        metadata: {},
-      };
+      return { eventType: "voice_disconnected", title: "Disconnected From Voice", reason, metadata: {} };
     case "move_voice":
       return {
         eventType: "voice_moved",
         title: "Moved Voice Channel",
         reason,
-        metadata: {
-          target_channel_id: targetChannelId || null,
-        },
+        metadata: { target_channel_id: targetChannelId || null },
       };
     default:
       return {
         eventType: `member_${normalizedAction}`,
         title: `Member ${normalizedAction}`,
         reason,
-        metadata: {
-          actor_id: actorId || null,
-          actor_name: actorName || null,
-        },
+        metadata: { actor_id: actorId || null, actor_name: actorName || null },
       };
   }
 }
 
+async function insertActivityFeedEvent(supabase, args) {
+  const now = new Date().toISOString();
+  const attempts = [
+    {
+      guild_id: args.guildId,
+      title: args.title,
+      description: args.description,
+      event_family: "member",
+      event_type: args.eventType,
+      source: "dashboard_mod_action",
+      actor_user_id: args.actorId,
+      actor_name: args.actorName,
+      target_user_id: args.userId,
+      target_name: args.targetName || args.userId,
+      metadata: args.metadata || {},
+      created_at: now,
+    },
+    {
+      guild_id: args.guildId,
+      title: args.title,
+      description: args.description,
+      event_type: args.eventType,
+      source: "dashboard_mod_action",
+      actor_user_id: args.actorId,
+      actor_name: args.actorName,
+      target_user_id: args.userId,
+      target_name: args.targetName || args.userId,
+      created_at: now,
+    },
+  ];
+
+  for (const candidate of attempts) {
+    try {
+      const { error } = await supabase.from("activity_feed_events").insert(candidate);
+      if (!error) return;
+    } catch {
+      // Best effort only.
+    }
+  }
+}
+
 export async function POST(req) {
+  let refreshedTokens = null;
+
   try {
-    const { session, refreshedTokens } = await requireStaffSessionForRoute();
+    const auth = await requireStaffSessionForRoute();
+    const { session } = auth;
+    refreshedTokens = auth?.refreshedTokens || null;
     const supabase = createServerSupabase();
-    const guildId = env.guildId || "";
+    const guildId = selectedGuildId();
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || "").toLowerCase().trim();
+    const normalizedAction = action === "remove_timeout" ? "untimeout" : action;
     const userId = String(body.user_id || "").trim();
     const reason =
-      String(body.reason || "").trim() ||
-      "Action taken from Stoney Verify Dashboard";
+      String(body.reason || "").trim() || "Action taken from Dank Shield Dashboard";
     const rawMinutes = Number(body.minutes || 10);
     const timeoutMinutes = Number.isFinite(rawMinutes)
       ? Math.max(1, Math.min(rawMinutes, 40320))
       : 10;
-    const staffName =
-      session?.user?.username ||
-      session?.user?.name ||
-      env.defaultStaffName ||
-      "Dashboard Staff";
-    const staffId =
-      session?.user?.discord_id ||
-      session?.user?.id ||
-      session?.discordUser?.id ||
-      "unknown";
+    const staffName = getStaffName(session);
+    const staffId = getStaffId(session);
+    const roleId = String(body.role_id || "").trim() || null;
+    let roleName = String(body.role_name || "").trim() || null;
+    const targetChannelId =
+      String(body.target_channel_id || body.channel_id || "").trim() || null;
 
     if (!guildId) {
-      return NextResponse.json({ error: "Missing guild id" }, { status: 500 });
+      return json(
+        { ok: false, error: "Select a server before running moderation actions.", needsServerSelection: true },
+        428,
+        refreshedTokens
+      );
     }
 
     if (!userId) {
-      return NextResponse.json({ error: "Missing user id" }, { status: 400 });
+      return json({ ok: false, selectedGuildId: guildId, error: "Missing user id" }, 400, refreshedTokens);
     }
 
-    const normalizedAction =
-      action === "remove_timeout" ? "untimeout" : action;
-
-    const roleId = String(body.role_id || "").trim() || null;
-    const roleName = String(body.role_name || "").trim() || null;
-    const targetChannelId =
-      String(body.target_channel_id || body.channel_id || "").trim() || null;
+    if (!normalizedAction) {
+      return json({ ok: false, selectedGuildId: guildId, error: "Missing action" }, 400, refreshedTokens);
+    }
 
     if (normalizedAction === "warn") {
       const { error } = await supabase.from("warns").insert({
@@ -623,9 +622,8 @@ export async function POST(req) {
         reason: `${reason} — issued by ${staffName}`,
         source_message: null,
       });
-
       if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return json({ ok: false, selectedGuildId: guildId, error: error.message }, 500, refreshedTokens);
       }
     } else if (normalizedAction === "timeout") {
       await discordApi(`/guilds/${guildId}/members/${userId}`, {
@@ -650,50 +648,29 @@ export async function POST(req) {
         body: { delete_message_seconds: 0 },
         reason: `${reason} — by ${staffName}`,
       });
-    } else if (
-      normalizedAction === "add_role" ||
-      normalizedAction === "remove_role"
-    ) {
+    } else if (normalizedAction === "add_role" || normalizedAction === "remove_role") {
       if (!roleId) {
-        return NextResponse.json({ error: "Missing role_id" }, { status: 400 });
+        return json({ ok: false, selectedGuildId: guildId, error: "Missing role_id" }, 400, refreshedTokens);
       }
-
-      const roleRows = normalizeGuildRoles(
-        await discordApi(`/guilds/${guildId}/roles`)
-      );
+      const roleRows = normalizeGuildRoles(await discordApi(`/guilds/${guildId}/roles`));
       const targetRole = roleRows.find((role) => role.id === roleId);
-
       if (!targetRole) {
-        return NextResponse.json(
-          { error: "Role not found in Discord." },
-          { status: 404 }
-        );
+        return json({ ok: false, selectedGuildId: guildId, error: "Role not found in Discord." }, 404, refreshedTokens);
       }
-
       if (targetRole.managed) {
-        return NextResponse.json(
-          { error: "Managed or integration roles cannot be changed here." },
-          { status: 400 }
-        );
+        return json({ ok: false, selectedGuildId: guildId, error: "Managed or integration roles cannot be changed here." }, 400, refreshedTokens);
       }
-
+      roleName = roleName || targetRole.name;
       await discordApi(`/guilds/${guildId}/members/${userId}/roles/${roleId}`, {
         method: normalizedAction === "add_role" ? "PUT" : "DELETE",
         reason: `${reason} — by ${staffName}`,
       });
-    } else if (
-      normalizedAction === "mute" ||
-      normalizedAction === "unmute" ||
-      normalizedAction === "deafen" ||
-      normalizedAction === "undeafen"
-    ) {
+    } else if (["mute", "unmute", "deafen", "undeafen"].includes(normalizedAction)) {
       const patch = {};
-
       if (normalizedAction === "mute") patch.mute = true;
       if (normalizedAction === "unmute") patch.mute = false;
       if (normalizedAction === "deafen") patch.deaf = true;
       if (normalizedAction === "undeafen") patch.deaf = false;
-
       await discordApi(`/guilds/${guildId}/members/${userId}`, {
         method: "PATCH",
         body: patch,
@@ -707,62 +684,49 @@ export async function POST(req) {
       });
     } else if (normalizedAction === "move_voice") {
       if (!targetChannelId) {
-        return NextResponse.json(
-          { error: "Missing target_channel_id" },
-          { status: 400 }
-        );
+        return json({ ok: false, selectedGuildId: guildId, error: "Missing target_channel_id" }, 400, refreshedTokens);
       }
-
       await discordApi(`/guilds/${guildId}/members/${userId}`, {
         method: "PATCH",
         body: { channel_id: targetChannelId },
         reason: `${reason} — by ${staffName}`,
       });
     } else if (normalizedAction === "history") {
-      const { data: warns } = await supabase
-        .from("warns")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false });
-
-      const { data: tickets } = await supabase
-        .from("tickets")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false });
-
-      const { data: memberEvents } = await supabase
-        .from("member_events")
-        .select("*")
-        .eq("guild_id", guildId)
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false })
-        .limit(100);
-
-      const response = NextResponse.json({
-        warns: warns || [],
-        tickets: tickets || [],
-        member_events: memberEvents || [],
-      });
-      applyAuthCookies(response, refreshedTokens);
-      return response;
-    } else {
-      return NextResponse.json(
-        { error: "Unsupported action" },
-        { status: 400 }
+      const [{ data: warns }, { data: tickets }, { data: memberEvents }] = await Promise.all([
+        supabase
+          .from("warns")
+          .select("*")
+          .eq("guild_id", guildId)
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("tickets")
+          .select("*")
+          .eq("guild_id", guildId)
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("member_events")
+          .select("*")
+          .eq("guild_id", guildId)
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(100),
+      ]);
+      return json(
+        {
+          ok: true,
+          selectedGuildId: guildId,
+          warns: warns || [],
+          tickets: tickets || [],
+          member_events: memberEvents || [],
+        },
+        200,
+        refreshedTokens
       );
+    } else {
+      return json({ ok: false, selectedGuildId: guildId, error: "Unsupported action" }, 400, refreshedTokens);
     }
-
-    await supabase.from("audit_events").insert({
-      title: `Member ${normalizedAction}`,
-      description: `${staffName} performed ${normalizedAction} on ${userId}${
-        normalizedAction === "timeout"
-          ? ` for ${timeoutMinutes} minute(s)`
-          : ""
-      }. Reason: ${reason}`,
-      event_type: `member_${normalizedAction}`,
-      related_id: userId,
-    });
 
     const eventDetails = buildMemberEventDetails({
       normalizedAction,
@@ -775,6 +739,17 @@ export async function POST(req) {
       actorName: staffName,
     });
 
+    const eventMetadata = {
+      action: normalizedAction,
+      timeout_minutes: normalizedAction === "timeout" ? timeoutMinutes : null,
+      role_id: roleId,
+      role_name: roleName,
+      target_channel_id: targetChannelId,
+      source: "dashboard_mod_action",
+      original_action: action,
+      ...eventDetails.metadata,
+    };
+
     await insertMemberEvent(
       {
         guildId,
@@ -784,20 +759,23 @@ export async function POST(req) {
         eventType: eventDetails.eventType,
         title: eventDetails.title,
         reason: eventDetails.reason,
-        metadata: {
-          action: normalizedAction,
-          timeout_minutes:
-            normalizedAction === "timeout" ? timeoutMinutes : null,
-          role_id: roleId,
-          role_name: roleName,
-          target_channel_id: targetChannelId,
-          source: "dashboard_mod_action",
-          original_action: action,
-          ...eventDetails.metadata,
-        },
+        metadata: eventMetadata,
       },
       supabase
     );
+
+    await insertActivityFeedEvent(supabase, {
+      guildId,
+      userId,
+      actorId: staffId,
+      actorName: staffName,
+      eventType: `member_${normalizedAction}`,
+      title: `Member ${normalizedAction}`,
+      description: `${staffName} performed ${normalizedAction} on ${userId}${
+        normalizedAction === "timeout" ? ` for ${timeoutMinutes} minute(s)` : ""
+      }. Reason: ${reason}`,
+      metadata: eventMetadata,
+    });
 
     let refreshedMember = null;
     let refreshWarning = null;
@@ -810,34 +788,29 @@ export async function POST(req) {
         action: normalizedAction,
       });
     } catch (refreshError) {
-      refreshWarning =
-        refreshError?.message || "Member refresh failed after Discord action.";
+      refreshWarning = refreshError?.message || "Member refresh failed after Discord action.";
     }
 
-    const response = NextResponse.json({
-      ok: true,
-      action: normalizedAction,
-      original_action: action,
-      user_id: userId,
-      timeout_minutes:
-        normalizedAction === "timeout" ? timeoutMinutes : null,
-      staff_id: staffId,
-      member: refreshedMember,
-      refresh_warning: refreshWarning,
-    });
-
-    applyAuthCookies(response, refreshedTokens);
-    return response;
+    return json(
+      {
+        ok: true,
+        selectedGuildId: guildId,
+        action: normalizedAction,
+        original_action: action,
+        user_id: userId,
+        timeout_minutes: normalizedAction === "timeout" ? timeoutMinutes : null,
+        staff_id: staffId,
+        staff_name: staffName,
+        member: refreshedMember,
+        refresh_warning: refreshWarning,
+      },
+      200,
+      refreshedTokens
+    );
   } catch (error) {
     const status =
       Number(error?.status) ||
-      (String(error?.message || "").toLowerCase() === "unauthorized"
-        ? 401
-        : 500);
-
-    return NextResponse.json(
-      { error: error.message || "Moderation action failed" },
-      { status }
-    );
+      (String(error?.message || "").toLowerCase() === "unauthorized" ? 401 : 500);
+    return json({ ok: false, error: error.message || "Moderation action failed" }, status, refreshedTokens);
   }
 }
