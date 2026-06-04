@@ -113,12 +113,6 @@ async function fetchStaffMetricOrNull(supabase: ReturnType<typeof createServerSu
   return (data as StaffMetricRow | null) || null;
 }
 
-async function createAuditEvent(supabase: ReturnType<typeof createServerSupabase>, ticketId: string, staffName: string, ticket: TicketRow, reason: string): Promise<void> {
-  try {
-    await supabase.from("audit_events").insert({ title: "Ticket closed", description: `${staffName} closed ticket ${ticket?.ticket_number || ticketId}: ${reason}`, event_type: "ticket_closed", related_id: ticketId });
-  } catch {}
-}
-
 async function createActivityFeedEvent(supabase: ReturnType<typeof createServerSupabase>, ticket: TicketRow, actorId: string | null, actorName: string, reason: string): Promise<void> {
   const guildId = normalizeString(ticket?.guild_id);
   if (!guildId) return;
@@ -140,7 +134,17 @@ async function createActivityFeedEvent(supabase: ReturnType<typeof createServerS
       title: "Ticket Closed",
       description: `${actorName} closed ticket ${ticket?.ticket_number || ticket?.id || ""}`.trim(),
       reason,
-      metadata: { ticket_id: ticket?.id || null, ticket_number: ticket?.ticket_number || null, channel_id: ticket?.channel_id || ticket?.discord_thread_id || null, channel_name: ticket?.channel_name || null, ticket_status: ticket?.status || null, closed_reason: reason, staff_id: actorId || null, staff_name: actorName, source: "dashboard_close_route" },
+      metadata: {
+        ticket_id: ticket?.id || null,
+        ticket_number: ticket?.ticket_number || null,
+        channel_id: ticket?.channel_id || ticket?.discord_thread_id || null,
+        channel_name: ticket?.channel_name || null,
+        ticket_status: ticket?.status || null,
+        closed_reason: reason,
+        staff_id: actorId || null,
+        staff_name: actorName,
+        source: "dashboard_close_route",
+      },
     });
   } catch {}
 }
@@ -189,7 +193,10 @@ export async function POST(request: Request, context: { params: { id?: string } 
     if (error || !data) return buildJsonResponse({ error: error?.message || "Failed to close ticket.", selectedGuildId: guildId }, 500, refreshedTokens);
 
     const updatedTicket = data as TicketRow;
-    await Promise.allSettled([createAuditEvent(supabase, ticketId, actorName, updatedTicket, reason), createActivityFeedEvent(supabase, updatedTicket, actorId, actorName, reason), updateStaffMetrics(supabase, guildId, actorId, actorName)]);
+    await Promise.allSettled([
+      createActivityFeedEvent(supabase, updatedTicket, actorId, actorName, reason),
+      updateStaffMetrics(supabase, guildId, actorId, actorName),
+    ]);
 
     return buildJsonResponse({ ok: true, selectedGuildId: guildId, ticket: mapTicket(updatedTicket), staffId: actorId, staffName: actorName, alreadyClosed: false }, 200, refreshedTokens);
   } catch (error) {
