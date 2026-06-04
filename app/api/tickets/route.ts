@@ -1,4 +1,10 @@
+import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
+import {
+  requireStaffSessionForRoute,
+  applyAuthCookies,
+} from "@/lib/auth-server";
+import { getSelectedGuildId } from "@/lib/guild-selection";
 import { classifyTicket, suggestModerationAction } from "@/lib/moderation";
 import { derivePriority } from "@/lib/priority";
 import { enrichTicketWithMatchedCategory } from "@/lib/ticketCategoryMatching";
@@ -61,14 +67,6 @@ type TicketMessageInsert = {
   source?: string;
 };
 
-type AuditEventInsert = {
-  title: string;
-  description: string;
-  event_type: string;
-  related_id: string;
-  metadata?: JsonRecord;
-};
-
 type ClassificationResult = {
   category?: string;
   confidence?: number;
@@ -83,7 +81,6 @@ type ModerationSuggestion = {
 };
 
 type TicketCreateBody = {
-  guild_id?: string | null;
   user_id?: string | null;
   username?: string | null;
   title?: string | null;
@@ -114,9 +111,7 @@ function normalizeBoolean(value: unknown): boolean {
 }
 
 function safeObject<T extends object = JsonRecord>(value: unknown): T {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return value as T;
-  }
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as T;
   return {} as T;
 }
 
@@ -133,6 +128,10 @@ function normalizeStringArray(value: unknown): string[] {
 function parseInteger(value: string | null, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function selectedGuildId(): string {
+  return normalizeString(getSelectedGuildId());
 }
 
 function isMissingColumnError(error: unknown, column?: string): boolean {
@@ -153,25 +152,41 @@ function isMissingColumnError(error: unknown, column?: string): boolean {
     );
   }
 
-  return (
-    text.includes("PGRST204") &&
-    text.includes("schema cache") &&
-    text.includes(column)
-  );
+  return text.includes("PGRST204") && text.includes("schema cache") && text.includes(column);
 }
 
-function buildJsonResponse(payload: Record<string, unknown>, status = 200): Response {
-  return new Response(JSON.stringify(payload), {
+function buildJsonResponse(
+  payload: Record<string, unknown>,
+  status = 200,
+  refreshedTokens: any = null
+) {
+  const response = NextResponse.json(payload, {
     status,
     headers: {
-      "Content-Type": "application/json",
       "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     },
   });
+  applyAuthCookies(response, refreshedTokens);
+  return response;
 }
 
-function buildErrorResponse(message: string, status = 500): Response {
-  return buildJsonResponse({ error: message }, status);
+function buildErrorResponse(
+  message: string,
+  status = 500,
+  selectedGuildIdValue = "",
+  refreshedTokens: any = null,
+  extra: Record<string, unknown> = {}
+) {
+  return buildJsonResponse(
+    {
+      ok: false,
+      error: message,
+      ...(selectedGuildIdValue ? { selectedGuildId: selectedGuildIdValue } : {}),
+      ...extra,
+    },
+    status,
+    refreshedTokens
+  );
 }
 
 function mapTicket(row: TicketRow): TicketRow {
@@ -228,11 +243,8 @@ function buildTicketTitle(
   classifiedCategory: string
 ): string {
   if (explicitTitle) return explicitTitle;
-
   const chosen = explicitCategory || classifiedCategory || "support";
-  return chosen
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+  return chosen.replaceAll("_", " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 async function fetchCategoriesForGuild(
@@ -256,12 +268,7 @@ async function insertTicketWithFallbacks(
 ): Promise<{ data: TicketRow | null; error: { message?: string } | null }> {
   let result = await supabase.from("tickets").insert(payload).select("*").single();
 
-  if (!result.error) {
-    return {
-      data: (result.data as TicketRow) || null,
-      error: null,
-    };
-  }
+  if (!result.error) return { data: (result.data as TicketRow) || null, error: null };
 
   const strippedCategoryMatchPayload = { ...payload };
   delete strippedCategoryMatchPayload.raw_category;
@@ -280,12 +287,7 @@ async function insertTicketWithFallbacks(
       .select("*")
       .single();
 
-    if (!result.error) {
-      return {
-        data: (result.data as TicketRow) || null,
-        error: null,
-      };
-    }
+    if (!result.error) return { data: (result.data as TicketRow) || null, error: null };
   }
 
   const strippedAiPayload = { ...strippedCategoryMatchPayload };
@@ -303,26 +305,91 @@ async function insertTicketWithFallbacks(
       .select("*")
       .single();
 
-    if (!result.error) {
-      return {
-        data: (result.data as TicketRow) || null,
-        error: null,
-      };
-    }
+    if (!result.error) return { data: (result.data as TicketRow) || null, error: null };
   }
 
-  return {
-    data: null,
-    error: result.error,
-  };
+  return { data: null, error: result.error };
+}
+
+async function insertTicketActivity(
+  supabase: ReturnType<typeof createServerSupabase>,
+  args: {
+    guildId: string;
+    ticketId: string;
+    userId: string;
+    username: string;
+    category: string | null;
+    source: string;
+    priority: string | null;
+  }
+) {
+  const now = new Date().toISOString();
+  const attempts = [
+    {
+      guild_id: args.guildId,
+      title: "Ticket created",
+      description: `New ${args.category || "support"} ticket for ${args.username || args.userId}`,
+      event_family: "ticket",
+      event_type: "ticket_created",
+      source: "dashboard_tickets_api",
+      related_id: args.ticketId,
+      ticket_id: args.ticketId,
+      target_user_id: args.userId,
+      target_name: args.username || args.userId,
+      metadata: {
+        guild_id: args.guildId,
+        user_id: args.userId,
+        username: args.username || args.userId,
+        category: args.category || null,
+        priority: args.priority || null,
+        source: args.source,
+      },
+      created_at: now,
+    },
+    {
+      guild_id: args.guildId,
+      title: "Ticket created",
+      description: `New ${args.category || "support"} ticket for ${args.username || args.userId}`,
+      event_type: "ticket_created",
+      source: "dashboard_tickets_api",
+      related_id: args.ticketId,
+      ticket_id: args.ticketId,
+      target_user_id: args.userId,
+      target_name: args.username || args.userId,
+      created_at: now,
+    },
+  ];
+
+  for (const candidate of attempts) {
+    try {
+      const { error } = await supabase.from("activity_feed_events").insert(candidate);
+      if (!error) return;
+    } catch {
+      // Best-effort only.
+    }
+  }
 }
 
 export async function GET(request: Request) {
+  let refreshedTokens: any = null;
+
   try {
+    const auth = await requireStaffSessionForRoute();
+    refreshedTokens = auth?.refreshedTokens || null;
     const supabase = createServerSupabase();
     const { searchParams } = new URL(request.url);
+    const guildId = selectedGuildId();
 
-    const guildId = normalizeString(searchParams.get("guild_id"));
+    if (!guildId) {
+      return buildErrorResponse(
+        "Select a server before loading tickets.",
+        428,
+        "",
+        refreshedTokens,
+        { needsServerSelection: true }
+      );
+    }
+
     const status = normalizeLower(searchParams.get("status"));
     const userId = normalizeString(searchParams.get("user_id"));
     const includeClosed = normalizeBoolean(searchParams.get("include_closed"));
@@ -331,31 +398,21 @@ export async function GET(request: Request) {
     let query = supabase
       .from("tickets")
       .select("*")
+      .eq("guild_id", guildId)
       .order("created_at", { ascending: false })
       .limit(limit);
 
-    if (guildId) {
-      query = query.eq("guild_id", guildId);
-    }
-
-    if (userId) {
-      query = query.eq("user_id", userId);
-    }
-
-    if (status) {
-      query = query.eq("status", status);
-    } else if (!includeClosed) {
-      query = query.neq("status", "closed").neq("status", "deleted");
-    }
+    if (userId) query = query.eq("user_id", userId);
+    if (status) query = query.eq("status", status);
+    else if (!includeClosed) query = query.neq("status", "closed").neq("status", "deleted");
 
     const { data, error } = await query;
-
     if (error) {
-      return buildErrorResponse(error.message || "Failed to load tickets.", 500);
+      return buildErrorResponse(error.message || "Failed to load tickets.", 500, guildId, refreshedTokens);
     }
 
     const rawRows = safeArray<TicketRow>(data);
-    const categories = guildId ? await fetchCategoriesForGuild(supabase, guildId) : [];
+    const categories = await fetchCategoriesForGuild(supabase, guildId);
 
     const tickets = rawRows.map((row) => {
       const mapped = mapTicket(row);
@@ -380,24 +437,42 @@ export async function GET(request: Request) {
       };
     });
 
-    return buildJsonResponse({
-      tickets,
-      count: tickets.length,
-    });
-  } catch (error) {
-    return buildErrorResponse(
-      error instanceof Error ? error.message : "Failed to load tickets.",
-      500
+    return buildJsonResponse(
+      {
+        ok: true,
+        selectedGuildId: guildId,
+        tickets,
+        count: tickets.length,
+      },
+      200,
+      refreshedTokens
     );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to load tickets.";
+    return buildErrorResponse(message, message === "Unauthorized" ? 401 : 500, "", refreshedTokens);
   }
 }
 
 export async function POST(request: Request) {
+  let refreshedTokens: any = null;
+
   try {
+    const auth = await requireStaffSessionForRoute();
+    refreshedTokens = auth?.refreshedTokens || null;
     const body = await parseBody(request);
     const supabase = createServerSupabase();
+    const guildId = selectedGuildId();
 
-    const guildId = normalizeString(body.guild_id);
+    if (!guildId) {
+      return buildErrorResponse(
+        "Select a server before creating a ticket.",
+        428,
+        "",
+        refreshedTokens,
+        { needsServerSelection: true }
+      );
+    }
+
     const userId = normalizeString(body.user_id);
     const username = normalizeString(body.username || body.user_id);
     const message = normalizeString(body.message);
@@ -407,17 +482,8 @@ export async function POST(request: Request) {
     const attachments = safeArray<JsonRecord>(body.attachments);
     const flagged = normalizeBoolean(body.flagged);
 
-    if (!guildId) {
-      return buildErrorResponse("guild_id is required.", 400);
-    }
-
-    if (!userId) {
-      return buildErrorResponse("user_id is required.", 400);
-    }
-
-    if (!message) {
-      return buildErrorResponse("message is required.", 400);
-    }
+    if (!userId) return buildErrorResponse("user_id is required.", 400, guildId, refreshedTokens);
+    if (!message) return buildErrorResponse("message is required.", 400, guildId, refreshedTokens);
 
     const classification = classifyTicket(message) as ClassificationResult;
     const suggestion = suggestModerationAction(message) as ModerationSuggestion;
@@ -427,11 +493,7 @@ export async function POST(request: Request) {
       guild_id: guildId,
       user_id: userId,
       username: username || userId,
-      title: buildTicketTitle(
-        explicitTitle,
-        explicitCategory,
-        normalizeString(classification?.category)
-      ),
+      title: buildTicketTitle(explicitTitle, explicitCategory, normalizeString(classification?.category)),
       category: explicitCategory || normalizeString(classification?.category) || "other",
       status: "open",
       initial_message: message,
@@ -456,16 +518,11 @@ export async function POST(request: Request) {
       "other";
 
     const createdAt = new Date().toISOString();
-
     const payload: Record<string, unknown> = {
       guild_id: guildId,
       user_id: userId,
       username: username || userId,
-      title: buildTicketTitle(
-        explicitTitle,
-        chosenCategory,
-        normalizeString(classification?.category)
-      ),
+      title: buildTicketTitle(explicitTitle, chosenCategory, normalizeString(classification?.category)),
       category: chosenCategory,
       status: "open",
       priority: derivePriority({
@@ -491,24 +548,20 @@ export async function POST(request: Request) {
         enrichedDraft?.matched_category_score == null
           ? null
           : normalizeNumber(enrichedDraft.matched_category_score, 0),
-      matched_category_keywords: normalizeStringArray(
-        enrichedDraft?.matched_category_keywords
-      ),
+      matched_category_keywords: normalizeStringArray(enrichedDraft?.matched_category_keywords),
+      created_at: createdAt,
+      updated_at: createdAt,
     };
 
     const inserted = await insertTicketWithFallbacks(supabase, payload);
-
     if (inserted.error || !inserted.data) {
-      return buildErrorResponse(
-        inserted.error?.message || "Failed to create ticket.",
-        500
-      );
+      return buildErrorResponse(inserted.error?.message || "Failed to create ticket.", 500, guildId, refreshedTokens);
     }
 
     const createdTicket = mapTicket(inserted.data);
-
+    const ticketId = String(createdTicket.id || "");
     const messageInsert: TicketMessageInsert = {
-      ticket_id: String(createdTicket.id || ""),
+      ticket_id: ticketId,
       author_id: userId || null,
       author_name: username || userId,
       content: message,
@@ -517,27 +570,17 @@ export async function POST(request: Request) {
       source,
     };
 
-    const auditInsert: AuditEventInsert = {
-      title: "Ticket created",
-      description: `New ${createdTicket.category || "support"} ticket for ${username || userId}`,
-      event_type: "ticket_created",
-      related_id: String(createdTicket.id || ""),
-      metadata: {
-        guild_id: guildId,
-        user_id: userId,
+    await Promise.allSettled([
+      ticketId ? supabase.from("ticket_messages").insert(messageInsert) : Promise.resolve(),
+      insertTicketActivity(supabase, {
+        guildId,
+        ticketId,
+        userId,
         username: username || userId,
         category: createdTicket.category || null,
-        matched_category_id: createdTicket.matched_category_id || null,
-        matched_category_name: createdTicket.matched_category_name || null,
-        matched_category_slug: createdTicket.matched_category_slug || null,
         priority: createdTicket.priority || null,
         source,
-      },
-    };
-
-    await Promise.allSettled([
-      supabase.from("ticket_messages").insert(messageInsert),
-      supabase.from("audit_events").insert(auditInsert),
+      }),
       insertMemberEvent(
         {
           guildId,
@@ -557,23 +600,26 @@ export async function POST(request: Request) {
             priority: createdTicket.priority || null,
             source,
             mod_suggestion: createdTicket.mod_suggestion || null,
-            mod_suggestion_confidence:
-              createdTicket.mod_suggestion_confidence ?? null,
+            mod_suggestion_confidence: createdTicket.mod_suggestion_confidence ?? null,
           },
         },
         supabase
       ),
     ]);
 
-    return buildJsonResponse({
-      ticket: createdTicket,
-      classification,
-      suggestion,
-    });
-  } catch (error) {
-    return buildErrorResponse(
-      error instanceof Error ? error.message : "Failed to create ticket.",
-      500
+    return buildJsonResponse(
+      {
+        ok: true,
+        selectedGuildId: guildId,
+        ticket: createdTicket,
+        classification,
+        suggestion,
+      },
+      200,
+      refreshedTokens
     );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to create ticket.";
+    return buildErrorResponse(message, message === "Unauthorized" ? 401 : 500, "", refreshedTokens);
   }
 }
