@@ -71,6 +71,9 @@ function SessionCard({ session }: { session: Exclude<SessionLike, null> }) {
   const explicitGuildId = getExplicitSelectedGuildId();
   const selectedGuildId = explicitGuildId || normalizeString(session.authContext?.selected_guild_id);
   const roles = Array.isArray(session.member?.roles) ? session.member.roles : [];
+  const hasConfirmedAccess = Boolean(session.isStaff || session.isServerManager || session.member?.has_manage_server || session.member?.has_staff_role);
+  const guildCheckError = normalizeString(session.authContext?.guild_check_error);
+  const shouldShowGuildCheckError = Boolean(guildCheckError && !hasConfirmedAccess && !selectedGuildId);
 
   return (
     <>
@@ -97,18 +100,18 @@ function SessionCard({ session }: { session: Exclude<SessionLike, null> }) {
         <div className="card account-info-card">
           <div className="muted account-eyebrow">Session</div>
           <div className="account-info-row"><span>Status</span><strong>Signed in</strong></div>
-          <div className="account-info-row"><span>Dashboard access</span><strong>{session.isStaff ? "Staff / Manager" : "Member"}</strong></div>
-          <div className="account-info-row"><span>Access label</span><strong>{session.member?.access_label || "Signed In"}</strong></div>
+          <div className="account-info-row"><span>Dashboard access</span><strong>{session.isStaff ? "Staff / Manager" : session.isServerManager ? "Server Manager" : "Member"}</strong></div>
+          <div className="account-info-row"><span>Access label</span><strong>{session.member?.access_label || (hasConfirmedAccess ? "Server Manager" : "Signed In")}</strong></div>
           <div className="account-info-row"><span>Selected server</span><strong>{selectedGuildId || "None selected"}</strong></div>
         </div>
 
         <div className="card account-info-card">
           <div className="muted account-eyebrow">Server Check</div>
           <div className="account-info-row"><span>Explicit server cookie</span><strong>{explicitGuildId ? "Set" : "Not set"}</strong></div>
-          <div className="account-info-row"><span>Guild member checked</span><strong>{session.authContext?.guild_checked ? "Yes" : "No"}</strong></div>
-          <div className="account-info-row"><span>Staff reason</span><strong>{session.authContext?.staff_reason || "—"}</strong></div>
-          {session.authContext?.guild_check_error ? (
-            <div className="account-warning">{session.authContext.guild_check_error}</div>
+          <div className="account-info-row"><span>Guild member checked</span><strong>{session.authContext?.guild_checked ? "Yes" : hasConfirmedAccess ? "Not needed for current access" : "No"}</strong></div>
+          <div className="account-info-row"><span>Staff reason</span><strong>{session.authContext?.staff_reason || (hasConfirmedAccess ? "access_confirmed" : "—")}</strong></div>
+          {shouldShowGuildCheckError ? (
+            <div className="account-warning">{guildCheckError}</div>
           ) : null}
         </div>
 
