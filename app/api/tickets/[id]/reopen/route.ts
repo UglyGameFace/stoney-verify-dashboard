@@ -105,12 +105,6 @@ async function fetchTicketOrNull(supabase: ReturnType<typeof createServerSupabas
   return data as TicketRow;
 }
 
-async function createAuditEvent(supabase: ReturnType<typeof createServerSupabase>, ticketId: string, staffName: string, ticket: TicketRow): Promise<void> {
-  try {
-    await supabase.from("audit_events").insert({ title: "Ticket reopened", description: `${staffName} reopened ticket ${ticket?.ticket_number || ticketId}`, event_type: "ticket_reopened", related_id: ticketId });
-  } catch {}
-}
-
 async function createActivityFeedEvent(supabase: ReturnType<typeof createServerSupabase>, ticket: TicketRow, actorId: string | null, actorName: string): Promise<void> {
   const guildId = normalizeString(ticket?.guild_id);
   if (!guildId) return;
@@ -131,7 +125,14 @@ async function createActivityFeedEvent(supabase: ReturnType<typeof createServerS
       related_id: ticket?.id || null,
       title: "Ticket Reopened",
       description: `${actorName} reopened ticket ${ticket?.ticket_number || ticket?.id || ""}`.trim(),
-      metadata: { ticket_id: ticket?.id || null, ticket_number: ticket?.ticket_number || null, reopened_at: ticket?.reopened_at || null, staff_id: actorId || null, staff_name: actorName, source: "dashboard_reopen_route" },
+      metadata: {
+        ticket_id: ticket?.id || null,
+        ticket_number: ticket?.ticket_number || null,
+        reopened_at: ticket?.reopened_at || null,
+        staff_id: actorId || null,
+        staff_name: actorName,
+        source: "dashboard_reopen_route",
+      },
     });
   } catch {}
 }
@@ -179,7 +180,10 @@ export async function POST(_request: Request, context: { params: { id?: string }
     if (updateError || !updatedTicket) return buildJsonResponse({ error: updateError?.message || "Failed to reopen ticket.", selectedGuildId: guildId }, 500, refreshedTokens);
 
     const reopenedTicket = updatedTicket as TicketRow;
-    await Promise.allSettled([createAuditEvent(supabase, ticketId, actorName, reopenedTicket), createActivityFeedEvent(supabase, reopenedTicket, actorId, actorName), createSystemNote(supabase, ticketId, actorId, actorName)]);
+    await Promise.allSettled([
+      createActivityFeedEvent(supabase, reopenedTicket, actorId, actorName),
+      createSystemNote(supabase, ticketId, actorId, actorName),
+    ]);
 
     return buildJsonResponse({ ok: true, selectedGuildId: guildId, ticket: mapTicket(reopenedTicket), staffId: actorId, staffName: actorName, alreadyOpen: false }, 200, refreshedTokens);
   } catch (error) {
