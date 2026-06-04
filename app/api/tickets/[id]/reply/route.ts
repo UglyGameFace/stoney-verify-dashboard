@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
+import { getSelectedGuildId } from "@/lib/guild-selection";
 import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
@@ -82,6 +83,10 @@ function normalizeMultiline(value: unknown): string {
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
     .trim();
+}
+
+function selectedGuildId(): string {
+  return normalizeString(getSelectedGuildId());
 }
 
 function safeObject<T extends object = Record<string, unknown>>(value: unknown): T {
@@ -179,12 +184,14 @@ function ticketIsReplyable(ticket: TicketRow | null | undefined): boolean {
 
 async function fetchTicketOrNull(
   supabase: ReturnType<typeof createServerSupabase>,
-  ticketId: string
+  ticketId: string,
+  guildId: string
 ) {
   const { data, error } = await supabase
     .from("tickets")
     .select("*")
     .eq("id", ticketId)
+    .eq("guild_id", guildId)
     .single();
 
   if (error || !data) return null;
@@ -299,13 +306,7 @@ async function mirrorReplyToDiscord(args: {
     };
   }
 
-  const payload = buildDiscordReplyPayload({
-    message,
-    attachments,
-    actorName,
-    ticket,
-  });
-
+  const payload = buildDiscordReplyPayload({ message, attachments, actorName, ticket });
   const chunks = chunkDiscordMessage(payload);
   const sent: DiscordMessageResponse[] = [];
 
@@ -341,7 +342,7 @@ async function insertDashboardStaffMessages(
   attachments: NormalizedAttachment[],
   discordMessages: DiscordMessageResponse[]
 ) {
-  const guildId = normalizeString(ticket?.guild_id || env?.guildId || "");
+  const guildId = normalizeString(ticket?.guild_id);
   const channelId = getTicketChannelId(ticket);
 
   if (!guildId || !channelId || !safeArray(discordMessages).length) return;
@@ -371,24 +372,6 @@ async function insertDashboardStaffMessages(
   }
 }
 
-async function createAuditEvent(
-  supabase: ReturnType<typeof createServerSupabase>,
-  ticketId: string,
-  actorName: string | null,
-  preview: string
-) {
-  try {
-    await supabase.from("audit_events").insert({
-      title: "Staff reply sent",
-      description: `${actorName || "Staff"} replied to ticket ${ticketId}: ${preview}`,
-      event_type: "ticket_reply",
-      related_id: ticketId,
-    });
-  } catch {
-    // best-effort only
-  }
-}
-
 async function createActivityFeedEvent(
   supabase: ReturnType<typeof createServerSupabase>,
   ticket: TicketRow,
@@ -398,7 +381,7 @@ async function createActivityFeedEvent(
   attachments: NormalizedAttachment[],
   mirroredToDiscord: boolean
 ) {
-  const guildId = normalizeString(ticket?.guild_id || env?.guildId || "");
+  const guildId = normalizeString(ticket?.guild_id);
   if (!guildId) return;
 
   const metadata = {
@@ -459,7 +442,8 @@ async function bumpTicketFreshness(
   ticket: TicketRow
 ) {
   const ticketId = normalizeString(ticket?.id);
-  if (!ticketId) return;
+  const guildId = normalizeString(ticket?.guild_id);
+  if (!ticketId || !guildId) return;
 
   try {
     await supabase
@@ -468,13 +452,15 @@ async function bumpTicketFreshness(
         updated_at: new Date().toISOString(),
         last_activity_at: new Date().toISOString(),
       })
-      .eq("id", ticketId);
+      .eq("id", ticketId)
+      .eq("guild_id", guildId);
   } catch {
     try {
       await supabase
         .from("tickets")
         .update({ updated_at: new Date().toISOString() })
-        .eq("id", ticketId);
+        .eq("id", ticketId)
+        .eq("guild_id", guildId);
     } catch {
       // best-effort only
     }
@@ -489,10 +475,19 @@ export async function POST(
     const { session, refreshedTokens } = await requireStaffSessionForRoute();
     const supabase = createServerSupabase();
     const ticketId = normalizeString(context?.params?.id);
+    const guildId = selectedGuildId();
+
+    if (!guildId) {
+      return buildJsonResponse(
+        { error: "Select a server before replying to a ticket.", needsServerSelection: true },
+        428,
+        refreshedTokens
+      );
+    }
 
     if (!ticketId) {
       return buildJsonResponse(
-        { error: "Missing ticket id." },
+        { error: "Missing ticket id.", selectedGuildId: guildId },
         400,
         refreshedTokens
       );
@@ -507,7 +502,7 @@ export async function POST(
 
     if (!message) {
       return buildJsonResponse(
-        { error: "Reply message cannot be empty." },
+        { error: "Reply message cannot be empty.", selectedGuildId: guildId },
         400,
         refreshedTokens
       );
@@ -515,16 +510,16 @@ export async function POST(
 
     if (message.length > MAX_MESSAGE_LENGTH) {
       return buildJsonResponse(
-        { error: `Reply is too long. Maximum ${MAX_MESSAGE_LENGTH} characters.` },
+        { error: `Reply is too long. Maximum ${MAX_MESSAGE_LENGTH} characters.`, selectedGuildId: guildId },
         400,
         refreshedTokens
       );
     }
 
-    const ticket = await fetchTicketOrNull(supabase, ticketId);
+    const ticket = await fetchTicketOrNull(supabase, ticketId, guildId);
     if (!ticket) {
       return buildJsonResponse(
-        { error: "Ticket not found." },
+        { error: "Ticket not found.", selectedGuildId: guildId },
         404,
         refreshedTokens
       );
@@ -532,7 +527,7 @@ export async function POST(
 
     if (!ticketIsReplyable(ticket)) {
       return buildJsonResponse(
-        { error: `Cannot reply to a ${getTicketStatus(ticket) || "closed"} ticket.` },
+        { error: `Cannot reply to a ${getTicketStatus(ticket) || "closed"} ticket.`, selectedGuildId: guildId },
         409,
         refreshedTokens
       );
@@ -556,22 +551,16 @@ export async function POST(
 
     if (error || !data) {
       return buildJsonResponse(
-        { error: error?.message || "Failed to save reply." },
+        { error: error?.message || "Failed to save reply.", selectedGuildId: guildId },
         500,
         refreshedTokens
       );
     }
 
-    const mirrorResult = await mirrorReplyToDiscord({
-      ticket,
-      actorName,
-      message,
-      attachments,
-    });
+    const mirrorResult = await mirrorReplyToDiscord({ ticket, actorName, message, attachments });
 
     await Promise.allSettled([
       bumpTicketFreshness(supabase, ticket),
-      createAuditEvent(supabase, ticketId, actorName, truncateText(message, 180)),
       createActivityFeedEvent(
         supabase,
         ticket,
@@ -595,6 +584,7 @@ export async function POST(
     return buildJsonResponse(
       {
         ok: true,
+        selectedGuildId: guildId,
         message: mapTicketMessage(data as TicketMessageRow),
         mirroredToDiscord: mirrorResult.mirroredToDiscord,
         mirroredMessageIds: mirrorResult.mirroredMessageIds || [],
