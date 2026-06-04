@@ -136,12 +136,6 @@ async function createActivityFeedEvent(supabase: ReturnType<typeof createServerS
   } catch {}
 }
 
-async function createAuditEvent(supabase: ReturnType<typeof createServerSupabase>, ticketId: string, actorName: string | null): Promise<void> {
-  try {
-    await supabase.from("audit_events").insert({ title: "Staff note added", description: `${actorName || "Staff"} added internal note to ticket ${ticketId}`, event_type: "ticket_note", related_id: ticketId });
-  } catch {}
-}
-
 async function bumpTicketUpdatedAt(supabase: ReturnType<typeof createServerSupabase>, ticketId: string, guildId: string): Promise<void> {
   const nowIso = new Date().toISOString();
   try {
@@ -211,7 +205,7 @@ export async function POST(request: Request, context: { params: { id?: string } 
 
     if (error || !data) return buildJsonResponse({ error: error?.message || "Failed to save note.", selectedGuildId: guildId }, 500, refreshedTokens);
 
-    await Promise.allSettled([bumpTicketUpdatedAt(supabase, ticketId, guildId), createAuditEvent(supabase, ticketId, actorName), createActivityFeedEvent(supabase, ticket, actorId, actorName, content)]);
+    await Promise.allSettled([bumpTicketUpdatedAt(supabase, ticketId, guildId), createActivityFeedEvent(supabase, ticket, actorId, actorName, content)]);
 
     return buildJsonResponse({ ok: true, selectedGuildId: guildId, note: mapNote(data) }, 200, refreshedTokens);
   } catch (error) {
