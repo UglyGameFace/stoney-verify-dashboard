@@ -19,7 +19,9 @@ export type BotCommandAction =
   | "sync_role_members"
   | "sync_active_tickets"
   | "sync_single_ticket"
-  | "portal_ticket_reply";
+  | "portal_ticket_reply"
+  | "post_ticket_panel"
+  | "run_ticket_panel_doctor";
 
 export type BotCommandRow = {
   id: string;
@@ -380,6 +382,42 @@ export async function queuePortalTicketReply(input: {
     },
     input.requestedBy ?? userId,
     input.guildId
+  );
+}
+
+export async function queuePostTicketPanel(input: {
+  guildId?: string | null;
+  channelId: string;
+  requestedBy?: string | null;
+}) {
+  const channelId = normalizeString(input.channelId);
+  if (!channelId) throw new Error("Missing channelId");
+
+  return insertCommand(
+    "post_ticket_panel",
+    {
+      channel_id: channelId,
+      mode: "post",
+      requested_from: "dashboard_setup_doctor",
+    },
+    input.requestedBy,
+    input.guildId
+  );
+}
+
+export async function queueRunTicketPanelDoctor(input?: {
+  guildId?: string | null;
+  channelId?: string | null;
+  requestedBy?: string | null;
+}) {
+  return insertCommand(
+    "run_ticket_panel_doctor",
+    {
+      channel_id: normalizeNullable(input?.channelId),
+      requested_from: "dashboard_setup_doctor",
+    },
+    input?.requestedBy,
+    input?.guildId
   );
 }
 
