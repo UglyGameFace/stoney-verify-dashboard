@@ -141,23 +141,6 @@ async function fetchTicketOrNull(
   return data as TicketRow;
 }
 
-async function createAuditEvent(
-  supabase: ReturnType<typeof createServerSupabase>,
-  ticketId: string,
-  staffName: string,
-  ticket: TicketRow,
-  reason: string
-): Promise<void> {
-  try {
-    await supabase.from("audit_events").insert({
-      title: "Ticket deleted",
-      description: `${staffName} deleted ticket ${ticket?.ticket_number || ticketId}: ${reason}`,
-      event_type: "ticket_deleted",
-      related_id: ticketId,
-    });
-  } catch {}
-}
-
 async function createActivityFeedEvent(
   supabase: ReturnType<typeof createServerSupabase>,
   ticket: TicketRow,
@@ -279,7 +262,6 @@ export async function POST(
 
     const deletedTicket = updatedTicket as TicketRow;
     await Promise.allSettled([
-      createAuditEvent(supabase, ticketId, actorName, deletedTicket, reason),
       createActivityFeedEvent(supabase, deletedTicket, actorId, actorName, reason),
       createSystemNote(supabase, ticketId, actorId, actorName, reason),
     ]);
