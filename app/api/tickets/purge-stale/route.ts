@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { requireStaffSessionForRoute } from "@/lib/auth-server";
 import { createServerSupabase } from "@/lib/supabase-server";
-import { env } from "@/lib/env";
+import { getSelectedGuildId } from "@/lib/guild-selection";
 import {
   buildRouteJson,
   getActorId,
@@ -18,6 +18,10 @@ export const revalidate = 0;
 
 function normalizeString(value: unknown): string {
   return String(value ?? "").trim();
+}
+
+function selectedGuildId(): string {
+  return normalizeString(getSelectedGuildId());
 }
 
 function parseDateMs(value: unknown): number {
@@ -58,6 +62,7 @@ function isPurgeCandidate(ticket: any, olderThanMinutes: number): boolean {
 function summarizeCandidate(ticket: any) {
   return {
     id: ticket?.id || null,
+    guild_id: ticket?.guild_id || null,
     channel_id: ticket?.channel_id || null,
     discord_thread_id: ticket?.discord_thread_id || null,
     status: ticket?.status || null,
@@ -74,11 +79,71 @@ function missingGuildIdResponse(refreshedTokens: RefreshedTokens | null) {
   return buildRouteJson(
     {
       ok: false,
-      error: "Missing guild id",
+      error: "Select a server before purging stale tickets.",
+      needsServerSelection: true,
     },
-    500,
+    428,
     refreshedTokens
   );
+}
+
+async function insertPurgeActivity(
+  supabase: ReturnType<typeof createServerSupabase>,
+  args: {
+    guildId: string;
+    actorId: string;
+    dryRun: boolean;
+    scanned: number;
+    candidates: number;
+    removed: number;
+    olderThanMinutes: number;
+  }
+) {
+  const now = new Date().toISOString();
+  const title = args.dryRun ? "Stale ticket purge preview" : "Stale tickets purged";
+  const eventType = args.dryRun ? "ticket_purge_preview" : "ticket_purge";
+  const description = `${args.dryRun ? "Previewed" : "Purged"} ${args.candidates} stale ticket row(s) older than ${args.olderThanMinutes} minute(s). Triggered by ${args.actorId}.`;
+
+  const attempts = [
+    {
+      guild_id: args.guildId,
+      title,
+      description,
+      event_family: "ticket",
+      event_type: eventType,
+      source: "dashboard_ticket_purge_stale",
+      actor_user_id: args.actorId,
+      actor_name: args.actorId,
+      related_id: args.actorId,
+      metadata: {
+        dry_run: args.dryRun,
+        scanned: args.scanned,
+        candidates: args.candidates,
+        removed: args.removed,
+        older_than_minutes: args.olderThanMinutes,
+      },
+      created_at: now,
+    },
+    {
+      guild_id: args.guildId,
+      title,
+      description,
+      event_type: eventType,
+      source: "dashboard_ticket_purge_stale",
+      actor_user_id: args.actorId,
+      actor_name: args.actorId,
+      created_at: now,
+    },
+  ];
+
+  for (const candidate of attempts) {
+    try {
+      const { error } = await supabase.from("activity_feed_events").insert(candidate);
+      if (!error) return;
+    } catch {
+      // Best-effort only. Purge should not fail because activity logging changed.
+    }
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -108,7 +173,7 @@ export async function POST(req: NextRequest) {
         ? Math.max(1, Math.floor(olderThanRaw))
         : 5;
 
-    const guildId = normalizeString(env.guildId);
+    const guildId = selectedGuildId();
     if (!guildId) {
       return missingGuildIdResponse(refreshedTokens);
     }
@@ -142,6 +207,7 @@ export async function POST(req: NextRequest) {
         const { error: deleteError, count } = await supabase
           .from("tickets")
           .delete({ count: "exact" })
+          .eq("guild_id", guildId)
           .in("id", ids);
 
         if (deleteError) {
@@ -152,18 +218,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    await supabase.from("audit_events").insert({
-      title: dryRun ? "Stale ticket purge preview" : "Stale tickets purged",
-      description: `${
-        dryRun ? "Previewed" : "Purged"
-      } ${candidates.length} stale ticket row(s) older than ${olderThanMinutes} minute(s). Triggered by ${actorId}.`,
-      event_type: dryRun ? "ticket_purge_preview" : "ticket_purge",
-      related_id: actorId,
+    await insertPurgeActivity(supabase, {
+      guildId,
+      actorId,
+      dryRun,
+      scanned: rows.length,
+      candidates: candidates.length,
+      removed,
+      olderThanMinutes,
     });
 
     return buildRouteJson(
       {
         ok: true,
+        selectedGuildId: guildId,
         dryRun,
         scanned: rows.length,
         removed,
