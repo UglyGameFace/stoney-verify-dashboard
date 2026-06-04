@@ -2,9 +2,18 @@ import { NextResponse } from "next/server"
 import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server"
 import { createServerSupabase } from "@/lib/supabase-server"
 import { env } from "@/lib/env"
+import { getSelectedGuildId } from "@/lib/guild-selection"
 
 export const dynamic = "force-dynamic"
 export const revalidate = 0
+
+function normalizeString(value) {
+  return String(value || "").trim()
+}
+
+function selectedGuildId() {
+  return normalizeString(getSelectedGuildId())
+}
 
 function safeAuditReason(value) {
   return encodeURIComponent(String(value || "").slice(0, 512))
@@ -12,9 +21,7 @@ function safeAuditReason(value) {
 
 async function discordApi(path, { method = "GET", body, reason } = {}) {
   const token = process.env.DISCORD_TOKEN || env.discordToken || ""
-  if (!token) {
-    throw new Error("Missing DISCORD_TOKEN")
-  }
+  if (!token) throw new Error("Missing DISCORD_TOKEN")
 
   const res = await fetch(`https://discord.com/api/v10${path}`, {
     method,
@@ -36,6 +43,37 @@ async function discordApi(path, { method = "GET", body, reason } = {}) {
 
   const text = await res.text()
   return text ? JSON.parse(text) : null
+}
+
+function getSessionUser(session) {
+  return session?.user || session?.discordUser || session?.staffUser || null
+}
+
+function getActorId(session) {
+  const user = getSessionUser(session)
+  return normalizeString(user?.discord_id || user?.id || user?.user_id || session?.discordUser?.id || "")
+}
+
+function getActorName(session) {
+  const user = getSessionUser(session)
+  return normalizeString(
+    user?.global_name ||
+      user?.display_name ||
+      user?.username ||
+      user?.name ||
+      session?.discordUser?.username ||
+      env.defaultStaffName ||
+      "Dashboard Staff"
+  )
+}
+
+function json(payload, status = 200, refreshedTokens = null) {
+  const response = NextResponse.json(payload, {
+    status,
+    headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
+  })
+  applyAuthCookies(response, refreshedTokens)
+  return response
 }
 
 function normalizeGuildRoles(rows) {
@@ -82,14 +120,12 @@ function resolveRoleGroups({ roleIds, roleNames, roleRules }) {
         group = "verified"
       } else if (/\b(staff|mod|moderator|admin|owner)\b/i.test(roleName)) {
         group = "staff"
-      } else if (/\b(booster|musicbot|nitro|resident|perm|dickheads|drunken|stoner)\b/i.test(roleName)) {
+      } else if (/\b(booster|musicbot|nitro|resident|supporter|vip|member)\b/i.test(roleName)) {
         group = "cosmetic"
       }
     }
 
-    if (group && Object.prototype.hasOwnProperty.call(hits, group)) {
-      hits[group] = true
-    }
+    if (group && Object.prototype.hasOwnProperty.call(hits, group)) hits[group] = true
   }
 
   return {
@@ -97,41 +133,19 @@ function resolveRoleGroups({ roleIds, roleNames, roleRules }) {
     has_verified_role: hits.verified || hits.secondary_verified,
     has_secondary_verified_role: hits.secondary_verified,
     has_staff_role: hits.staff || hits.admin,
-    has_cosmetic_only:
-      !hits.unverified &&
-      !hits.verified &&
-      !hits.secondary_verified &&
-      !hits.staff &&
-      !hits.admin &&
-      (hits.cosmetic || roleIds.length > 0),
+    has_cosmetic_only: !hits.unverified && !hits.verified && !hits.secondary_verified && !hits.staff && !hits.admin && (hits.cosmetic || roleIds.length > 0),
   }
 }
 
 function resolveRoleState({ inGuild, hasAnyRole, has_unverified, has_verified_role, has_staff_role, has_cosmetic_only }) {
-  if (!inGuild) {
-    return { data_health: "left_guild", role_state: "left_guild", role_state_reason: "Member is not currently present in Discord." }
-  }
-  if (has_staff_role && has_unverified) {
-    return { data_health: "missing_role", role_state: "staff_conflict", role_state_reason: "Member has both Staff and Unverified." }
-  }
-  if (has_staff_role) {
-    return { data_health: "ok", role_state: "staff_ok", role_state_reason: "Member has staff access with no unverified conflict." }
-  }
-  if (has_verified_role && has_unverified) {
-    return { data_health: "missing_role", role_state: "verified_conflict", role_state_reason: "Member has both Verified and Unverified roles." }
-  }
-  if (has_verified_role) {
-    return { data_health: "ok", role_state: "verified_ok", role_state_reason: "Member has a valid verified role set." }
-  }
-  if (has_unverified) {
-    return { data_health: "ok", role_state: "unverified_only", role_state_reason: "Member is pending verification and only has unverified access." }
-  }
-  if (has_cosmetic_only) {
-    return { data_health: "missing_role", role_state: "booster_only", role_state_reason: "Member has cosmetic roles but no core verification role." }
-  }
-  if (!hasAnyRole) {
-    return { data_health: "missing_role", role_state: "missing_unverified", role_state_reason: "Member has no tracked roles. Expected at least an unverified role." }
-  }
+  if (!inGuild) return { data_health: "left_guild", role_state: "left_guild", role_state_reason: "Member is not currently present in Discord." }
+  if (has_staff_role && has_unverified) return { data_health: "missing_role", role_state: "staff_conflict", role_state_reason: "Member has both Staff and Unverified." }
+  if (has_staff_role) return { data_health: "ok", role_state: "staff_ok", role_state_reason: "Member has staff access with no unverified conflict." }
+  if (has_verified_role && has_unverified) return { data_health: "missing_role", role_state: "verified_conflict", role_state_reason: "Member has both Verified and Unverified roles." }
+  if (has_verified_role) return { data_health: "ok", role_state: "verified_ok", role_state_reason: "Member has a valid verified role set." }
+  if (has_unverified) return { data_health: "ok", role_state: "unverified_only", role_state_reason: "Member is pending verification and only has unverified access." }
+  if (has_cosmetic_only) return { data_health: "missing_role", role_state: "booster_only", role_state_reason: "Member has cosmetic roles but no core verification role." }
+  if (!hasAnyRole) return { data_health: "missing_role", role_state: "missing_unverified", role_state_reason: "Member has no tracked roles. Expected at least an unverified role." }
   return { data_health: "unknown", role_state: "unknown", role_state_reason: "Unable to determine member role state from current role set." }
 }
 
@@ -139,9 +153,7 @@ function buildAvatarUrl(memberUser) {
   const avatar = memberUser?.avatar || ""
   const userId = String(memberUser?.id || "")
   const discrim = Number(memberUser?.discriminator || 0) % 5
-  if (avatar && userId) {
-    return `https://cdn.discordapp.com/avatars/${userId}/${avatar}.png?size=128`
-  }
+  if (avatar && userId) return `https://cdn.discordapp.com/avatars/${userId}/${avatar}.png?size=128`
   return `https://cdn.discordapp.com/embed/avatars/${discrim}.png`
 }
 
@@ -185,21 +197,62 @@ function buildStoredUnavailableMember(storedMember, userId) {
   }
 }
 
+async function insertMemberSyncActivity(supabase, args) {
+  const now = new Date().toISOString()
+  const attempts = [
+    {
+      guild_id: args.guildId,
+      title: "Member sync completed",
+      description: `${args.actorName} refreshed member ${args.userId}. Reason: ${args.reason}`,
+      event_family: "member",
+      event_type: "member_sync",
+      source: "dashboard_member_sync",
+      actor_user_id: args.actorId,
+      actor_name: args.actorName,
+      target_user_id: args.userId,
+      target_name: args.memberName || args.userId,
+      metadata: { reason: args.reason, in_guild: args.inGuild, role_state: args.roleState || null },
+      created_at: now,
+    },
+    {
+      guild_id: args.guildId,
+      title: "Member sync completed",
+      description: `${args.actorName} refreshed member ${args.userId}. Reason: ${args.reason}`,
+      event_type: "member_sync",
+      source: "dashboard_member_sync",
+      actor_user_id: args.actorId,
+      actor_name: args.actorName,
+      target_user_id: args.userId,
+      target_name: args.memberName || args.userId,
+      created_at: now,
+    },
+  ]
+
+  for (const candidate of attempts) {
+    try {
+      const { error } = await supabase.from("activity_feed_events").insert(candidate)
+      if (!error) return
+    } catch {}
+  }
+}
+
 export async function POST(req) {
+  let refreshedTokens = null
+
   try {
-    const { session, refreshedTokens } = await requireStaffSessionForRoute()
+    const auth = await requireStaffSessionForRoute()
+    const session = auth?.session
+    refreshedTokens = auth?.refreshedTokens || null
     const supabase = createServerSupabase()
-    const guildId = env.guildId || ""
+    const guildId = selectedGuildId()
     const body = await req.json().catch(() => ({}))
     const userId = String(body.user_id || "").trim()
     const reason = String(body.reason || "").trim() || "Dashboard member sync"
+    const actorId = getActorId(session)
+    const actorName = getActorName(session)
 
-    if (!guildId) {
-      return NextResponse.json({ error: "Missing guild id" }, { status: 500 })
-    }
-    if (!userId) {
-      return NextResponse.json({ error: "Missing user id" }, { status: 400 })
-    }
+    if (!guildId) return json({ ok: false, error: "Select a server before syncing a member.", needsServerSelection: true }, 428, refreshedTokens)
+    if (!userId) return json({ ok: false, selectedGuildId: guildId, error: "Missing user id" }, 400, refreshedTokens)
 
     const [{ data: storedMember, error: storedError }, { data: roleRules, error: rulesError }] = await Promise.all([
       supabase.from("guild_members").select("*").eq("guild_id", guildId).eq("user_id", userId).maybeSingle(),
@@ -236,16 +289,23 @@ export async function POST(req) {
             .eq("guild_id", guildId)
             .eq("user_id", userId)
 
-          if (updateError) {
-            throw new Error(updateError.message || "Failed to mark member as left guild.")
-          }
+          if (updateError) throw new Error(updateError.message || "Failed to mark member as left guild.")
         }
 
-        const response = NextResponse.json({ ok: true, member: buildStoredUnavailableMember(storedMember, userId), in_guild: false })
-        applyAuthCookies(response, refreshedTokens)
-        return response
-      }
+        const unavailable = buildStoredUnavailableMember(storedMember, userId)
+        await insertMemberSyncActivity(supabase, {
+          guildId,
+          actorId,
+          actorName,
+          userId,
+          reason,
+          inGuild: false,
+          memberName: unavailable.display_name || unavailable.username || userId,
+          roleState: unavailable.role_state,
+        })
 
+        return json({ ok: true, selectedGuildId: guildId, member: unavailable, in_guild: false }, 200, refreshedTokens)
+      }
       throw error
     }
 
@@ -299,50 +359,56 @@ export async function POST(req) {
     const { error: upsertError } = await supabase.from("guild_members").upsert(row, { onConflict: "guild_id,user_id" })
     if (upsertError) throw new Error(upsertError.message || "Failed to persist member sync.")
 
-    await supabase.from("audit_events").insert({
-      title: "Member sync completed",
-      description: `${session?.user?.username || env.defaultStaffName || "Dashboard Staff"} refreshed member ${userId}. Reason: ${reason}`,
-      event_type: "member_sync",
-      related_id: userId,
+    await insertMemberSyncActivity(supabase, {
+      guildId,
+      actorId,
+      actorName,
+      userId,
+      reason,
+      inGuild: true,
+      memberName: row.display_name || row.username || userId,
+      roleState: row.role_state,
     })
 
-    const response = NextResponse.json({
-      ok: true,
-      in_guild: true,
-      member: {
-        user_id: row.user_id,
-        username: row.username,
-        display_name: row.display_name,
-        global_name: row.display_name,
-        avatar: row.avatar_hash,
-        avatar_url: row.avatar_url,
-        nickname: row.nickname,
-        joined_at: row.joined_at,
-        role_ids: row.role_ids,
-        role_names: row.role_names,
-        top_role: row.top_role,
-        roles: row.roles,
+    return json(
+      {
+        ok: true,
+        selectedGuildId: guildId,
         in_guild: true,
-        discord_unavailable: false,
-        data_health: row.data_health,
-        role_state: row.role_state,
-        role_state_reason: row.role_state_reason,
-        has_unverified: row.has_unverified,
-        has_verified_role: row.has_verified_role,
-        has_staff_role: row.has_staff_role,
-        has_secondary_verified_role: row.has_secondary_verified_role,
-        has_cosmetic_only: row.has_cosmetic_only,
-        synced_at: row.synced_at,
-        updated_at: row.updated_at,
-        highest_role_id: row.highest_role_id,
-        highest_role_name: row.highest_role_name,
-        last_seen_at: row.last_seen_at,
+        member: {
+          user_id: row.user_id,
+          username: row.username,
+          display_name: row.display_name,
+          global_name: row.display_name,
+          avatar: row.avatar_hash,
+          avatar_url: row.avatar_url,
+          nickname: row.nickname,
+          joined_at: row.joined_at,
+          role_ids: row.role_ids,
+          role_names: row.role_names,
+          top_role: row.top_role,
+          roles: row.roles,
+          in_guild: true,
+          discord_unavailable: false,
+          data_health: row.data_health,
+          role_state: row.role_state,
+          role_state_reason: row.role_state_reason,
+          has_unverified: row.has_unverified,
+          has_verified_role: row.has_verified_role,
+          has_staff_role: row.has_staff_role,
+          has_secondary_verified_role: row.has_secondary_verified_role,
+          has_cosmetic_only: row.has_cosmetic_only,
+          synced_at: row.synced_at,
+          updated_at: row.updated_at,
+          highest_role_id: row.highest_role_id,
+          highest_role_name: row.highest_role_name,
+          last_seen_at: row.last_seen_at,
+        },
       },
-    })
-
-    applyAuthCookies(response, refreshedTokens)
-    return response
+      200,
+      refreshedTokens
+    )
   } catch (error) {
-    return NextResponse.json({ error: error.message || "Member sync failed" }, { status: 500 })
+    return json({ ok: false, error: error.message || "Member sync failed" }, error?.message === "Unauthorized" ? 401 : 500, refreshedTokens)
   }
 }
