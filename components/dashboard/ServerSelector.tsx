@@ -102,6 +102,8 @@ export default function ServerSelector() {
     [servers]
   );
 
+  const showBotCheckWarning = Boolean(botCheckError && installedCount === 0 && !loading);
+
   async function loadServers() {
     setLoading(true);
     setError("");
@@ -115,11 +117,14 @@ export default function ServerSelector() {
       });
       const json = (await res.json().catch(() => null)) as ServerResponse | null;
       if (!res.ok || json?.error) throw new Error(json?.error || `Server list request failed with status ${res.status}.`);
-      setServers(Array.isArray(json?.servers) ? json.servers : []);
+      const nextServers = Array.isArray(json?.servers) ? json.servers : [];
+      const readyCount = nextServers.filter((server) => getInstallState(server) === "installed").length;
+      setServers(nextServers);
       setSelectedGuildId(normalizeString(json?.selectedGuildId));
-      setBotCheckError(normalizeString(json?.botCheckError));
+      setBotCheckError(readyCount > 0 || json?.botCheckOk ? "" : normalizeString(json?.botCheckError));
     } catch (err) {
       setError(friendlyServerError(err instanceof Error ? err.message : err));
+      setBotCheckError("");
     } finally {
       setLoading(false);
     }
@@ -146,6 +151,7 @@ export default function ServerSelector() {
     setSavingId(server.id);
     setError("");
     setMessage("");
+    setBotCheckError("");
     try {
       const res = await fetch("/api/servers", {
         method: "POST",
@@ -165,6 +171,7 @@ export default function ServerSelector() {
       }
       setSelectedGuildId(server.id);
       setServers((prev) => prev.map((row) => ({ ...row, selected: row.id === server.id })));
+      setBotCheckError("");
       setMessage(`${server.name} is selected. Dashboard tools will now use this server only.`);
     } catch (err) {
       setError(friendlyServerError(err instanceof Error ? err.message : err));
@@ -204,7 +211,7 @@ export default function ServerSelector() {
           </div>
         </div>
 
-        {botCheckError ? (
+        {showBotCheckWarning ? (
           <div className="info-banner server-warning" style={{ marginTop: 12 }}>
             Bot install check warning: {friendlyServerError(botCheckError)}
           </div>
@@ -249,7 +256,7 @@ export default function ServerSelector() {
                       {server.owner ? "Owner" : "Manage Server"} • {getInstallMeta(server)}
                       {server.is_default_env_guild ? " • Default server" : ""}
                     </div>
-                    {installState === "unknown" && server.bot_check_error ? (
+                    {installState === "unknown" && server.bot_check_error && installedCount === 0 ? (
                       <div className="server-subtle-warning">{friendlyServerError(server.bot_check_error)}</div>
                     ) : null}
                   </div>
@@ -418,73 +425,6 @@ export default function ServerSelector() {
         .server-meta {
           margin-top: 5px;
           color: var(--muted, #c7ddcf);
-          font-size: 13px;
-          line-height: 1.4;
-        }
-        .server-subtle-warning {
-          margin-top: 6px;
-          color: #fde68a;
-          font-size: 12px;
-          line-height: 1.35;
-          overflow-wrap: anywhere;
-        }
-        .server-card-footer {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 10px;
-          flex-wrap: wrap;
-        }
-        .server-pill {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          min-height: 34px;
-          padding: 7px 11px;
-          border-radius: 999px;
-          font-size: 12px;
-          font-weight: 900;
-          border: 1px solid rgba(255,255,255,0.14);
-        }
-        .server-pill.installed {
-          color: #e7fff0;
-          background: rgba(93,255,141,0.14);
-          border-color: rgba(93,255,141,0.28);
-        }
-        .server-pill.missing {
-          color: #bfdbfe;
-          background: rgba(96,165,250,0.13);
-          border-color: rgba(96,165,250,0.26);
-        }
-        .server-pill.unknown {
-          color: #fff1c8;
-          background: rgba(255,211,107,0.13);
-          border-color: rgba(255,211,107,0.26);
-        }
-        .server-empty-state {
-          display: grid;
-          gap: 8px;
-          text-align: left;
-          line-height: 1.45;
-        }
-        .server-empty-state strong {
-          color: var(--text-strong, #fff);
-        }
-        @media (max-width: 720px) {
-          .server-status-strip {
-            grid-template-columns: 1fr;
-          }
-          .server-next-actions,
-          .server-next-actions :global(.button),
-          .server-card-footer,
-          .server-card-footer :global(.button),
-          .server-refresh {
-            width: 100%;
-          }
-          .server-card-footer :global(a.button),
-          .server-card-footer :global(button.button) {
-            width: 100% !important;
-          }
         }
       `}</style>
     </div>
