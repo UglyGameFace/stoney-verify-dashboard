@@ -133,13 +133,6 @@ async function resolveAssigneeIdentity(supabase: ReturnType<typeof createServerS
   return { assigneeId: clean, assigneeName: clean };
 }
 
-async function createAuditEvent(supabase: ReturnType<typeof createServerSupabase>, ticketId: string, actorName: string, ticket: TicketRow, nextAssigneeName: string, reason: string): Promise<void> {
-  const detail = reason ? `${actorName} transferred ticket ${ticket?.ticket_number || ticketId} to ${nextAssigneeName}: ${reason}` : `${actorName} transferred ticket ${ticket?.ticket_number || ticketId} to ${nextAssigneeName}`;
-  try {
-    await supabase.from("audit_events").insert({ title: "Ticket transferred", description: detail, event_type: "ticket_transferred", related_id: ticketId });
-  } catch {}
-}
-
 async function createActivityFeedEvent(supabase: ReturnType<typeof createServerSupabase>, ticket: TicketRow, actorId: string | null, actorName: string, previousAssigneeId: string | null, previousAssigneeName: string | null, nextAssigneeId: string, nextAssigneeName: string, reason: string): Promise<void> {
   const guildId = normalizeString(ticket?.guild_id);
   if (!guildId) return;
@@ -223,7 +216,10 @@ export async function POST(request: Request, context: { params: { id?: string } 
     if (updateError || !updatedTicket) return buildJsonResponse({ error: updateError?.message || "Failed to transfer ticket.", selectedGuildId: guildId }, 500, refreshedTokens);
 
     const transferredTicket = updatedTicket as TicketRow;
-    await Promise.allSettled([createAuditEvent(supabase, ticketId, actorName, transferredTicket, assigneeName, reason), createActivityFeedEvent(supabase, transferredTicket, actorId, actorName, previousAssigneeId, previousAssigneeName, assigneeId, assigneeName, reason), createSystemNote(supabase, ticketId, actorId, actorName, assigneeName, reason)]);
+    await Promise.allSettled([
+      createActivityFeedEvent(supabase, transferredTicket, actorId, actorName, previousAssigneeId, previousAssigneeName, assigneeId, assigneeName, reason),
+      createSystemNote(supabase, ticketId, actorId, actorName, assigneeName, reason),
+    ]);
 
     return buildJsonResponse({ ok: true, selectedGuildId: guildId, ticket: mapTicket(transferredTicket), staffId: actorId, staffName: actorName, nextAssigneeId: assigneeId, nextAssigneeName: assigneeName, alreadyAssignedToTarget: false }, 200, refreshedTokens);
   } catch (error) {
