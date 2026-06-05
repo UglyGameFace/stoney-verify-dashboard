@@ -2,10 +2,10 @@ import Link from "next/link";
 import Sidebar from "@/components/Sidebar";
 import {
   getSession,
-  getDiscordLoginUrl,
   hasDiscordOAuthConfig,
 } from "@/lib/auth-server";
 import { getExplicitSelectedGuildId } from "@/lib/guild-selection";
+import { loginRouteFor } from "@/lib/auth-return";
 
 type SearchParams = {
   authError?: string | string[];
@@ -69,7 +69,9 @@ function SessionCard({ session }: { session: Exclude<SessionLike, null> }) {
     "Discord user";
   const avatarUrl = session.user?.avatar_url || session.discordUser?.avatar_url || "";
   const explicitGuildId = getExplicitSelectedGuildId();
-  const selectedGuildId = explicitGuildId || normalizeString(session.authContext?.selected_guild_id);
+  const sessionGuildId = normalizeString(session.authContext?.selected_guild_id);
+  const selectedGuildId = explicitGuildId || sessionGuildId;
+  const selectedSource = explicitGuildId ? "Selected by cookie" : sessionGuildId ? "Default/fallback context" : "None";
   const roles = Array.isArray(session.member?.roles) ? session.member.roles : [];
   const hasConfirmedAccess = Boolean(session.isStaff || session.isServerManager || session.member?.has_manage_server || session.member?.has_staff_role);
   const guildCheckError = normalizeString(session.authContext?.guild_check_error);
@@ -91,7 +93,7 @@ function SessionCard({ session }: { session: Exclude<SessionLike, null> }) {
         <div className="account-actions">
           <ActionLink href="/" primary>Home</ActionLink>
           <ActionLink href="/servers">Servers</ActionLink>
-          {hasDiscordOAuthConfig() ? <ActionLink href={getDiscordLoginUrl()}>Re-authorize Discord</ActionLink> : null}
+          {hasDiscordOAuthConfig() ? <ActionLink href={loginRouteFor("/auth-status")}>Re-authorize Discord</ActionLink> : null}
           <ActionLink href="/api/auth/logout">Reset Login</ActionLink>
         </div>
       </section>
@@ -107,7 +109,7 @@ function SessionCard({ session }: { session: Exclude<SessionLike, null> }) {
 
         <div className="card account-info-card">
           <div className="muted account-eyebrow">Server Check</div>
-          <div className="account-info-row"><span>Explicit server cookie</span><strong>{explicitGuildId ? "Set" : "Not set"}</strong></div>
+          <div className="account-info-row"><span>Server context source</span><strong>{selectedSource}</strong></div>
           <div className="account-info-row"><span>Guild member checked</span><strong>{session.authContext?.guild_checked ? "Yes" : hasConfirmedAccess ? "Not needed for current access" : "No"}</strong></div>
           <div className="account-info-row"><span>Staff reason</span><strong>{session.authContext?.staff_reason || (hasConfirmedAccess ? "access_confirmed" : "—")}</strong></div>
           {shouldShowGuildCheckError ? (
@@ -143,7 +145,7 @@ function LoginRequiredState({ authError }: { authError?: string }) {
         </p>
         {authError ? <pre className="account-error-pre">{decodeURIComponent(authError)}</pre> : null}
         <div className="auth-state-actions">
-          {hasDiscordOAuthConfig() ? <ActionLink href={getDiscordLoginUrl()} primary>{authError ? "Try Discord login again" : "Sign in with Discord"}</ActionLink> : null}
+          {hasDiscordOAuthConfig() ? <ActionLink href={loginRouteFor("/auth-status")} primary>{authError ? "Try Discord login again" : "Sign in with Discord"}</ActionLink> : null}
           <ActionLink href="/api/auth/logout">Reset login</ActionLink>
           <ActionLink href="/">Back Home</ActionLink>
         </div>
