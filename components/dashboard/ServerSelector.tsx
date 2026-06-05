@@ -56,7 +56,7 @@ function getInstallLabel(server: ServerRow): string {
 function getInstallMeta(server: ServerRow): string {
   const state = getInstallState(server);
   if (state === "installed") return "Dank Shield installed";
-  if (state === "unknown") return "Bot status could not be verified";
+  if (state === "unknown") return "Bot status check temporarily blocked";
   return "Dank Shield not installed";
 }
 
@@ -102,7 +102,7 @@ export default function ServerSelector() {
     [servers]
   );
 
-  const showBotCheckWarning = Boolean(botCheckError && installedCount === 0 && !loading);
+  const showBotCheckWarning = Boolean(botCheckError && !loading);
 
   async function loadServers() {
     setLoading(true);
@@ -118,10 +118,9 @@ export default function ServerSelector() {
       const json = (await res.json().catch(() => null)) as ServerResponse | null;
       if (!res.ok || json?.error) throw new Error(json?.error || `Server list request failed with status ${res.status}.`);
       const nextServers = Array.isArray(json?.servers) ? json.servers : [];
-      const readyCount = nextServers.filter((server) => getInstallState(server) === "installed").length;
       setServers(nextServers);
       setSelectedGuildId(normalizeString(json?.selectedGuildId));
-      setBotCheckError(readyCount > 0 || json?.botCheckOk ? "" : normalizeString(json?.botCheckError));
+      setBotCheckError(json?.botCheckOk ? "" : normalizeString(json?.botCheckError));
     } catch (err) {
       setError(friendlyServerError(err instanceof Error ? err.message : err));
       setBotCheckError("");
@@ -137,15 +136,16 @@ export default function ServerSelector() {
   async function selectServer(server: ServerRow) {
     const installState = getInstallState(server);
     if (installState !== "installed") {
-      if (server.bot_invite_url) {
-        window.location.href = server.bot_invite_url;
+      if (installState === "unknown") {
+        setError("Bot status could not be verified right now, so SniperPlug is not showing an invite button. Wait a moment and tap Refresh/Recheck so a temporary Discord failure does not mislabel an installed server.");
         return;
       }
-      setError(
-        installState === "unknown"
-          ? "The dashboard could not verify bot access for this server. Refresh first. If it still says blocked, the bot token/env is wrong on Vercel or Discord is rate limiting the bot guild lookup."
-          : "Dank Shield is not installed in that server yet. Invite the bot there first, then refresh this page."
-      );
+      const inviteUrl = normalizeString(server.bot_invite_url);
+      if (inviteUrl) {
+        window.location.href = inviteUrl;
+        return;
+      }
+      setError("Dank Shield is not installed in that server yet. Invite the bot there first, then refresh this page.");
       return;
     }
     setSavingId(server.id);
@@ -188,7 +188,7 @@ export default function ServerSelector() {
             <div className="muted server-eyebrow">Server Context</div>
             <h2 style={{ margin: 0 }}>Available servers</h2>
             <div className="muted server-copy">
-              Select the server Dank Shield should manage. Servers with the bot installed become selectable; servers without it show an invite action.
+              Select the server Dank Shield should manage. Servers with confirmed bot access become selectable; temporary Discord check failures show a recheck action instead of a false install warning.
             </div>
           </div>
           <button type="button" className="button ghost server-refresh" onClick={() => void loadServers()} disabled={loading || Boolean(savingId)}>
@@ -242,6 +242,7 @@ export default function ServerSelector() {
           {servers.map((server) => {
             const installState = getInstallState(server);
             const installed = installState === "installed";
+            const unknown = installState === "unknown";
             const selected = selectedGuildId === server.id || Boolean(server.selected);
             const inviteUrl = normalizeString(server.bot_invite_url);
             return (
@@ -256,14 +257,14 @@ export default function ServerSelector() {
                       {server.owner ? "Owner" : "Manage Server"} • {getInstallMeta(server)}
                       {server.is_default_env_guild ? " • Default server" : ""}
                     </div>
-                    {installState === "unknown" && server.bot_check_error && installedCount === 0 ? (
+                    {unknown && server.bot_check_error ? (
                       <div className="server-subtle-warning">{friendlyServerError(server.bot_check_error)}</div>
                     ) : null}
                   </div>
                 </div>
 
                 <div className="server-card-footer">
-                  <div className={`server-pill ${installed ? "installed" : installState === "unknown" ? "unknown" : "missing"}`}>
+                  <div className={`server-pill ${installed ? "installed" : unknown ? "unknown" : "missing"}`}>
                     {getInstallLabel(server)}
                   </div>
                   {installed ? (
@@ -275,6 +276,15 @@ export default function ServerSelector() {
                       style={{ width: "auto", minWidth: 140 }}
                     >
                       {savingId === server.id ? "Selecting..." : selected ? "Selected" : "Select Server"}
+                    </button>
+                  ) : unknown ? (
+                    <button
+                      type="button"
+                      className="button ghost"
+                      onClick={() => void loadServers()}
+                      style={{ width: "auto", minWidth: 140 }}
+                    >
+                      Recheck
                     </button>
                   ) : inviteUrl ? (
                     <a className="button primary" href={inviteUrl} style={{ width: "auto", minWidth: 140 }}>
@@ -361,9 +371,9 @@ export default function ServerSelector() {
         }
         .server-next-step {
           display: flex;
-          align-items: center;
           justify-content: space-between;
-          gap: 12px;
+          align-items: center;
+          gap: 14px;
           flex-wrap: wrap;
         }
         .server-next-actions {
@@ -371,60 +381,105 @@ export default function ServerSelector() {
           gap: 10px;
           flex-wrap: wrap;
         }
-        .server-next-actions :global(.button) {
-          width: auto;
-          min-width: 150px;
-        }
         .server-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-          gap: 14px;
+          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+          gap: 16px;
         }
         .server-card {
           border: 1px solid rgba(255,255,255,0.14);
           border-radius: 22px;
-          padding: 16px;
-          background: rgba(255,255,255,0.055);
+          padding: 18px;
+          background: rgba(2, 8, 18, 0.78);
+          box-shadow: 0 16px 40px rgba(0,0,0,0.18);
           display: grid;
           gap: 16px;
         }
         .server-card.selected {
-          border-color: rgba(93,255,141,0.42);
-          box-shadow: 0 0 0 1px rgba(93,255,141,0.12) inset, 0 12px 36px rgba(93,255,141,0.08);
+          border-color: rgba(54, 211, 153, 0.72);
+          box-shadow: 0 0 0 1px rgba(54, 211, 153, 0.18), 0 18px 44px rgba(0,0,0,0.24);
+        }
+        .server-card.needs-install {
+          opacity: 0.94;
         }
         .server-main {
           display: flex;
-          gap: 12px;
-          align-items: center;
+          gap: 14px;
+          align-items: flex-start;
           min-width: 0;
         }
         .server-icon {
-          width: 52px;
-          height: 52px;
-          min-width: 52px;
-          border-radius: 18px;
+          width: 54px;
+          height: 54px;
+          min-width: 54px;
+          border-radius: 16px;
           overflow: hidden;
+          background: rgba(54, 211, 153, 0.1);
           display: grid;
           place-items: center;
-          background: rgba(93,255,141,0.14);
-          color: #e8fff0;
           font-weight: 900;
-          font-size: 20px;
+          color: #e8fff2;
         }
         .server-icon img {
           width: 100%;
           height: 100%;
           object-fit: cover;
+          display: block;
         }
         .server-name {
           font-weight: 900;
           color: var(--text-strong, #fff);
+          font-size: 20px;
+          line-height: 1.2;
           overflow-wrap: anywhere;
-          font-size: 18px;
         }
         .server-meta {
           margin-top: 5px;
           color: var(--muted, #c7ddcf);
+          line-height: 1.4;
+          overflow-wrap: anywhere;
+        }
+        .server-subtle-warning {
+          margin-top: 8px;
+          color: #ffd7a5;
+          font-size: 13px;
+          line-height: 1.35;
+          overflow-wrap: anywhere;
+        }
+        .server-card-footer {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+        .server-pill {
+          font-weight: 850;
+          color: var(--text-strong, #fff);
+        }
+        .server-pill.installed {
+          color: #d9ffee;
+        }
+        .server-pill.unknown {
+          color: #ffe3b3;
+        }
+        .server-pill.missing {
+          color: #ffd3d3;
+        }
+        .server-empty-state {
+          display: grid;
+          gap: 8px;
+          text-align: center;
+          line-height: 1.35;
+        }
+        @media (max-width: 760px) {
+          .server-status-strip {
+            grid-template-columns: 1fr;
+          }
+          .server-next-actions,
+          .server-next-actions .button {
+            width: 100%;
+          }
         }
       `}</style>
     </div>
