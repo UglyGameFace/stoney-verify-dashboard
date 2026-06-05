@@ -14,9 +14,10 @@ export default async function ServersPage() {
     return (
       <AuthStatePage
         variant="login"
-        message="Sign in with Discord to choose which server you want to manage. The dashboard will not open Discord authorization until you press the sign-in button."
+        message="Sign in with Discord to choose which server you want to manage. After login, you will come right back here instead of being dropped on Home."
         showReset={false}
         showBack={false}
+        returnTo="/servers"
       />
     );
   }

@@ -1,8 +1,6 @@
 import Link from "next/link";
-import {
-  getDiscordLoginUrl,
-  hasDiscordOAuthConfig,
-} from "@/lib/auth-server";
+import { hasDiscordOAuthConfig } from "@/lib/auth-server";
+import { loginRouteFor } from "@/lib/auth-return";
 
 type AuthStateVariant = "login" | "session" | "error" | "forbidden";
 
@@ -16,6 +14,7 @@ type AuthStatePageProps = {
   showBack?: boolean;
   backHref?: string;
   backLabel?: string;
+  returnTo?: string;
 };
 
 function variantDefaults(variant: AuthStateVariant) {
@@ -60,9 +59,10 @@ export default function AuthStatePage({
   showBack = true,
   backHref = "/",
   backLabel = "Back Home",
+  returnTo,
 }: AuthStatePageProps) {
   const defaults = variantDefaults(variant);
-  const loginUrl = hasDiscordOAuthConfig() ? getDiscordLoginUrl() : "";
+  const loginUrl = hasDiscordOAuthConfig() ? loginRouteFor(returnTo || backHref || "/auth-status") : "";
 
   return (
     <main className={`auth-state-page auth-only-page tone-${variant === "error" ? "danger" : variant === "session" ? "warning" : "default"}`} data-auth-state="required" data-auth-state-page="true">
