@@ -18,6 +18,7 @@ export const revalidate = 0;
 const MANAGE_GUILD = BigInt(1 << 5);
 const ADMINISTRATOR = BigInt(1 << 3);
 const DEFAULT_BOT_INVITE_PERMISSIONS = "8";
+const MAX_DIRECT_BOT_GUILD_CHECKS = 25;
 
 type DiscordUserGuild = {
   id?: string | null;
@@ -40,6 +41,8 @@ type BotGuildLookup = {
 };
 
 type JsonRecord = Record<string, unknown>;
+
+type InstallState = "installed" | "missing" | "unknown";
 
 function normalizeString(value: unknown): string {
   return String(value || "").trim();
@@ -106,6 +109,47 @@ async function fetchBotGuilds(): Promise<BotGuildLookup> {
   }
 }
 
+async function fetchBotGuildById(guildId: string): Promise<BotGuild | null> {
+  const id = normalizeString(guildId);
+  if (!id || !normalizeString(env.discordToken)) return null;
+
+  try {
+    const guild = (await discordBotFetch(`/guilds/${id}`)) as BotGuild;
+    return normalizeString(guild?.id) ? guild : { id };
+  } catch {
+    return null;
+  }
+}
+
+async function strengthenBotLookupWithDirectChecks(
+  botLookup: BotGuildLookup,
+  userGuilds: DiscordUserGuild[]
+): Promise<BotGuildLookup> {
+  if (botLookup.ok) return botLookup;
+
+  const candidates = userGuilds
+    .map((guild) => normalizeString(guild.id))
+    .filter(Boolean)
+    .slice(0, MAX_DIRECT_BOT_GUILD_CHECKS);
+
+  if (!candidates.length) return botLookup;
+
+  const nextGuilds = new Map(botLookup.guilds);
+  const results = await Promise.allSettled(candidates.map((guildId) => fetchBotGuildById(guildId)));
+
+  for (const result of results) {
+    if (result.status !== "fulfilled") continue;
+    const guild = result.value;
+    const id = normalizeString(guild?.id);
+    if (id) nextGuilds.set(id, guild as BotGuild);
+  }
+
+  return {
+    ...botLookup,
+    guilds: nextGuilds,
+  };
+}
+
 async function fetchKnownDashboardGuildIds(guildIds: string[]): Promise<Set<string>> {
   const ids = guildIds.map(normalizeString).filter(Boolean);
   const found = new Set<string>();
@@ -113,7 +157,18 @@ async function fetchKnownDashboardGuildIds(guildIds: string[]): Promise<Set<stri
 
   try {
     const supabase = createServerSupabase();
-    const tables = ["guild_members", "guild_roles", "ticket_categories", "tickets", "activity_feed_events"];
+    const tables = [
+      "guild_members",
+      "guild_roles",
+      "ticket_categories",
+      "tickets",
+      "activity_feed_events",
+      "guild_configs",
+      "guild_config",
+      "guild_settings",
+      "server_configs",
+      "dashboard_guilds",
+    ];
 
     await Promise.all(
       tables.map(async (table) => {
@@ -152,18 +207,19 @@ function buildJsonResponse(payload: JsonRecord, status = 200, routeSession: Rout
   return response;
 }
 
-function resolveInstallState(guildId: string, botLookup: BotGuildLookup, knownDashboardGuildIds: Set<string>): "installed" | "missing" | "unknown" {
+function resolveInstallState(guildId: string, botLookup: BotGuildLookup, knownDashboardGuildIds: Set<string>): InstallState {
   const defaultGuildId = normalizeString(env.guildId || env.discordGuildId);
 
   if (botLookup.guilds.has(guildId)) return "installed";
   if (knownDashboardGuildIds.has(guildId)) return "installed";
-
-  // If Discord's bot-guild lookup is unavailable, the configured default guild is very likely
-  // the live bot server. Do not incorrectly show "Bot not installed" for it.
   if (!botLookup.ok && defaultGuildId && defaultGuildId === guildId) return "installed";
 
   if (!botLookup.ok) return "unknown";
   return "missing";
+}
+
+function inviteUrlForState(guildId: string, installState: InstallState): string | null {
+  return installState === "missing" ? buildBotInviteUrl(guildId) : null;
 }
 
 export async function GET() {
@@ -174,17 +230,18 @@ export async function GET() {
   }
 
   try {
-    const [userGuildsRaw, botLookup] = await Promise.all([
+    const [userGuildsRaw, initialBotLookup] = await Promise.all([
       discordUserFetch("/users/@me/guilds", routeSession.bearer) as Promise<DiscordUserGuild[]>,
       fetchBotGuilds(),
     ]);
 
     const userGuilds = Array.isArray(userGuildsRaw) ? userGuildsRaw : [];
-    const selectedGuildId = getSelectedGuildId();
     const manageableSource = userGuilds.filter(hasManageGuildPermission);
-    const knownDashboardGuildIds = await fetchKnownDashboardGuildIds(
-      manageableSource.map((guild) => normalizeString(guild.id))
-    );
+    const [knownDashboardGuildIds, botLookup] = await Promise.all([
+      fetchKnownDashboardGuildIds(manageableSource.map((guild) => normalizeString(guild.id))),
+      strengthenBotLookupWithDirectChecks(initialBotLookup, manageableSource),
+    ]);
+    const selectedGuildId = getSelectedGuildId();
 
     const manageable = manageableSource
       .map((guild) => {
@@ -205,7 +262,7 @@ export async function GET() {
           bot_install_state: installState,
           bot_check_ok: botLookup.ok,
           bot_check_error: botLookup.error,
-          bot_invite_url: installed ? null : buildBotInviteUrl(id),
+          bot_invite_url: inviteUrlForState(id, installState),
           selected: selectedGuildId === id,
           is_default_env_guild: normalizeString(env.guildId || env.discordGuildId) === id,
         };
@@ -251,13 +308,14 @@ export async function POST(request: Request) {
       return buildJsonResponse({ error: "Server id is required." }, 400, routeSession);
     }
 
-    const [userGuildsRaw, botLookup, knownDashboardGuildIds] = await Promise.all([
+    const [userGuildsRaw, initialBotLookup, knownDashboardGuildIds] = await Promise.all([
       discordUserFetch("/users/@me/guilds", routeSession.bearer) as Promise<DiscordUserGuild[]>,
       fetchBotGuilds(),
       fetchKnownDashboardGuildIds([requestedGuildId]),
     ]);
 
-    const userGuild = (Array.isArray(userGuildsRaw) ? userGuildsRaw : []).find(
+    const userGuilds = Array.isArray(userGuildsRaw) ? userGuildsRaw : [];
+    const userGuild = userGuilds.find(
       (guild) => normalizeString(guild.id) === requestedGuildId
     );
 
@@ -269,14 +327,16 @@ export async function POST(request: Request) {
       );
     }
 
+    const botLookup = await strengthenBotLookupWithDirectChecks(initialBotLookup, [userGuild]);
     const installState = resolveInstallState(requestedGuildId, botLookup, knownDashboardGuildIds);
+
     if (installState !== "installed") {
-      const inviteUrl = buildBotInviteUrl(requestedGuildId);
+      const inviteUrl = inviteUrlForState(requestedGuildId, installState);
       return buildJsonResponse(
         {
           error:
             installState === "unknown"
-              ? "The dashboard could not verify bot access for that server. Refresh, then use the invite link if needed."
+              ? "The dashboard could not verify bot access for that server. No invite action was shown because this may be a temporary Discord check failure. Wait a moment, then recheck."
               : "Dank Shield is not installed in that server yet.",
           bot_install_state: installState,
           bot_invite_url: inviteUrl,
