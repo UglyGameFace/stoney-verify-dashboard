@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { getSession, getDiscordLoginUrl } from "@/lib/auth-server";
+import { getSession } from "@/lib/auth-server";
+import { loginRouteFor } from "@/lib/auth-return";
 import { createServerSupabase } from "@/lib/supabase-server";
 
 import MemberPortalClient from "@/components/MemberPortalClient";
@@ -26,7 +27,7 @@ export default async function PortalPage() {
   const session = await getSession();
 
   if (!session?.user?.id) {
-    redirect(getDiscordLoginUrl());
+    redirect(loginRouteFor("/portal"));
   }
 
   const tickets = await getUserTickets(session.user.id);
