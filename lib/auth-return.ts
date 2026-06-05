@@ -7,6 +7,7 @@ const BLOCKED_RETURN_PREFIXES = [
   "/api/auth/login",
   "/api/auth/callback",
   "/api/auth/logout",
+  "/api/auth/refresh",
 ];
 
 function normalizeString(value: unknown): string {
