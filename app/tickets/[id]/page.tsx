@@ -5,9 +5,9 @@ import Sidebar from "@/components/Sidebar";
 import TicketDetailClient from "@/components/TicketDetailClient";
 import {
   getSession,
-  getDiscordLoginUrl,
   hasDiscordOAuthConfig,
 } from "@/lib/auth-server";
+import { loginRouteFor } from "@/lib/auth-return";
 import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
@@ -412,7 +412,7 @@ export default async function TicketPage({ params }: TicketPageProps) {
 
   if (!session) {
     if (hasDiscordOAuthConfig()) {
-      redirect(getDiscordLoginUrl());
+      redirect(loginRouteFor(`/tickets/${encodeURIComponent(ticketId)}`));
     }
 
     return <LoginRequiredState />;
