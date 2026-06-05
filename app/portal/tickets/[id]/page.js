@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { getSession, getDiscordLoginUrl } from "@/lib/auth-server";
+import { getSession } from "@/lib/auth-server";
+import { loginRouteFor } from "@/lib/auth-return";
 import { createServerSupabase } from "@/lib/supabase-server";
 import MemberTicketThreadClient from "@/components/MemberTicketThreadClient";
 
@@ -72,16 +73,15 @@ async function getPortalTicketData(ticketId, userId) {
 
 export default async function PortalTicketThreadPage({ params }) {
   const session = await getSession();
-
-  if (!session?.user?.id) {
-    redirect(getDiscordLoginUrl());
-  }
-
   const ticketId =
     typeof params?.id === "string" ? params.id.trim() : "";
 
   if (!ticketId) {
     notFound();
+  }
+
+  if (!session?.user?.id) {
+    redirect(loginRouteFor(`/portal/tickets/${encodeURIComponent(ticketId)}`));
   }
 
   const data = await getPortalTicketData(ticketId, session.user.id);
