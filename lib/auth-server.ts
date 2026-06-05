@@ -447,6 +447,20 @@ export async function getSession(): Promise<BuiltSession | null> {
   }
 }
 
+async function refreshAndRequireStaffSession(refreshToken: string): Promise<{
+  session: BuiltSession;
+  refreshedTokens: DiscordTokenPayload;
+}> {
+  if (!refreshToken) throw makeAuthError("Unauthorized", 401);
+
+  const refreshedTokens = await refreshAccessToken(refreshToken);
+  const session = await buildSession(refreshedTokens.access_token);
+
+  if (!session?.isStaff) throw makeAuthError("Unauthorized", 403);
+
+  return { session, refreshedTokens };
+}
+
 export async function requireStaffSessionForRoute(): Promise<{
   session: BuiltSession;
   refreshedTokens: DiscordTokenPayload | null;
@@ -461,17 +475,19 @@ export async function requireStaffSessionForRoute(): Promise<{
 
   const shouldRefresh = !accessToken || (expiresAt && Date.now() > expiresAt - 60000);
   if (shouldRefresh) {
-    if (!refreshToken) throw makeAuthError("Unauthorized", 401);
-    refreshedTokens = await refreshAccessToken(refreshToken);
-    accessToken = refreshedTokens.access_token;
+    return await refreshAndRequireStaffSession(refreshToken || "");
   }
 
   if (!accessToken) throw makeAuthError("Unauthorized", 401);
 
-  const session = await buildSession(accessToken);
-  if (!session?.isStaff) throw makeAuthError("Unauthorized", 403);
-
-  return { session, refreshedTokens };
+  try {
+    const session = await buildSession(accessToken);
+    if (!session?.isStaff) throw makeAuthError("Unauthorized", 403);
+    return { session, refreshedTokens };
+  } catch (error) {
+    if (!refreshToken) throw error;
+    return await refreshAndRequireStaffSession(refreshToken);
+  }
 }
 
 export function applyAuthCookies<T extends { cookies: { set: Function } }>(response: T, tokenPayload: DiscordTokenPayload | null): T {
