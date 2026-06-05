@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { getDiscordLoginUrl, hasDiscordOAuthConfig } from "@/lib/auth-server";
+import { hasDiscordOAuthConfig } from "@/lib/auth-server";
+import { loginRouteFor } from "@/lib/auth-return";
 
 type AuthStateCardProps = {
   eyebrow?: string;
@@ -11,6 +12,7 @@ type AuthStateCardProps = {
   backHref?: string;
   backLabel?: string;
   authError?: string;
+  returnTo?: string;
 };
 
 function safeDecode(value?: string): string {
@@ -32,8 +34,9 @@ export default function AuthStateCard({
   backHref = "/",
   backLabel = "Back Home",
   authError = "",
+  returnTo,
 }: AuthStateCardProps) {
-  const loginUrl = hasDiscordOAuthConfig() ? getDiscordLoginUrl() : "";
+  const loginUrl = hasDiscordOAuthConfig() ? loginRouteFor(returnTo || backHref || "/auth-status") : "";
   const decodedError = safeDecode(authError);
 
   return (
