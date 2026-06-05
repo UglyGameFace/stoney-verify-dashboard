@@ -28,6 +28,12 @@ function getAvatarAlt(session) {
   return `${getUsername(session)} avatar`;
 }
 
+function getLoginHref() {
+  if (typeof window === "undefined") return "/api/auth/login";
+  const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}` || "/";
+  return `/api/auth/login?return_to=${encodeURIComponent(returnTo)}`;
+}
+
 export default function AuthStatus() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -68,6 +74,7 @@ export default function AuthStatus() {
 
   const avatarUrl = useMemo(() => getAvatarUrl(session), [session]);
   const username = useMemo(() => getUsername(session), [session]);
+  const loginHref = useMemo(() => getLoginHref(), []);
 
   if (loading) {
     return <div className="loading-state">Checking session...</div>;
@@ -88,7 +95,7 @@ export default function AuthStatus() {
             </div>
           </div>
 
-          <a className="button primary" href="/api/auth/login">
+          <a className="button primary" href={loginHref}>
             Login with Discord
           </a>
         </div>
