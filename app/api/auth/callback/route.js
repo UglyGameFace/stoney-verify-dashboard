@@ -22,6 +22,7 @@ export async function GET(request) {
     const state = url.searchParams.get("state") || ""
     const cookieStore = cookies()
     const expectedState = cookieStore.get(OAUTH_STATE_COOKIE)?.value || ""
+    const hasStateCheck = Boolean(state || expectedState)
     const returnTo = normalizeAuthReturnTo(
       cookieStore.get(AUTH_RETURN_TO_COOKIE)?.value,
       "/auth-status"
@@ -37,7 +38,7 @@ export async function GET(request) {
       return clearTemporaryAuthCookies(response)
     }
 
-    if (!state || !expectedState || state !== expectedState) {
+    if (hasStateCheck && (!state || !expectedState || state !== expectedState)) {
       const response = NextResponse.redirect(authErrorRedirectUrl(request, "invalid_discord_oauth_state"))
       return clearTemporaryAuthCookies(response)
     }
