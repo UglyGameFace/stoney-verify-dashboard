@@ -2,15 +2,15 @@ import Link from "next/link";
 import ServerSelector from "@/components/dashboard/ServerSelector";
 import AuthStatePage from "@/components/dashboard/AuthStatePage";
 import SetupWorkspaceShell from "@/components/dashboard/SetupWorkspaceShell";
-import { getRouteSession } from "@/lib/route-session";
+import { getSession } from "@/lib/auth-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function ServersPage() {
-  const routeSession = await getRouteSession();
+  const session = await getSession();
 
-  if (!routeSession) {
+  if (!session) {
     return (
       <AuthStatePage
         variant="login"
