@@ -161,7 +161,9 @@ export default async function AuthStatusPage({ searchParams }: { searchParams?: 
   const authError = firstParam(searchParams?.authError);
   const session = (await getSession()) as SessionLike;
 
-  if (!session || authError) {
+  // A stale authError in the URL must not override a valid cookie session.
+  // This prevents users from being trapped on the login-failure screen after OAuth already succeeded.
+  if (!session) {
     return <LoginRequiredState authError={authError} />;
   }
 
