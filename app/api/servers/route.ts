@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { discordBotFetch, discordUserFetch } from "@/lib/discord-api";
-import { getSession } from "@/lib/auth-server";
 import {
   getSelectedGuildId,
   setSelectedGuildCookie,
 } from "@/lib/guild-selection";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { env } from "@/lib/env";
+import {
+  applyRouteSession,
+  getRouteSession,
+  type RouteSession,
+} from "@/lib/route-session";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const ACCESS_COOKIE = "discord_access_token";
 const MANAGE_GUILD = BigInt(1 << 5);
 const ADMINISTRATOR = BigInt(1 << 3);
 const DEFAULT_BOT_INVITE_PERMISSIONS = "8";
@@ -82,7 +84,7 @@ async function fetchBotGuilds(): Promise<BotGuildLookup> {
   if (!normalizeString(env.discordToken)) {
     return {
       ok: false,
-      error: "Dashboard bot token is missing, so bot installation could not be verified from Discord.",
+      error: "Dashboard bot credential is missing, so bot installation could not be verified from Discord.",
       guilds: new Map(),
     };
   }
@@ -139,13 +141,15 @@ async function fetchKnownDashboardGuildIds(guildIds: string[]): Promise<Set<stri
   return found;
 }
 
-function buildJsonResponse(payload: JsonRecord, status = 200) {
-  return NextResponse.json(payload, {
+function buildJsonResponse(payload: JsonRecord, status = 200, routeSession: RouteSession | null = null) {
+  const response = NextResponse.json(payload, {
     status,
     headers: {
       "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     },
   });
+  applyRouteSession(response, routeSession);
+  return response;
 }
 
 function resolveInstallState(guildId: string, botLookup: BotGuildLookup, knownDashboardGuildIds: Set<string>): "installed" | "missing" | "unknown" {
@@ -163,16 +167,15 @@ function resolveInstallState(guildId: string, botLookup: BotGuildLookup, knownDa
 }
 
 export async function GET() {
-  const session = await getSession();
-  const accessToken = normalizeString(cookies().get(ACCESS_COOKIE)?.value);
+  const routeSession = await getRouteSession();
 
-  if (!session || !accessToken) {
+  if (!routeSession) {
     return buildJsonResponse({ error: "Discord login required." }, 401);
   }
 
   try {
     const [userGuildsRaw, botLookup] = await Promise.all([
-      discordUserFetch("/users/@me/guilds", accessToken) as Promise<DiscordUserGuild[]>,
+      discordUserFetch("/users/@me/guilds", routeSession.bearer) as Promise<DiscordUserGuild[]>,
       fetchBotGuilds(),
     ]);
 
@@ -222,22 +225,22 @@ export async function GET() {
       manageableCount: manageable.length,
       botCheckOk: botLookup.ok,
       botCheckError: botLookup.error,
-    });
+    }, 200, routeSession);
   } catch (error) {
     return buildJsonResponse(
       {
         error: error instanceof Error ? error.message : "Failed to load Discord servers.",
       },
-      500
+      500,
+      routeSession
     );
   }
 }
 
 export async function POST(request: Request) {
-  const session = await getSession();
-  const accessToken = normalizeString(cookies().get(ACCESS_COOKIE)?.value);
+  const routeSession = await getRouteSession();
 
-  if (!session || !accessToken) {
+  if (!routeSession) {
     return buildJsonResponse({ error: "Discord login required." }, 401);
   }
 
@@ -245,11 +248,11 @@ export async function POST(request: Request) {
     const body = (await request.json().catch(() => ({}))) as JsonRecord;
     const requestedGuildId = normalizeString(body.guild_id || body.guildId);
     if (!requestedGuildId) {
-      return buildJsonResponse({ error: "Server id is required." }, 400);
+      return buildJsonResponse({ error: "Server id is required." }, 400, routeSession);
     }
 
     const [userGuildsRaw, botLookup, knownDashboardGuildIds] = await Promise.all([
-      discordUserFetch("/users/@me/guilds", accessToken) as Promise<DiscordUserGuild[]>,
+      discordUserFetch("/users/@me/guilds", routeSession.bearer) as Promise<DiscordUserGuild[]>,
       fetchBotGuilds(),
       fetchKnownDashboardGuildIds([requestedGuildId]),
     ]);
@@ -261,7 +264,8 @@ export async function POST(request: Request) {
     if (!userGuild || !hasManageGuildPermission(userGuild)) {
       return buildJsonResponse(
         { error: "You need Manage Server or Administrator permission for that server." },
-        403
+        403,
+        routeSession
       );
     }
 
@@ -278,11 +282,12 @@ export async function POST(request: Request) {
           bot_invite_url: inviteUrl,
           bot_check_error: botLookup.error,
         },
-        installState === "unknown" ? 503 : 409
+        installState === "unknown" ? 503 : 409,
+        routeSession
       );
     }
 
-    const response = buildJsonResponse({ ok: true, selectedGuildId: requestedGuildId });
+    const response = buildJsonResponse({ ok: true, selectedGuildId: requestedGuildId }, 200, routeSession);
     setSelectedGuildCookie(response, requestedGuildId);
     return response;
   } catch (error) {
@@ -290,7 +295,8 @@ export async function POST(request: Request) {
       {
         error: error instanceof Error ? error.message : "Failed to select server.",
       },
-      500
+      500,
+      routeSession
     );
   }
 }
