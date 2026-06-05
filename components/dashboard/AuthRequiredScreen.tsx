@@ -1,8 +1,6 @@
 import Link from "next/link";
-import {
-  getDiscordLoginUrl,
-  hasDiscordOAuthConfig,
-} from "@/lib/auth-server";
+import { hasDiscordOAuthConfig } from "@/lib/auth-server";
+import { loginRouteFor } from "@/lib/auth-return";
 
 type AuthRequiredScreenProps = {
   eyebrow?: string;
@@ -14,6 +12,7 @@ type AuthRequiredScreenProps = {
   backHref?: string;
   backLabel?: string;
   primaryLabel?: string;
+  returnTo?: string;
 };
 
 export default function AuthRequiredScreen({
@@ -26,8 +25,9 @@ export default function AuthRequiredScreen({
   backHref = "/",
   backLabel = "Back Home",
   primaryLabel = "Sign in with Discord",
+  returnTo,
 }: AuthRequiredScreenProps) {
-  const loginUrl = hasDiscordOAuthConfig() ? getDiscordLoginUrl() : "";
+  const loginUrl = hasDiscordOAuthConfig() ? loginRouteFor(returnTo || backHref || "/auth-status") : "";
 
   return (
     <main className={`auth-state-page tone-${tone}`} data-auth-state="true">
