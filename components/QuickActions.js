@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   syncMembersAction,
   reconcileDepartedMembersAction,
@@ -41,6 +41,20 @@ function getSuccessMessage(name, result) {
   }
 
   return `${name} completed successfully.`;
+}
+
+function normalizeString(value) {
+  return String(value || "").trim();
+}
+
+function pickStaffIdFromSession(session) {
+  return normalizeString(
+    session?.user?.discord_id ||
+      session?.user?.id ||
+      session?.discordUser?.id ||
+      session?.member?.id ||
+      session?.id
+  );
 }
 
 function ActionCard({
@@ -108,7 +122,7 @@ function ActionCard({
 
             <div className="member-detail-item">
               <span className="ticket-info-label">Requested By</span>
-              <span>{currentStaffId || "Missing staff session"}</span>
+              <span>{currentStaffId || "Resolving staff session"}</span>
             </div>
 
             <div className="member-detail-item">
@@ -120,7 +134,7 @@ function ActionCard({
               <span className="ticket-info-label">State</span>
               <span>
                 {!hasStaffId
-                  ? "Blocked"
+                  ? "Resolving"
                   : isRunning
                     ? "Running"
                     : "Ready"}
@@ -283,8 +297,48 @@ export default function QuickActions({
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [expandedAction, setExpandedAction] = useState("");
+  const [resolvedStaffId, setResolvedStaffId] = useState(() => normalizeString(currentStaffId));
+  const [resolvingStaff, setResolvingStaff] = useState(false);
 
-  const hasStaffId = Boolean(String(currentStaffId || "").trim());
+  const effectiveStaffId = normalizeString(currentStaffId || resolvedStaffId);
+  const hasStaffId = Boolean(effectiveStaffId);
+
+  useEffect(() => {
+    const propStaffId = normalizeString(currentStaffId);
+    if (propStaffId) {
+      setResolvedStaffId(propStaffId);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function resolveStaffIdentity() {
+      setResolvingStaff(true);
+      try {
+        const res = await fetch("/api/auth/me", {
+          method: "GET",
+          cache: "no-store",
+          headers: { "Cache-Control": "no-store" },
+        });
+        const json = await res.json().catch(() => null);
+        const nextStaffId = pickStaffIdFromSession(json?.session);
+        if (!cancelled && nextStaffId) {
+          setResolvedStaffId(nextStaffId);
+          setError("");
+        }
+      } catch {
+        // Keep the inline warning; this is recoverable by refresh/sign-in.
+      } finally {
+        if (!cancelled) setResolvingStaff(false);
+      }
+    }
+
+    void resolveStaffIdentity();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentStaffId]);
 
   const actions = useMemo(
     () => [
@@ -298,8 +352,8 @@ export default function QuickActions({
           "Best when member counts, role stats, or verification states look outdated.",
         runner: () =>
           syncMembersAction({
-            staffId: currentStaffId,
-            requestedBy: currentStaffId,
+            staffId: effectiveStaffId,
+            requestedBy: effectiveStaffId,
           }),
       },
       {
@@ -312,8 +366,8 @@ export default function QuickActions({
           "Best when former members are still showing as active in the dashboard.",
         runner: () =>
           reconcileDepartedMembersAction({
-            staffId: currentStaffId,
-            requestedBy: currentStaffId,
+            staffId: effectiveStaffId,
+            requestedBy: effectiveStaffId,
           }),
       },
       {
@@ -326,14 +380,14 @@ export default function QuickActions({
           "Best when Discord clearly has an active ticket but the dashboard queue does not show it.",
         runner: () =>
           syncActiveTicketsAction({
-            staffId: currentStaffId,
-            requestedBy: currentStaffId,
+            staffId: effectiveStaffId,
+            requestedBy: effectiveStaffId,
             includeClosedVisibleChannels: true,
             dryRun: false,
           }),
       },
     ],
-    [currentStaffId]
+    [effectiveStaffId]
   );
 
   function toggleExpanded(key) {
@@ -346,7 +400,9 @@ export default function QuickActions({
 
     if (!hasStaffId) {
       setError(
-        "Dashboard session is missing your staff ID. Refresh the page and make sure you are fully logged in with staff access."
+        resolvingStaff
+          ? "Dashboard is still resolving your staff identity. Wait a moment, then try again."
+          : "Dashboard session is missing your staff ID. Use Account → Reset Login once, then sign in again."
       );
       return;
     }
@@ -406,7 +462,9 @@ export default function QuickActions({
 
       {!hasStaffId ? (
         <div className="error-banner" style={{ marginBottom: 12 }}>
-          Staff identity is missing in the dashboard session. Action buttons are locked until the session refreshes correctly.
+          {resolvingStaff
+            ? "Resolving staff identity from your active Discord session..."
+            : "Staff identity is missing in the dashboard session. Action buttons are locked until the session refreshes correctly."}
         </div>
       ) : null}
 
@@ -436,7 +494,7 @@ export default function QuickActions({
               hasStaffId={hasStaffId}
               onToggle={() => toggleExpanded(action.key)}
               onRun={() => runAction(action.name, action.runner)}
-              currentStaffId={currentStaffId}
+              currentStaffId={effectiveStaffId}
             />
           );
         })}
