@@ -4,8 +4,15 @@ import { applyAuthCookies, buildSession, refreshAccessToken } from "@/lib/auth-s
 const COOKIE_ACCESS = ["discord", "access", "token"].join("_");
 const COOKIE_REFRESH = ["discord", "refresh", "token"].join("_");
 const COOKIE_EXPIRES = ["discord", "expires", "at"].join("_");
+const ACCESS_FIELD = ["access", "token"].join("_");
 
-type TokenPayload = Record<string, unknown> | null;
+type TokenPayload = {
+  access_token?: string;
+  token_type?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+} | null;
 
 export type RouteSession = {
   bearer: string;
@@ -17,42 +24,63 @@ function clean(value: unknown): string {
 }
 
 function payloadBearer(payload: TokenPayload): string {
-  return clean(payload?.[["access", "token"].join("_")]);
+  return clean(payload?.[ACCESS_FIELD]);
+}
+
+async function tryRefresh(refreshValue: string): Promise<RouteSession | null> {
+  if (!refreshValue) return null;
+
+  try {
+    const refreshed = (await refreshAccessToken(refreshValue)) as TokenPayload;
+    const bearer = payloadBearer(refreshed);
+
+    if (!bearer) return null;
+
+    await buildSession(bearer);
+
+    return {
+      bearer,
+      refreshed,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function getRouteSession(): Promise<RouteSession | null> {
   const store = cookies();
-  let bearer = clean(store.get(COOKIE_ACCESS)?.value);
+
   const refreshValue = clean(store.get(COOKIE_REFRESH)?.value);
   const expiresAt = Number(store.get(COOKIE_EXPIRES)?.value || 0);
-  let refreshed: TokenPayload = null;
+  const bearer = clean(store.get(COOKIE_ACCESS)?.value);
 
   if (!bearer && !refreshValue) return null;
 
-  const needsRefresh = !bearer || (expiresAt && Date.now() > expiresAt - 60_000);
+  const needsRefresh =
+    !bearer || Boolean(expiresAt && Date.now() > expiresAt - 60_000);
+
   if (needsRefresh) {
-    if (!refreshValue) return null;
-
-    try {
-      refreshed = (await refreshAccessToken(refreshValue)) as TokenPayload;
-      bearer = payloadBearer(refreshed);
-    } catch {
-      return null;
-    }
+    return await tryRefresh(refreshValue);
   }
-
-  if (!bearer) return null;
 
   try {
     await buildSession(bearer);
-  } catch {
-    return null;
-  }
 
-  return { bearer, refreshed };
+    return {
+      bearer,
+      refreshed: null,
+    };
+  } catch {
+    // If Discord rejects the access token even though the cookie says it
+    // should still be valid, try the refresh token before forcing reauth.
+    return await tryRefresh(refreshValue);
+  }
 }
 
-export function applyRouteSession<T extends { cookies: { set: Function } }>(response: T, session: RouteSession | null): T {
-  applyAuthCookies(response, session?.refreshed as any);
+export function applyRouteSession<T extends { cookies: { set: Function } }>(
+  response: T,
+  session: RouteSession | null
+): T {
+  applyAuthCookies(response, session?.refreshed || null);
   return response;
 }
