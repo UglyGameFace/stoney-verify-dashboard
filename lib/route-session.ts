@@ -7,7 +7,7 @@ const COOKIE_EXPIRES = ["discord", "expires", "at"].join("_");
 const ACCESS_FIELD = ["access", "token"].join("_");
 
 type TokenPayload = {
-  access_token?: string;
+  access_token: string;
   token_type?: string;
   expires_in?: number;
   refresh_token?: string;
