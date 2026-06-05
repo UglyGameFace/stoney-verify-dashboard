@@ -436,14 +436,33 @@ export async function buildSession(accessToken: string): Promise<BuiltSession> {
   };
 }
 
+async function buildSessionFromRefreshToken(refreshToken: string): Promise<BuiltSession | null> {
+  if (!refreshToken) return null;
+
+  try {
+    const refreshed = await refreshAccessToken(refreshToken);
+    return await buildSession(refreshed.access_token);
+  } catch {
+    return null;
+  }
+}
+
 export async function getSession(): Promise<BuiltSession | null> {
   const accessToken = getCookieValue(ACCESS_COOKIE);
-  if (!accessToken) return null;
+  const refreshToken = getCookieValue(REFRESH_COOKIE);
+  const expiresAt = Number(getCookieValue(EXPIRES_COOKIE) || 0);
+
+  if (!accessToken && !refreshToken) return null;
+
+  const shouldRefresh = !accessToken || Boolean(expiresAt && Date.now() > expiresAt - 60000);
+  if (shouldRefresh) {
+    return await buildSessionFromRefreshToken(refreshToken);
+  }
 
   try {
     return await buildSession(accessToken);
   } catch {
-    return null;
+    return await buildSessionFromRefreshToken(refreshToken);
   }
 }
 
