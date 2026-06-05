@@ -38,6 +38,7 @@ type BotGuildLookup = {
   ok: boolean;
   error: string | null;
   guilds: Map<string, BotGuild>;
+  directCheckedIds: Set<string>;
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -89,6 +90,7 @@ async function fetchBotGuilds(): Promise<BotGuildLookup> {
       ok: false,
       error: "Dashboard bot credential is missing, so bot installation could not be verified from Discord.",
       guilds: new Map(),
+      directCheckedIds: new Set(),
     };
   }
 
@@ -99,12 +101,13 @@ async function fetchBotGuilds(): Promise<BotGuildLookup> {
         .map((guild) => [normalizeString(guild.id), guild] as const)
         .filter(([id]) => Boolean(id))
     );
-    return { ok: true, error: null, guilds };
+    return { ok: true, error: null, guilds, directCheckedIds: new Set() };
   } catch (error) {
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Bot guild check failed.",
       guilds: new Map(),
+      directCheckedIds: new Set(),
     };
   }
 }
@@ -123,23 +126,24 @@ async function fetchBotGuildById(guildId: string): Promise<BotGuild | null> {
 
 async function strengthenBotLookupWithDirectChecks(
   botLookup: BotGuildLookup,
-  userGuilds: DiscordUserGuild[]
+  userGuilds: DiscordUserGuild[],
+  forceMissingProof = false
 ): Promise<BotGuildLookup> {
-  if (botLookup.ok) return botLookup;
-
   const candidates = userGuilds
     .map((guild) => normalizeString(guild.id))
     .filter(Boolean)
+    .filter((guildId) => forceMissingProof || !botLookup.ok || !botLookup.guilds.has(guildId))
+    .filter((guildId) => !botLookup.directCheckedIds.has(guildId))
     .slice(0, MAX_DIRECT_BOT_GUILD_CHECKS);
 
   if (!candidates.length) return botLookup;
 
   const nextGuilds = new Map(botLookup.guilds);
-  const results = await Promise.allSettled(candidates.map((guildId) => fetchBotGuildById(guildId)));
+  const directCheckedIds = new Set(botLookup.directCheckedIds);
 
-  for (const result of results) {
-    if (result.status !== "fulfilled") continue;
-    const guild = result.value;
+  for (const guildId of candidates) {
+    directCheckedIds.add(guildId);
+    const guild = await fetchBotGuildById(guildId);
     const id = normalizeString(guild?.id);
     if (id) nextGuilds.set(id, guild as BotGuild);
   }
@@ -147,6 +151,7 @@ async function strengthenBotLookupWithDirectChecks(
   return {
     ...botLookup,
     guilds: nextGuilds,
+    directCheckedIds,
   };
 }
 
@@ -215,6 +220,7 @@ function resolveInstallState(guildId: string, botLookup: BotGuildLookup, knownDa
   if (!botLookup.ok && defaultGuildId && defaultGuildId === guildId) return "installed";
 
   if (!botLookup.ok) return "unknown";
+  if (!botLookup.directCheckedIds.has(guildId)) return "unknown";
   return "missing";
 }
 
@@ -239,7 +245,7 @@ export async function GET() {
     const manageableSource = userGuilds.filter(hasManageGuildPermission);
     const [knownDashboardGuildIds, botLookup] = await Promise.all([
       fetchKnownDashboardGuildIds(manageableSource.map((guild) => normalizeString(guild.id))),
-      strengthenBotLookupWithDirectChecks(initialBotLookup, manageableSource),
+      strengthenBotLookupWithDirectChecks(initialBotLookup, manageableSource, true),
     ]);
     const selectedGuildId = getSelectedGuildId();
 
@@ -327,7 +333,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const botLookup = await strengthenBotLookupWithDirectChecks(initialBotLookup, [userGuild]);
+    const botLookup = await strengthenBotLookupWithDirectChecks(initialBotLookup, [userGuild], true);
     const installState = resolveInstallState(requestedGuildId, botLookup, knownDashboardGuildIds);
 
     if (installState !== "installed") {
