@@ -26,6 +26,27 @@ function clearTemporaryAuthCookies(response) {
   return response
 }
 
+function loginRetryRedirect(request, returnTo) {
+  const url = new URL("/api/auth/login", request.url)
+  url.searchParams.set("return_to", normalizeAuthReturnTo(returnTo, "/auth-status"))
+  url.searchParams.set("retry", "oauth_state")
+  return NextResponse.redirect(url)
+}
+
+async function redirectExistingSessionOrLoginRetry(request, returnTo) {
+  const existingSession = await getSession()
+
+  if (existingSession) {
+    const response = NextResponse.redirect(dashboardRedirectUrl(request, returnTo))
+    return clearTemporaryAuthCookies(response)
+  }
+
+  // Do not clear OAUTH_STATE_COOKIE here. A stale restored mobile callback can arrive
+  // while a newer login attempt is active; clearing the cookie would break the fresh attempt
+  // and create the exact invalid_discord_oauth_state loop users are seeing.
+  return loginRetryRedirect(request, returnTo)
+}
+
 async function redirectExistingSessionOrError(request, returnTo, errorMessage) {
   const existingSession = await getSession()
 
@@ -61,7 +82,7 @@ export async function GET(request) {
     }
 
     if (hasStateCheck && (!state || !expectedStates.includes(state))) {
-      return await redirectExistingSessionOrError(request, returnTo, "invalid_discord_oauth_state")
+      return await redirectExistingSessionOrLoginRetry(request, returnTo)
     }
 
     const token = await exchangeCodeForToken(code)
