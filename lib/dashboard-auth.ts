@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { applyAuthCookies, refreshAccessToken } from "@/lib/auth-server";
 import { discordBotFetch, discordUserFetch, fetchGuildRoles } from "@/lib/discord-api";
 import { createServerSupabase } from "@/lib/supabase-server";
-import { getSelectedGuildId } from "@/lib/guild-selection";
+import { getSelectedGuildId, hasSelectedGuildManagerProof } from "@/lib/guild-selection";
 import { env } from "@/lib/env";
 
 const ACCESS_COOKIE = "discord_access_token";
@@ -277,6 +277,7 @@ function groupForRole(roleId: string, roleName: string, rules: RoleRule[]): stri
 
 function deriveAccess(args: {
   manager: boolean;
+  managerProof: boolean;
   roleIds: string[];
   roleNames: string[];
   rules: RoleRule[];
@@ -295,8 +296,9 @@ function deriveAccess(args: {
   }
 
   const loweredRoleNames = args.roleNames.map(lower);
+  const hasManagerAccess = args.manager || args.managerProof;
   const hasStaffRole =
-    args.manager ||
+    hasManagerAccess ||
     ruleStaff ||
     Boolean(args.storedMember?.has_staff_role) ||
     args.roleIds.some((id) => env.staffRoleIds.includes(clean(id))) ||
@@ -310,11 +312,11 @@ function deriveAccess(args: {
     Boolean(args.storedMember?.has_unverified) ||
     loweredRoleNames.some((name) => name === "unverified" || name.includes("unverified"));
 
-  const accessLevel: DashboardAccessLevel = args.manager ? "server_manager" : hasStaffRole ? "staff" : "member";
-  const accessLabel = args.manager ? "Server Manager" : hasStaffRole ? "Staff" : hasVerifiedRole ? "Verified" : hasUnverifiedRole ? "Limited" : "Signed In";
-  const verificationLabel = args.manager ? "Server Manager" : hasStaffRole ? "Staff" : hasVerifiedRole ? "Verified" : hasUnverifiedRole ? "Pending Verification" : "Server Access Not Checked";
+  const accessLevel: DashboardAccessLevel = hasManagerAccess ? "server_manager" : hasStaffRole ? "staff" : "member";
+  const accessLabel = hasManagerAccess ? "Server Manager" : hasStaffRole ? "Staff" : hasVerifiedRole ? "Verified" : hasUnverifiedRole ? "Limited" : "Signed In";
+  const verificationLabel = hasManagerAccess ? "Server Manager" : hasStaffRole ? "Staff" : hasVerifiedRole ? "Verified" : hasUnverifiedRole ? "Pending Verification" : "Server Access Not Checked";
 
-  return { hasStaffRole, hasVerifiedRole, hasUnverifiedRole, accessLevel, accessLabel, verificationLabel };
+  return { hasStaffRole, hasVerifiedRole, hasUnverifiedRole, hasManagerAccess, accessLevel, accessLabel, verificationLabel };
 }
 
 export async function getDashboardAuthSession(): Promise<DashboardAuthSession | null> {
@@ -324,8 +326,9 @@ export async function getDashboardAuthSession(): Promise<DashboardAuthSession | 
   const { bearer, refreshedTokens, user } = await loadUserWithRetry(bearerState);
   const userId = clean(user.id);
   const selectedGuildId = clean(getSelectedGuildId());
+  const managerProof = Boolean(selectedGuildId && hasSelectedGuildManagerProof());
   const [managerAccess, botContext, dbAccess] = await Promise.all([
-    loadUserGuildManagerAccess(bearer, selectedGuildId),
+    managerProof ? Promise.resolve({ ok: true, error: null }) : loadUserGuildManagerAccess(bearer, selectedGuildId),
     loadBotMemberContext(selectedGuildId, userId),
     loadDatabaseAccess(selectedGuildId, userId),
   ]);
@@ -339,11 +342,11 @@ export async function getDashboardAuthSession(): Promise<DashboardAuthSession | 
   ).sort((a, b) => Number(b.position || 0) - Number(a.position || 0));
   const roleIds = liveRoleIds.length ? liveRoleIds : rolesDetailed.map((role) => role.id).filter(Boolean);
   const roleNames = rolesDetailed.map((role) => clean(role.name)).filter(Boolean);
-  const access = deriveAccess({ manager: managerAccess.ok, roleIds, roleNames, rules: dbAccess.rules, storedMember: dbAccess.storedMember });
+  const access = deriveAccess({ manager: managerAccess.ok, managerProof, roleIds, roleNames, rules: dbAccess.rules, storedMember: dbAccess.storedMember });
   const image = avatarUrl(user) || dbAccess.storedMember?.avatar_url || null;
   const displayName = clean(botContext.member?.nick || dbAccess.storedMember?.display_name || dbAccess.storedMember?.nickname || user.global_name || user.username || "Member");
-  const guildChecked = Boolean(selectedGuildId && (managerAccess.ok || !botContext.error || dbAccess.storedMember));
-  const staffReason = access.accessLevel === "server_manager" ? "manage_server_permission" : access.accessLevel === "staff" ? (dbAccess.rules.length ? "selected_guild_role_rule" : "stored_or_env_staff_role") : null;
+  const guildChecked = Boolean(selectedGuildId && (managerAccess.ok || managerProof || !botContext.error || dbAccess.storedMember));
+  const staffReason = managerProof ? "selected_server_access_proof" : access.accessLevel === "server_manager" ? "manage_server_permission" : access.accessLevel === "staff" ? (dbAccess.rules.length ? "selected_guild_role_rule" : "stored_or_env_staff_role") : null;
 
   return {
     signedIn: true,
@@ -387,7 +390,7 @@ export async function getDashboardAuthSession(): Promise<DashboardAuthSession | 
       has_staff_role: access.hasStaffRole,
       has_verified_role: access.hasVerifiedRole,
       has_unverified_role: access.hasUnverifiedRole,
-      has_manage_server: managerAccess.ok,
+      has_manage_server: access.hasManagerAccess,
       access_label: access.accessLabel,
       verification_label: access.verificationLabel,
     },
