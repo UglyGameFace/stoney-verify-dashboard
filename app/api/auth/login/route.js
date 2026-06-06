@@ -8,6 +8,22 @@ import {
   normalizeAuthReturnTo,
 } from "@/lib/auth-return"
 
+const MAX_RECENT_OAUTH_STATES = 6
+
+function parseStateCookie(value) {
+  return String(value || "")
+    .split("|")
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function buildStateCookie(nextState, previousValue) {
+  const previousStates = parseStateCookie(previousValue)
+  return [nextState, ...previousStates.filter((item) => item !== nextState)]
+    .slice(0, MAX_RECENT_OAUTH_STATES)
+    .join("|")
+}
+
 export async function GET(request) {
   if (!env.discordClientId || !env.discordRedirectUri) {
     return NextResponse.json({ error: "Missing Discord OAuth configuration." }, { status: 500 })
@@ -33,11 +49,12 @@ export async function GET(request) {
     "/auth-status"
   )
   const state = createOAuthState()
+  const previousStateCookie = request.cookies?.get?.(OAUTH_STATE_COOKIE)?.value || ""
   const discordUrl = new URL(getDiscordLoginUrl())
   discordUrl.searchParams.set("state", state)
 
   const response = NextResponse.redirect(discordUrl)
-  response.cookies.set(OAUTH_STATE_COOKIE, state, getCookieOptions(10 * 60))
+  response.cookies.set(OAUTH_STATE_COOKIE, buildStateCookie(state, previousStateCookie), getCookieOptions(10 * 60))
   response.cookies.set(AUTH_RETURN_TO_COOKIE, returnTo, getCookieOptions(10 * 60))
   return response
 }
