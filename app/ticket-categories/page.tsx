@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import TicketCategoriesManager from "@/components/dashboard/TicketCategoriesManager";
 import AuthStatePage from "@/components/dashboard/AuthStatePage";
 import SetupWorkspaceShell from "@/components/dashboard/SetupWorkspaceShell";
@@ -11,6 +10,25 @@ async function safeDashboardAuthSession(): Promise<DashboardAuthSession | null> 
   } catch {
     return null;
   }
+}
+
+function StaffRequiredState() {
+  return (
+    <main className="auth-state-page">
+      <div className="card auth-state-card">
+        <div className="muted auth-state-eyebrow">Staff Access Required</div>
+        <h1>Ticket categories are staff-only</h1>
+        <p className="muted">
+          You are signed in, but this selected server did not confirm staff or Manage Server access for this page. Choose the server again or check Account for the current access state.
+        </p>
+        <div className="auth-state-actions">
+          <Link href="/servers" className="button primary">Choose Server</Link>
+          <Link href="/auth-status" className="button ghost">View Account</Link>
+          <Link href="/" className="button ghost">Dashboard</Link>
+        </div>
+      </div>
+    </main>
+  );
 }
 
 function ServerRequiredState() {
@@ -49,8 +67,8 @@ export default async function TicketCategoriesPage() {
     );
   }
 
-  if (!session.isStaff) redirect("/");
   if (!session.selectedGuildId) return <ServerRequiredState />;
+  if (!session.isStaff) return <StaffRequiredState />;
 
   return (
     <SetupWorkspaceShell
