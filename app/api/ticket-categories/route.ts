@@ -171,14 +171,14 @@ async function assertSlugAvailable(supabase: ReturnType<typeof createServerSupab
   if (data?.id && data.id !== excludeId) throw new Error("That category slug is already in use.");
 }
 
-async function loadCategories(supabase: ReturnType<typeof createServerSupabase>, guildId: string) {
+async function loadCategories(supabase: ReturnType<typeof createServerSupabase>, guildId: string): Promise<JsonRecord[]> {
   const [categoriesRes, ticketsRes] = await Promise.all([
     supabase.from("ticket_categories").select("*").eq("guild_id", guildId).order("sort_order", { ascending: true, nullsFirst: false }).order("name", { ascending: true }),
     supabase.from("tickets").select("id,status,category_id,matched_category_id,updated_at,created_at").eq("guild_id", guildId),
   ]);
   if (categoriesRes.error) throw new Error(categoriesRes.error.message);
   const tickets = safeArray<JsonRecord>(ticketsRes.data || []);
-  return safeArray<JsonRecord>(categoriesRes.data || []).map((category) => {
+  return safeArray<JsonRecord>(categoriesRes.data || []).map((category): JsonRecord => {
     const id = clean(category.id);
     const linked = tickets.filter((ticket) => clean(ticket.category_id) === id || clean(ticket.matched_category_id) === id);
     return {
@@ -206,8 +206,8 @@ export async function GET() {
     if (!guildId) return dashboardAuthJson({ error: "Select a server before managing ticket categories.", needsServerSelection: true }, 428, session);
     const supabase = createServerSupabase();
     const categories = await loadCategories(supabase, guildId);
-    const defaultCategory = categories.find((row) => row.is_default) || null;
-    return dashboardAuthJson({ selectedGuildId: guildId, categories, defaultCategoryId: defaultCategory?.id || null, presets: PRESET_KEYWORDS, codServiceKeywords: COD_SERVICE_KEYWORDS }, 200, session);
+    const defaultCategory = categories.find((row) => Boolean(row.is_default)) || null;
+    return dashboardAuthJson({ selectedGuildId: guildId, categories, defaultCategoryId: defaultCategory ? clean(defaultCategory.id) || null : null, presets: PRESET_KEYWORDS, codServiceKeywords: COD_SERVICE_KEYWORDS }, 200, session);
   } catch (error) {
     return dashboardAuthJson({ error: errorMessage(error, "Failed to load categories.") }, errorStatus(error, 500), session);
   }
