@@ -17,6 +17,14 @@ function normalizeString(value: unknown): string {
   return String(value || "").trim();
 }
 
+async function safeDashboardAuthSession(): Promise<DashboardAuthSession | null> {
+  try {
+    return await getDashboardAuthSession();
+  } catch {
+    return null;
+  }
+}
+
 function ActionLink({ href, children, primary = false }: { href: string; children: React.ReactNode; primary?: boolean }) {
   return (
     <Link href={href} className={primary ? "button primary" : "button ghost"}>
@@ -57,7 +65,7 @@ function SessionCard({ session }: { session: DashboardAuthSession }) {
           <div style={{ minWidth: 0 }}>
             <div className="muted account-eyebrow">Account</div>
             <h1>{displayName}</h1>
-            <p className="muted">Your Discord session is active. This page now uses the selected-server dashboard access check, including Manage Server permission and configured staff role rules.</p>
+            <p className="muted">Your Discord session is active. This page uses the selected-server dashboard access check, including Manage Server permission and configured staff role rules.</p>
           </div>
         </div>
         <div className="account-actions">
@@ -109,7 +117,7 @@ function LoginRequiredState({ authError }: { authError?: string }) {
         <p className="muted">
           {authError
             ? "Discord returned an auth error. The reason is shown below so the dashboard does not silently loop back."
-            : "The dashboard does not see a valid Discord session cookie yet. Sign in with Discord to continue."}
+            : "The dashboard could not validate a Discord session. Reset login once if this keeps happening, then sign in again."}
         </p>
         {authError ? <pre className="account-error-pre">{decodeURIComponent(authError)}</pre> : null}
         <div className="auth-state-actions">
@@ -127,7 +135,7 @@ export const revalidate = 0;
 
 export default async function AuthStatusPage({ searchParams }: { searchParams?: SearchParams }) {
   const authError = firstParam(searchParams?.authError);
-  const session = await getDashboardAuthSession();
+  const session = await safeDashboardAuthSession();
 
   if (!session) return <LoginRequiredState authError={authError} />;
 
