@@ -1,14 +1,10 @@
-import { NextResponse } from "next/server"
-import { getSession, requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server"
+import { getDashboardAuthSession, dashboardAuthJson } from "@/lib/dashboard-auth"
 
 export async function GET() {
   try {
-    const result = await requireStaffSessionForRoute()
-    const response = NextResponse.json({ session: result.session })
-    applyAuthCookies(response, result.refreshedTokens)
-    return response
-  } catch {
-    const session = await getSession()
-    return NextResponse.json({ session })
+    const session = await getDashboardAuthSession()
+    return dashboardAuthJson({ session }, 200, session)
+  } catch (error) {
+    return dashboardAuthJson({ session: null, error: error?.message || "Failed to load session." }, 200, null)
   }
 }
