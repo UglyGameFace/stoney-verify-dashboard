@@ -3,12 +3,7 @@ import { redirect } from "next/navigation";
 import TicketCategoriesManager from "@/components/dashboard/TicketCategoriesManager";
 import AuthStatePage from "@/components/dashboard/AuthStatePage";
 import SetupWorkspaceShell from "@/components/dashboard/SetupWorkspaceShell";
-import { getSession } from "@/lib/auth-server";
-import { getSelectedGuildId } from "@/lib/guild-selection";
-
-type SessionLike = {
-  isStaff?: boolean;
-} | null;
+import { getDashboardAuthSession } from "@/lib/dashboard-auth";
 
 function ServerRequiredState() {
   return (
@@ -33,7 +28,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function TicketCategoriesPage() {
-  const session = (await getSession()) as SessionLike;
+  const session = await getDashboardAuthSession();
 
   if (!session) {
     return (
@@ -46,8 +41,8 @@ export default async function TicketCategoriesPage() {
     );
   }
 
-  if (!session?.isStaff) redirect("/");
-  if (!getSelectedGuildId()) return <ServerRequiredState />;
+  if (!session.isStaff) redirect("/");
+  if (!session.selectedGuildId) return <ServerRequiredState />;
 
   return (
     <SetupWorkspaceShell
