@@ -139,10 +139,7 @@ function getCookieValue(name: string): string {
 }
 
 function getSelectedAuthGuildId(): string {
-  return (
-    getCookieValue(SELECTED_GUILD_COOKIE) ||
-    safeText(env.guildId || env.discordGuildId)
-  );
+  return getCookieValue(SELECTED_GUILD_COOKIE);
 }
 
 function hasManageGuildPermission(guild: DiscordUserGuild | null | undefined): boolean {
