@@ -6,216 +6,80 @@ import DashboardClient from "@/components/DashboardClient";
 import UserDashboardClient from "@/components/UserDashboardClient";
 import AuthStatePage from "@/components/dashboard/AuthStatePage";
 import SetupLaunchChecklist from "@/components/dashboard/SetupLaunchChecklist";
-import { getSession } from "@/lib/auth-server";
-import { getSelectedGuildId } from "@/lib/guild-selection";
+import { getDashboardAuthSession, type DashboardAuthSession } from "@/lib/dashboard-auth";
 import { env } from "@/lib/env";
-
-type SessionLike = {
-  isStaff?: boolean;
-  user?: {
-    discord_id?: string | null;
-    id?: string | null;
-    username?: string | null;
-    global_name?: string | null;
-    name?: string | null;
-    avatar_url?: string | null;
-    avatar?: string | null;
-    image?: string | null;
-    picture?: string | null;
-  } | null;
-  discordUser?: {
-    id?: string | null;
-    username?: string | null;
-    global_name?: string | null;
-    avatar_url?: string | null;
-    avatar?: string | null;
-  } | null;
-  member?: {
-    display_name?: string | null;
-    verification_label?: string | null;
-    access_label?: string | null;
-    roles?: string[] | null;
-    has_unverified_role?: boolean | null;
-    has_verified_role?: boolean | null;
-    has_staff_role?: boolean | null;
-    has_manage_server?: boolean | null;
-  } | null;
-} | null;
 
 type DashboardPayload = Record<string, unknown>;
 
-function normalizeString(value: unknown): string {
+function clean(value: unknown): string {
   return String(value || "").trim();
 }
 
-function buildFallbackUserData(session: SessionLike, guildId: string): DashboardPayload {
-  const discordId = normalizeString(
-    session?.user?.discord_id ||
-      session?.user?.id ||
-      session?.discordUser?.id
-  );
+function resolveAppOrigin(): string {
+  const explicitCandidates = [
+    env?.siteUrl,
+    env?.appUrl,
+    env?.baseUrl,
+    env?.publicUrl,
+    process.env.NEXT_PUBLIC_SITE_URL,
+    process.env.SITE_URL,
+    process.env.APP_URL,
+    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "",
+  ]
+    .map(clean)
+    .filter(Boolean);
 
-  const username =
-    session?.user?.username ||
-    session?.discordUser?.username ||
-    session?.user?.global_name ||
-    session?.user?.name ||
-    "Member";
+  if (explicitCandidates.length) return explicitCandidates[0].replace(/\/+$/, "");
 
-  const displayName =
-    session?.member?.display_name ||
-    session?.discordUser?.global_name ||
-    session?.user?.global_name ||
-    username;
-
-  const avatarUrl =
-    session?.user?.avatar_url ||
-    session?.user?.avatar ||
-    session?.user?.image ||
-    session?.user?.picture ||
-    session?.discordUser?.avatar_url ||
-    session?.discordUser?.avatar ||
-    null;
-
-  return {
-    ok: true,
-    selectedGuildId: guildId || null,
-    viewer: {
-      discord_id: discordId || null,
-      username,
-      display_name: displayName,
-      global_name: displayName,
-      avatar_url: avatarUrl,
-      avatar: avatarUrl,
-      image: avatarUrl,
-      picture: avatarUrl,
-      isStaff: false,
-      guild_id: guildId || null,
-      verification_label: session?.member?.verification_label || "Not Synced Yet",
-      access_label: session?.member?.access_label || "Not Synced Yet",
-      role_names: Array.isArray(session?.member?.roles) ? session.member.roles : [],
-    },
-    member: {
-      guild_id: guildId || null,
-      user_id: discordId || null,
-      username,
-      display_name: displayName,
-      nickname: null,
-      avatar_url: avatarUrl,
-      joined_at: null,
-      role_names: Array.isArray(session?.member?.roles) ? session.member.roles : [],
-      role_ids: [],
-      has_unverified: Boolean(session?.member?.has_unverified_role),
-      has_verified_role: Boolean(session?.member?.has_verified_role),
-      has_staff_role: Boolean(session?.member?.has_staff_role || session?.member?.has_manage_server),
-      has_secondary_verified_role: false,
-      role_state: "not_synced",
-      role_state_reason: "Dashboard API fallback payload was used.",
-    },
-    profile: {
-      guild_id: guildId || null,
-      user_id: discordId || null,
-      username,
-      display_name: displayName,
-      nickname: null,
-      avatar_url: avatarUrl,
-      joined_at: null,
-      role_names: Array.isArray(session?.member?.roles) ? session.member.roles : [],
-      role_ids: [],
-      has_unverified: Boolean(session?.member?.has_unverified_role),
-      has_verified_role: Boolean(session?.member?.has_verified_role),
-      has_staff_role: Boolean(session?.member?.has_staff_role || session?.member?.has_manage_server),
-      has_secondary_verified_role: false,
-      role_state: "not_synced",
-      role_state_reason: "Dashboard API fallback payload was used.",
-    },
-    entry: {
-      joined_at: null,
-      join_source: null,
-      entry_method: null,
-      invite_code: null,
-      inviter_id: null,
-      inviter_name: null,
-      vanity_used: false,
-    },
-    relationships: {
-      entry_method: null,
-      verification_source: null,
-      entry_reason: null,
-      approval_reason: null,
-      invite_code: null,
-      inviter_id: null,
-      inviter_name: null,
-      vanity_used: false,
-      vouched_by: null,
-      vouched_by_name: null,
-      approved_by: null,
-      approved_by_name: null,
-      verification_ticket_id: null,
-      source_ticket_id: null,
-      vouch_count: 0,
-      latest_vouch_at: null,
-    },
-    ticketSummary: {
-      total: 0,
-      open: 0,
-      closed: 0,
-      deleted: 0,
-      claimed: 0,
-      status_counts: {},
-      priority_counts: {},
-      category_counts: {},
-      latest_ticket_at: null,
-    },
-    verification: {
-      status: "unknown",
-      has_unverified: Boolean(session?.member?.has_unverified_role),
-      has_verified_role: Boolean(session?.member?.has_verified_role),
-      has_secondary_verified_role: false,
-      has_staff_role: Boolean(session?.member?.has_staff_role || session?.member?.has_manage_server),
-      flag_count: 0,
-      flagged_count: 0,
-      latest_flag_at: null,
-      vc_request_count: 0,
-      vc_completed_count: 0,
-      vc_latest_status: null,
-      token_count: 0,
-      token_latest_status: null,
-      token_latest_decision: null,
-      token_submitted_count: 0,
-      token_pending_count: 0,
-      token_approved_count: 0,
-      token_denied_count: 0,
-      open_ticket_id: null,
-    },
-    verificationFlags: [],
-    verificationTokens: [],
-    vcSessions: [],
-    vcVerifySession: null,
-    joinHistory: [],
-    memberEvents: [],
-    usernameHistory: [],
-    historicalUsernames: [],
-    vouches: [],
-    openTicket: null,
-    recentTickets: [],
-    recentActivity: [],
-    categories: [],
-    stats: {
-      ticket_count: 0,
-      activity_count: 0,
-      verification_flag_count: 0,
-      verification_token_count: 0,
-      vc_session_count: 0,
-      last_activity_at: null,
-    },
-  };
+  const headerStore = headers();
+  const host = clean(headerStore.get("x-forwarded-host")) || clean(headerStore.get("host"));
+  const proto = clean(headerStore.get("x-forwarded-proto")) || (host.includes("localhost") || host.startsWith("127.0.0.1") ? "http" : "https");
+  return host ? `${proto}://${host}` : "http://127.0.0.1:3000";
 }
 
-function buildFallbackStaffData(guildId: string): DashboardPayload {
+async function fetchDashboardJson(pathname: string, fallbackData: DashboardPayload): Promise<DashboardPayload> {
+  try {
+    const headerStore = headers();
+    const origin = resolveAppOrigin();
+    const cookieHeader = clean(headerStore.get("cookie"));
+    const authHeader = clean(headerStore.get("authorization"));
+
+    const response = await fetch(`${origin}${pathname}`, {
+      method: "GET",
+      cache: "no-store",
+      headers: {
+        ...(cookieHeader ? { cookie: cookieHeader } : {}),
+        ...(authHeader ? { authorization: authHeader } : {}),
+        accept: "application/json",
+        "x-dashboard-internal": "1",
+      },
+      next: { revalidate: 0 },
+    });
+
+    if (!response.ok) return fallbackData;
+    const json = (await response.json().catch(() => null)) as DashboardPayload | null;
+    return json && typeof json === "object" ? json : fallbackData;
+  } catch {
+    return fallbackData;
+  }
+}
+
+function buildFallbackStaffData(session: DashboardAuthSession): DashboardPayload {
   return {
     ok: true,
-    selectedGuildId: guildId || null,
+    selectedGuildId: session.selectedGuildId || null,
+    staffUserId: session.user.discord_id,
+    viewer: {
+      id: session.user.discord_id,
+      discord_id: session.user.discord_id,
+      username: session.user.username,
+      display_name: session.member.display_name,
+      avatar_url: session.user.avatar_url,
+      isStaff: true,
+      isServerManager: session.isServerManager,
+      access_label: session.member.access_label,
+      role_names: session.member.roles,
+    },
     generated_at: new Date().toISOString(),
     tickets: [],
     activeTickets: [],
@@ -233,92 +97,57 @@ function buildFallbackStaffData(guildId: string): DashboardPayload {
     guildMembers: [],
     members: [],
     memberRows: [],
-    memberCounts: {
-      tracked: 0,
-      active: 0,
-      former: 0,
-      pendingVerification: 0,
-      verified: 0,
-      staff: 0,
-    },
-    counts: {
-      openTickets: 0,
-      warnsToday: 0,
-      raidAlerts: 0,
-      fraudFlags: 0,
-    },
+    memberCounts: { tracked: 0, active: 0, former: 0, pendingVerification: 0, verified: 0, staff: 0 },
+    counts: { openTickets: 0, warnsToday: 0, raidAlerts: 0, fraudFlags: 0 },
   };
 }
 
-function resolveAppOrigin(): string {
-  const explicitCandidates = [
-    env?.siteUrl,
-    env?.appUrl,
-    env?.baseUrl,
-    env?.publicUrl,
-    process.env.NEXT_PUBLIC_SITE_URL,
-    process.env.SITE_URL,
-    process.env.APP_URL,
-    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "",
-  ]
-    .map((value) => normalizeString(value))
-    .filter(Boolean);
-
-  if (explicitCandidates.length) {
-    return explicitCandidates[0].replace(/\/+$/, "");
-  }
-
-  const headerStore = headers();
-  const host =
-    normalizeString(headerStore.get("x-forwarded-host")) ||
-    normalizeString(headerStore.get("host"));
-
-  const proto =
-    normalizeString(headerStore.get("x-forwarded-proto")) ||
-    (host.includes("localhost") || host.startsWith("127.0.0.1") ? "http" : "https");
-
-  if (host) return `${proto}://${host}`;
-  return "http://127.0.0.1:3000";
-}
-
-async function fetchDashboardJson(pathname: string, fallbackData: DashboardPayload): Promise<DashboardPayload> {
-  try {
-    const headerStore = headers();
-    const origin = resolveAppOrigin();
-    const cookieHeader = normalizeString(headerStore.get("cookie"));
-    const authHeader = normalizeString(headerStore.get("authorization"));
-
-    const response = await fetch(`${origin}${pathname}`, {
-      method: "GET",
-      cache: "no-store",
-      headers: {
-        ...(cookieHeader ? { cookie: cookieHeader } : {}),
-        ...(authHeader ? { authorization: authHeader } : {}),
-        accept: "application/json",
-        "x-dashboard-internal": "1",
-      },
-      next: { revalidate: 0 },
-    });
-
-    if (!response.ok) return fallbackData;
-    const json = (await response.json().catch(() => null)) as DashboardPayload | null;
-    if (!json || typeof json !== "object") return fallbackData;
-    return json;
-  } catch {
-    return fallbackData;
-  }
+function buildFallbackUserData(session: DashboardAuthSession): DashboardPayload {
+  return {
+    ok: true,
+    selectedGuildId: session.selectedGuildId || null,
+    viewer: {
+      discord_id: session.user.discord_id,
+      username: session.user.username,
+      display_name: session.member.display_name,
+      global_name: session.member.display_name,
+      avatar_url: session.user.avatar_url,
+      avatar: session.user.avatar_url,
+      image: session.user.avatar_url,
+      picture: session.user.avatar_url,
+      isStaff: false,
+      guild_id: session.selectedGuildId || null,
+      verification_label: session.member.verification_label,
+      access_label: session.member.access_label,
+      role_names: session.member.roles,
+    },
+    member: {
+      guild_id: session.selectedGuildId || null,
+      user_id: session.user.discord_id,
+      username: session.user.username,
+      display_name: session.member.display_name,
+      avatar_url: session.user.avatar_url,
+      role_names: session.member.roles,
+      role_ids: session.member.roleIds,
+      has_unverified: session.member.has_unverified_role,
+      has_verified_role: session.member.has_verified_role,
+      has_staff_role: session.member.has_staff_role,
+      role_state: "dashboard_auth",
+      role_state_reason: "Loaded from selected-server dashboard auth.",
+    },
+    categories: [],
+    recentTickets: [],
+    recentActivity: [],
+    verificationFlags: [],
+    verificationTokens: [],
+    vcSessions: [],
+    stats: { ticket_count: 0, activity_count: 0, verification_flag_count: 0, verification_token_count: 0, vc_session_count: 0, last_activity_at: null },
+  };
 }
 
 function StaffQuickToolsCard() {
   return (
-    <div
-      className="card staff-quick-tools-card"
-      style={{
-        marginBottom: 18,
-        background:
-          "radial-gradient(circle at top right, rgba(93,255,141,0.08), transparent 28%), radial-gradient(circle at bottom left, rgba(99,213,255,0.06), transparent 24%), linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015)), linear-gradient(180deg, rgba(14, 25, 35, 0.98), rgba(7, 13, 21, 0.98))",
-      }}
-    >
+    <div className="card staff-quick-tools-card" style={{ marginBottom: 18 }}>
       <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="muted" style={{ marginBottom: 8 }}>Staff Tools</div>
@@ -342,25 +171,9 @@ function DashboardLockedHome() {
     <section className="card dashboard-locked-home" aria-label="Dashboard locked until server selection">
       <div className="muted dashboard-locked-eyebrow">Dashboard</div>
       <h1>Pick a server before the dashboard loads</h1>
-      <p className="muted">
-        Home is the live control room. It will stay clean until a server is selected, so it does not pretend to show tickets, forms, members, or activity from the wrong place.
-      </p>
+      <p className="muted">Home is the live control room. It stays clean until a server is selected.</p>
       <div className="dashboard-locked-actions">
         <Link href="/servers" className="button primary">Go to Servers</Link>
-      </div>
-      <div className="dashboard-locked-grid">
-        <div>
-          <strong>Home</strong>
-          <span>Live tickets, activity, members, and staff tools after selection.</span>
-        </div>
-        <div>
-          <strong>Servers</strong>
-          <span>Only place to pick or invite the bot into a Discord server.</span>
-        </div>
-        <div>
-          <strong>Account</strong>
-          <span>Discord session, selected server, and reset-login controls.</span>
-        </div>
       </div>
     </section>
   );
@@ -370,9 +183,7 @@ function StaffShell({ children }: { children: ReactNode }) {
   return (
     <>
       <Sidebar />
-      <main className="content">
-        {children}
-      </main>
+      <main className="content">{children}</main>
     </>
   );
 }
@@ -381,15 +192,12 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function HomePage() {
-  const session = (await getSession()) as SessionLike;
-
+  const session = await getDashboardAuthSession();
   if (!session) return <AuthStatePage variant="login" showReset={false} showBack={false} />;
 
-  const guildId = normalizeString(getSelectedGuildId());
-  const hasSelectedGuild = Boolean(guildId);
-
-  if (session?.isStaff) {
-    if (!hasSelectedGuild) {
+  const guildId = clean(session.selectedGuildId);
+  if (session.isStaff) {
+    if (!guildId) {
       return (
         <StaffShell>
           <DashboardLockedHome />
@@ -397,7 +205,7 @@ export default async function HomePage() {
       );
     }
 
-    const staffData = await fetchDashboardJson("/api/staff/dashboard", buildFallbackStaffData(guildId));
+    const staffData = await fetchDashboardJson("/api/staff/dashboard", buildFallbackStaffData(session));
 
     return (
       <StaffShell>
@@ -405,13 +213,14 @@ export default async function HomePage() {
         <SetupLaunchChecklist data={staffData} selectedGuildId={guildId} />
         <DashboardClient
           initialData={staffData}
-          staffName={session?.user?.username || session?.discordUser?.username || env?.defaultStaffName || "Staff"}
+          staffName={session.user.username || session.discordUser.username || env?.defaultStaffName || "Staff"}
+          initialStaffId={session.user.discord_id}
         />
       </StaffShell>
     );
   }
 
-  const userData = await fetchDashboardJson("/api/user/dashboard", buildFallbackUserData(session, guildId));
+  const userData = await fetchDashboardJson("/api/user/dashboard", buildFallbackUserData(session));
   return (
     <main className="content" style={{ minHeight: "100vh" }}>
       <UserDashboardClient initialData={userData} />
