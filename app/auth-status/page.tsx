@@ -1,47 +1,13 @@
 import Link from "next/link";
 import Sidebar from "@/components/Sidebar";
-import {
-  getSession,
-  hasDiscordOAuthConfig,
-} from "@/lib/auth-server";
+import { hasDiscordOAuthConfig } from "@/lib/auth-server";
+import { getDashboardAuthSession, type DashboardAuthSession } from "@/lib/dashboard-auth";
 import { getExplicitSelectedGuildId } from "@/lib/guild-selection";
 import { loginRouteFor } from "@/lib/auth-return";
 
 type SearchParams = {
   authError?: string | string[];
 };
-
-type SessionLike = {
-  isStaff?: boolean;
-  isServerManager?: boolean;
-  user?: {
-    username?: string | null;
-    global_name?: string | null;
-    avatar_url?: string | null;
-    discord_id?: string | null;
-    id?: string | null;
-  } | null;
-  discordUser?: {
-    username?: string | null;
-    global_name?: string | null;
-    avatar_url?: string | null;
-    id?: string | null;
-  } | null;
-  member?: {
-    display_name?: string | null;
-    access_label?: string | null;
-    verification_label?: string | null;
-    has_manage_server?: boolean | null;
-    has_staff_role?: boolean | null;
-    roles?: string[] | null;
-  } | null;
-  authContext?: {
-    selected_guild_id?: string | null;
-    guild_checked?: boolean | null;
-    guild_check_error?: string | null;
-    staff_reason?: string | null;
-  } | null;
-} | null;
 
 function firstParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] || "" : value || "";
@@ -59,7 +25,13 @@ function ActionLink({ href, children, primary = false }: { href: string; childre
   );
 }
 
-function SessionCard({ session }: { session: Exclude<SessionLike, null> }) {
+function accessLabel(session: DashboardAuthSession): string {
+  if (session.isServerManager) return "Server Manager";
+  if (session.isStaff) return "Staff";
+  return "Member";
+}
+
+function SessionCard({ session }: { session: DashboardAuthSession }) {
   const displayName =
     session.member?.display_name ||
     session.user?.global_name ||
@@ -69,13 +41,11 @@ function SessionCard({ session }: { session: Exclude<SessionLike, null> }) {
     "Discord user";
   const avatarUrl = session.user?.avatar_url || session.discordUser?.avatar_url || "";
   const explicitGuildId = getExplicitSelectedGuildId();
-  const sessionGuildId = normalizeString(session.authContext?.selected_guild_id);
+  const sessionGuildId = normalizeString(session.authContext?.selected_guild_id || session.selectedGuildId);
   const selectedGuildId = explicitGuildId || sessionGuildId;
   const selectedSource = explicitGuildId ? "Selected by cookie" : sessionGuildId ? "Default/fallback context" : "None";
   const roles = Array.isArray(session.member?.roles) ? session.member.roles : [];
-  const hasConfirmedAccess = Boolean(session.isStaff || session.isServerManager || session.member?.has_manage_server || session.member?.has_staff_role);
   const guildCheckError = normalizeString(session.authContext?.guild_check_error);
-  const shouldShowGuildCheckError = Boolean(guildCheckError && !hasConfirmedAccess && !selectedGuildId);
 
   return (
     <>
@@ -87,7 +57,7 @@ function SessionCard({ session }: { session: Exclude<SessionLike, null> }) {
           <div style={{ minWidth: 0 }}>
             <div className="muted account-eyebrow">Account</div>
             <h1>{displayName}</h1>
-            <p className="muted">Your Discord session is active. Use this page to confirm account state, selected server context, and reset/re-authorize without getting bounced around.</p>
+            <p className="muted">Your Discord session is active. This page now uses the selected-server dashboard access check, including Manage Server permission and configured staff role rules.</p>
           </div>
         </div>
         <div className="account-actions">
@@ -102,19 +72,17 @@ function SessionCard({ session }: { session: Exclude<SessionLike, null> }) {
         <div className="card account-info-card">
           <div className="muted account-eyebrow">Session</div>
           <div className="account-info-row"><span>Status</span><strong>Signed in</strong></div>
-          <div className="account-info-row"><span>Dashboard access</span><strong>{session.isStaff ? "Staff / Manager" : session.isServerManager ? "Server Manager" : "Member"}</strong></div>
-          <div className="account-info-row"><span>Access label</span><strong>{session.member?.access_label || (hasConfirmedAccess ? "Server Manager" : "Signed In")}</strong></div>
+          <div className="account-info-row"><span>Dashboard access</span><strong>{accessLabel(session)}</strong></div>
+          <div className="account-info-row"><span>Access label</span><strong>{session.member?.access_label || accessLabel(session)}</strong></div>
           <div className="account-info-row"><span>Selected server</span><strong>{selectedGuildId || "None selected"}</strong></div>
         </div>
 
         <div className="card account-info-card">
           <div className="muted account-eyebrow">Server Check</div>
           <div className="account-info-row"><span>Server context source</span><strong>{selectedSource}</strong></div>
-          <div className="account-info-row"><span>Guild member checked</span><strong>{session.authContext?.guild_checked ? "Yes" : hasConfirmedAccess ? "Not needed for current access" : "No"}</strong></div>
-          <div className="account-info-row"><span>Staff reason</span><strong>{session.authContext?.staff_reason || (hasConfirmedAccess ? "access_confirmed" : "—")}</strong></div>
-          {shouldShowGuildCheckError ? (
-            <div className="account-warning">{guildCheckError}</div>
-          ) : null}
+          <div className="account-info-row"><span>Guild/member checked</span><strong>{session.authContext?.guild_checked ? "Yes" : "No"}</strong></div>
+          <div className="account-info-row"><span>Staff reason</span><strong>{session.authContext?.staff_reason || session.authContext?.access_source || "—"}</strong></div>
+          {guildCheckError ? <div className="account-warning">{guildCheckError}</div> : null}
         </div>
 
         <div className="card account-info-card account-info-wide">
@@ -159,13 +127,9 @@ export const revalidate = 0;
 
 export default async function AuthStatusPage({ searchParams }: { searchParams?: SearchParams }) {
   const authError = firstParam(searchParams?.authError);
-  const session = (await getSession()) as SessionLike;
+  const session = await getDashboardAuthSession();
 
-  // A stale authError in the URL must not override a valid cookie session.
-  // This prevents users from being trapped on the login-failure screen after OAuth already succeeded.
-  if (!session) {
-    return <LoginRequiredState authError={authError} />;
-  }
+  if (!session) return <LoginRequiredState authError={authError} />;
 
   return (
     <div className="shell account-page-shell">
