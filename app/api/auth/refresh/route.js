@@ -17,8 +17,12 @@ function redirectTo(request, path) {
   return NextResponse.redirect(new URL(path, request.url));
 }
 
-function loginRedirect(request, returnTo) {
-  return redirectTo(request, `/api/auth/login?return_to=${encodeURIComponent(returnTo)}`);
+function recoveryRedirect(request, reason, returnTo) {
+  const params = new URLSearchParams({
+    authError: reason,
+    return_to: returnTo,
+  });
+  return redirectTo(request, `/auth-status?${params.toString()}`);
 }
 
 export async function GET(request) {
@@ -27,8 +31,9 @@ export async function GET(request) {
   const refreshToken = clean(request.cookies.get(REFRESH_COOKIE)?.value);
 
   if (!refreshToken) {
-    const response = loginRedirect(request, returnTo);
+    const response = recoveryRedirect(request, "missing_refresh_token", returnTo);
     clearAuthCookies(response);
+    response.cookies.set("dank_auth_refresh_failed", "1", getCookieOptions(60));
     return response;
   }
 
@@ -38,7 +43,7 @@ export async function GET(request) {
     applyAuthCookies(response, token);
     return response;
   } catch {
-    const response = loginRedirect(request, returnTo);
+    const response = recoveryRedirect(request, "refresh_failed", returnTo);
     clearAuthCookies(response);
     response.cookies.set("dank_auth_refresh_failed", "1", getCookieOptions(60));
     return response;
