@@ -1,11 +1,10 @@
 import { createServerSupabase } from "@/lib/supabase-server";
-import { requireDashboardStaffSession, dashboardAuthJson } from "@/lib/dashboard-auth";
+import { requireDashboardStaffSession, dashboardAuthJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type JsonRecord = Record<string, unknown>;
-
 type ErrorWithStatus = Error & { status?: number };
 
 const PRESET_KEYWORDS: Record<string, string[]> = {
@@ -78,7 +77,7 @@ function parseMaxLength(value: unknown): number {
   return Math.max(50, Math.min(Math.round(num), 4000));
 }
 
-function normalizeFormQuestions(value: unknown) {
+function normalizeFormQuestions(value: unknown): JsonRecord[] {
   return safeArray<JsonRecord>(value)
     .map((item) => {
       const label = clean(item.label || item.question || item.name || item.title).slice(0, 45);
@@ -93,7 +92,7 @@ function normalizeFormQuestions(value: unknown) {
         max_length: parseMaxLength(item.max_length ?? item.maxLength),
       };
     })
-    .filter(Boolean)
+    .filter((item): item is JsonRecord => Boolean(item))
     .slice(0, 5);
 }
 
@@ -106,7 +105,7 @@ function formConfig(value: unknown): JsonRecord {
   return { ...config, disable_default_template: normalizeBoolean(config.disable_default_template), forms_disabled: normalizeBoolean(config.forms_disabled) };
 }
 
-function buildPayload(body: JsonRecord, guildId: string, existing: JsonRecord = {}, actorId = "dashboard") {
+function buildPayload(body: JsonRecord, guildId: string, existing: JsonRecord = {}, actorId = "dashboard"): JsonRecord {
   const name = clean(body.name ?? existing.name);
   const slug = slugify(body.slug ?? existing.slug ?? name);
   if (!name) throw new Error("Category name is required.");
@@ -191,7 +190,7 @@ async function loadCategories(supabase: ReturnType<typeof createServerSupabase>,
 }
 
 export async function GET() {
-  let session = null;
+  let session: DashboardAuthSession | null = null;
   try {
     session = await requireDashboardStaffSession();
     const guildId = clean(session.selectedGuildId);
@@ -206,7 +205,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  let session = null;
+  let session: DashboardAuthSession | null = null;
   try {
     session = await requireDashboardStaffSession();
     const guildId = clean(session.selectedGuildId);
@@ -215,7 +214,7 @@ export async function POST(request: Request) {
     const body = await bodyJson(request);
     const payload = buildPayload(body, guildId, {}, session.user.discord_id);
     await assertSlugAvailable(supabase, guildId, clean(payload.slug));
-    if (payload.is_default) await clearOtherDefaults(supabase, guildId);
+    if (Boolean(payload.is_default)) await clearOtherDefaults(supabase, guildId);
     const { data, error } = await supabase.from("ticket_categories").insert({ ...payload, created_at: new Date().toISOString() }).select("*").single();
     if (error) throw new Error(error.message);
     return dashboardAuthJson({ ok: true, selectedGuildId: guildId, category: data, audit: { action: "category_created", actorId: session.user.discord_id, actorName: session.user.username } }, 200, session);
@@ -225,7 +224,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  let session = null;
+  let session: DashboardAuthSession | null = null;
   try {
     session = await requireDashboardStaffSession();
     const guildId = clean(session.selectedGuildId);
@@ -238,7 +237,7 @@ export async function PATCH(request: Request) {
     if (!existing) return dashboardAuthJson({ error: "Category not found." }, 404, session);
     const payload = buildPayload(body, guildId, existing, session.user.discord_id);
     await assertSlugAvailable(supabase, guildId, clean(payload.slug), id);
-    if (payload.is_default) await clearOtherDefaults(supabase, guildId, id);
+    if (Boolean(payload.is_default)) await clearOtherDefaults(supabase, guildId, id);
     const { data, error } = await supabase.from("ticket_categories").update(payload).eq("guild_id", guildId).eq("id", id).select("*").single();
     if (error) throw new Error(error.message);
     return dashboardAuthJson({ ok: true, selectedGuildId: guildId, category: data, audit: { action: "category_updated", actorId: session.user.discord_id, actorName: session.user.username } }, 200, session);
@@ -248,7 +247,7 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  let session = null;
+  let session: DashboardAuthSession | null = null;
   try {
     session = await requireDashboardStaffSession();
     const guildId = clean(session.selectedGuildId);
