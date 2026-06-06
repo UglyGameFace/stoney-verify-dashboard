@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
-import { exchangeCodeForToken, applyAuthCookies, getCookieOptions } from "@/lib/auth-server"
+import {
+  exchangeCodeForToken,
+  applyAuthCookies,
+  getCookieOptions,
+  getSession,
+} from "@/lib/auth-server"
 import { dashboardRedirectUrl, authErrorRedirectUrl } from "@/lib/auth-redirect"
 import {
   AUTH_RETURN_TO_COOKIE,
@@ -8,10 +13,29 @@ import {
   normalizeAuthReturnTo,
 } from "@/lib/auth-return"
 
+function parseStateCookie(value) {
+  return String(value || "")
+    .split("|")
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
 function clearTemporaryAuthCookies(response) {
   response.cookies.set(OAUTH_STATE_COOKIE, "", getCookieOptions(0))
   response.cookies.set(AUTH_RETURN_TO_COOKIE, "", getCookieOptions(0))
   return response
+}
+
+async function redirectExistingSessionOrError(request, returnTo, errorMessage) {
+  const existingSession = await getSession()
+
+  if (existingSession) {
+    const response = NextResponse.redirect(dashboardRedirectUrl(request, returnTo))
+    return clearTemporaryAuthCookies(response)
+  }
+
+  const response = NextResponse.redirect(authErrorRedirectUrl(request, errorMessage))
+  return clearTemporaryAuthCookies(response)
 }
 
 export async function GET(request) {
@@ -21,26 +45,23 @@ export async function GET(request) {
     const oauthError = url.searchParams.get("error")
     const state = url.searchParams.get("state") || ""
     const cookieStore = cookies()
-    const expectedState = cookieStore.get(OAUTH_STATE_COOKIE)?.value || ""
-    const hasStateCheck = Boolean(state || expectedState)
+    const expectedStates = parseStateCookie(cookieStore.get(OAUTH_STATE_COOKIE)?.value || "")
+    const hasStateCheck = Boolean(state || expectedStates.length)
     const returnTo = normalizeAuthReturnTo(
       cookieStore.get(AUTH_RETURN_TO_COOKIE)?.value,
       "/auth-status"
     )
 
     if (oauthError) {
-      const response = NextResponse.redirect(authErrorRedirectUrl(request, oauthError))
-      return clearTemporaryAuthCookies(response)
+      return await redirectExistingSessionOrError(request, returnTo, oauthError)
     }
 
     if (!code) {
-      const response = NextResponse.redirect(authErrorRedirectUrl(request, "missing_discord_oauth_code"))
-      return clearTemporaryAuthCookies(response)
+      return await redirectExistingSessionOrError(request, returnTo, "missing_discord_oauth_code")
     }
 
-    if (hasStateCheck && (!state || !expectedState || state !== expectedState)) {
-      const response = NextResponse.redirect(authErrorRedirectUrl(request, "invalid_discord_oauth_state"))
-      return clearTemporaryAuthCookies(response)
+    if (hasStateCheck && (!state || !expectedStates.includes(state))) {
+      return await redirectExistingSessionOrError(request, returnTo, "invalid_discord_oauth_state")
     }
 
     const token = await exchangeCodeForToken(code)
