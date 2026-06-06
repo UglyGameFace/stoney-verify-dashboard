@@ -1,5 +1,5 @@
 import { createServerSupabase } from "@/lib/supabase-server";
-import { requireDashboardStaffSession, dashboardAuthJson } from "@/lib/dashboard-auth";
+import { requireDashboardStaffSession, dashboardAuthJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
 import { discordBotFetch } from "@/lib/discord-api";
 
 export const dynamic = "force-dynamic";
@@ -107,7 +107,7 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 export async function GET() {
-  let session = null;
+  let session: DashboardAuthSession | null = null;
 
   try {
     session = await requireDashboardStaffSession();
