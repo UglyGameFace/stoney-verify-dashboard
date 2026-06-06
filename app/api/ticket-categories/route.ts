@@ -1,5 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase-server";
 import { requireDashboardStaffSession, dashboardAuthJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
+import { getExplicitSelectedGuildId, hasSelectedGuildManagerProof } from "@/lib/guild-selection";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -13,6 +14,13 @@ type NormalizedFormQuestion = {
   required: boolean;
   style: "short" | "paragraph";
   max_length: number;
+};
+type CategoryRouteAccess = {
+  guildId: string;
+  session: DashboardAuthSession | null;
+  actorId: string;
+  actorName: string;
+  accessMode: "session" | "selected_server_proof";
 };
 
 const PRESET_KEYWORDS: Record<string, string[]> = {
@@ -198,16 +206,55 @@ async function loadCategories(supabase: ReturnType<typeof createServerSupabase>,
   });
 }
 
+async function getCategoryRouteAccess(): Promise<CategoryRouteAccess> {
+  try {
+    const session = await requireDashboardStaffSession();
+    const guildId = clean(session.selectedGuildId);
+    if (!guildId) {
+      const error = new Error("Select a server before managing ticket categories.") as ErrorWithStatus;
+      error.status = 428;
+      throw error;
+    }
+    return {
+      guildId,
+      session,
+      actorId: clean(session.user.discord_id) || "dashboard",
+      actorName: clean(session.user.username) || "Dashboard",
+      accessMode: "session",
+    };
+  } catch (error) {
+    const guildId = clean(getExplicitSelectedGuildId());
+    if (guildId && hasSelectedGuildManagerProof()) {
+      return {
+        guildId,
+        session: null,
+        actorId: "dashboard-proof",
+        actorName: "Dashboard",
+        accessMode: "selected_server_proof",
+      };
+    }
+    throw error;
+  }
+}
+
+function audit(action: string, access: CategoryRouteAccess) {
+  return {
+    action,
+    actorId: access.actorId,
+    actorName: access.actorName,
+    accessMode: access.accessMode,
+  };
+}
+
 export async function GET() {
   let session: DashboardAuthSession | null = null;
   try {
-    session = await requireDashboardStaffSession();
-    const guildId = clean(session.selectedGuildId);
-    if (!guildId) return dashboardAuthJson({ error: "Select a server before managing ticket categories.", needsServerSelection: true }, 428, session);
+    const access = await getCategoryRouteAccess();
+    session = access.session;
     const supabase = createServerSupabase();
-    const categories = await loadCategories(supabase, guildId);
+    const categories = await loadCategories(supabase, access.guildId);
     const defaultCategory = categories.find((row) => Boolean(row.is_default)) || null;
-    return dashboardAuthJson({ selectedGuildId: guildId, categories, defaultCategoryId: defaultCategory ? clean(defaultCategory.id) || null : null, presets: PRESET_KEYWORDS, codServiceKeywords: COD_SERVICE_KEYWORDS }, 200, session);
+    return dashboardAuthJson({ selectedGuildId: access.guildId, categories, defaultCategoryId: defaultCategory ? clean(defaultCategory.id) || null : null, presets: PRESET_KEYWORDS, codServiceKeywords: COD_SERVICE_KEYWORDS, accessMode: access.accessMode }, 200, session);
   } catch (error) {
     return dashboardAuthJson({ error: errorMessage(error, "Failed to load categories.") }, errorStatus(error, 500), session);
   }
@@ -216,17 +263,16 @@ export async function GET() {
 export async function POST(request: Request) {
   let session: DashboardAuthSession | null = null;
   try {
-    session = await requireDashboardStaffSession();
-    const guildId = clean(session.selectedGuildId);
-    if (!guildId) return dashboardAuthJson({ error: "Select a server before managing ticket categories.", needsServerSelection: true }, 428, session);
+    const access = await getCategoryRouteAccess();
+    session = access.session;
     const supabase = createServerSupabase();
     const body = await bodyJson(request);
-    const payload = buildPayload(body, guildId, {}, session.user.discord_id);
-    await assertSlugAvailable(supabase, guildId, clean(payload.slug));
-    if (Boolean(payload.is_default)) await clearOtherDefaults(supabase, guildId);
+    const payload = buildPayload(body, access.guildId, {}, access.actorId);
+    await assertSlugAvailable(supabase, access.guildId, clean(payload.slug));
+    if (Boolean(payload.is_default)) await clearOtherDefaults(supabase, access.guildId);
     const { data, error } = await supabase.from("ticket_categories").insert({ ...payload, created_at: new Date().toISOString() }).select("*").single();
     if (error) throw new Error(error.message);
-    return dashboardAuthJson({ ok: true, selectedGuildId: guildId, category: data, audit: { action: "category_created", actorId: session.user.discord_id, actorName: session.user.username } }, 200, session);
+    return dashboardAuthJson({ ok: true, selectedGuildId: access.guildId, category: data, audit: audit("category_created", access) }, 200, session);
   } catch (error) {
     return dashboardAuthJson({ error: errorMessage(error, "Failed to create category.") }, errorStatus(error, 400), session);
   }
@@ -235,21 +281,20 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   let session: DashboardAuthSession | null = null;
   try {
-    session = await requireDashboardStaffSession();
-    const guildId = clean(session.selectedGuildId);
-    if (!guildId) return dashboardAuthJson({ error: "Select a server before managing ticket categories.", needsServerSelection: true }, 428, session);
+    const access = await getCategoryRouteAccess();
+    session = access.session;
     const supabase = createServerSupabase();
     const body = await bodyJson(request);
     const id = clean(body.id);
     if (!id) return dashboardAuthJson({ error: "Category id is required." }, 400, session);
-    const existing = await getCategory(supabase, guildId, id);
+    const existing = await getCategory(supabase, access.guildId, id);
     if (!existing) return dashboardAuthJson({ error: "Category not found." }, 404, session);
-    const payload = buildPayload(body, guildId, existing, session.user.discord_id);
-    await assertSlugAvailable(supabase, guildId, clean(payload.slug), id);
-    if (Boolean(payload.is_default)) await clearOtherDefaults(supabase, guildId, id);
-    const { data, error } = await supabase.from("ticket_categories").update(payload).eq("guild_id", guildId).eq("id", id).select("*").single();
+    const payload = buildPayload(body, access.guildId, existing, access.actorId);
+    await assertSlugAvailable(supabase, access.guildId, clean(payload.slug), id);
+    if (Boolean(payload.is_default)) await clearOtherDefaults(supabase, access.guildId, id);
+    const { data, error } = await supabase.from("ticket_categories").update(payload).eq("guild_id", access.guildId).eq("id", id).select("*").single();
     if (error) throw new Error(error.message);
-    return dashboardAuthJson({ ok: true, selectedGuildId: guildId, category: data, audit: { action: "category_updated", actorId: session.user.discord_id, actorName: session.user.username } }, 200, session);
+    return dashboardAuthJson({ ok: true, selectedGuildId: access.guildId, category: data, audit: audit("category_updated", access) }, 200, session);
   } catch (error) {
     return dashboardAuthJson({ error: errorMessage(error, "Failed to update category.") }, errorStatus(error, 400), session);
   }
@@ -258,23 +303,22 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   let session: DashboardAuthSession | null = null;
   try {
-    session = await requireDashboardStaffSession();
-    const guildId = clean(session.selectedGuildId);
-    if (!guildId) return dashboardAuthJson({ error: "Select a server before managing ticket categories.", needsServerSelection: true }, 428, session);
+    const access = await getCategoryRouteAccess();
+    session = access.session;
     const supabase = createServerSupabase();
     const url = new URL(request.url);
     const body = await bodyJson(request);
     const id = clean(url.searchParams.get("id") || body.id);
     if (!id) return dashboardAuthJson({ error: "Category id is required." }, 400, session);
-    const existing = await getCategory(supabase, guildId, id);
+    const existing = await getCategory(supabase, access.guildId, id);
     if (!existing) return dashboardAuthJson({ error: "Category not found." }, 404, session);
     if (existing.is_default) return dashboardAuthJson({ error: "You cannot delete the default category until another default is set." }, 409, session);
-    const { count, error: linkedError } = await supabase.from("tickets").select("*", { count: "exact", head: true }).eq("guild_id", guildId).or(`category_id.eq.${id},matched_category_id.eq.${id}`);
+    const { count, error: linkedError } = await supabase.from("tickets").select("*", { count: "exact", head: true }).eq("guild_id", access.guildId).or(`category_id.eq.${id},matched_category_id.eq.${id}`);
     if (linkedError) throw new Error(linkedError.message);
     if (Number(count || 0) > 0) return dashboardAuthJson({ error: "This category is still linked to tickets. Reassign those tickets before deleting it." }, 409, session);
-    const { error } = await supabase.from("ticket_categories").delete().eq("guild_id", guildId).eq("id", id);
+    const { error } = await supabase.from("ticket_categories").delete().eq("guild_id", access.guildId).eq("id", id);
     if (error) throw new Error(error.message);
-    return dashboardAuthJson({ ok: true, selectedGuildId: guildId, deletedId: id, audit: { action: "category_deleted", actorId: session.user.discord_id, actorName: session.user.username } }, 200, session);
+    return dashboardAuthJson({ ok: true, selectedGuildId: access.guildId, deletedId: id, audit: audit("category_deleted", access) }, 200, session);
   } catch (error) {
     return dashboardAuthJson({ error: errorMessage(error, "Failed to delete category.") }, errorStatus(error, 400), session);
   }
