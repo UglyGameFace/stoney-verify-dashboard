@@ -15,6 +15,14 @@ function clean(value: unknown): string {
   return String(value || "").trim();
 }
 
+async function safeDashboardAuthSession(): Promise<DashboardAuthSession | null> {
+  try {
+    return await getDashboardAuthSession();
+  } catch {
+    return null;
+  }
+}
+
 function resolveAppOrigin(): string {
   const explicitCandidates = [
     env?.siteUrl,
@@ -192,8 +200,8 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function HomePage() {
-  const session = await getDashboardAuthSession();
-  if (!session) return <AuthStatePage variant="login" showReset={false} showBack={false} />;
+  const session = await safeDashboardAuthSession();
+  if (!session) return <AuthStatePage variant="login" showReset={true} showBack={false} />;
 
   const guildId = clean(session.selectedGuildId);
   if (session.isStaff) {
