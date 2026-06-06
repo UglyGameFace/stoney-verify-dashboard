@@ -6,6 +6,14 @@ export const revalidate = 0;
 
 type JsonRecord = Record<string, unknown>;
 type ErrorWithStatus = Error & { status?: number };
+type NormalizedFormQuestion = {
+  key: string;
+  label: string;
+  placeholder: string;
+  required: boolean;
+  style: "short" | "paragraph";
+  max_length: number;
+};
 
 const PRESET_KEYWORDS: Record<string, string[]> = {
   verification: ["verification", "verify", "verification issue", "id verification", "vc verify", "role issue"],
@@ -77,22 +85,23 @@ function parseMaxLength(value: unknown): number {
   return Math.max(50, Math.min(Math.round(num), 4000));
 }
 
-function normalizeFormQuestions(value: unknown): JsonRecord[] {
+function normalizeFormQuestions(value: unknown): NormalizedFormQuestion[] {
   return safeArray<JsonRecord>(value)
-    .map((item) => {
+    .map((item): NormalizedFormQuestion | null => {
       const label = clean(item.label || item.question || item.name || item.title).slice(0, 45);
       if (!label) return null;
       const rawStyle = lower(item.style || item.type || "paragraph");
+      const style: "short" | "paragraph" = ALLOWED_FORM_STYLES.has(rawStyle) && rawStyle === "short" ? "short" : "paragraph";
       return {
         key: slugify(item.key || item.name || label).slice(0, 80),
         label,
         placeholder: clean(item.placeholder || item.description || item.help_text).slice(0, 100),
         required: normalizeBoolean(item.required ?? true),
-        style: ALLOWED_FORM_STYLES.has(rawStyle) ? rawStyle : "paragraph",
+        style,
         max_length: parseMaxLength(item.max_length ?? item.maxLength),
       };
     })
-    .filter((item): item is JsonRecord => Boolean(item))
+    .filter((item): item is NormalizedFormQuestion => item !== null)
     .slice(0, 5);
 }
 
