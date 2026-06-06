@@ -6,6 +6,8 @@ export const revalidate = 0;
 
 type JsonRecord = Record<string, unknown>;
 
+type ErrorWithStatus = Error & { status?: number };
+
 const PRESET_KEYWORDS: Record<string, string[]> = {
   verification: ["verification", "verify", "verification issue", "id verification", "vc verify", "role issue"],
   appeal: ["appeal", "ban appeal", "timeout appeal", "unban", "unmute"],
@@ -26,29 +28,15 @@ const COD_SERVICE_KEYWORDS = [
 const ALLOWED_INTAKE_TYPES = new Set(["general", "verification", "appeal", "report", "partnership", "question", "custom"]);
 const ALLOWED_FORM_STYLES = new Set(["short", "paragraph"]);
 
-function clean(value: unknown): string {
-  return String(value || "").trim();
-}
-
-function lower(value: unknown): string {
-  return clean(value).toLowerCase();
-}
-
-function safeArray<T = unknown>(value: unknown): T[] {
-  return Array.isArray(value) ? (value as T[]) : [];
-}
-
-function safeObject(value: unknown): JsonRecord {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
-}
+function clean(value: unknown): string { return String(value || "").trim(); }
+function lower(value: unknown): string { return clean(value).toLowerCase(); }
+function safeArray<T = unknown>(value: unknown): T[] { return Array.isArray(value) ? (value as T[]) : []; }
+function safeObject(value: unknown): JsonRecord { return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {}; }
+function errorStatus(error: unknown, fallback: number): number { return typeof (error as ErrorWithStatus)?.status === "number" ? Number((error as ErrorWithStatus).status) : fallback; }
+function errorMessage(error: unknown, fallback: string): string { return error instanceof Error ? error.message : fallback; }
 
 function slugify(value: unknown): string {
-  return clean(value)
-    .toLowerCase()
-    .replace(/['"]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
+  return clean(value).toLowerCase().replace(/['"]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
 }
 
 function normalizeBoolean(value: unknown): boolean {
@@ -115,11 +103,7 @@ function formSettingsTouched(body: JsonRecord): boolean {
 
 function formConfig(value: unknown): JsonRecord {
   const config = safeObject(value);
-  return {
-    ...config,
-    disable_default_template: normalizeBoolean(config.disable_default_template),
-    forms_disabled: normalizeBoolean(config.forms_disabled),
-  };
+  return { ...config, disable_default_template: normalizeBoolean(config.disable_default_template), forms_disabled: normalizeBoolean(config.forms_disabled) };
 }
 
 function buildPayload(body: JsonRecord, guildId: string, existing: JsonRecord = {}, actorId = "dashboard") {
@@ -158,13 +142,7 @@ function buildPayload(body: JsonRecord, guildId: string, existing: JsonRecord = 
   return payload;
 }
 
-async function bodyJson(request: Request): Promise<JsonRecord> {
-  try {
-    return safeObject(await request.json());
-  } catch {
-    return {};
-  }
-}
+async function bodyJson(request: Request): Promise<JsonRecord> { try { return safeObject(await request.json()); } catch { return {}; } }
 
 async function clearOtherDefaults(supabase: ReturnType<typeof createServerSupabase>, guildId: string, excludeId = "") {
   let query = supabase.from("ticket_categories").update({ is_default: false }).eq("guild_id", guildId).eq("is_default", true);
@@ -223,7 +201,7 @@ export async function GET() {
     const defaultCategory = categories.find((row) => row.is_default) || null;
     return dashboardAuthJson({ selectedGuildId: guildId, categories, defaultCategoryId: defaultCategory?.id || null, presets: PRESET_KEYWORDS, codServiceKeywords: COD_SERVICE_KEYWORDS }, 200, session);
   } catch (error) {
-    return dashboardAuthJson({ error: error instanceof Error ? error.message : "Failed to load categories." }, error?.status || 500, session);
+    return dashboardAuthJson({ error: errorMessage(error, "Failed to load categories.") }, errorStatus(error, 500), session);
   }
 }
 
@@ -242,7 +220,7 @@ export async function POST(request: Request) {
     if (error) throw new Error(error.message);
     return dashboardAuthJson({ ok: true, selectedGuildId: guildId, category: data, audit: { action: "category_created", actorId: session.user.discord_id, actorName: session.user.username } }, 200, session);
   } catch (error) {
-    return dashboardAuthJson({ error: error instanceof Error ? error.message : "Failed to create category." }, error?.status || 400, session);
+    return dashboardAuthJson({ error: errorMessage(error, "Failed to create category.") }, errorStatus(error, 400), session);
   }
 }
 
@@ -265,7 +243,7 @@ export async function PATCH(request: Request) {
     if (error) throw new Error(error.message);
     return dashboardAuthJson({ ok: true, selectedGuildId: guildId, category: data, audit: { action: "category_updated", actorId: session.user.discord_id, actorName: session.user.username } }, 200, session);
   } catch (error) {
-    return dashboardAuthJson({ error: error instanceof Error ? error.message : "Failed to update category." }, error?.status || 400, session);
+    return dashboardAuthJson({ error: errorMessage(error, "Failed to update category.") }, errorStatus(error, 400), session);
   }
 }
 
@@ -290,6 +268,6 @@ export async function DELETE(request: Request) {
     if (error) throw new Error(error.message);
     return dashboardAuthJson({ ok: true, selectedGuildId: guildId, deletedId: id, audit: { action: "category_deleted", actorId: session.user.discord_id, actorName: session.user.username } }, 200, session);
   } catch (error) {
-    return dashboardAuthJson({ error: error instanceof Error ? error.message : "Failed to delete category." }, error?.status || 400, session);
+    return dashboardAuthJson({ error: errorMessage(error, "Failed to delete category.") }, errorStatus(error, 400), session);
   }
 }
