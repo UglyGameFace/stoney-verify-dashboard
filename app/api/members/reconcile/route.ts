@@ -1,96 +1,39 @@
-import { NextRequest, NextResponse } from "next/server";
 import { queueReconcileDepartedMembers } from "@/lib/botCommands";
-import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
+import { requireDashboardStaffSession, dashboardAuthJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function getActorId(session: any): string | null {
-  const candidates = [
-    session?.user?.id,
-    session?.user?.user_id,
-    session?.user?.discord_id,
-    session?.discordUser?.id,
-  ];
+type ErrorWithStatus = Error & { status?: number };
 
-  for (const value of candidates) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-
-  if (typeof candidates[0] === "number") {
-    return String(candidates[0]);
-  }
-
-  return null;
+function errorStatus(error: unknown, fallback: number): number {
+  return typeof (error as ErrorWithStatus)?.status === "number" ? Number((error as ErrorWithStatus).status) : fallback;
 }
 
-export async function POST(req: NextRequest) {
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
+export async function POST() {
+  let session: DashboardAuthSession | null = null;
+
   try {
-    const { session, refreshedTokens } = await requireStaffSessionForRoute();
-    const actorId = getActorId(session);
+    session = await requireDashboardStaffSession();
+    const guildId = session.selectedGuildId;
+    const actorId = session.user.discord_id;
 
-    if (!actorId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          queued: false,
-          error: "Unauthorized",
-        },
-        {
-          status: 401,
-          headers: {
-            "Cache-Control": "no-store, max-age=0",
-          },
-        }
-      );
+    if (!guildId) {
+      return dashboardAuthJson({ ok: false, queued: false, error: "Select a server before reconciling members.", needsServerSelection: true }, 428, session);
     }
 
-    try {
-      await req.json();
-    } catch {
-      // ignore body intentionally
-    }
+    const command = await queueReconcileDepartedMembers({ guildId, requestedBy: actorId });
 
-    const command = await queueReconcileDepartedMembers({
-      requestedBy: actorId,
-    });
-
-    const response = NextResponse.json(
-      {
-        ok: true,
-        queued: true,
-        command,
-      },
-      {
-        status: 200,
-        headers: {
-          "Cache-Control": "no-store, max-age=0",
-        },
-      }
-    );
-
-    applyAuthCookies(response, refreshedTokens);
-    return response;
+    return dashboardAuthJson({ ok: true, queued: true, command }, 200, session);
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to queue reconcile command";
-
-    return NextResponse.json(
-      {
-        ok: false,
-        queued: false,
-        error: message,
-      },
-      {
-        status: message === "Unauthorized" ? 401 : 500,
-        headers: {
-          "Cache-Control": "no-store, max-age=0",
-        },
-      }
+    return dashboardAuthJson(
+      { ok: false, queued: false, error: errorMessage(error, "Failed to queue reconcile command.") },
+      errorStatus(error, 500),
+      session
     );
   }
 }
