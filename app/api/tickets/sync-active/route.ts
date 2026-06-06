@@ -1,50 +1,55 @@
 import { NextRequest } from "next/server";
 import { queueSyncActiveTickets } from "@/lib/botCommands";
-import { requireStaffSessionForRoute } from "@/lib/auth-server";
+import { requireDashboardStaffSession, dashboardAuthJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
 import {
-  buildRouteJson,
-  getActorId,
   parseRouteBody,
   readBoolean,
   readString,
   toErrorMessage,
-  unauthorizedRouteResponse,
-  type RefreshedTokens,
 } from "@/lib/ticketActionRoute";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+type ErrorWithStatus = Error & { status?: number };
+
+function errorStatus(error: unknown, fallback: number): number {
+  return typeof (error as ErrorWithStatus)?.status === "number" ? Number((error as ErrorWithStatus).status) : fallback;
+}
+
 export async function POST(req: NextRequest) {
-  let refreshedTokens: RefreshedTokens | null = null;
+  let session: DashboardAuthSession | null = null;
 
   try {
-    const auth = await requireStaffSessionForRoute();
-    refreshedTokens = auth?.refreshedTokens ?? null;
+    session = await requireDashboardStaffSession();
+    const guildId = session.selectedGuildId;
+    const actorId = session.user.discord_id;
 
-    const actorId = getActorId(auth?.session);
-    if (!actorId) {
-      return unauthorizedRouteResponse(refreshedTokens);
+    if (!guildId) {
+      return dashboardAuthJson(
+        { ok: false, queued: false, error: "Select a server before syncing active tickets.", needsServerSelection: true },
+        428,
+        session
+      );
     }
 
     const body = await parseRouteBody(req);
-
     const dryRun = readBoolean(body, ["dryRun", "dry_run"], false);
     const includeClosedVisibleChannels = readBoolean(
       body,
       ["includeClosedVisibleChannels", "include_closed_visible_channels"],
       true
     );
-    const requestedBy =
-      readString(body, ["requestedBy", "requested_by"], actorId) || actorId;
+    const requestedBy = readString(body, ["requestedBy", "requested_by"], actorId) || actorId;
 
     const command = await queueSyncActiveTickets({
+      guildId,
       requestedBy: actorId,
       dryRun,
       includeClosedVisibleChannels,
     });
 
-    return buildRouteJson(
+    return dashboardAuthJson(
       {
         ok: true,
         queued: true,
@@ -55,19 +60,13 @@ export async function POST(req: NextRequest) {
         effectiveRequestedBy: actorId,
       },
       200,
-      refreshedTokens
+      session
     );
   } catch (error) {
-    const message = toErrorMessage(error);
-
-    return buildRouteJson(
-      {
-        ok: false,
-        queued: false,
-        error: message,
-      },
-      message === "Unauthorized" ? 401 : 500,
-      refreshedTokens
+    return dashboardAuthJson(
+      { ok: false, queued: false, error: toErrorMessage(error) },
+      errorStatus(error, 500),
+      session
     );
   }
 }
