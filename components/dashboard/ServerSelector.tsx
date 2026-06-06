@@ -19,6 +19,7 @@ type ServerRow = {
 
 type ServerResponse = {
   error?: string;
+  error_code?: string;
   selectedGuildId?: string;
   servers?: ServerRow[];
   botCheckOk?: boolean;
@@ -55,22 +56,38 @@ function getInstallLabel(server: ServerRow): string {
   return "Invite needed";
 }
 
-function friendlyServerError(raw: unknown): string {
+function friendlyServerError(raw: unknown, hasVisibleServers = false): string {
   const value = text(raw);
   const lower = value.toLowerCase();
 
   if (!value) return "Failed to load servers. Please try again.";
+
+  if (!hasVisibleServers) {
+    if (lower.includes("429") || lower.includes("rate limit") || lower.includes("retry_after")) {
+      return "Discord is rate limiting the server list right now. Wait a moment, then tap Refresh.";
+    }
+    if (lower.includes("401") || lower.includes("unauthorized") || lower.includes("session") || lower.includes("login") || lower.includes("oauth")) {
+      return "The dashboard could not load your Discord server list with the current login. Open Account → Reset Login once, then sign in again.";
+    }
+    if (lower.includes("403") || lower.includes("forbidden")) {
+      return "Discord blocked the server list request. Make sure this Discord account can manage the server, then refresh.";
+    }
+    if (lower.includes("bot token") || lower.includes("bot credential")) {
+      return "The bot install check needs attention, but the dashboard also could not load your manageable server list yet.";
+    }
+  }
+
   if (lower.includes("429") || lower.includes("rate limit") || lower.includes("retry_after")) {
-    return "Discord is rate limiting one live check. Confirmed installed servers remain usable.";
+    return "Discord is rate limiting one live check. Already listed servers remain usable.";
   }
   if (lower.includes("bot token") || lower.includes("bot credential")) {
-    return "The bot install check needs attention, but confirmed installed servers remain selectable.";
+    return "The bot install check needs attention. Already confirmed installed servers remain selectable.";
   }
-  if (lower.includes("401") || lower.includes("unauthorized") || lower.includes("session") || lower.includes("login")) {
-    return "One live Discord check could not use the current session, but confirmed installed servers remain usable.";
+  if (lower.includes("401") || lower.includes("unauthorized") || lower.includes("session") || lower.includes("login") || lower.includes("oauth")) {
+    return "One live Discord check could not use the current session. Already listed servers remain usable.";
   }
   if (lower.includes("403") || lower.includes("forbidden")) {
-    return "Discord blocked one live check. Confirmed installed servers remain usable.";
+    return "Discord blocked one live check. Already listed servers remain usable.";
   }
 
   return value.length > 180 ? `${value.slice(0, 180)}…` : value;
@@ -103,7 +120,7 @@ export default function ServerSelector() {
   const unresolvedCount = unresolvedServers.length;
   const allVisibleServersReady = servers.length > 0 && unresolvedCount === 0;
   const unresolvedError = unresolvedServers.map((server) => text(server.bot_check_error)).find(Boolean) || botCheckError;
-  const showBotCheckWarning = Boolean(unresolvedError && !loading && !allVisibleServersReady && (!servers.length || unresolvedCount > 0));
+  const showBotCheckWarning = Boolean(unresolvedError && !loading && servers.length > 0 && !allVisibleServersReady && unresolvedCount > 0);
 
   async function loadServers() {
     setLoading(true);
@@ -130,7 +147,7 @@ export default function ServerSelector() {
       setSelectedGuildId(nextSelectedGuildId);
       setBotCheckError(nextUnresolvedServers.length > 0 ? nextUnresolvedError : "");
     } catch (err) {
-      setError(friendlyServerError(err instanceof Error ? err.message : err));
+      setError(friendlyServerError(err instanceof Error ? err.message : err, servers.length > 0));
       setBotCheckError("");
     } finally {
       setLoading(false);
@@ -191,7 +208,7 @@ export default function ServerSelector() {
       setServers((prev) => prev.map((row) => ({ ...row, selected: row.id === server.id })));
       setMessage(`${server.name} is selected. Dashboard tools will now use this server only.`);
     } catch (err) {
-      setError(friendlyServerError(err instanceof Error ? err.message : err));
+      setError(friendlyServerError(err instanceof Error ? err.message : err, servers.length > 0));
     } finally {
       setSavingId("");
     }
@@ -221,7 +238,7 @@ export default function ServerSelector() {
 
         {showBotCheckWarning ? (
           <div className="info-banner server-warning" style={{ marginTop: 12 }}>
-            Bot install check warning: {friendlyServerError(unresolvedError)}
+            Bot install check warning: {friendlyServerError(unresolvedError, servers.length > 0)}
           </div>
         ) : null}
 
@@ -260,7 +277,7 @@ export default function ServerSelector() {
                     <div className="server-meta">
                       {server.owner ? "Owner" : "Manage Server"} • {getInstallMeta(server)}{server.is_default_env_guild ? " • Default server" : ""}
                     </div>
-                    {unknown && server.bot_check_error ? <div className="server-subtle-warning">{friendlyServerError(server.bot_check_error)}</div> : null}
+                    {unknown && server.bot_check_error ? <div className="server-subtle-warning">{friendlyServerError(server.bot_check_error, servers.length > 0)}</div> : null}
                   </div>
                 </div>
 
@@ -285,8 +302,8 @@ export default function ServerSelector() {
       ) : (
         <div className="card empty-state server-empty-state">
           <strong>No manageable servers found.</strong>
-          <span>Make sure you are signed into the right Discord account and have Manage Server or Administrator permission.</span>
-          <span>If Discord is rate limiting requests, wait a moment and tap Refresh.</span>
+          <span>The server list did not load any Discord servers for this login.</span>
+          <span>Use Account → Reset Login once, sign in again, then tap Refresh. If this repeats, the Discord server-list API is rejecting or rate-limiting the request.</span>
         </div>
       )}
 
