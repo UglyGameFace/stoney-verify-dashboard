@@ -323,7 +323,7 @@ export async function getDashboardAuthSession(): Promise<DashboardAuthSession | 
 
   const { bearer, refreshedTokens, user } = await loadUserWithRetry(bearerState);
   const userId = clean(user.id);
-  const selectedGuildId = clean(getSelectedGuildId() || env.guildId || env.discordGuildId);
+  const selectedGuildId = clean(getSelectedGuildId());
   const [managerAccess, botContext, dbAccess] = await Promise.all([
     loadUserGuildManagerAccess(bearer, selectedGuildId),
     loadBotMemberContext(selectedGuildId, userId),
@@ -342,7 +342,7 @@ export async function getDashboardAuthSession(): Promise<DashboardAuthSession | 
   const access = deriveAccess({ manager: managerAccess.ok, roleIds, roleNames, rules: dbAccess.rules, storedMember: dbAccess.storedMember });
   const image = avatarUrl(user) || dbAccess.storedMember?.avatar_url || null;
   const displayName = clean(botContext.member?.nick || dbAccess.storedMember?.display_name || dbAccess.storedMember?.nickname || user.global_name || user.username || "Member");
-  const guildChecked = Boolean(managerAccess.ok || !botContext.error || dbAccess.storedMember);
+  const guildChecked = Boolean(selectedGuildId && (managerAccess.ok || !botContext.error || dbAccess.storedMember));
   const staffReason = access.accessLevel === "server_manager" ? "manage_server_permission" : access.accessLevel === "staff" ? (dbAccess.rules.length ? "selected_guild_role_rule" : "stored_or_env_staff_role") : null;
 
   return {
@@ -407,6 +407,11 @@ export async function requireDashboardStaffSession(): Promise<DashboardAuthSessi
   if (!session) {
     const error = new Error("Unauthorized") as Error & { status?: number };
     error.status = 401;
+    throw error;
+  }
+  if (!session.selectedGuildId) {
+    const error = new Error("Select a server before using dashboard tools.") as Error & { status?: number };
+    error.status = 428;
     throw error;
   }
   if (!session.isStaff) {
