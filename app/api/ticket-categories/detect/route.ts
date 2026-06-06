@@ -1,18 +1,9 @@
-import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { createServerSupabase } from "@/lib/supabase-server";
-import { applyAuthCookies, refreshAccessToken } from "@/lib/auth-server";
-import { getSelectedGuildId } from "@/lib/guild-selection";
-import { discordBotFetch, discordUserFetch } from "@/lib/discord-api";
+import { requireDashboardStaffSession, dashboardAuthJson } from "@/lib/dashboard-auth";
+import { discordBotFetch } from "@/lib/discord-api";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-const MANAGE_GUILD = BigInt(1 << 5);
-const ADMINISTRATOR = BigInt(1 << 3);
-const ACCESS_COOKIE = "discord_access_token";
-const REFRESH_COOKIE = "discord_refresh_token";
-const EXPIRES_COOKIE = "discord_expires_at";
 
 type DiscordChannel = {
   id?: string;
@@ -28,25 +19,6 @@ type ExistingCategory = {
   slug?: string | null;
 };
 
-type DiscordUserGuild = {
-  id?: string | null;
-  owner?: boolean | null;
-  permissions?: string | number | null;
-};
-
-type RefreshedTokens = {
-  access_token: string;
-  token_type?: string;
-  expires_in?: number;
-  refresh_token?: string;
-  scope?: string;
-} | null;
-
-type BearerSession = {
-  bearer: string;
-  refreshedTokens: RefreshedTokens;
-};
-
 const TICKET_WORDS = ["ticket", "tickets", "support", "help", "verify", "verification", "appeal", "report", "reports", "incident", "modmail", "claim"];
 const VERIFY_WORDS = ["verify", "verification", "id", "vc verify", "unverified", "verified"];
 const APPEAL_WORDS = ["appeal", "appeals", "ban", "unban", "timeout", "mute"];
@@ -55,16 +27,16 @@ const QUESTION_WORDS = ["question", "questions", "faq", "help"];
 const PARTNER_WORDS = ["partner", "partnership", "collab", "sponsor"];
 const SERVICE_WORDS = ["service", "services", "cod", "call of duty", "order", "orders", "paid", "shop"];
 
-function normalizeString(value: unknown): string {
+function clean(value: unknown): string {
   return String(value || "").trim();
 }
 
 function normalizeText(value: unknown): string {
-  return normalizeString(value).toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  return clean(value).toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function slugify(value: unknown): string {
-  return normalizeString(value)
+  return clean(value)
     .toLowerCase()
     .replace(/['"]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
@@ -79,9 +51,8 @@ function includesAny(haystack: string, words: string[]) {
 function unique(values: string[]) {
   const out: string[] = [];
   for (const value of values) {
-    const clean = normalizeString(value);
-    if (!clean) continue;
-    if (!out.some((existing) => existing.toLowerCase() === clean.toLowerCase())) out.push(clean);
+    const item = clean(value);
+    if (item && !out.some((existing) => existing.toLowerCase() === item.toLowerCase())) out.push(item);
   }
   return out;
 }
@@ -127,87 +98,22 @@ function buttonLabelForType(type: string, name: string) {
   return "Open Support Ticket";
 }
 
-function hasManageGuildPermission(guild: DiscordUserGuild | null | undefined): boolean {
-  if (!guild) return false;
-  if (guild.owner) return true;
-  try {
-    const raw = BigInt(normalizeString(guild.permissions || "0"));
-    return (raw & ADMINISTRATOR) === ADMINISTRATOR || (raw & MANAGE_GUILD) === MANAGE_GUILD;
-  } catch {
-    return false;
-  }
+function errorStatus(error: unknown, fallback: number): number {
+  return typeof (error as { status?: unknown })?.status === "number" ? Number((error as { status?: number }).status) : fallback;
 }
 
-async function refreshBearer(refreshToken: string): Promise<BearerSession | null> {
-  const token = normalizeString(refreshToken);
-  if (!token) return null;
-
-  try {
-    const refreshedTokens = (await refreshAccessToken(token)) as RefreshedTokens;
-    const bearer = normalizeString(refreshedTokens?.access_token);
-    if (!bearer) return null;
-    return { bearer, refreshedTokens };
-  } catch {
-    return null;
-  }
-}
-
-async function getBearerSession(): Promise<BearerSession | null> {
-  const store = cookies();
-  const accessToken = normalizeString(store.get(ACCESS_COOKIE)?.value);
-  const refreshToken = normalizeString(store.get(REFRESH_COOKIE)?.value);
-  const expiresAt = Number(store.get(EXPIRES_COOKIE)?.value || 0);
-
-  if (!accessToken && !refreshToken) return null;
-
-  const shouldRefresh = !accessToken || Boolean(expiresAt && Date.now() > expiresAt - 60_000);
-  if (shouldRefresh) return await refreshBearer(refreshToken);
-
-  return { bearer: accessToken, refreshedTokens: null };
-}
-
-async function fetchManageableGuilds(session: BearerSession): Promise<{ session: BearerSession; guilds: DiscordUserGuild[] }> {
-  try {
-    const guilds = (await discordUserFetch("/users/@me/guilds", session.bearer)) as DiscordUserGuild[];
-    return { session, guilds: Array.isArray(guilds) ? guilds : [] };
-  } catch (error) {
-    const refreshToken = normalizeString(cookies().get(REFRESH_COOKIE)?.value || session.refreshedTokens?.refresh_token);
-    const retrySession = await refreshBearer(refreshToken);
-    if (!retrySession) throw error;
-    const guilds = (await discordUserFetch("/users/@me/guilds", retrySession.bearer)) as DiscordUserGuild[];
-    return { session: retrySession, guilds: Array.isArray(guilds) ? guilds : [] };
-  }
-}
-
-function buildJsonResponse(payload: Record<string, unknown>, status = 200, refreshedTokens: RefreshedTokens = null) {
-  const response = NextResponse.json(payload, {
-    status,
-    headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
-  });
-  applyAuthCookies(response, refreshedTokens);
-  return response;
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 export async function GET() {
-  let bearerSession: BearerSession | null = null;
+  let session = null;
 
   try {
-    bearerSession = await getBearerSession();
-    if (!bearerSession) {
-      return buildJsonResponse({ error: "Discord login required. Open Account and sign in again." }, 401);
-    }
-
-    const guildId = normalizeString(getSelectedGuildId());
+    session = await requireDashboardStaffSession();
+    const guildId = clean(session.selectedGuildId);
     if (!guildId) {
-      return buildJsonResponse({ error: "Select a server before detecting categories.", needsServerSelection: true }, 428, bearerSession.refreshedTokens);
-    }
-
-    const access = await fetchManageableGuilds(bearerSession);
-    bearerSession = access.session;
-    const selectedGuild = access.guilds.find((guild) => normalizeString(guild.id) === guildId);
-
-    if (!hasManageGuildPermission(selectedGuild)) {
-      return buildJsonResponse({ error: "You need Manage Server or Administrator permission for the selected server before auto-detect can scan categories.", selectedGuildId: guildId }, 403, bearerSession.refreshedTokens);
+      return dashboardAuthJson({ error: "Select a server before detecting categories.", needsServerSelection: true }, 428, session);
     }
 
     const supabase = createServerSupabase();
@@ -217,7 +123,7 @@ export async function GET() {
     ]);
 
     if (existingRes.error) {
-      return buildJsonResponse({ error: existingRes.error.message, selectedGuildId: guildId }, 500, bearerSession.refreshedTokens);
+      return dashboardAuthJson({ error: existingRes.error.message, selectedGuildId: guildId }, 500, session);
     }
 
     const allChannels = Array.isArray(channels) ? (channels as DiscordChannel[]) : [];
@@ -226,7 +132,7 @@ export async function GET() {
     const childrenByParent = new Map<string, DiscordChannel[]>();
 
     for (const channel of allChannels) {
-      const parentId = normalizeString(channel.parent_id);
+      const parentId = clean(channel.parent_id);
       if (!parentId) continue;
       const list = childrenByParent.get(parentId) || [];
       list.push(channel);
@@ -236,10 +142,10 @@ export async function GET() {
     const categoryChannels = allChannels.filter((channel) => Number(channel.type) === 4);
     const suggestions = categoryChannels
       .map((category, index) => {
-        const name = normalizeString(category.name);
+        const name = clean(category.name);
         if (!name) return null;
-        const children = (childrenByParent.get(normalizeString(category.id)) || []).sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
-        const childNames = children.map((child) => normalizeString(child.name)).filter(Boolean);
+        const children = (childrenByParent.get(clean(category.id)) || []).sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
+        const childNames = children.map((child) => clean(child.name)).filter(Boolean);
         const haystack = normalizeText([name, ...childNames].join(" "));
         const looksTicketRelated = includesAny(haystack, TICKET_WORDS) || childNames.length > 0;
         if (!looksTicketRelated) return null;
@@ -248,7 +154,7 @@ export async function GET() {
         const confidence = includesAny(haystack, TICKET_WORDS) ? 92 : Math.min(75, 45 + childNames.length * 8);
         return {
           source: "discord_category",
-          discord_channel_id: normalizeString(category.id),
+          discord_channel_id: clean(category.id),
           discord_channel_name: name,
           child_channel_count: childNames.length,
           child_channel_names: childNames.slice(0, 8),
@@ -266,26 +172,21 @@ export async function GET() {
             match_keywords: defaultKeywords(intakeType, name, childNames),
             button_label: buttonLabelForType(intakeType, name),
             sort_order: String((index + 1) * 10),
-            is_default: index === 0 && !existing.some((row) => normalizeString(row.slug)),
+            is_default: index === 0 && !existing.some((row) => clean(row.slug)),
           },
         };
       })
       .filter(Boolean);
 
-    return buildJsonResponse({
+    return dashboardAuthJson({
       ok: true,
       selectedGuildId: guildId,
       scannedChannels: allChannels.length,
       scannedCategories: categoryChannels.length,
       existingCategoryCount: existing.length,
       suggestions,
-    }, 200, bearerSession.refreshedTokens);
+    }, 200, session);
   } catch (error) {
-    const raw = error instanceof Error ? error.message : "Failed to detect Discord categories.";
-    const lower = raw.toLowerCase();
-    const message = lower.includes("session expired") || lower.includes("401") || lower.includes("unauthorized")
-      ? "Discord session could not be refreshed for auto-detect. Use Account → Reset Login once, then return to Categories."
-      : raw;
-    return buildJsonResponse({ error: message }, lower.includes("session") || lower.includes("401") ? 401 : 500, bearerSession?.refreshedTokens || null);
+    return dashboardAuthJson({ error: errorMessage(error, "Failed to detect Discord categories.") }, errorStatus(error, 500), session);
   }
 }
