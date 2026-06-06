@@ -3,7 +3,15 @@ import { redirect } from "next/navigation";
 import TicketCategoriesManager from "@/components/dashboard/TicketCategoriesManager";
 import AuthStatePage from "@/components/dashboard/AuthStatePage";
 import SetupWorkspaceShell from "@/components/dashboard/SetupWorkspaceShell";
-import { getDashboardAuthSession } from "@/lib/dashboard-auth";
+import { getDashboardAuthSession, type DashboardAuthSession } from "@/lib/dashboard-auth";
+
+async function safeDashboardAuthSession(): Promise<DashboardAuthSession | null> {
+  try {
+    return await getDashboardAuthSession();
+  } catch {
+    return null;
+  }
+}
 
 function ServerRequiredState() {
   return (
@@ -28,14 +36,14 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function TicketCategoriesPage() {
-  const session = await getDashboardAuthSession();
+  const session = await safeDashboardAuthSession();
 
   if (!session) {
     return (
       <AuthStatePage
         variant="login"
-        message="Sign in with Discord to manage ticket categories. The dashboard will not open Discord authorization until you press the sign-in button."
-        showReset={false}
+        message="The dashboard could not validate your Discord session for ticket categories. Use Account → Reset Login once if this keeps happening, then sign in again."
+        showReset={true}
         showBack={false}
       />
     );
