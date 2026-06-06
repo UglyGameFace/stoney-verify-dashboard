@@ -61,7 +61,10 @@ function friendlyServerError(raw: unknown): string {
 
   if (!value) return "Failed to load servers. Please try again.";
   if (lower.includes("429") || lower.includes("rate limit") || lower.includes("retry_after")) {
-    return "Discord is rate limiting one of the live checks right now. Confirmed installed servers remain usable.";
+    return "Discord is rate limiting one live check. Confirmed installed servers remain usable.";
+  }
+  if (lower.includes("bot token") || lower.includes("bot credential")) {
+    return "The bot install check needs attention, but confirmed installed servers remain selectable.";
   }
   if (lower.includes("401") || lower.includes("unauthorized") || lower.includes("session") || lower.includes("login")) {
     return "One live Discord check could not use the current session, but confirmed installed servers remain usable.";
@@ -92,12 +95,15 @@ export default function ServerSelector() {
     [servers]
   );
 
-  const unresolvedCount = useMemo(
-    () => servers.filter((server) => getInstallState(server) !== "installed").length,
+  const unresolvedServers = useMemo(
+    () => servers.filter((server) => getInstallState(server) !== "installed"),
     [servers]
   );
 
-  const showBotCheckWarning = Boolean(botCheckError && !loading && (!servers.length || unresolvedCount > 0));
+  const unresolvedCount = unresolvedServers.length;
+  const allVisibleServersReady = servers.length > 0 && unresolvedCount === 0;
+  const unresolvedError = unresolvedServers.map((server) => text(server.bot_check_error)).find(Boolean) || botCheckError;
+  const showBotCheckWarning = Boolean(unresolvedError && !loading && !allVisibleServersReady && (!servers.length || unresolvedCount > 0));
 
   async function loadServers() {
     setLoading(true);
@@ -116,11 +122,13 @@ export default function ServerSelector() {
       if (!res.ok || json?.error) throw new Error(json?.error || `Server list request failed with status ${res.status}.`);
 
       const nextServers = Array.isArray(json?.servers) ? json.servers : [];
-      setServers(nextServers);
-      setSelectedGuildId(text(json?.selectedGuildId));
+      const nextSelectedGuildId = text(json?.selectedGuildId);
+      const nextUnresolvedServers = nextServers.filter((server) => getInstallState(server) !== "installed");
+      const nextUnresolvedError = nextUnresolvedServers.map((server) => text(server.bot_check_error)).find(Boolean) || text(json?.botCheckError);
 
-      const nextUnresolvedCount = nextServers.filter((server) => getInstallState(server) !== "installed").length;
-      setBotCheckError(nextUnresolvedCount > 0 ? text(json?.botCheckError) : "");
+      setServers(nextServers);
+      setSelectedGuildId(nextSelectedGuildId);
+      setBotCheckError(nextUnresolvedServers.length > 0 ? nextUnresolvedError : "");
     } catch (err) {
       setError(friendlyServerError(err instanceof Error ? err.message : err));
       setBotCheckError("");
@@ -213,7 +221,7 @@ export default function ServerSelector() {
 
         {showBotCheckWarning ? (
           <div className="info-banner server-warning" style={{ marginTop: 12 }}>
-            Bot install check warning: {friendlyServerError(botCheckError)}
+            Bot install check warning: {friendlyServerError(unresolvedError)}
           </div>
         ) : null}
 
@@ -296,21 +304,25 @@ export default function ServerSelector() {
         .server-next-step { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; }
         .server-next-actions { display: flex; gap: 10px; flex-wrap: wrap; }
         .server-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
-        .server-card { border: 1px solid rgba(255,255,255,0.14); border-radius: 22px; padding: 18px; background: rgba(2, 8, 18, 0.78); display: grid; gap: 16px; }
-        .server-card.selected { border-color: rgba(54, 211, 153, 0.72); box-shadow: 0 0 0 1px rgba(54, 211, 153, 0.18), 0 18px 44px rgba(0,0,0,0.24); }
-        .server-main { display: flex; gap: 14px; align-items: flex-start; min-width: 0; }
-        .server-icon { width: 54px; height: 54px; min-width: 54px; border-radius: 16px; overflow: hidden; background: rgba(54, 211, 153, 0.1); display: grid; place-items: center; font-weight: 900; color: #e8fff2; }
-        .server-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
-        .server-name { font-weight: 900; color: var(--text-strong, #fff); font-size: 20px; line-height: 1.2; overflow-wrap: anywhere; }
-        .server-meta { margin-top: 5px; color: var(--muted, #c7ddcf); line-height: 1.4; overflow-wrap: anywhere; }
-        .server-subtle-warning { margin-top: 8px; color: #ffd7a5; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
-        .server-card-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-        .server-pill { font-weight: 850; color: var(--text-strong, #fff); }
-        .server-pill.installed { color: #d9ffee; }
-        .server-pill.unknown { color: #ffe3b3; }
-        .server-pill.missing { color: #ffd3d3; }
-        .server-empty-state { display: grid; gap: 8px; text-align: center; line-height: 1.35; }
-        @media (max-width: 760px) { .server-status-strip { grid-template-columns: 1fr; } .server-next-actions, .server-next-actions .button { width: 100%; } }
+        .server-card { border: 1px solid rgba(255,255,255,0.14); border-radius: 22px; padding: 18px; background: rgba(2, 8, 18, 0.78); display: grid; gap: 16px; box-shadow: 0 16px 36px rgba(0,0,0,0.22); }
+        .server-card.selected { border-color: rgba(74, 222, 128, 0.75); box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.25), 0 16px 42px rgba(34,197,94,0.16); }
+        .server-main { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
+        .server-icon { width: 58px; height: 58px; flex: 0 0 58px; border-radius: 18px; display: grid; place-items: center; background: rgba(34,197,94,0.12); color: #dfffea; font-weight: 950; overflow: hidden; }
+        .server-icon img { width: 100%; height: 100%; object-fit: cover; }
+        .server-name { font-weight: 950; font-size: 20px; color: var(--text-strong, #fff); overflow-wrap: anywhere; line-height: 1.1; }
+        .server-meta { margin-top: 6px; color: var(--muted, #c7ddcf); line-height: 1.35; }
+        .server-subtle-warning { margin-top: 8px; color: #ffd6a3; font-size: 13px; line-height: 1.35; }
+        .server-card-footer { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
+        .server-pill { font-weight: 900; color: #fff; }
+        .server-pill.installed { color: #dfffea; }
+        .server-pill.unknown { color: #ffd6a3; }
+        .server-pill.missing { color: #ffd2d2; }
+        .empty-state { display: grid; gap: 6px; text-align: center; }
+        @media (max-width: 720px) {
+          .server-status-strip { grid-template-columns: 1fr; }
+          .server-next-actions, .server-next-actions .button { width: 100%; }
+          .server-card-footer .button { flex: 1; }
+        }
       `}</style>
     </div>
   );
