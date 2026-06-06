@@ -1,34 +1,11 @@
-import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
-import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
-import { getSelectedGuildId } from "@/lib/guild-selection";
+import { requireDashboardStaffSession, dashboardAuthJson } from "@/lib/dashboard-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type RefreshedTokens = {
-  access_token: string;
-  token_type?: string;
-  expires_in?: number;
-  refresh_token?: string;
-  scope?: string;
-} | null;
-
 type JsonRecord = Record<string, unknown>;
-
-type SessionLike = {
-  user?: {
-    discord_id?: string | null;
-    id?: string | null;
-    user_id?: string | null;
-    username?: string | null;
-    name?: string | null;
-  } | null;
-  discordUser?: {
-    id?: string | null;
-    username?: string | null;
-  } | null;
-};
+type ErrorWithStatus = Error & { status?: number };
 
 function normalizeString(value: unknown): string {
   return String(value || "").trim();
@@ -44,13 +21,12 @@ function safeObject<T extends object = JsonRecord>(value: unknown): T {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as T) : ({} as T);
 }
 
-function buildJsonResponse(payload: Record<string, unknown>, status = 200, refreshedTokens: RefreshedTokens = null) {
-  const response = NextResponse.json(payload, {
-    status,
-    headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
-  });
-  applyAuthCookies(response, refreshedTokens);
-  return response;
+function errorStatus(error: unknown, fallback: number): number {
+  return typeof (error as ErrorWithStatus)?.status === "number" ? Number((error as ErrorWithStatus).status) : fallback;
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 async function parseRequestBody(request: Request): Promise<JsonRecord> {
@@ -61,30 +37,15 @@ async function parseRequestBody(request: Request): Promise<JsonRecord> {
   }
 }
 
-function getActorIdentity(session: SessionLike | null | undefined) {
-  return {
-    actorId:
-      session?.user?.discord_id ||
-      session?.user?.id ||
-      session?.user?.user_id ||
-      session?.discordUser?.id ||
-      null,
-    actorName:
-      session?.user?.username ||
-      session?.user?.name ||
-      session?.discordUser?.username ||
-      "Dashboard Staff",
-  };
-}
-
 export async function POST(request: Request) {
+  let session = null;
+
   try {
-    const { session, refreshedTokens } = await requireStaffSessionForRoute();
-    const typedSession = session as SessionLike;
-    const guildId = normalizeString(getSelectedGuildId());
+    session = await requireDashboardStaffSession();
+    const guildId = normalizeString(session.selectedGuildId);
 
     if (!guildId) {
-      return buildJsonResponse({ error: "Select a server before resetting categories.", needsServerSelection: true }, 428, refreshedTokens);
+      return dashboardAuthJson({ error: "Select a server before resetting categories.", needsServerSelection: true }, 428, session);
     }
 
     const body = await parseRequestBody(request);
@@ -93,22 +54,25 @@ export async function POST(request: Request) {
     const resetLinkedTickets = normalizeBoolean(body.resetLinkedTickets);
 
     if (confirmText !== "RESET CATEGORIES") {
-      return buildJsonResponse({ error: "Type RESET CATEGORIES to confirm this destructive action." }, 400, refreshedTokens);
+      return dashboardAuthJson({ error: "Type RESET CATEGORIES to confirm this destructive action." }, 400, session);
     }
 
     if (!understandsSeverity) {
-      return buildJsonResponse({ error: "Confirm that you understand this removes all dashboard category routing for the selected server." }, 400, refreshedTokens);
+      return dashboardAuthJson({ error: "Confirm that you understand this removes all dashboard category routing for the selected server." }, 400, session);
     }
 
     const supabase = createServerSupabase();
-    const { actorId, actorName } = getActorIdentity(typedSession);
+    const actorId = session.user.discord_id;
+    const actorName = session.user.username || session.discordUser.username || "Dashboard Staff";
 
     const { count: categoryCount, error: countError } = await supabase
       .from("ticket_categories")
       .select("id", { count: "exact", head: true })
       .eq("guild_id", guildId);
 
-    if (countError) return buildJsonResponse({ error: countError.message, selectedGuildId: guildId }, 500, refreshedTokens);
+    if (countError) {
+      return dashboardAuthJson({ error: countError.message, selectedGuildId: guildId }, 500, session);
+    }
 
     const { count: linkedTicketCount, error: linkedCountError } = await supabase
       .from("tickets")
@@ -116,17 +80,19 @@ export async function POST(request: Request) {
       .eq("guild_id", guildId)
       .not("category_id", "is", null);
 
-    if (linkedCountError) return buildJsonResponse({ error: linkedCountError.message, selectedGuildId: guildId }, 500, refreshedTokens);
+    if (linkedCountError) {
+      return dashboardAuthJson({ error: linkedCountError.message, selectedGuildId: guildId }, 500, session);
+    }
 
     if (Number(linkedTicketCount || 0) > 0 && !resetLinkedTickets) {
-      return buildJsonResponse(
+      return dashboardAuthJson(
         {
           error: "Some tickets are linked to dashboard categories. Check the acknowledgement box to clear category links before reset.",
           selectedGuildId: guildId,
           linkedTicketCount: Number(linkedTicketCount || 0),
         },
         409,
-        refreshedTokens
+        session
       );
     }
 
@@ -142,7 +108,9 @@ export async function POST(request: Request) {
         })
         .eq("guild_id", guildId);
 
-      if (ticketUpdateError) return buildJsonResponse({ error: ticketUpdateError.message, selectedGuildId: guildId }, 500, refreshedTokens);
+      if (ticketUpdateError) {
+        return dashboardAuthJson({ error: ticketUpdateError.message, selectedGuildId: guildId }, 500, session);
+      }
     }
 
     const { error: deleteError } = await supabase
@@ -150,9 +118,11 @@ export async function POST(request: Request) {
       .delete()
       .eq("guild_id", guildId);
 
-    if (deleteError) return buildJsonResponse({ error: deleteError.message, selectedGuildId: guildId }, 500, refreshedTokens);
+    if (deleteError) {
+      return dashboardAuthJson({ error: deleteError.message, selectedGuildId: guildId }, 500, session);
+    }
 
-    return buildJsonResponse(
+    return dashboardAuthJson(
       {
         ok: true,
         selectedGuildId: guildId,
@@ -165,10 +135,9 @@ export async function POST(request: Request) {
         },
       },
       200,
-      refreshedTokens
+      session
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unauthorized";
-    return buildJsonResponse({ error: message }, message === "Unauthorized" ? 401 : 400);
+    return dashboardAuthJson({ error: errorMessage(error, "Failed to reset categories.") }, errorStatus(error, 400), session);
   }
 }
