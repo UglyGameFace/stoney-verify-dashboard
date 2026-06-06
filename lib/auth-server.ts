@@ -10,6 +10,7 @@ const ACCESS_COOKIE = "discord_access_token";
 const REFRESH_COOKIE = "discord_refresh_token";
 const EXPIRES_COOKIE = "discord_expires_at";
 const SELECTED_GUILD_COOKIE = "dank_selected_guild_id";
+const SELECTED_GUILD_ACCESS_COOKIE = "dank_selected_guild_access";
 
 const MANAGE_GUILD = BigInt(1 << 5);
 const ADMINISTRATOR = BigInt(1 << 3);
@@ -140,6 +141,21 @@ function getCookieValue(name: string): string {
 
 function getSelectedAuthGuildId(): string {
   return getCookieValue(SELECTED_GUILD_COOKIE);
+}
+
+function getSelectedAuthGuildAccessProof(): string {
+  return getCookieValue(SELECTED_GUILD_ACCESS_COOKIE).toLowerCase();
+}
+
+function hasSelectedAuthGuildManagerProof(): boolean {
+  const proof = getSelectedAuthGuildAccessProof();
+  return proof === "manager" || proof === "owner" || proof === "admin";
+}
+
+function requireSelectedAuthGuildId(): string {
+  const selectedGuildId = getSelectedAuthGuildId();
+  if (!selectedGuildId) throw makeAuthError("Select a server before using dashboard tools.", 428);
+  return selectedGuildId;
 }
 
 function hasManageGuildPermission(guild: DiscordUserGuild | null | undefined): boolean {
@@ -292,10 +308,18 @@ function buildBannerUrl(user: DiscordUser): string | null {
   return `https://cdn.discordapp.com/banners/${userId}/${banner}.${isAnimated ? "gif" : "png"}?size=512`;
 }
 
-function deriveMemberAccessFlags(memberRoleIds: string[], memberRoleNamesLower: string[], hasManageServer: boolean) {
+function deriveMemberAccessFlags(
+  memberRoleIds: string[],
+  memberRoleNamesLower: string[],
+  hasManageServer: boolean,
+  hasSelectedServerProof: boolean
+) {
+  const envStaffNames = env.staffRoleNames.map((name) => normalizeRoleName(name));
+  const effectiveManager = hasManageServer || hasSelectedServerProof;
   const hasStaffRole =
+    effectiveManager ||
     memberRoleIds.some((id) => env.staffRoleIds.includes(String(id))) ||
-    memberRoleNamesLower.some((name) => env.staffRoleNames.includes(name));
+    memberRoleNamesLower.some((name) => envStaffNames.includes(name));
 
   const hasVerifiedRole =
     memberRoleNamesLower.some((name) => ["verified", "resident", "member"].includes(name)) ||
@@ -308,7 +332,7 @@ function deriveMemberAccessFlags(memberRoleIds: string[], memberRoleNamesLower: 
   let accessLabel = "Signed In";
   let verificationLabel = "Server Access Not Checked";
 
-  if (hasManageServer) {
+  if (effectiveManager) {
     accessLabel = "Server Manager";
     verificationLabel = "Server Manager";
   } else if (hasStaffRole) {
@@ -322,7 +346,7 @@ function deriveMemberAccessFlags(memberRoleIds: string[], memberRoleNamesLower: 
     verificationLabel = "Pending Verification";
   }
 
-  return { hasStaffRole, hasVerifiedRole, hasUnverifiedRole, hasManageServer, accessLabel, verificationLabel };
+  return { hasStaffRole, hasVerifiedRole, hasUnverifiedRole, hasManageServer: effectiveManager, accessLabel, verificationLabel };
 }
 
 async function buildGuildMemberContext(user: DiscordUser, guildId: string): Promise<{
@@ -352,12 +376,13 @@ async function buildGuildMemberContext(user: DiscordUser, guildId: string): Prom
 export async function buildSession(accessToken: string): Promise<BuiltSession> {
   const user = (await discordUserFetch("/users/@me", accessToken)) as DiscordUser;
   const selectedGuildId = getSelectedAuthGuildId();
+  const hasSelectedServerProof = Boolean(selectedGuildId && hasSelectedAuthGuildManagerProof());
   const avatarUrl = buildDiscordAvatarUrl(user);
   const bannerUrl = buildBannerUrl(user);
 
-  const [guildContext, hasManageServer] = await Promise.all([
+  const [guildContext, hasLiveManageServer] = await Promise.all([
     buildGuildMemberContext(user, selectedGuildId),
-    fetchSelectedGuildManagerAccess(accessToken, selectedGuildId),
+    hasSelectedServerProof ? Promise.resolve(true) : fetchSelectedGuildManagerAccess(accessToken, selectedGuildId),
   ]);
 
   const roleMap = new Map(guildContext.roles.map((role) => [String(role.id), role]));
@@ -377,10 +402,10 @@ export async function buildSession(accessToken: string): Promise<BuiltSession> {
 
   const memberRoleNames = memberRolesDetailed.map((role) => safeText(role.name)).filter(Boolean);
   const memberRoleNamesLower = memberRoleNames.map((name) => normalizeRoleName(name));
-  const access = deriveMemberAccessFlags(memberRoleIds, memberRoleNamesLower, hasManageServer);
+  const access = deriveMemberAccessFlags(memberRoleIds, memberRoleNamesLower, hasLiveManageServer, hasSelectedServerProof);
   const displayName = safeText(guildContext.member?.nick || user.global_name || user.username, "Member");
   const hasDashboardStaffAccess = access.hasStaffRole || access.hasManageServer;
-  const staffReason = access.hasManageServer ? "manage_server_permission" : access.hasStaffRole ? "configured_staff_role" : null;
+  const staffReason = hasSelectedServerProof ? "selected_server_access_proof" : access.hasManageServer ? "manage_server_permission" : access.hasStaffRole ? "configured_staff_role" : null;
 
   return {
     user: {
@@ -426,8 +451,8 @@ export async function buildSession(accessToken: string): Promise<BuiltSession> {
     authContext: {
       guild_id: selectedGuildId || null,
       selected_guild_id: selectedGuildId || null,
-      guild_checked: !guildContext.error,
-      guild_check_error: guildContext.error,
+      guild_checked: Boolean(selectedGuildId && (hasSelectedServerProof || !guildContext.error)),
+      guild_check_error: hasSelectedServerProof ? null : guildContext.error,
       staff_reason: staffReason,
     },
   };
@@ -448,6 +473,7 @@ async function refreshAndRequireStaffSession(refreshToken: string): Promise<{
   session: BuiltSession;
   refreshedTokens: DiscordTokenPayload;
 }> {
+  requireSelectedAuthGuildId();
   if (!refreshToken) throw makeAuthError("Unauthorized", 401);
 
   const refreshedTokens = await refreshAccessToken(refreshToken);
@@ -469,6 +495,7 @@ export async function requireStaffSessionForRoute(): Promise<{
   let refreshedTokens: DiscordTokenPayload | null = null;
 
   if (!accessToken && !refreshToken) throw makeAuthError("Unauthorized", 401);
+  requireSelectedAuthGuildId();
 
   const shouldRefresh = !accessToken || (expiresAt && Date.now() > expiresAt - 60000);
   if (shouldRefresh) {
