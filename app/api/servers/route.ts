@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { discordBotFetch, discordUserFetch } from "@/lib/discord-api";
 import {
   getSelectedGuildId,
@@ -6,11 +7,7 @@ import {
 } from "@/lib/guild-selection";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { env } from "@/lib/env";
-import {
-  applyRouteSession,
-  getRouteSession,
-  type RouteSession,
-} from "@/lib/route-session";
+import { applyAuthCookies, refreshAccessToken } from "@/lib/auth-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -19,6 +16,9 @@ const MANAGE_GUILD = BigInt(1 << 5);
 const ADMINISTRATOR = BigInt(1 << 3);
 const DEFAULT_BOT_INVITE_PERMISSIONS = "8";
 const MAX_DIRECT_BOT_GUILD_CHECKS = 25;
+const ACCESS_COOKIE = "discord_access_token";
+const REFRESH_COOKIE = "discord_refresh_token";
+const EXPIRES_COOKIE = "discord_expires_at";
 
 type DiscordUserGuild = {
   id?: string | null;
@@ -41,8 +41,20 @@ type BotGuildLookup = {
   directCheckedIds: Set<string>;
 };
 
-type JsonRecord = Record<string, unknown>;
+type TokenPayload = {
+  access_token: string;
+  token_type?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+} | null;
 
+type BearerSession = {
+  bearer: string;
+  refreshed: TokenPayload;
+};
+
+type JsonRecord = Record<string, unknown>;
 type InstallState = "installed" | "missing" | "unknown";
 
 function normalizeString(value: unknown): string {
@@ -82,6 +94,50 @@ function buildBotInviteUrl(guildId: string): string | null {
   }
 
   return `https://discord.com/oauth2/authorize?${params.toString()}`;
+}
+
+async function refreshBearer(refreshToken: string): Promise<BearerSession | null> {
+  const token = normalizeString(refreshToken);
+  if (!token) return null;
+
+  try {
+    const refreshed = (await refreshAccessToken(token)) as TokenPayload;
+    const bearer = normalizeString(refreshed?.access_token);
+    if (!bearer) return null;
+    return { bearer, refreshed };
+  } catch {
+    return null;
+  }
+}
+
+async function getBearerSession(): Promise<BearerSession | null> {
+  const store = cookies();
+  const accessToken = normalizeString(store.get(ACCESS_COOKIE)?.value);
+  const refreshToken = normalizeString(store.get(REFRESH_COOKIE)?.value);
+  const expiresAt = Number(store.get(EXPIRES_COOKIE)?.value || 0);
+
+  if (!accessToken && !refreshToken) return null;
+
+  const needsRefresh = !accessToken || Boolean(expiresAt && Date.now() > expiresAt - 60_000);
+  if (needsRefresh) return await refreshBearer(refreshToken);
+
+  return { bearer: accessToken, refreshed: null };
+}
+
+async function fetchUserGuildsWithRefresh(session: BearerSession): Promise<{
+  session: BearerSession;
+  guilds: DiscordUserGuild[];
+}> {
+  try {
+    const guilds = (await discordUserFetch("/users/@me/guilds", session.bearer)) as DiscordUserGuild[];
+    return { session, guilds: Array.isArray(guilds) ? guilds : [] };
+  } catch (error) {
+    const refreshToken = normalizeString(cookies().get(REFRESH_COOKIE)?.value || session.refreshed?.refresh_token);
+    const retrySession = await refreshBearer(refreshToken);
+    if (!retrySession) throw error;
+    const guilds = (await discordUserFetch("/users/@me/guilds", retrySession.bearer)) as DiscordUserGuild[];
+    return { session: retrySession, guilds: Array.isArray(guilds) ? guilds : [] };
+  }
 }
 
 async function fetchBotGuilds(): Promise<BotGuildLookup> {
@@ -148,11 +204,7 @@ async function strengthenBotLookupWithDirectChecks(
     if (id) nextGuilds.set(id, guild as BotGuild);
   }
 
-  return {
-    ...botLookup,
-    guilds: nextGuilds,
-    directCheckedIds,
-  };
+  return { ...botLookup, guilds: nextGuilds, directCheckedIds };
 }
 
 async function fetchKnownDashboardGuildIds(guildIds: string[]): Promise<Set<string>> {
@@ -201,14 +253,14 @@ async function fetchKnownDashboardGuildIds(guildIds: string[]): Promise<Set<stri
   return found;
 }
 
-function buildJsonResponse(payload: JsonRecord, status = 200, routeSession: RouteSession | null = null) {
+function buildJsonResponse(payload: JsonRecord, status = 200, session: BearerSession | null = null) {
   const response = NextResponse.json(payload, {
     status,
     headers: {
       "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     },
   });
-  applyRouteSession(response, routeSession);
+  applyAuthCookies(response, session?.refreshed || null);
   return response;
 }
 
@@ -229,19 +281,18 @@ function inviteUrlForState(guildId: string, installState: InstallState): string 
 }
 
 export async function GET() {
-  const routeSession = await getRouteSession();
+  const initialSession = await getBearerSession();
 
-  if (!routeSession) {
+  if (!initialSession) {
     return buildJsonResponse({ error: "Discord login required." }, 401);
   }
 
   try {
-    const [userGuildsRaw, initialBotLookup] = await Promise.all([
-      discordUserFetch("/users/@me/guilds", routeSession.bearer) as Promise<DiscordUserGuild[]>,
+    const [{ session, guilds: userGuilds }, initialBotLookup] = await Promise.all([
+      fetchUserGuildsWithRefresh(initialSession),
       fetchBotGuilds(),
     ]);
 
-    const userGuilds = Array.isArray(userGuildsRaw) ? userGuildsRaw : [];
     const manageableSource = userGuilds.filter(hasManageGuildPermission);
     const [knownDashboardGuildIds, botLookup] = await Promise.all([
       fetchKnownDashboardGuildIds(manageableSource.map((guild) => normalizeString(guild.id))),
@@ -288,22 +339,20 @@ export async function GET() {
       manageableCount: manageable.length,
       botCheckOk: botLookup.ok,
       botCheckError: botLookup.error,
-    }, 200, routeSession);
+    }, 200, session);
   } catch (error) {
     return buildJsonResponse(
-      {
-        error: error instanceof Error ? error.message : "Failed to load Discord servers.",
-      },
+      { error: error instanceof Error ? error.message : "Failed to load Discord servers." },
       500,
-      routeSession
+      initialSession
     );
   }
 }
 
 export async function POST(request: Request) {
-  const routeSession = await getRouteSession();
+  const initialSession = await getBearerSession();
 
-  if (!routeSession) {
+  if (!initialSession) {
     return buildJsonResponse({ error: "Discord login required." }, 401);
   }
 
@@ -311,25 +360,22 @@ export async function POST(request: Request) {
     const body = (await request.json().catch(() => ({}))) as JsonRecord;
     const requestedGuildId = normalizeString(body.guild_id || body.guildId);
     if (!requestedGuildId) {
-      return buildJsonResponse({ error: "Server id is required." }, 400, routeSession);
+      return buildJsonResponse({ error: "Server id is required." }, 400, initialSession);
     }
 
-    const [userGuildsRaw, initialBotLookup, knownDashboardGuildIds] = await Promise.all([
-      discordUserFetch("/users/@me/guilds", routeSession.bearer) as Promise<DiscordUserGuild[]>,
+    const [{ session, guilds: userGuilds }, initialBotLookup, knownDashboardGuildIds] = await Promise.all([
+      fetchUserGuildsWithRefresh(initialSession),
       fetchBotGuilds(),
       fetchKnownDashboardGuildIds([requestedGuildId]),
     ]);
 
-    const userGuilds = Array.isArray(userGuildsRaw) ? userGuildsRaw : [];
-    const userGuild = userGuilds.find(
-      (guild) => normalizeString(guild.id) === requestedGuildId
-    );
+    const userGuild = userGuilds.find((guild) => normalizeString(guild.id) === requestedGuildId);
 
     if (!userGuild || !hasManageGuildPermission(userGuild)) {
       return buildJsonResponse(
         { error: "You need Manage Server or Administrator permission for that server." },
         403,
-        routeSession
+        session
       );
     }
 
@@ -349,20 +395,18 @@ export async function POST(request: Request) {
           bot_check_error: botLookup.error,
         },
         installState === "unknown" ? 503 : 409,
-        routeSession
+        session
       );
     }
 
-    const response = buildJsonResponse({ ok: true, selectedGuildId: requestedGuildId }, 200, routeSession);
+    const response = buildJsonResponse({ ok: true, selectedGuildId: requestedGuildId }, 200, session);
     setSelectedGuildCookie(response, requestedGuildId);
     return response;
   } catch (error) {
     return buildJsonResponse(
-      {
-        error: error instanceof Error ? error.message : "Failed to select server.",
-      },
+      { error: error instanceof Error ? error.message : "Failed to select server." },
       500,
-      routeSession
+      initialSession
     );
   }
 }
