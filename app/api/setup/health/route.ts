@@ -1,12 +1,11 @@
-import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth-server";
-import { getSelectedGuildId } from "@/lib/guild-selection";
 import { createServerSupabase } from "@/lib/supabase-server";
+import { requireDashboardStaffSession, dashboardAuthJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type AnyRecord = Record<string, unknown>;
+type ErrorWithStatus = Error & { status?: number };
 
 type HealthCheck = {
   key: string;
@@ -31,13 +30,12 @@ function safeObject(value: unknown): AnyRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as AnyRecord) : {};
 }
 
-function noStoreJson(body: unknown, status = 200) {
-  return NextResponse.json(body, {
-    status,
-    headers: {
-      "Cache-Control": "no-store, max-age=0",
-    },
-  });
+function errorStatus(error: unknown, fallback: number): number {
+  return typeof (error as ErrorWithStatus)?.status === "number" ? Number((error as ErrorWithStatus).status) : fallback;
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 async function safeRows(queryFactory: () => Promise<{ data?: unknown[] | null; error?: { message?: string } | null }>): Promise<unknown[]> {
@@ -76,49 +74,48 @@ function buildCheck(check: HealthCheck): HealthCheck {
   return check;
 }
 
+function serverRequiredHealth(session: DashboardAuthSession | null) {
+  const checks: HealthCheck[] = [
+    buildCheck({
+      key: "server_selected",
+      label: "Choose Server",
+      description: "Pick the Discord server this dashboard should manage before opening categories, forms, tickets, activity, or member tools.",
+      ok: false,
+      severity: "required",
+      action_label: "Choose Server",
+      action_href: "/servers",
+      detail: "No selected server",
+    }),
+  ];
+
+  return dashboardAuthJson(
+    {
+      ok: false,
+      error: "Select a server before checking setup health.",
+      needsServerSelection: true,
+      selectedGuildId: null,
+      score: 0,
+      total: checks.length,
+      passed: 0,
+      required_total: 1,
+      required_passed: 0,
+      ready_for_launch: false,
+      next_fix: checks[0],
+      summary: { server_selected: false },
+      checks,
+    },
+    200,
+    session
+  );
+}
+
 export async function GET() {
+  let session: DashboardAuthSession | null = null;
+
   try {
-    const session = await getSession();
-    if (!session) return noStoreJson({ ok: false, error: "Unauthorized" }, 401);
-    if (!session?.isStaff) return noStoreJson({ ok: false, error: "Forbidden" }, 403);
-
-    const guildId = normalizeString(getSelectedGuildId());
-    if (!guildId) {
-      const checks: HealthCheck[] = [
-        buildCheck({
-          key: "server_selected",
-          label: "Choose Server",
-          description: "Pick the Discord server this dashboard should manage before opening categories, forms, tickets, activity, or member tools.",
-          ok: false,
-          severity: "required",
-          action_label: "Choose Server",
-          action_href: "/servers",
-          detail: "No selected server",
-        }),
-      ];
-      const nextFix = checks[0];
-
-      return noStoreJson(
-        {
-          ok: false,
-          error: "Select a server before checking setup health.",
-          needsServerSelection: true,
-          selectedGuildId: null,
-          score: 0,
-          total: checks.length,
-          passed: 0,
-          required_total: 1,
-          required_passed: 0,
-          ready_for_launch: false,
-          next_fix: nextFix,
-          summary: {
-            server_selected: false,
-          },
-          checks,
-        },
-        200
-      );
-    }
+    session = await requireDashboardStaffSession();
+    const guildId = normalizeString(session.selectedGuildId);
+    if (!guildId) return serverRequiredHealth(session);
 
     const supabase = createServerSupabase();
 
@@ -162,7 +159,7 @@ export async function GET() {
         key: "server_selected",
         label: "Server Selected",
         description: "Dashboard is scoped to one Discord server before reading or changing data.",
-        ok: Boolean(guildId),
+        ok: true,
         severity: "required",
         action_label: "Change Server",
         action_href: "/servers",
@@ -285,38 +282,35 @@ export async function GET() {
     const requiredPassed = required.filter((check) => check.ok).length;
     const score = checks.length ? Math.round((passed / checks.length) * 100) : 0;
     const readyForLaunch = required.length > 0 && requiredPassed === required.length;
-
     const nextFix = checks.find((check) => !check.ok && check.severity === "required") || checks.find((check) => !check.ok) || null;
 
-    return noStoreJson({
-      ok: true,
-      selectedGuildId: guildId,
-      score,
-      total: checks.length,
-      passed,
-      required_total: required.length,
-      required_passed: requiredPassed,
-      ready_for_launch: readyForLaunch,
-      next_fix: nextFix,
-      summary: {
-        categories: categories.length,
-        forms_covered: categoriesWithForms.length,
-        tickets: ticketsCount,
-        active_tickets: activeTicketsCount,
-        activity_events: activityCount,
-        guild_members: guildMembersCount,
-        guild_roles: rolesCount,
-        pending_commands: pendingCommands.length,
-      },
-      checks,
-    });
-  } catch (error: unknown) {
-    return noStoreJson(
+    return dashboardAuthJson(
       {
-        ok: false,
-        error: error instanceof Error ? error.message : "Failed to check setup health.",
+        ok: true,
+        selectedGuildId: guildId,
+        score,
+        total: checks.length,
+        passed,
+        required_total: required.length,
+        required_passed: requiredPassed,
+        ready_for_launch: readyForLaunch,
+        next_fix: nextFix,
+        summary: {
+          categories: categories.length,
+          forms_covered: categoriesWithForms.length,
+          tickets: ticketsCount,
+          active_tickets: activeTicketsCount,
+          activity_events: activityCount,
+          guild_members: guildMembersCount,
+          guild_roles: rolesCount,
+          pending_commands: pendingCommands.length,
+        },
+        checks,
       },
-      500
+      200,
+      session
     );
+  } catch (error) {
+    return dashboardAuthJson({ ok: false, error: errorMessage(error, "Failed to check setup health.") }, errorStatus(error, 500), session);
   }
 }
