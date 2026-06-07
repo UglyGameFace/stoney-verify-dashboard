@@ -1,5 +1,5 @@
 import { createServerSupabase } from "@/lib/supabase-server";
-import { requireDashboardStaffSession, dashboardAuthJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
 import { discordBotFetch } from "@/lib/discord-api";
 
 export const dynamic = "force-dynamic";
@@ -98,14 +98,6 @@ function buttonLabelForType(type: string, name: string) {
   return "Open Support Ticket";
 }
 
-function errorStatus(error: unknown, fallback: number): number {
-  return typeof (error as { status?: unknown })?.status === "number" ? Number((error as { status?: number }).status) : fallback;
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
-}
-
 export async function GET() {
   let session: DashboardAuthSession | null = null;
 
@@ -113,7 +105,7 @@ export async function GET() {
     session = await requireDashboardStaffSession();
     const guildId = clean(session.selectedGuildId);
     if (!guildId) {
-      return dashboardAuthJson({ error: "Select a server before detecting categories.", needsServerSelection: true }, 428, session);
+      return dashboardAuthJson({ error: "Select a server before detecting categories.", error_code: "selected_server_required", needsServerSelection: true }, 428, session);
     }
 
     const supabase = createServerSupabase();
@@ -187,6 +179,6 @@ export async function GET() {
       suggestions,
     }, 200, session);
   } catch (error) {
-    return dashboardAuthJson({ error: errorMessage(error, "Failed to detect Discord categories.") }, errorStatus(error, 500), session);
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
