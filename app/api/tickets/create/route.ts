@@ -1,29 +1,22 @@
 import { NextRequest } from "next/server";
 import { queueCreateTicket } from "@/lib/botCommands";
-import { requireStaffSessionForRoute } from "@/lib/auth-server";
 import { insertMemberEvent } from "@/lib/memberEventWrites";
-import { getSelectedGuildId } from "@/lib/guild-selection";
-import {
-  buildRouteJson,
-  getActorId,
-  parseRouteBody,
-  readBoolean,
-  readString,
-  toErrorMessage,
-  unauthorizedRouteResponse,
-  type RefreshedTokens,
-} from "@/lib/ticketActionRoute";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
+import { parseRouteBody, readBoolean, readString } from "@/lib/ticketActionRoute";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function getActorName(session: any): string {
-  return (
-    session?.user?.username ||
-    session?.user?.name ||
-    session?.discordUser?.username ||
-    "Dashboard Staff"
-  );
+function clean(value: unknown): string {
+  return String(value || "").trim();
+}
+
+function getActorId(session: DashboardAuthSession | null): string {
+  return clean(session?.user?.discord_id || session?.user?.id || session?.discordUser?.id);
+}
+
+function getActorName(session: DashboardAuthSession | null): string {
+  return clean(session?.user?.username || session?.user?.global_name || session?.discordUser?.username) || "Dashboard Staff";
 }
 
 function normalizeNullable(value: unknown): string | null {
@@ -31,144 +24,93 @@ function normalizeNullable(value: unknown): string | null {
   return text || null;
 }
 
-function selectedGuildId(): string {
-  return String(getSelectedGuildId() || "").trim();
+function json(payload: Record<string, unknown>, status = 200, session: DashboardAuthSession | null = null) {
+  return dashboardAuthJson(payload, status, session);
 }
 
-function readStringArray(
-  body: Record<string, unknown>,
-  keys: string[]
-): string[] | null {
+function readStringArray(body: Record<string, unknown>, keys: string[]): string[] | null {
   for (const key of keys) {
     const value = body?.[key];
     if (!Array.isArray(value)) continue;
 
-    const cleaned = value
-      .map((item) => String(item ?? "").trim())
-      .filter(Boolean);
-
+    const cleaned = value.map((item) => String(item ?? "").trim()).filter(Boolean);
     return cleaned.length ? cleaned : null;
   }
 
   return null;
 }
 
-function missingFieldRouteResponse(
-  field: string,
-  refreshedTokens: RefreshedTokens | null
-) {
-  return buildRouteJson(
+function missingFieldResponse(field: string, session: DashboardAuthSession | null, guildId = "") {
+  return json(
     {
       ok: false,
       error: `Missing ${field}`,
+      error_code: "invalid_request",
+      selectedGuildId: guildId || null,
     },
     400,
-    refreshedTokens
+    session
   );
 }
 
 export async function POST(req: NextRequest) {
-  let refreshedTokens: RefreshedTokens | null = null;
+  let session: DashboardAuthSession | null = null;
 
   try {
-    const auth = await requireStaffSessionForRoute();
-    refreshedTokens = auth?.refreshedTokens ?? null;
-
-    const actorId = getActorId(auth?.session);
-    const actorName = getActorName(auth?.session);
-    const guildId = selectedGuildId();
-
-    if (!actorId) {
-      return unauthorizedRouteResponse(refreshedTokens);
-    }
+    session = await requireDashboardStaffSession();
+    const actorId = getActorId(session);
+    const actorName = getActorName(session);
+    const guildId = clean(session.selectedGuildId);
 
     if (!guildId) {
-      return buildRouteJson(
+      return json(
         {
           ok: false,
           error: "Select a server before creating a ticket.",
+          error_code: "selected_server_required",
           needsServerSelection: true,
         },
         428,
-        refreshedTokens
+        session
+      );
+    }
+
+    if (!actorId) {
+      return json(
+        {
+          ok: false,
+          error: "Could not identify signed-in staff member.",
+          error_code: "invalid_request",
+          selectedGuildId: guildId,
+        },
+        400,
+        session
       );
     }
 
     const body = await parseRouteBody(req);
-
     const userId = readString(body, ["userId", "user_id"]);
     const category = readString(body, ["category"], "support");
-    const openingMessage = readString(
-      body,
-      ["openingMessage", "opening_message"],
-      ""
-    );
+    const openingMessage = readString(body, ["openingMessage", "opening_message"], "");
     const priority = readString(body, ["priority"], "medium");
-    const parentCategoryId = readString(
-      body,
-      ["parentCategoryId", "parent_category_id"],
-      ""
-    );
-    const allowDuplicate = readBoolean(
-      body,
-      ["allowDuplicate", "allow_duplicate"],
-      false
-    );
+    const parentCategoryId = readString(body, ["parentCategoryId", "parent_category_id"], "");
+    const allowDuplicate = readBoolean(body, ["allowDuplicate", "allow_duplicate"], false);
+    const staffRoleIds = readStringArray(body, ["staffRoleIds", "staff_role_ids"]);
+    const entryMethod = readString(body, ["entryMethod", "entry_method"], "") || null;
+    const verificationSource = readString(body, ["verificationSource", "verification_source"], "") || null;
+    const sourceTicketId = readString(body, ["sourceTicketId", "source_ticket_id"], "") || null;
+    const verificationTicketId = readString(body, ["verificationTicketId", "verification_ticket_id"], "") || sourceTicketId || null;
+    const invitedBy = readString(body, ["invitedBy", "invited_by"], "") || null;
+    const invitedByName = readString(body, ["invitedByName", "invited_by_name"], "") || null;
+    const inviteCode = readString(body, ["inviteCode", "invite_code"], "") || null;
+    const vouchedBy = readString(body, ["vouchedBy", "vouched_by"], "") || null;
+    const vouchedByName = readString(body, ["vouchedByName", "vouched_by_name"], "") || null;
+    const approvedBy = readString(body, ["approvedBy", "approved_by"], "") || actorId;
+    const approvedByName = readString(body, ["approvedByName", "approved_by_name"], "") || actorName;
+    const entryReason = readString(body, ["entryReason", "entry_reason"], "") || null;
+    const approvalReason = readString(body, ["approvalReason", "approval_reason"], "") || null;
 
-    const staffRoleIds = readStringArray(body, [
-      "staffRoleIds",
-      "staff_role_ids",
-    ]);
-
-    const entryMethod =
-      readString(body, ["entryMethod", "entry_method"], "") || null;
-
-    const verificationSource =
-      readString(body, ["verificationSource", "verification_source"], "") || null;
-
-    const sourceTicketId =
-      readString(body, ["sourceTicketId", "source_ticket_id"], "") || null;
-
-    const verificationTicketId =
-      readString(
-        body,
-        ["verificationTicketId", "verification_ticket_id"],
-        ""
-      ) ||
-      sourceTicketId ||
-      null;
-
-    const invitedBy =
-      readString(body, ["invitedBy", "invited_by"], "") || null;
-
-    const invitedByName =
-      readString(body, ["invitedByName", "invited_by_name"], "") || null;
-
-    const inviteCode =
-      readString(body, ["inviteCode", "invite_code"], "") || null;
-
-    const vouchedBy =
-      readString(body, ["vouchedBy", "vouched_by"], "") || null;
-
-    const vouchedByName =
-      readString(body, ["vouchedByName", "vouched_by_name"], "") || null;
-
-    const approvedBy =
-      readString(body, ["approvedBy", "approved_by"], "") || actorId;
-
-    const approvedByName =
-      readString(body, ["approvedByName", "approved_by_name"], "") ||
-      actorName;
-
-    const entryReason =
-      readString(body, ["entryReason", "entry_reason"], "") || null;
-
-    const approvalReason =
-      readString(body, ["approvalReason", "approval_reason"], "") || null;
-
-    if (!userId) {
-      return missingFieldRouteResponse("userId", refreshedTokens);
-    }
+    if (!userId) return missingFieldResponse("userId", session, guildId);
 
     const command = await queueCreateTicket({
       guildId,
@@ -225,7 +167,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    return buildRouteJson(
+    return json(
       {
         ok: true,
         selectedGuildId: guildId,
@@ -242,18 +184,9 @@ export async function POST(req: NextRequest) {
         approvedByName,
       },
       200,
-      refreshedTokens
+      session
     );
   } catch (error) {
-    const message = toErrorMessage(error);
-
-    return buildRouteJson(
-      {
-        ok: false,
-        error: message,
-      },
-      message === "Unauthorized" ? 401 : 500,
-      refreshedTokens
-    );
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
