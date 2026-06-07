@@ -1,21 +1,8 @@
-import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
-import {
-  requireStaffSessionForRoute,
-  applyAuthCookies,
-} from "@/lib/auth-server";
-import { getSelectedGuildId } from "@/lib/guild-selection";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-type RefreshedTokens = {
-  access_token: string;
-  token_type?: string;
-  expires_in?: number;
-  refresh_token?: string;
-  scope?: string;
-} | null;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -151,32 +138,21 @@ function getStaffName(session: SessionLike | null | undefined): string {
   );
 }
 
-function selectedGuildId(): string {
-  return normalizeString(getSelectedGuildId());
-}
-
 function buildJsonResponse(
   data: Record<string, unknown>,
   status = 200,
-  refreshedTokens: RefreshedTokens = null
-): NextResponse {
-  const response = NextResponse.json(data, {
-    status,
-    headers: {
-      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-    },
-  });
-  applyAuthCookies(response, refreshedTokens);
-  return response;
+  session: DashboardAuthSession | null = null
+) {
+  return dashboardAuthJson(data, status, session);
 }
 
 function buildErrorResponse(
   message: string,
   status = 500,
-  refreshedTokens: RefreshedTokens = null,
+  session: DashboardAuthSession | null = null,
   extra: Record<string, unknown> = {}
-): NextResponse {
-  return buildJsonResponse({ error: message, ...extra }, status, refreshedTokens);
+) {
+  return buildJsonResponse({ ok: false, error: message, ...extra }, status, session);
 }
 
 function buildCommandAction(action: string): string {
@@ -525,37 +501,36 @@ export async function POST(
   request: Request,
   context: { params: { id?: string } }
 ) {
-  let refreshedTokens: RefreshedTokens = null;
+  let session: DashboardAuthSession | null = null;
+
   try {
-    const auth = await requireStaffSessionForRoute();
-    const session = auth?.session as SessionLike | undefined;
-    refreshedTokens = (auth?.refreshedTokens as RefreshedTokens) ?? null;
-    const guildId = selectedGuildId();
+    session = await requireDashboardStaffSession();
+    const guildId = normalizeString(session.selectedGuildId);
     if (!guildId) {
       return buildErrorResponse(
         "Select a server before running verification actions.",
         428,
-        refreshedTokens,
-        { needsServerSelection: true }
+        session,
+        { error_code: "selected_server_required", needsServerSelection: true }
       );
     }
 
     const supabase = createServerSupabase();
     const body = await parseRequestBody(request);
     const ticketId = normalizeString(context?.params?.id);
-    if (!ticketId) return buildErrorResponse("Missing ticket id.", 400, refreshedTokens);
+    if (!ticketId) return buildErrorResponse("Missing ticket id.", 400, session, { error_code: "invalid_request", selectedGuildId: guildId });
 
     const action = normalizeLower(body?.action);
     const supportedActions = new Set(["approve", "deny", "remove_unverified", "repost_verify_ui"]);
     if (!supportedActions.has(action)) {
-      return buildErrorResponse("Unsupported verification action.", 400, refreshedTokens, { selectedGuildId: guildId });
+      return buildErrorResponse("Unsupported verification action.", 400, session, { error_code: "invalid_request", selectedGuildId: guildId });
     }
 
-    const staffId = getStaffId(session);
-    const staffName = getStaffName(session);
+    const staffId = getStaffId(session as SessionLike);
+    const staffName = getStaffName(session as SessionLike);
     const reason = buildReason(action, body?.reason);
     const roleId = normalizeString(body?.role_id);
-    if (!staffId) return buildErrorResponse("Missing staff identity.", 401, refreshedTokens, { selectedGuildId: guildId });
+    if (!staffId) return buildErrorResponse("Missing staff identity.", 401, session, { selectedGuildId: guildId });
 
     const { data: ticket, error: ticketError } = await supabase
       .from("tickets")
@@ -565,24 +540,24 @@ export async function POST(
       .single();
 
     if (ticketError || !ticket) {
-      return buildErrorResponse(ticketError?.message || "Ticket not found.", 404, refreshedTokens, { selectedGuildId: guildId });
+      return buildErrorResponse(ticketError?.message || "Ticket not found.", 404, session, { selectedGuildId: guildId });
     }
 
     const typedTicket = ticket as TicketRow;
     const ticketStatus = normalizeLower(typedTicket?.status);
     if (ticketStatus === "deleted") {
-      return buildErrorResponse("Cannot run verification actions on a deleted ticket.", 409, refreshedTokens, { selectedGuildId: guildId });
+      return buildErrorResponse("Cannot run verification actions on a deleted ticket.", 409, session, { selectedGuildId: guildId });
     }
 
     const userId = normalizeString(typedTicket?.user_id);
     if (!userId && action !== "repost_verify_ui") {
-      return buildErrorResponse("Ticket is missing user_id.", 400, refreshedTokens, { selectedGuildId: guildId });
+      return buildErrorResponse("Ticket is missing user_id.", 400, session, { error_code: "invalid_request", selectedGuildId: guildId });
     }
 
     const channelId = normalizeString(typedTicket?.channel_id || typedTicket?.discord_thread_id);
     const username = normalizeString(typedTicket?.username) || normalizeString(typedTicket?.owner_display_name) || normalizeString(typedTicket?.title) || "member";
     const commandAction = buildCommandAction(action);
-    if (!commandAction) return buildErrorResponse("Could not resolve verification command.", 400, refreshedTokens, { selectedGuildId: guildId });
+    if (!commandAction) return buildErrorResponse("Could not resolve verification command.", 400, session, { error_code: "invalid_request", selectedGuildId: guildId });
 
     const existingPending = await findPendingVerificationCommand(supabase, {
       guildId,
@@ -603,7 +578,7 @@ export async function POST(
           message: `${buildHumanMessage(action, username)} Already queued.`,
         },
         200,
-        refreshedTokens
+        session
       );
     }
 
@@ -668,7 +643,7 @@ export async function POST(
       .single();
 
     if (commandError) {
-      return buildErrorResponse(commandError.message || "Failed to queue verification command.", 500, refreshedTokens, { selectedGuildId: guildId });
+      return buildErrorResponse(commandError.message || "Failed to queue verification command.", 500, session, { selectedGuildId: guildId });
     }
 
     const command = (commandRow as { id?: string | null } | null) || null;
@@ -723,11 +698,9 @@ export async function POST(
         message: buildHumanMessage(action, username),
       },
       200,
-      refreshedTokens
+      session
     );
   } catch (error) {
-    const err = error as { status?: number; message?: string } | undefined;
-    const status = err?.status || (err?.message === "Unauthorized" ? 401 : 500);
-    return buildErrorResponse(err?.message || "Verification route failed.", status, refreshedTokens);
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
