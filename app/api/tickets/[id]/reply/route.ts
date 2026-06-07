@@ -1,7 +1,5 @@
-import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
-import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
-import { getSelectedGuildId } from "@/lib/guild-selection";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
 import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
@@ -11,14 +9,6 @@ const MAX_MESSAGE_LENGTH = 4000;
 const DISCORD_MESSAGE_LIMIT = 2000;
 const MAX_ATTACHMENTS = 10;
 const CLOSED_STATUSES = new Set(["closed", "deleted"]);
-
-type RefreshedTokens = {
-  access_token: string;
-  token_type?: string;
-  expires_in?: number;
-  refresh_token?: string;
-  scope?: string;
-} | null;
 
 type SessionLike = {
   user?: {
@@ -85,10 +75,6 @@ function normalizeMultiline(value: unknown): string {
     .trim();
 }
 
-function selectedGuildId(): string {
-  return normalizeString(getSelectedGuildId());
-}
-
 function safeObject<T extends object = Record<string, unknown>>(value: unknown): T {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as T)
@@ -109,17 +95,9 @@ function truncateText(value: unknown, max = 240): string {
 function buildJsonResponse(
   payload: Record<string, unknown>,
   status = 200,
-  refreshedTokens: RefreshedTokens = null
+  session: DashboardAuthSession | null = null
 ) {
-  const response = NextResponse.json(payload, {
-    status,
-    headers: {
-      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-    },
-  });
-
-  applyAuthCookies(response, refreshedTokens);
-  return response;
+  return dashboardAuthJson(payload, status, session);
 }
 
 function getActorIdentity(session: SessionLike | null | undefined) {
@@ -220,10 +198,7 @@ function buildDiscordReplyPayload(args: {
 
   const parts = [header, ticketLine, "", message];
 
-  if (attachmentLines.length) {
-    parts.push("", "Attachments:", ...attachmentLines);
-  }
-
+  if (attachmentLines.length) parts.push("", "Attachments:", ...attachmentLines);
   return parts.join("\n").trim();
 }
 
@@ -251,60 +226,27 @@ function chunkDiscordMessage(content: string, limit = DISCORD_MESSAGE_LIMIT): st
 
 async function postDiscordMessage(channelId: string, content: string) {
   const token = process.env.DISCORD_TOKEN || env?.discordToken || "";
-
-  if (!token || !channelId || !content) {
-    return { ok: false as const, error: "Missing Discord token, channel, or content." };
-  }
+  if (!token || !channelId || !content) return { ok: false as const, error: "Missing Discord token, channel, or content." };
 
   try {
     const response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
       method: "POST",
-      headers: {
-        Authorization: `Bot ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        content,
-        allowed_mentions: { parse: [] },
-      }),
+      headers: { Authorization: `Bot ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ content, allowed_mentions: { parse: [] } }),
       cache: "no-store",
     });
-
     const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
-
-    if (!response.ok) {
-      return {
-        ok: false as const,
-        error: normalizeString(json?.message) || `Discord API error ${response.status}`,
-      };
-    }
-
+    if (!response.ok) return { ok: false as const, error: normalizeString(json?.message) || `Discord API error ${response.status}` };
     return { ok: true as const, data: json as DiscordMessageResponse };
   } catch (error) {
-    return {
-      ok: false as const,
-      error: error instanceof Error ? error.message : "Failed to reach Discord API.",
-    };
+    return { ok: false as const, error: error instanceof Error ? error.message : "Failed to reach Discord API." };
   }
 }
 
-async function mirrorReplyToDiscord(args: {
-  ticket: TicketRow;
-  actorName: string | null;
-  message: string;
-  attachments: NormalizedAttachment[];
-}) {
+async function mirrorReplyToDiscord(args: { ticket: TicketRow; actorName: string | null; message: string; attachments: NormalizedAttachment[] }) {
   const { ticket, actorName, message, attachments } = args;
-
   const channelId = getTicketChannelId(ticket);
-  if (!channelId) {
-    return {
-      mirroredToDiscord: false,
-      mirroredMessageIds: [] as string[],
-      mirrorError: "Ticket is not linked to a Discord channel.",
-      discordMessages: [] as DiscordMessageResponse[],
-    };
-  }
+  if (!channelId) return { mirroredToDiscord: false, mirroredMessageIds: [] as string[], mirrorError: "Ticket is not linked to a Discord channel.", discordMessages: [] as DiscordMessageResponse[] };
 
   const payload = buildDiscordReplyPayload({ message, attachments, actorName, ticket });
   const chunks = chunkDiscordMessage(payload);
@@ -312,25 +254,11 @@ async function mirrorReplyToDiscord(args: {
 
   for (const chunk of chunks) {
     const result = await postDiscordMessage(channelId, chunk);
-
-    if (!result.ok) {
-      return {
-        mirroredToDiscord: sent.length > 0,
-        mirroredMessageIds: sent.map((row) => normalizeString(row.id)).filter(Boolean),
-        mirrorError: result.error || "Failed to mirror reply to Discord.",
-        discordMessages: sent,
-      };
-    }
-
+    if (!result.ok) return { mirroredToDiscord: sent.length > 0, mirroredMessageIds: sent.map((row) => normalizeString(row.id)).filter(Boolean), mirrorError: result.error || "Failed to mirror reply to Discord.", discordMessages: sent };
     sent.push(result.data as DiscordMessageResponse);
   }
 
-  return {
-    mirroredToDiscord: sent.length > 0,
-    mirroredMessageIds: sent.map((row) => normalizeString(row.id)).filter(Boolean),
-    mirrorError: "",
-    discordMessages: sent,
-  };
+  return { mirroredToDiscord: sent.length > 0, mirroredMessageIds: sent.map((row) => normalizeString(row.id)).filter(Boolean), mirrorError: "", discordMessages: sent };
 }
 
 async function insertDashboardStaffMessages(
@@ -344,7 +272,6 @@ async function insertDashboardStaffMessages(
 ) {
   const guildId = normalizeString(ticket?.guild_id);
   const channelId = getTicketChannelId(ticket);
-
   if (!guildId || !channelId || !safeArray(discordMessages).length) return;
 
   const rows = discordMessages.map((discordMessage, index) => ({
@@ -355,49 +282,20 @@ async function insertDashboardStaffMessages(
     author_name: actorName || "Dashboard Staff",
     display_name: actorName || "Dashboard Staff",
     avatar_url: null,
-    content:
-      discordMessages.length === 1
-        ? message
-        : index === 0
-          ? message
-          : `Continued reply segment ${index + 1}`,
+    content: discordMessages.length === 1 ? message : index === 0 ? message : `Continued reply segment ${index + 1}`,
     attachments,
     embeds: [],
   }));
 
   try {
     await supabase.from("dashboard_staff_messages").insert(rows);
-  } catch {
-    // best-effort only
-  }
+  } catch {}
 }
 
-async function createActivityFeedEvent(
-  supabase: ReturnType<typeof createServerSupabase>,
-  ticket: TicketRow,
-  actorId: string | null,
-  actorName: string | null,
-  message: string,
-  attachments: NormalizedAttachment[],
-  mirroredToDiscord: boolean
-) {
+async function createActivityFeedEvent(supabase: ReturnType<typeof createServerSupabase>, ticket: TicketRow, actorId: string | null, actorName: string | null, message: string, attachments: NormalizedAttachment[], mirroredToDiscord: boolean) {
   const guildId = normalizeString(ticket?.guild_id);
   if (!guildId) return;
-
-  const metadata = {
-    ticket_id: ticket?.id || null,
-    ticket_number: ticket?.ticket_number || null,
-    channel_id: getTicketChannelId(ticket) || null,
-    channel_name: ticket?.channel_name || null,
-    ticket_status: ticket?.status || null,
-    attachment_count: attachments.length,
-    attachments,
-    mirrored_to_discord: mirroredToDiscord,
-    staff_id: actorId || null,
-    staff_name: actorName || null,
-    source: "dashboard_ticket_reply",
-  };
-
+  const metadata = { ticket_id: ticket?.id || null, ticket_number: ticket?.ticket_number || null, channel_id: getTicketChannelId(ticket) || null, channel_name: ticket?.channel_name || null, ticket_status: ticket?.status || null, attachment_count: attachments.length, attachments, mirrored_to_discord: mirroredToDiscord, staff_id: actorId || null, staff_name: actorName || null, source: "dashboard_ticket_reply" };
   try {
     await supabase.from("activity_feed_events").insert({
       guild_id: guildId,
@@ -416,187 +314,54 @@ async function createActivityFeedEvent(
       title: "Staff Reply Sent",
       description: `${actorName || "Staff"} replied to ticket ${ticket?.ticket_number || ticket?.id || ""}`.trim(),
       reason: truncateText(message, 240),
-      search_text: [
-        "ticket reply",
-        actorName,
-        actorId,
-        ticket?.id,
-        ticket?.ticket_number,
-        ticket?.username,
-        ticket?.user_id,
-        ticket?.channel_name,
-        ticket?.status,
-        message,
-      ]
-        .filter(Boolean)
-        .join(" "),
+      search_text: ["ticket reply", actorName, actorId, ticket?.id, ticket?.ticket_number, ticket?.username, ticket?.user_id, ticket?.channel_name, ticket?.status, message].filter(Boolean).join(" "),
       metadata,
     });
-  } catch {
-    // best-effort only
-  }
+  } catch {}
 }
 
-async function bumpTicketFreshness(
-  supabase: ReturnType<typeof createServerSupabase>,
-  ticket: TicketRow
-) {
+async function bumpTicketFreshness(supabase: ReturnType<typeof createServerSupabase>, ticket: TicketRow) {
   const ticketId = normalizeString(ticket?.id);
   const guildId = normalizeString(ticket?.guild_id);
   if (!ticketId || !guildId) return;
-
   try {
-    await supabase
-      .from("tickets")
-      .update({
-        updated_at: new Date().toISOString(),
-        last_activity_at: new Date().toISOString(),
-      })
-      .eq("id", ticketId)
-      .eq("guild_id", guildId);
+    await supabase.from("tickets").update({ updated_at: new Date().toISOString(), last_activity_at: new Date().toISOString() }).eq("id", ticketId).eq("guild_id", guildId);
   } catch {
-    try {
-      await supabase
-        .from("tickets")
-        .update({ updated_at: new Date().toISOString() })
-        .eq("id", ticketId)
-        .eq("guild_id", guildId);
-    } catch {
-      // best-effort only
-    }
+    try { await supabase.from("tickets").update({ updated_at: new Date().toISOString() }).eq("id", ticketId).eq("guild_id", guildId); } catch {}
   }
 }
 
-export async function POST(
-  request: Request,
-  context: { params: { id?: string } }
-) {
+export async function POST(request: Request, context: { params: { id?: string } }) {
+  let session: DashboardAuthSession | null = null;
   try {
-    const { session, refreshedTokens } = await requireStaffSessionForRoute();
+    session = await requireDashboardStaffSession();
     const supabase = createServerSupabase();
     const ticketId = normalizeString(context?.params?.id);
-    const guildId = selectedGuildId();
+    const guildId = normalizeString(session.selectedGuildId);
 
-    if (!guildId) {
-      return buildJsonResponse(
-        { error: "Select a server before replying to a ticket.", needsServerSelection: true },
-        428,
-        refreshedTokens
-      );
-    }
+    if (!guildId) return buildJsonResponse({ error: "Select a server before replying to a ticket.", error_code: "selected_server_required", needsServerSelection: true }, 428, session);
+    if (!ticketId) return buildJsonResponse({ error: "Missing ticket id.", error_code: "invalid_request", selectedGuildId: guildId }, 400, session);
 
-    if (!ticketId) {
-      return buildJsonResponse(
-        { error: "Missing ticket id.", selectedGuildId: guildId },
-        400,
-        refreshedTokens
-      );
-    }
-
-    const body = safeObject<{ message?: string; attachments?: AttachmentInput[] }>(
-      await request.json().catch(() => ({}))
-    );
-
+    const body = safeObject<{ message?: string; attachments?: AttachmentInput[] }>(await request.json().catch(() => ({})));
     const message = normalizeMultiline(body?.message);
     const attachments = normalizeAttachments(body?.attachments);
 
-    if (!message) {
-      return buildJsonResponse(
-        { error: "Reply message cannot be empty.", selectedGuildId: guildId },
-        400,
-        refreshedTokens
-      );
-    }
-
-    if (message.length > MAX_MESSAGE_LENGTH) {
-      return buildJsonResponse(
-        { error: `Reply is too long. Maximum ${MAX_MESSAGE_LENGTH} characters.`, selectedGuildId: guildId },
-        400,
-        refreshedTokens
-      );
-    }
+    if (!message) return buildJsonResponse({ error: "Reply message cannot be empty.", error_code: "invalid_request", selectedGuildId: guildId }, 400, session);
+    if (message.length > MAX_MESSAGE_LENGTH) return buildJsonResponse({ error: `Reply is too long. Maximum ${MAX_MESSAGE_LENGTH} characters.`, error_code: "invalid_request", selectedGuildId: guildId }, 400, session);
 
     const ticket = await fetchTicketOrNull(supabase, ticketId, guildId);
-    if (!ticket) {
-      return buildJsonResponse(
-        { error: "Ticket not found.", selectedGuildId: guildId },
-        404,
-        refreshedTokens
-      );
-    }
-
-    if (!ticketIsReplyable(ticket)) {
-      return buildJsonResponse(
-        { error: `Cannot reply to a ${getTicketStatus(ticket) || "closed"} ticket.`, selectedGuildId: guildId },
-        409,
-        refreshedTokens
-      );
-    }
+    if (!ticket) return buildJsonResponse({ error: "Ticket not found.", selectedGuildId: guildId }, 404, session);
+    if (!ticketIsReplyable(ticket)) return buildJsonResponse({ error: `Cannot reply to a ${getTicketStatus(ticket) || "closed"} ticket.`, selectedGuildId: guildId }, 409, session);
 
     const { actorId, actorName } = getActorIdentity(session as SessionLike);
-
-    const { data, error } = await supabase
-      .from("ticket_messages")
-      .insert({
-        ticket_id: ticketId,
-        author_id: actorId || "",
-        author_name: actorName,
-        content: message,
-        message_type: "staff",
-        attachments,
-        source: "dashboard",
-      })
-      .select("*")
-      .single();
-
-    if (error || !data) {
-      return buildJsonResponse(
-        { error: error?.message || "Failed to save reply.", selectedGuildId: guildId },
-        500,
-        refreshedTokens
-      );
-    }
+    const { data, error } = await supabase.from("ticket_messages").insert({ ticket_id: ticketId, author_id: actorId || "", author_name: actorName, content: message, message_type: "staff", attachments, source: "dashboard" }).select("*").single();
+    if (error || !data) return buildJsonResponse({ error: error?.message || "Failed to save reply.", selectedGuildId: guildId }, 500, session);
 
     const mirrorResult = await mirrorReplyToDiscord({ ticket, actorName, message, attachments });
+    await Promise.allSettled([bumpTicketFreshness(supabase, ticket), createActivityFeedEvent(supabase, ticket, actorId, actorName, message, attachments, mirrorResult.mirroredToDiscord), insertDashboardStaffMessages(supabase, ticket, actorId, actorName, message, attachments, mirrorResult.discordMessages || [])]);
 
-    await Promise.allSettled([
-      bumpTicketFreshness(supabase, ticket),
-      createActivityFeedEvent(
-        supabase,
-        ticket,
-        actorId,
-        actorName,
-        message,
-        attachments,
-        mirrorResult.mirroredToDiscord
-      ),
-      insertDashboardStaffMessages(
-        supabase,
-        ticket,
-        actorId,
-        actorName,
-        message,
-        attachments,
-        mirrorResult.discordMessages || []
-      ),
-    ]);
-
-    return buildJsonResponse(
-      {
-        ok: true,
-        selectedGuildId: guildId,
-        message: mapTicketMessage(data as TicketMessageRow),
-        mirroredToDiscord: mirrorResult.mirroredToDiscord,
-        mirroredMessageIds: mirrorResult.mirroredMessageIds || [],
-        mirrorError: mirrorResult.mirrorError || "",
-      },
-      200,
-      refreshedTokens
-    );
+    return buildJsonResponse({ ok: true, selectedGuildId: guildId, message: mapTicketMessage(data as TicketMessageRow), mirroredToDiscord: mirrorResult.mirroredToDiscord, mirroredMessageIds: mirrorResult.mirroredMessageIds || [], mirrorError: mirrorResult.mirrorError || "" }, 200, session);
   } catch (error) {
-    return buildJsonResponse(
-      { error: error instanceof Error ? error.message : "Unauthorized" },
-      error instanceof Error && error.message === "Unauthorized" ? 401 : 500
-    );
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
