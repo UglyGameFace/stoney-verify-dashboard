@@ -1,10 +1,5 @@
-import { NextResponse } from "next/server";
-import {
-  requireStaffSessionForRoute,
-  applyAuthCookies,
-} from "@/lib/auth-server";
 import { createServerSupabase } from "@/lib/supabase-server";
-import { getSelectedGuildId } from "@/lib/guild-selection";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson } from "@/lib/dashboard-auth";
 import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
@@ -48,10 +43,6 @@ function safeObject(value) {
 function safeString(value, fallback = "") {
   const text = String(value ?? "").trim();
   return text || fallback;
-}
-
-function selectedGuildId() {
-  return safeString(getSelectedGuildId());
 }
 
 function normalizeStoredMemberPayload(storedMember = {}) {
@@ -298,42 +289,30 @@ function buildMergedMemberPayload({ userId, guildId, guildMember, storedMember, 
   };
 }
 
-function jsonWithCookies(body, status, refreshedTokens) {
-  const response = NextResponse.json(body, {
-    status,
-    headers: {
-      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-    },
-  });
-  applyAuthCookies(response, refreshedTokens);
-  return response;
-}
-
 export async function GET(req) {
-  let refreshedTokens = null;
+  let session = null;
 
   try {
-    const auth = await requireStaffSessionForRoute();
-    refreshedTokens = auth?.refreshedTokens || null;
-
+    session = await requireDashboardStaffSession();
     const supabase = createServerSupabase();
     const url = new URL(req.url);
-    const guildId = selectedGuildId();
+    const guildId = safeString(session.selectedGuildId);
     const userId = safeString(url.searchParams.get("user_id"));
 
     if (!guildId) {
-      return jsonWithCookies(
+      return dashboardAuthJson(
         {
           error: "Select a server before loading member details.",
+          error_code: "selected_server_required",
           needsServerSelection: true,
         },
         428,
-        refreshedTokens
+        session
       );
     }
 
     if (!userId) {
-      return jsonWithCookies({ error: "Missing user id", selectedGuildId: guildId }, 400, refreshedTokens);
+      return dashboardAuthJson({ error: "Missing user id", error_code: "invalid_request", selectedGuildId: guildId }, 400, session);
     }
 
     const storedMember = await getStoredMember(supabase, guildId, userId);
@@ -374,20 +353,16 @@ export async function GET(req) {
       inGuild: Boolean(guildMember),
     });
 
-    return jsonWithCookies(
+    return dashboardAuthJson(
       {
         ok: true,
         selectedGuildId: guildId,
         member: memberPayload,
       },
       200,
-      refreshedTokens
+      session
     );
   } catch (error) {
-    return jsonWithCookies(
-      { error: error?.message || "Failed to load member details" },
-      Number(error?.status) || 500,
-      refreshedTokens
-    );
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
