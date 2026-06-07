@@ -1,19 +1,9 @@
-import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
-import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
-import { getSelectedGuildId } from "@/lib/guild-selection";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
 import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-type RefreshedTokens = {
-  access_token: string;
-  token_type?: string;
-  expires_in?: number;
-  refresh_token?: string;
-  scope?: string;
-} | null;
 
 type SessionLike = {
   user?: { discord_id?: string | null; id?: string | null; username?: string | null; name?: string | null } | null;
@@ -58,17 +48,8 @@ function normalizeMultiline(value: unknown): string {
   return String(value || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
 }
 
-function selectedGuildId(): string {
-  return normalizeString(getSelectedGuildId());
-}
-
-function buildJsonResponse(payload: Record<string, unknown>, status = 200, refreshedTokens: RefreshedTokens = null) {
-  const response = NextResponse.json(payload, {
-    status,
-    headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
-  });
-  applyAuthCookies(response, refreshedTokens);
-  return response;
+function buildJsonResponse(payload: Record<string, unknown>, status = 200, session: DashboardAuthSession | null = null) {
+  return dashboardAuthJson(payload, status, session);
 }
 
 function getActorIdentity(session: SessionLike | null | undefined) {
@@ -158,28 +139,30 @@ async function updateStaffMetrics(supabase: ReturnType<typeof createServerSupaba
 }
 
 export async function POST(request: Request, context: { params: { id?: string } }) {
+  let session: DashboardAuthSession | null = null;
+
   try {
-    const { session, refreshedTokens } = await requireStaffSessionForRoute();
+    session = await requireDashboardStaffSession();
     const supabase = createServerSupabase();
     const ticketId = normalizeString(context?.params?.id);
-    const guildId = selectedGuildId();
+    const guildId = normalizeString(session.selectedGuildId);
 
-    if (!guildId) return buildJsonResponse({ error: "Select a server before closing a ticket.", needsServerSelection: true }, 428, refreshedTokens);
-    if (!ticketId) return buildJsonResponse({ error: "Missing ticket id.", selectedGuildId: guildId }, 400, refreshedTokens);
+    if (!guildId) return buildJsonResponse({ error: "Select a server before closing a ticket.", error_code: "selected_server_required", needsServerSelection: true }, 428, session);
+    if (!ticketId) return buildJsonResponse({ error: "Missing ticket id.", error_code: "invalid_request", selectedGuildId: guildId }, 400, session);
 
     const ticket = await fetchTicketOrNull(supabase, ticketId, guildId);
-    if (!ticket) return buildJsonResponse({ error: "Ticket not found.", selectedGuildId: guildId }, 404, refreshedTokens);
+    if (!ticket) return buildJsonResponse({ error: "Ticket not found.", selectedGuildId: guildId }, 404, session);
 
     const status = getTicketStatus(ticket);
-    if (status === "deleted") return buildJsonResponse({ error: "Cannot close a deleted ticket.", selectedGuildId: guildId }, 409, refreshedTokens);
+    if (status === "deleted") return buildJsonResponse({ error: "Cannot close a deleted ticket.", selectedGuildId: guildId }, 409, session);
 
     const { actorId, actorName } = getActorIdentity(session as SessionLike);
-    if (!actorId) return buildJsonResponse({ error: "Missing staff identity.", selectedGuildId: guildId }, 401, refreshedTokens);
+    if (!actorId) return buildJsonResponse({ error: "Missing staff identity.", selectedGuildId: guildId }, 401, session);
 
     const body = (await request.json().catch(() => ({}))) as { reason?: string };
     const reason = normalizeMultiline(body?.reason) || "Closed by staff";
 
-    if (status === "closed") return buildJsonResponse({ ok: true, selectedGuildId: guildId, ticket: mapTicket(ticket), staffId: actorId, staffName: actorName, alreadyClosed: true }, 200, refreshedTokens);
+    if (status === "closed") return buildJsonResponse({ ok: true, selectedGuildId: guildId, ticket: mapTicket(ticket), staffId: actorId, staffName: actorName, alreadyClosed: true }, 200, session);
 
     const nowIso = new Date().toISOString();
     const { data, error } = await supabase
@@ -190,7 +173,7 @@ export async function POST(request: Request, context: { params: { id?: string } 
       .select("*")
       .single();
 
-    if (error || !data) return buildJsonResponse({ error: error?.message || "Failed to close ticket.", selectedGuildId: guildId }, 500, refreshedTokens);
+    if (error || !data) return buildJsonResponse({ error: error?.message || "Failed to close ticket.", selectedGuildId: guildId }, 500, session);
 
     const updatedTicket = data as TicketRow;
     await Promise.allSettled([
@@ -198,8 +181,8 @@ export async function POST(request: Request, context: { params: { id?: string } 
       updateStaffMetrics(supabase, guildId, actorId, actorName),
     ]);
 
-    return buildJsonResponse({ ok: true, selectedGuildId: guildId, ticket: mapTicket(updatedTicket), staffId: actorId, staffName: actorName, alreadyClosed: false }, 200, refreshedTokens);
+    return buildJsonResponse({ ok: true, selectedGuildId: guildId, ticket: mapTicket(updatedTicket), staffId: actorId, staffName: actorName, alreadyClosed: false }, 200, session);
   } catch (error) {
-    return buildJsonResponse({ error: error instanceof Error ? error.message : "Unauthorized" }, error instanceof Error && error.message === "Unauthorized" ? 401 : 500);
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
