@@ -1,19 +1,13 @@
-import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { fetchGuildRoles, discordBotFetch, normalizeMember } from "@/lib/discord-api";
 import { env } from "@/lib/env";
-import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
-import { getSelectedGuildId } from "@/lib/guild-selection";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson } from "@/lib/dashboard-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 function normalizeString(value) {
   return String(value || "").trim();
-}
-
-function selectedGuildId() {
-  return normalizeString(getSelectedGuildId());
 }
 
 function getSessionUser(session) {
@@ -37,15 +31,8 @@ function getActorName(session) {
   );
 }
 
-function json(payload, status = 200, refreshedTokens = null) {
-  const response = NextResponse.json(payload, {
-    status,
-    headers: {
-      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-    },
-  });
-  applyAuthCookies(response, refreshedTokens);
-  return response;
+function json(payload, status = 200, session = null) {
+  return dashboardAuthJson(payload, status, session);
 }
 
 async function fetchGuildMemberBatch(guildId, after = "0", limit = 500) {
@@ -94,23 +81,22 @@ async function insertRoleSyncActivity(supabase, args) {
 }
 
 export async function POST() {
-  let refreshedTokens = null;
+  let session = null;
   try {
-    const auth = await requireStaffSessionForRoute();
-    const session = auth?.session;
-    refreshedTokens = auth?.refreshedTokens || null;
+    session = await requireDashboardStaffSession();
     const supabase = createServerSupabase();
-    const guildId = selectedGuildId();
+    const guildId = normalizeString(session.selectedGuildId);
 
     if (!guildId) {
       return json(
         {
           ok: false,
           error: "Select a server before running role sync.",
+          error_code: "selected_server_required",
           needsServerSelection: true,
         },
         428,
-        refreshedTokens
+        session
       );
     }
 
@@ -168,7 +154,7 @@ export async function POST() {
         .upsert(roleRows, { onConflict: "guild_id,role_id" });
 
       if (roleError) {
-        return json({ ok: false, selectedGuildId: guildId, error: roleError.message }, 500, refreshedTokens);
+        return json({ ok: false, selectedGuildId: guildId, error: roleError.message }, 500, session);
       }
     }
 
@@ -185,7 +171,7 @@ export async function POST() {
       .eq("guild_id", guildId);
 
     if (markLeftError) {
-      return json({ ok: false, selectedGuildId: guildId, error: markLeftError.message }, 500, refreshedTokens);
+      return json({ ok: false, selectedGuildId: guildId, error: markLeftError.message }, 500, session);
     }
 
     if (normalizedMembers.length) {
@@ -194,7 +180,7 @@ export async function POST() {
         .upsert(normalizedMembers, { onConflict: "guild_id,user_id" });
 
       if (memberError) {
-        return json({ ok: false, selectedGuildId: guildId, error: memberError.message }, 500, refreshedTokens);
+        return json({ ok: false, selectedGuildId: guildId, error: memberError.message }, 500, session);
       }
     }
 
@@ -216,10 +202,9 @@ export async function POST() {
         next_after: null,
       },
       200,
-      refreshedTokens
+      session
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Role sync failed";
-    return json({ ok: false, error: message }, message === "Unauthorized" ? 401 : 500, refreshedTokens);
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
