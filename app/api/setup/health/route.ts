@@ -1,11 +1,10 @@
 import { createServerSupabase } from "@/lib/supabase-server";
-import { requireDashboardStaffSession, dashboardAuthJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type AnyRecord = Record<string, unknown>;
-type ErrorWithStatus = Error & { status?: number };
 
 type HealthCheck = {
   key: string;
@@ -30,12 +29,8 @@ function safeObject(value: unknown): AnyRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as AnyRecord) : {};
 }
 
-function errorStatus(error: unknown, fallback: number): number {
-  return typeof (error as ErrorWithStatus)?.status === "number" ? Number((error as ErrorWithStatus).status) : fallback;
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
+function dashboardBaseHref(guildId: string): string {
+  return `/dashboard/${encodeURIComponent(normalizeString(guildId))}`;
 }
 
 async function safeRows(queryFactory: () => Promise<{ data?: unknown[] | null; error?: { message?: string } | null }>): Promise<unknown[]> {
@@ -92,6 +87,7 @@ function serverRequiredHealth(session: DashboardAuthSession | null) {
     {
       ok: false,
       error: "Select a server before checking setup health.",
+      error_code: "selected_server_required",
       needsServerSelection: true,
       selectedGuildId: null,
       score: 0,
@@ -117,6 +113,7 @@ export async function GET() {
     const guildId = normalizeString(session.selectedGuildId);
     if (!guildId) return serverRequiredHealth(session);
 
+    const baseHref = dashboardBaseHref(guildId);
     const supabase = createServerSupabase();
 
     const [categoriesRaw, ticketsCount, activeTicketsCount, botCommandsRaw, activityCount, guildMembersCount, rolesCount] = await Promise.all([
@@ -172,7 +169,7 @@ export async function GET() {
         ok: guildMembersCount > 0,
         severity: "recommended",
         action_label: "Sync Members",
-        action_href: "/#actions",
+        action_href: `${baseHref}#actions`,
         detail: `${guildMembersCount} member row${guildMembersCount === 1 ? "" : "s"}, ${rolesCount} role row${rolesCount === 1 ? "" : "s"}`,
       }),
       buildCheck({
@@ -182,7 +179,7 @@ export async function GET() {
         ok: categories.length > 0,
         severity: "required",
         action_label: "Create Categories",
-        action_href: "/ticket-categories",
+        action_href: `${baseHref}/categories`,
         detail: `${categories.length} categor${categories.length === 1 ? "y" : "ies"}`,
       }),
       buildCheck({
@@ -192,7 +189,7 @@ export async function GET() {
         ok: categories.length > 0 && namedCategories.length === categories.length,
         severity: "required",
         action_label: "Review Categories",
-        action_href: "/ticket-categories",
+        action_href: `${baseHref}/categories`,
         detail: `${namedCategories.length}/${categories.length} ready`,
       }),
       buildCheck({
@@ -202,7 +199,7 @@ export async function GET() {
         ok: Boolean(defaultCategory),
         severity: "recommended",
         action_label: "Set Default",
-        action_href: "/ticket-categories",
+        action_href: `${baseHref}/categories`,
         detail: defaultCategory ? normalizeString(defaultCategory.name) : "No default category",
       }),
       buildCheck({
@@ -212,7 +209,7 @@ export async function GET() {
         ok: categories.length > 0 && categoriesWithButtons.length === categories.length,
         severity: "recommended",
         action_label: "Fix Labels",
-        action_href: "/ticket-categories",
+        action_href: `${baseHref}/categories`,
         detail: `${categoriesWithButtons.length}/${categories.length} labeled`,
       }),
       buildCheck({
@@ -222,7 +219,7 @@ export async function GET() {
         ok: categories.length > 0 && categoriesWithForms.length === categories.length,
         severity: "recommended",
         action_label: "Configure Forms",
-        action_href: "/ticket-forms",
+        action_href: `${baseHref}/forms`,
         detail: `${categoriesWithForms.length}/${categories.length} covered`,
       }),
       buildCheck({
@@ -232,7 +229,7 @@ export async function GET() {
         ok: panelCommands.length > 0,
         severity: "recommended",
         action_label: "Publish Panel",
-        action_href: "#panel-command",
+        action_href: `${baseHref}#panel-command`,
         detail: panelCommands.length ? `${panelCommands.length} panel command${panelCommands.length === 1 ? "" : "s"} found` : "No panel command found yet",
       }),
       buildCheck({
@@ -242,7 +239,7 @@ export async function GET() {
         ok: doctorCommands.length > 0,
         severity: "optional",
         action_label: "Run Doctor",
-        action_href: "#panel-command",
+        action_href: `${baseHref}#panel-command`,
         detail: doctorCommands.length ? `${doctorCommands.length} doctor command${doctorCommands.length === 1 ? "" : "s"} found` : "No doctor command found yet",
       }),
       buildCheck({
@@ -252,7 +249,7 @@ export async function GET() {
         ok: ticketsCount > 0,
         severity: "required",
         action_label: "Open Test Ticket",
-        action_href: "/#tickets",
+        action_href: `${baseHref}#tickets`,
         detail: `${ticketsCount} ticket${ticketsCount === 1 ? "" : "s"}; ${activeTicketsCount} open/claimed`,
       }),
       buildCheck({
@@ -262,7 +259,7 @@ export async function GET() {
         ok: activityCount > 0,
         severity: "recommended",
         action_label: "View Activity",
-        action_href: "/#activity",
+        action_href: `${baseHref}#activity`,
         detail: `${activityCount} event${activityCount === 1 ? "" : "s"}`,
       }),
       buildCheck({
@@ -272,7 +269,7 @@ export async function GET() {
         ok: pendingCommands.length === 0,
         severity: "required",
         action_label: "Review Actions",
-        action_href: "/#actions",
+        action_href: `${baseHref}#actions`,
         detail: pendingCommands.length ? `${pendingCommands.length} pending/processing` : "No stuck commands found",
       }),
     ];
@@ -311,6 +308,6 @@ export async function GET() {
       session
     );
   } catch (error) {
-    return dashboardAuthJson({ ok: false, error: errorMessage(error, "Failed to check setup health.") }, errorStatus(error, 500), session);
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
