@@ -1,18 +1,12 @@
-import { NextResponse } from "next/server"
-import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server"
 import { createServerSupabase } from "@/lib/supabase-server"
 import { env } from "@/lib/env"
-import { getSelectedGuildId } from "@/lib/guild-selection"
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson } from "@/lib/dashboard-auth"
 
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
 function normalizeString(value) {
   return String(value || "").trim()
-}
-
-function selectedGuildId() {
-  return normalizeString(getSelectedGuildId())
 }
 
 function safeAuditReason(value) {
@@ -67,13 +61,8 @@ function getActorName(session) {
   )
 }
 
-function json(payload, status = 200, refreshedTokens = null) {
-  const response = NextResponse.json(payload, {
-    status,
-    headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
-  })
-  applyAuthCookies(response, refreshedTokens)
-  return response
+function json(payload, status = 200, session = null) {
+  return dashboardAuthJson(payload, status, session)
 }
 
 function normalizeGuildRoles(rows) {
@@ -237,22 +226,20 @@ async function insertMemberSyncActivity(supabase, args) {
 }
 
 export async function POST(req) {
-  let refreshedTokens = null
+  let session = null
 
   try {
-    const auth = await requireStaffSessionForRoute()
-    const session = auth?.session
-    refreshedTokens = auth?.refreshedTokens || null
+    session = await requireDashboardStaffSession()
     const supabase = createServerSupabase()
-    const guildId = selectedGuildId()
+    const guildId = normalizeString(session.selectedGuildId)
     const body = await req.json().catch(() => ({}))
     const userId = String(body.user_id || "").trim()
     const reason = String(body.reason || "").trim() || "Dashboard member sync"
     const actorId = getActorId(session)
     const actorName = getActorName(session)
 
-    if (!guildId) return json({ ok: false, error: "Select a server before syncing a member.", needsServerSelection: true }, 428, refreshedTokens)
-    if (!userId) return json({ ok: false, selectedGuildId: guildId, error: "Missing user id" }, 400, refreshedTokens)
+    if (!guildId) return json({ ok: false, error: "Select a server before syncing a member.", error_code: "selected_server_required", needsServerSelection: true }, 428, session)
+    if (!userId) return json({ ok: false, selectedGuildId: guildId, error: "Missing user id", error_code: "invalid_request" }, 400, session)
 
     const [{ data: storedMember, error: storedError }, { data: roleRules, error: rulesError }] = await Promise.all([
       supabase.from("guild_members").select("*").eq("guild_id", guildId).eq("user_id", userId).maybeSingle(),
@@ -293,18 +280,9 @@ export async function POST(req) {
         }
 
         const unavailable = buildStoredUnavailableMember(storedMember, userId)
-        await insertMemberSyncActivity(supabase, {
-          guildId,
-          actorId,
-          actorName,
-          userId,
-          reason,
-          inGuild: false,
-          memberName: unavailable.display_name || unavailable.username || userId,
-          roleState: unavailable.role_state,
-        })
+        await insertMemberSyncActivity(supabase, { guildId, actorId, actorName, userId, reason, inGuild: false, memberName: unavailable.display_name || unavailable.username || userId, roleState: unavailable.role_state })
 
-        return json({ ok: true, selectedGuildId: guildId, member: unavailable, in_guild: false }, 200, refreshedTokens)
+        return json({ ok: true, selectedGuildId: guildId, member: unavailable, in_guild: false }, 200, session)
       }
       throw error
     }
@@ -359,16 +337,7 @@ export async function POST(req) {
     const { error: upsertError } = await supabase.from("guild_members").upsert(row, { onConflict: "guild_id,user_id" })
     if (upsertError) throw new Error(upsertError.message || "Failed to persist member sync.")
 
-    await insertMemberSyncActivity(supabase, {
-      guildId,
-      actorId,
-      actorName,
-      userId,
-      reason,
-      inGuild: true,
-      memberName: row.display_name || row.username || userId,
-      roleState: row.role_state,
-    })
+    await insertMemberSyncActivity(supabase, { guildId, actorId, actorName, userId, reason, inGuild: true, memberName: row.display_name || row.username || userId, roleState: row.role_state })
 
     return json(
       {
@@ -406,9 +375,9 @@ export async function POST(req) {
         },
       },
       200,
-      refreshedTokens
+      session
     )
   } catch (error) {
-    return json({ ok: false, error: error.message || "Member sync failed" }, error?.message === "Unauthorized" ? 401 : 500, refreshedTokens)
+    return dashboardAuthErrorJson(error, session, 500)
   }
 }
