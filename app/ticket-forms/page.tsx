@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import TicketFormsManager from "@/components/dashboard/TicketFormsManager";
 import AuthStatePage from "@/components/dashboard/AuthStatePage";
 import SetupWorkspaceShell from "@/components/dashboard/SetupWorkspaceShell";
@@ -10,6 +11,10 @@ async function safeDashboardAuthSession(): Promise<DashboardAuthSession | null> 
   } catch {
     return null;
   }
+}
+
+function dashboardBaseHref(guildId: string): string {
+  return `/dashboard/${encodeURIComponent(String(guildId || "").trim())}`;
 }
 
 function StaffRequiredState() {
@@ -70,16 +75,20 @@ export default async function TicketFormsPage() {
   if (!session.selectedGuildId) return <ServerRequiredState />;
   if (!session.isStaff) return <StaffRequiredState />;
 
+  const base = dashboardBaseHref(session.selectedGuildId);
+  redirect(`${base}/forms`);
+
   return (
     <SetupWorkspaceShell
       activeStep="forms"
       eyebrow="Step 3 of 3"
       title="Ticket Forms"
       description="Control what members answer after choosing an issue type. Smart defaults work automatically, and custom questions override them per category."
+      dashboardBaseHref={base}
       actions={
         <>
-          <Link href="/ticket-categories" className="button ghost">Back: Categories</Link>
-          <Link href="/" className="button primary">Finish Setup</Link>
+          <Link href={`${base}/categories`} className="button ghost">Back: Categories</Link>
+          <Link href={base} className="button primary">Finish Setup</Link>
         </>
       }
     >
