@@ -11,21 +11,35 @@ type SetupWorkspaceShellProps = {
   description: string;
   children: ReactNode;
   actions?: ReactNode;
+  dashboardBaseHref?: string;
 };
 
 const SETUP_STEPS: Array<{
   key: SetupStepKey;
-  href: string;
+  fallbackHref: string;
   label: string;
   helper: string;
   step: string;
 }> = [
-  { key: "servers", href: "/servers", label: "Servers", helper: "Pick context", step: "1" },
-  { key: "categories", href: "/ticket-categories", label: "Categories", helper: "Route tickets", step: "2" },
-  { key: "forms", href: "/ticket-forms", label: "Forms", helper: "Collect details", step: "3" },
+  { key: "servers", fallbackHref: "/servers", label: "Servers", helper: "Pick context", step: "1" },
+  { key: "categories", fallbackHref: "/ticket-categories", label: "Categories", helper: "Route tickets", step: "2" },
+  { key: "forms", fallbackHref: "/ticket-forms", label: "Forms", helper: "Collect details", step: "3" },
 ];
 
-export default function SetupWorkspaceShell({ activeStep, eyebrow, title, description, children, actions }: SetupWorkspaceShellProps) {
+function clean(value: unknown): string {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
+
+function stepHref(key: SetupStepKey, dashboardBaseHref?: string): string {
+  const base = clean(dashboardBaseHref);
+  if (!base) return SETUP_STEPS.find((item) => item.key === key)?.fallbackHref || "/servers";
+  if (key === "servers") return "/servers";
+  if (key === "categories") return `${base}/categories`;
+  if (key === "forms") return `${base}/forms`;
+  return base;
+}
+
+export default function SetupWorkspaceShell({ activeStep, eyebrow, title, description, children, actions, dashboardBaseHref }: SetupWorkspaceShellProps) {
   return (
     <div className="shell setup-workspace-shell">
       <Sidebar />
@@ -44,8 +58,9 @@ export default function SetupWorkspaceShell({ activeStep, eyebrow, title, descri
             <nav className="setup-step-nav" aria-label="Setup steps">
               {SETUP_STEPS.map((item) => {
                 const active = item.key === activeStep;
+                const href = stepHref(item.key, dashboardBaseHref) || item.fallbackHref;
                 return (
-                  <Link key={item.key} href={item.href} className={`setup-step-link ${active ? "active" : ""}`} aria-current={active ? "page" : undefined}>
+                  <Link key={item.key} href={href} className={`setup-step-link ${active ? "active" : ""}`} aria-current={active ? "page" : undefined}>
                     <span className="setup-step-number">{item.step}</span>
                     <span className="setup-step-copy">
                       <strong>{item.label}</strong>
