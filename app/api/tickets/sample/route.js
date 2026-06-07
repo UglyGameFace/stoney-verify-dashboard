@@ -1,6 +1,5 @@
 import { createServerSupabase } from "@/lib/supabase-server";
-import { requireStaffSessionForRoute } from "@/lib/auth-server";
-import { getSelectedGuildId } from "@/lib/guild-selection";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson } from "@/lib/dashboard-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -35,17 +34,8 @@ function getStaffName(session) {
   );
 }
 
-function selectedGuildId() {
-  return normalizeString(getSelectedGuildId());
-}
-
-function json(payload, status = 200) {
-  return Response.json(payload, {
-    status,
-    headers: {
-      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-    },
-  });
+function json(payload, status = 200, session = null) {
+  return dashboardAuthJson(payload, status, session);
 }
 
 async function insertActivityEvent(supabase, args) {
@@ -89,29 +79,35 @@ async function insertActivityEvent(supabase, args) {
 }
 
 export async function POST() {
+  let session = null;
+
   try {
     if (!isSampleRouteEnabled()) {
       return json(
         {
           ok: false,
           error: "Sample ticket creation is disabled.",
+          error_code: "forbidden",
           enableWith: "ENABLE_SAMPLE_TICKET_ROUTE=true",
         },
-        403
+        403,
+        session
       );
     }
 
-    const { session } = await requireStaffSessionForRoute();
-    const guildId = selectedGuildId();
+    session = await requireDashboardStaffSession();
+    const guildId = normalizeString(session.selectedGuildId);
 
     if (!guildId) {
       return json(
         {
           ok: false,
           error: "Select a server before creating sample tickets.",
+          error_code: "selected_server_required",
           needsServerSelection: true,
         },
-        428
+        428,
+        session
       );
     }
 
@@ -119,7 +115,7 @@ export async function POST() {
     const staffName = getStaffName(session);
 
     if (!staffId) {
-      return json({ ok: false, error: "Could not identify signed-in staff member." }, 401);
+      return json({ ok: false, error: "Could not identify signed-in staff member.", error_code: "invalid_request", selectedGuildId: guildId }, 400, session);
     }
 
     const supabase = createServerSupabase();
@@ -167,7 +163,7 @@ export async function POST() {
     const { data, error } = await supabase.from("tickets").insert(samples).select("*");
 
     if (error) {
-      return json({ ok: false, selectedGuildId: guildId, error: error.message }, 500);
+      return json({ ok: false, selectedGuildId: guildId, error: error.message }, 500, session);
     }
 
     const tickets = Array.isArray(data) ? data : [];
@@ -184,7 +180,7 @@ export async function POST() {
       const { error: messageError } = await supabase.from("ticket_messages").insert(messages);
 
       if (messageError) {
-        return json({ ok: false, selectedGuildId: guildId, error: messageError.message }, 500);
+        return json({ ok: false, selectedGuildId: guildId, error: messageError.message }, 500, session);
       }
     }
 
@@ -196,14 +192,17 @@ export async function POST() {
       ticketIds: tickets.map((ticket) => ticket.id).filter(Boolean),
     });
 
-    return json({
-      ok: true,
-      selectedGuildId: guildId,
-      inserted: tickets.length,
-      tickets,
-    });
+    return json(
+      {
+        ok: true,
+        selectedGuildId: guildId,
+        inserted: tickets.length,
+        tickets,
+      },
+      200,
+      session
+    );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to create sample tickets.";
-    return json({ ok: false, error: message }, message === "Unauthorized" ? 401 : 500);
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
