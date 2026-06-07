@@ -1,5 +1,5 @@
 import { createServerSupabase } from "@/lib/supabase-server";
-import { requireDashboardStaffSession, dashboardAuthJson } from "@/lib/dashboard-auth";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson } from "@/lib/dashboard-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -90,7 +90,7 @@ export async function GET() {
     const guildId = clean(session.selectedGuildId);
 
     if (!guildId) {
-      return dashboardAuthJson({ ok: false, error: "Select a server before opening the staff dashboard.", needsServerSelection: true }, 428, session);
+      return dashboardAuthJson({ ok: false, error: "Select a server before opening the staff dashboard.", error_code: "selected_server_required", needsServerSelection: true }, 428, session);
     }
 
     const supabase = createServerSupabase();
@@ -159,7 +159,6 @@ export async function GET() {
       },
     }, 200, session);
   } catch (error) {
-    const status = error?.status || (error?.message === "Staff access required" ? 403 : 401);
-    return dashboardAuthJson({ ok: false, error: error?.message || "Unauthorized" }, status, session);
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
