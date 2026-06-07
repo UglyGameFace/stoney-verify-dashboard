@@ -1,21 +1,11 @@
-import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
-import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server";
-import { getSelectedGuildId } from "@/lib/guild-selection";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
 import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const MAX_NOTE_LENGTH = 4000;
-
-type RefreshedTokens = {
-  access_token: string;
-  token_type?: string;
-  expires_in?: number;
-  refresh_token?: string;
-  scope?: string;
-} | null;
 
 type SessionLike = {
   user?: { discord_id?: string | null; id?: string | null; username?: string | null; name?: string | null } | null;
@@ -63,17 +53,8 @@ function safeObject<T extends object = Record<string, unknown>>(value: unknown):
   return value && typeof value === "object" && !Array.isArray(value) ? (value as T) : ({} as T);
 }
 
-function selectedGuildId(): string {
-  return normalizeString(getSelectedGuildId());
-}
-
-function buildJsonResponse(payload: Record<string, unknown>, status = 200, refreshedTokens: RefreshedTokens = null) {
-  const response = NextResponse.json(payload, {
-    status,
-    headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
-  });
-  applyAuthCookies(response, refreshedTokens);
-  return response;
+function buildJsonResponse(payload: Record<string, unknown>, status = 200, session: DashboardAuthSession | null = null) {
+  return dashboardAuthJson(payload, status, session);
 }
 
 function mapNote(row: TicketNoteRow | null | undefined) {
@@ -148,44 +129,48 @@ async function bumpTicketUpdatedAt(supabase: ReturnType<typeof createServerSupab
 }
 
 export async function GET(_request: Request, context: { params: { id?: string } }) {
+  let session: DashboardAuthSession | null = null;
+
   try {
-    const { refreshedTokens } = await requireStaffSessionForRoute();
+    session = await requireDashboardStaffSession();
     const supabase = createServerSupabase();
     const ticketId = normalizeString(context?.params?.id);
-    const guildId = selectedGuildId();
+    const guildId = normalizeString(session.selectedGuildId);
 
-    if (!guildId) return buildJsonResponse({ error: "Select a server before loading ticket notes.", needsServerSelection: true }, 428, refreshedTokens);
-    if (!ticketId) return buildJsonResponse({ error: "Missing ticket id.", selectedGuildId: guildId }, 400, refreshedTokens);
+    if (!guildId) return buildJsonResponse({ error: "Select a server before loading ticket notes.", error_code: "selected_server_required", needsServerSelection: true }, 428, session);
+    if (!ticketId) return buildJsonResponse({ error: "Missing ticket id.", error_code: "invalid_request", selectedGuildId: guildId }, 400, session);
 
     const ticket = await fetchTicketOrNull(supabase, ticketId, guildId);
-    if (!ticket) return buildJsonResponse({ error: "Ticket not found.", selectedGuildId: guildId }, 404, refreshedTokens);
+    if (!ticket) return buildJsonResponse({ error: "Ticket not found.", selectedGuildId: guildId }, 404, session);
 
     const { data, error } = await supabase.from("ticket_notes").select("*").eq("ticket_id", ticketId).order("created_at", { ascending: false });
-    if (error) return buildJsonResponse({ error: error.message || "Failed to load notes.", selectedGuildId: guildId }, 500, refreshedTokens);
+    if (error) return buildJsonResponse({ error: error.message || "Failed to load notes.", selectedGuildId: guildId }, 500, session);
 
-    return buildJsonResponse({ ok: true, selectedGuildId: guildId, notes: Array.isArray(data) ? (data as TicketNoteRow[]).map(mapNote) : [] }, 200, refreshedTokens);
+    return buildJsonResponse({ ok: true, selectedGuildId: guildId, notes: Array.isArray(data) ? (data as TicketNoteRow[]).map(mapNote) : [] }, 200, session);
   } catch (error) {
-    return buildJsonResponse({ error: error instanceof Error ? error.message : "Unauthorized" }, error instanceof Error && error.message === "Unauthorized" ? 401 : 500);
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
 
 export async function POST(request: Request, context: { params: { id?: string } }) {
+  let session: DashboardAuthSession | null = null;
+
   try {
-    const { session, refreshedTokens } = await requireStaffSessionForRoute();
+    session = await requireDashboardStaffSession();
     const supabase = createServerSupabase();
     const ticketId = normalizeString(context?.params?.id);
-    const guildId = selectedGuildId();
+    const guildId = normalizeString(session.selectedGuildId);
 
-    if (!guildId) return buildJsonResponse({ error: "Select a server before adding a ticket note.", needsServerSelection: true }, 428, refreshedTokens);
-    if (!ticketId) return buildJsonResponse({ error: "Missing ticket id.", selectedGuildId: guildId }, 400, refreshedTokens);
+    if (!guildId) return buildJsonResponse({ error: "Select a server before adding a ticket note.", error_code: "selected_server_required", needsServerSelection: true }, 428, session);
+    if (!ticketId) return buildJsonResponse({ error: "Missing ticket id.", error_code: "invalid_request", selectedGuildId: guildId }, 400, session);
 
     const body = safeObject<{ content?: string }>(await request.json().catch(() => ({})));
     const content = normalizeMultiline(body?.content);
-    if (!content) return buildJsonResponse({ error: "Note content is required.", selectedGuildId: guildId }, 400, refreshedTokens);
-    if (content.length > MAX_NOTE_LENGTH) return buildJsonResponse({ error: `Note is too long. Maximum ${MAX_NOTE_LENGTH} characters.`, selectedGuildId: guildId }, 400, refreshedTokens);
+    if (!content) return buildJsonResponse({ error: "Note content is required.", error_code: "invalid_request", selectedGuildId: guildId }, 400, session);
+    if (content.length > MAX_NOTE_LENGTH) return buildJsonResponse({ error: `Note is too long. Maximum ${MAX_NOTE_LENGTH} characters.`, error_code: "invalid_request", selectedGuildId: guildId }, 400, session);
 
     const ticket = await fetchTicketOrNull(supabase, ticketId, guildId);
-    if (!ticket) return buildJsonResponse({ error: "Ticket not found.", selectedGuildId: guildId }, 404, refreshedTokens);
+    if (!ticket) return buildJsonResponse({ error: "Ticket not found.", selectedGuildId: guildId }, 404, session);
 
     const { actorId, actorName } = getActorIdentity(session as SessionLike);
     const nowIso = new Date().toISOString();
@@ -203,12 +188,12 @@ export async function POST(request: Request, context: { params: { id?: string } 
       error = fallbackResponse.error;
     }
 
-    if (error || !data) return buildJsonResponse({ error: error?.message || "Failed to save note.", selectedGuildId: guildId }, 500, refreshedTokens);
+    if (error || !data) return buildJsonResponse({ error: error?.message || "Failed to save note.", selectedGuildId: guildId }, 500, session);
 
     await Promise.allSettled([bumpTicketUpdatedAt(supabase, ticketId, guildId), createActivityFeedEvent(supabase, ticket, actorId, actorName, content)]);
 
-    return buildJsonResponse({ ok: true, selectedGuildId: guildId, note: mapNote(data) }, 200, refreshedTokens);
+    return buildJsonResponse({ ok: true, selectedGuildId: guildId, note: mapNote(data) }, 200, session);
   } catch (error) {
-    return buildJsonResponse({ error: error instanceof Error ? error.message : "Unauthorized" }, error instanceof Error && error.message === "Unauthorized" ? 401 : 500);
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
