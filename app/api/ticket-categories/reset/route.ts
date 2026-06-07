@@ -1,11 +1,10 @@
 import { createServerSupabase } from "@/lib/supabase-server";
-import { requireDashboardStaffSession, dashboardAuthJson } from "@/lib/dashboard-auth";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson } from "@/lib/dashboard-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type JsonRecord = Record<string, unknown>;
-type ErrorWithStatus = Error & { status?: number };
 
 function normalizeString(value: unknown): string {
   return String(value || "").trim();
@@ -19,14 +18,6 @@ function normalizeBoolean(value: unknown): boolean {
 
 function safeObject<T extends object = JsonRecord>(value: unknown): T {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as T) : ({} as T);
-}
-
-function errorStatus(error: unknown, fallback: number): number {
-  return typeof (error as ErrorWithStatus)?.status === "number" ? Number((error as ErrorWithStatus).status) : fallback;
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
 }
 
 async function parseRequestBody(request: Request): Promise<JsonRecord> {
@@ -45,7 +36,7 @@ export async function POST(request: Request) {
     const guildId = normalizeString(session.selectedGuildId);
 
     if (!guildId) {
-      return dashboardAuthJson({ error: "Select a server before resetting categories.", needsServerSelection: true }, 428, session);
+      return dashboardAuthJson({ error: "Select a server before resetting categories.", error_code: "selected_server_required", needsServerSelection: true }, 428, session);
     }
 
     const body = await parseRequestBody(request);
@@ -54,11 +45,11 @@ export async function POST(request: Request) {
     const resetLinkedTickets = normalizeBoolean(body.resetLinkedTickets);
 
     if (confirmText !== "RESET CATEGORIES") {
-      return dashboardAuthJson({ error: "Type RESET CATEGORIES to confirm this destructive action." }, 400, session);
+      return dashboardAuthJson({ error: "Type RESET CATEGORIES to confirm this destructive action.", error_code: "invalid_request" }, 400, session);
     }
 
     if (!understandsSeverity) {
-      return dashboardAuthJson({ error: "Confirm that you understand this removes all dashboard category routing for the selected server." }, 400, session);
+      return dashboardAuthJson({ error: "Confirm that you understand this removes all dashboard category routing for the selected server.", error_code: "invalid_request" }, 400, session);
     }
 
     const supabase = createServerSupabase();
@@ -88,6 +79,7 @@ export async function POST(request: Request) {
       return dashboardAuthJson(
         {
           error: "Some tickets are linked to dashboard categories. Check the acknowledgement box to clear category links before reset.",
+          error_code: "invalid_request",
           selectedGuildId: guildId,
           linkedTicketCount: Number(linkedTicketCount || 0),
         },
@@ -138,6 +130,6 @@ export async function POST(request: Request) {
       session
     );
   } catch (error) {
-    return dashboardAuthJson({ error: errorMessage(error, "Failed to reset categories.") }, errorStatus(error, 400), session);
+    return dashboardAuthErrorJson(error, session, 400);
   }
 }
