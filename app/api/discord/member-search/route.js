@@ -1,7 +1,5 @@
-import { NextResponse } from "next/server"
 import { createServerSupabase } from "@/lib/supabase-server"
-import { requireStaffSessionForRoute, applyAuthCookies } from "@/lib/auth-server"
-import { getSelectedGuildId } from "@/lib/guild-selection"
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson } from "@/lib/dashboard-auth"
 
 export const dynamic = "force-dynamic"
 export const revalidate = 0
@@ -12,21 +10,6 @@ function normalizeSearchValue(value) {
 
 function normalizeString(value) {
   return String(value || "").trim()
-}
-
-function selectedGuildId() {
-  return normalizeString(getSelectedGuildId())
-}
-
-function jsonWithCookies(body, status = 200, refreshedTokens = null) {
-  const response = NextResponse.json(body, {
-    status,
-    headers: {
-      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-    },
-  })
-  applyAuthCookies(response, refreshedTokens)
-  return response
 }
 
 function extractRoleSearchTerms(member) {
@@ -98,29 +81,28 @@ function prefixScore(member, query) {
 }
 
 export async function GET(req) {
-  let refreshedTokens = null
+  let session = null
 
   try {
-    const auth = await requireStaffSessionForRoute()
-    refreshedTokens = auth?.refreshedTokens || null
-
+    session = await requireDashboardStaffSession()
     const url = new URL(req.url)
     const q = String(url.searchParams.get("q") || "").trim()
-    const guildId = selectedGuildId()
+    const guildId = normalizeString(session.selectedGuildId)
 
     if (!guildId) {
-      return jsonWithCookies(
+      return dashboardAuthJson(
         {
           error: "Select a server before searching members.",
+          error_code: "selected_server_required",
           needsServerSelection: true,
         },
         428,
-        refreshedTokens
+        session
       )
     }
 
     if (!q) {
-      return jsonWithCookies({ ok: true, selectedGuildId: guildId, results: [] }, 200, refreshedTokens)
+      return dashboardAuthJson({ ok: true, selectedGuildId: guildId, results: [] }, 200, session)
     }
 
     const supabase = createServerSupabase()
@@ -133,10 +115,10 @@ export async function GET(req) {
       .limit(200)
 
     if (error) {
-      return jsonWithCookies(
+      return dashboardAuthJson(
         { error: error.message || "Search failed", selectedGuildId: guildId },
         500,
-        refreshedTokens
+        session
       )
     }
 
@@ -176,12 +158,8 @@ export async function GET(req) {
       })
       .slice(0, 20)
 
-    return jsonWithCookies({ ok: true, selectedGuildId: guildId, results }, 200, refreshedTokens)
+    return dashboardAuthJson({ ok: true, selectedGuildId: guildId, results }, 200, session)
   } catch (error) {
-    return jsonWithCookies(
-      { error: error?.message || "Search failed" },
-      Number(error?.status) || (error?.message === "Unauthorized" ? 401 : 500),
-      refreshedTokens
-    )
+    return dashboardAuthErrorJson(error, session, 500)
   }
 }
