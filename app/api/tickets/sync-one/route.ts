@@ -1,64 +1,41 @@
 import { NextRequest } from "next/server";
-import { requireStaffSessionForRoute } from "@/lib/auth-server";
-import {
-  buildRouteJson,
-  getActorId,
-  parseRouteBody,
-  readBoolean,
-  readString,
-  toErrorMessage,
-  unauthorizedRouteResponse,
-  type RefreshedTokens,
-} from "@/lib/ticketActionRoute";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
+import { parseRouteBody, readBoolean, readString } from "@/lib/ticketActionRoute";
 import { queueSyncSingleTicket } from "@/lib/botCommands";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function missingFieldRouteResponse(
-  field: string,
-  refreshedTokens: RefreshedTokens | null
-) {
-  return buildRouteJson(
-    {
-      ok: false,
-      error: `Missing ${field}`,
-    },
-    400,
-    refreshedTokens
-  );
+function actorIdFromSession(session: DashboardAuthSession | null): string {
+  return String(session?.user?.discord_id || session?.user?.id || session?.discordUser?.id || "").trim();
+}
+
+function json(payload: Record<string, unknown>, status = 200, session: DashboardAuthSession | null = null) {
+  return dashboardAuthJson(payload, status, session);
+}
+
+function missingField(field: string, session: DashboardAuthSession | null) {
+  return json({ ok: false, queued: false, error: `Missing ${field}`, error_code: "invalid_request" }, 400, session);
 }
 
 export async function POST(req: NextRequest) {
-  let refreshedTokens: RefreshedTokens | null = null;
+  let session: DashboardAuthSession | null = null;
 
   try {
-    const auth = await requireStaffSessionForRoute();
-    refreshedTokens = auth?.refreshedTokens ?? null;
-
-    const actorId = getActorId(auth?.session);
-    if (!actorId) {
-      return unauthorizedRouteResponse(refreshedTokens);
-    }
+    session = await requireDashboardStaffSession();
+    const actorId = actorIdFromSession(session);
+    if (!actorId) return json({ ok: false, queued: false, error: "Could not identify signed-in staff member.", error_code: "invalid_request" }, 400, session);
 
     const body = await parseRouteBody(req);
-
     const channelId = readString(body, ["channelId", "channel_id"]);
     const dryRun = readBoolean(body, ["dryRun", "dry_run"], false);
-    const requestedBy =
-      readString(body, ["requestedBy", "requested_by"], actorId) || actorId;
+    const requestedBy = readString(body, ["requestedBy", "requested_by"], actorId) || actorId;
 
-    if (!channelId) {
-      return missingFieldRouteResponse("channelId", refreshedTokens);
-    }
+    if (!channelId) return missingField("channelId", session);
 
-    const command = await queueSyncSingleTicket({
-      channelId,
-      dryRun,
-      requestedBy: actorId,
-    });
+    const command = await queueSyncSingleTicket({ channelId, dryRun, requestedBy: actorId });
 
-    return buildRouteJson(
+    return json(
       {
         ok: true,
         queued: true,
@@ -69,19 +46,9 @@ export async function POST(req: NextRequest) {
         effectiveRequestedBy: actorId,
       },
       200,
-      refreshedTokens
+      session
     );
   } catch (error) {
-    const message = toErrorMessage(error);
-
-    return buildRouteJson(
-      {
-        ok: false,
-        queued: false,
-        error: message,
-      },
-      message === "Unauthorized" ? 401 : 500,
-      refreshedTokens
-    );
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
