@@ -70,6 +70,28 @@ type StoredMember = {
 
 export type DashboardAccessLevel = "signed_out" | "member" | "staff" | "server_manager";
 
+export type DashboardAuthErrorCode =
+  | "signed_out"
+  | "selected_server_required"
+  | "route_guild_mismatch"
+  | "staff_access_required"
+  | "forbidden"
+  | "discord_rate_limited"
+  | "discord_rejected_token"
+  | "token_refresh_failed"
+  | "bot_check_unknown"
+  | "bot_not_installed"
+  | "invalid_request"
+  | "server_error";
+
+export type DashboardAuthError = Error & {
+  status?: number;
+  error_code?: DashboardAuthErrorCode;
+  code?: DashboardAuthErrorCode | string;
+  retryable?: boolean;
+  needsServerSelection?: boolean;
+};
+
 export type DashboardAuthSession = {
   signedIn: boolean;
   accessLevel: DashboardAccessLevel;
@@ -132,6 +154,79 @@ function clean(value: unknown): string {
 
 function lower(value: unknown): string {
   return clean(value).toLowerCase();
+}
+
+function makeDashboardAuthError(message: string, status: number, errorCode: DashboardAuthErrorCode, retryable = false): DashboardAuthError {
+  const error = new Error(message) as DashboardAuthError;
+  error.status = status;
+  error.error_code = errorCode;
+  error.code = errorCode;
+  error.retryable = retryable;
+  error.needsServerSelection = errorCode === "selected_server_required" || errorCode === "route_guild_mismatch";
+  return error;
+}
+
+function statusFromCode(errorCode: DashboardAuthErrorCode, fallbackStatus: number): number {
+  if (errorCode === "signed_out" || errorCode === "discord_rejected_token" || errorCode === "token_refresh_failed") return 401;
+  if (errorCode === "selected_server_required") return 428;
+  if (errorCode === "route_guild_mismatch") return 409;
+  if (errorCode === "staff_access_required" || errorCode === "forbidden") return 403;
+  if (errorCode === "discord_rate_limited") return 429;
+  if (errorCode === "bot_check_unknown") return 503;
+  if (errorCode === "bot_not_installed" || errorCode === "invalid_request") return 400;
+  return fallbackStatus;
+}
+
+function normalizeErrorCode(value: unknown): DashboardAuthErrorCode | null {
+  const code = lower(value);
+  const allowed: DashboardAuthErrorCode[] = [
+    "signed_out",
+    "selected_server_required",
+    "route_guild_mismatch",
+    "staff_access_required",
+    "forbidden",
+    "discord_rate_limited",
+    "discord_rejected_token",
+    "token_refresh_failed",
+    "bot_check_unknown",
+    "bot_not_installed",
+    "invalid_request",
+    "server_error",
+  ];
+  return allowed.includes(code as DashboardAuthErrorCode) ? (code as DashboardAuthErrorCode) : null;
+}
+
+export function classifyDashboardAuthError(error: unknown, fallbackStatus = 500): { status: number; error_code: DashboardAuthErrorCode; message: string; needsServerSelection: boolean; retryable: boolean } {
+  const raw = error as DashboardAuthError;
+  const rawMessage = error instanceof Error ? error.message : clean(error);
+  const message = rawMessage || "Dashboard request failed.";
+  const explicitCode = normalizeErrorCode(raw?.error_code || raw?.code);
+  const status = typeof raw?.status === "number" ? Number(raw.status) : fallbackStatus;
+  const text = lower(message);
+
+  let error_code: DashboardAuthErrorCode = explicitCode || "server_error";
+
+  if (!explicitCode) {
+    if (status === 428 || text.includes("select a server") || text.includes("selected server")) error_code = "selected_server_required";
+    else if (status === 429 || text.includes("rate limit") || text.includes("retry_after") || text.includes("rate-limiting")) error_code = "discord_rate_limited";
+    else if (text.includes("oauth refresh failed") || text.includes("refresh failed") || text.includes("token refresh")) error_code = "token_refresh_failed";
+    else if (text.includes("discord rejected") || text.includes("discord session expired") || text.includes("oauth token") || text.includes("401") || text.includes("unauthorized")) error_code = "discord_rejected_token";
+    else if (status === 401 || text === "unauthorized") error_code = "signed_out";
+    else if (status === 403 || text.includes("staff access required")) error_code = text.includes("staff") ? "staff_access_required" : "forbidden";
+    else if (status === 409 || text.includes("guild mismatch") || text.includes("server mismatch")) error_code = "route_guild_mismatch";
+    else if (text.includes("bot") && text.includes("installed")) error_code = "bot_not_installed";
+    else if (text.includes("bot") && (text.includes("unknown") || text.includes("could not verify"))) error_code = "bot_check_unknown";
+    else if (status === 400) error_code = "invalid_request";
+  }
+
+  const finalStatus = statusFromCode(error_code, status || fallbackStatus);
+  return {
+    status: finalStatus,
+    error_code,
+    message,
+    needsServerSelection: Boolean(raw?.needsServerSelection || error_code === "selected_server_required" || error_code === "route_guild_mismatch"),
+    retryable: Boolean(raw?.retryable || error_code === "discord_rate_limited" || error_code === "bot_check_unknown"),
+  };
 }
 
 function hasManageGuildPermission(guild: DiscordUserGuild | null | undefined): boolean {
@@ -407,21 +502,9 @@ export async function getDashboardAuthSession(): Promise<DashboardAuthSession | 
 
 export async function requireDashboardStaffSession(): Promise<DashboardAuthSession> {
   const session = await getDashboardAuthSession();
-  if (!session) {
-    const error = new Error("Unauthorized") as Error & { status?: number };
-    error.status = 401;
-    throw error;
-  }
-  if (!session.selectedGuildId) {
-    const error = new Error("Select a server before using dashboard tools.") as Error & { status?: number };
-    error.status = 428;
-    throw error;
-  }
-  if (!session.isStaff) {
-    const error = new Error("Staff access required") as Error & { status?: number };
-    error.status = 403;
-    throw error;
-  }
+  if (!session) throw makeDashboardAuthError("Dashboard session missing. Sign in with Discord to continue.", 401, "signed_out");
+  if (!session.selectedGuildId) throw makeDashboardAuthError("Select a server before using dashboard tools.", 428, "selected_server_required");
+  if (!session.isStaff) throw makeDashboardAuthError("Staff access required for the selected server.", 403, "staff_access_required");
   return session;
 }
 
@@ -431,10 +514,36 @@ export function applyDashboardAuthCookies<T extends { cookies: { set: Function }
 }
 
 export function dashboardAuthJson(payload: Record<string, unknown>, status = 200, session: DashboardAuthSession | null = null) {
-  const response = NextResponse.json(payload, {
-    status,
+  const errorLike = status >= 400 ? classifyDashboardAuthError({ ...payload, message: payload.error || payload.message, status, error_code: payload.error_code }, status) : null;
+  const responsePayload = errorLike
+    ? {
+        ...payload,
+        ok: payload.ok ?? false,
+        error: payload.error || errorLike.message,
+        error_code: payload.error_code || errorLike.error_code,
+        needsServerSelection: payload.needsServerSelection ?? errorLike.needsServerSelection,
+        retryable: payload.retryable ?? errorLike.retryable,
+      }
+    : payload;
+  const response = NextResponse.json(responsePayload, {
+    status: errorLike?.status || status,
     headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
   });
   applyDashboardAuthCookies(response, session);
   return response;
+}
+
+export function dashboardAuthErrorJson(error: unknown, session: DashboardAuthSession | null = null, fallbackStatus = 500) {
+  const classified = classifyDashboardAuthError(error, fallbackStatus);
+  return dashboardAuthJson(
+    {
+      ok: false,
+      error: classified.message,
+      error_code: classified.error_code,
+      needsServerSelection: classified.needsServerSelection,
+      retryable: classified.retryable,
+    },
+    classified.status,
+    session
+  );
 }
