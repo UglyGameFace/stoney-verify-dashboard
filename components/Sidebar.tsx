@@ -34,47 +34,55 @@ type ServersPayload = {
   botCheckError?: string | null;
 };
 
-const groups: LinkGroup[] = [
-  {
-    title: "Command Center",
-    links: [
-      { href: "/", label: "Dashboard", helper: "Live control room", icon: "🏠", match: "exact" },
-      { href: "/#tickets", label: "Tickets", helper: "Open, claim, close", icon: "🎫", match: "ticket-detail", requiresServer: true },
-      { href: "/#members", label: "Members", helper: "Search + history", icon: "👥", match: "home-section", requiresServer: true },
-    ],
-  },
-  {
-    title: "Setup Flow",
-    links: [
-      { href: "/servers", label: "Servers", helper: "Select or invite bot", icon: "🛰️", match: "startsWith" },
-      { href: "/ticket-categories", label: "Categories", helper: "Ticket routing", icon: "🧩", match: "startsWith", requiresServer: true },
-      { href: "/ticket-forms", label: "Forms", helper: "Questions + intake", icon: "📝", match: "startsWith", requiresServer: true },
-    ],
-  },
-];
-
 function normalizeString(value: unknown): string {
   return String(value || "").trim();
 }
 
+function dashboardHref(guildId: string): string {
+  return `/dashboard/${encodeURIComponent(normalizeString(guildId))}`;
+}
+
+function scopedLinks(selectedGuildId: string): LinkGroup[] {
+  const base = selectedGuildId ? dashboardHref(selectedGuildId) : "";
+  return [
+    {
+      title: "Command Center",
+      links: [
+        { href: base || "/", label: "Dashboard", helper: "Live control room", icon: "🏠", match: "exact" },
+        { href: base ? `${base}#tickets` : "/#tickets", label: "Tickets", helper: "Open, claim, close", icon: "🎫", match: "ticket-detail", requiresServer: true },
+        { href: base ? `${base}#members` : "/#members", label: "Members", helper: "Search + history", icon: "👥", match: "home-section", requiresServer: true },
+      ],
+    },
+    {
+      title: "Setup Flow",
+      links: [
+        { href: "/servers", label: "Servers", helper: "Select or invite bot", icon: "🛰️", match: "startsWith" },
+        { href: base ? `${base}/categories` : "/ticket-categories", label: "Categories", helper: "Ticket routing", icon: "🧩", match: "startsWith", requiresServer: true },
+        { href: base ? `${base}/forms` : "/ticket-forms", label: "Forms", helper: "Questions + intake", icon: "📝", match: "startsWith", requiresServer: true },
+      ],
+    },
+  ];
+}
+
 function isTicketDetailPath(pathname: string): boolean {
-  return pathname === "/tickets" || pathname.startsWith("/tickets/");
+  return pathname === "/tickets" || pathname.startsWith("/tickets/") || pathname.includes("#tickets");
 }
 
 function isLinkActive(pathname: string, link: SidebarLink): boolean {
-  if (link.match === "exact") return pathname === link.href;
+  if (link.match === "exact") return pathname === link.href || (link.href.startsWith("/dashboard/") && pathname === link.href);
   if (link.match === "startsWith") return pathname === link.href || pathname.startsWith(`${link.href}/`);
-  if (link.match === "home-section") return pathname === "/";
-  if (link.match === "ticket-detail") return pathname === "/" || isTicketDetailPath(pathname);
+  if (link.match === "home-section") return pathname === "/" || pathname.startsWith("/dashboard/");
+  if (link.match === "ticket-detail") return pathname === "/" || pathname.startsWith("/dashboard/") || isTicketDetailPath(pathname);
   return false;
 }
 
 function isSetupPath(pathname: string): boolean {
-  return pathname === "/servers" || pathname.startsWith("/ticket-categories") || pathname.startsWith("/ticket-forms");
+  return pathname === "/servers" || pathname.startsWith("/ticket-categories") || pathname.startsWith("/ticket-forms") || pathname.includes("/categories") || pathname.includes("/forms");
 }
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [selectedGuildId, setSelectedGuildId] = useState("");
   const [selectedServerName, setSelectedServerName] = useState("");
   const [installedCount, setInstalledCount] = useState<number | null>(null);
   const [hasSelectedServer, setHasSelectedServer] = useState(false);
@@ -89,6 +97,7 @@ export default function Sidebar() {
         const res = await fetch("/api/servers", {
           method: "GET",
           cache: "no-store",
+          credentials: "same-origin",
           headers: { "Cache-Control": "no-store" },
         });
         const json = (await res.json().catch(() => null)) as ServersPayload | null;
@@ -96,6 +105,7 @@ export default function Sidebar() {
         const rows = Array.isArray(json.servers) ? json.servers : [];
         const selectedId = normalizeString(json.selectedGuildId);
         const selected = rows.find((row) => row.selected || row.id === selectedId) || null;
+        setSelectedGuildId(selectedId);
         setSelectedServerName(normalizeString(selected?.name));
         setHasSelectedServer(Boolean(selectedId || selected));
         setInstalledCount(Number(json.installedCount ?? rows.filter((row) => row.bot_installed).length));
@@ -111,10 +121,12 @@ export default function Sidebar() {
     };
   }, []);
 
+  const groups = useMemo(() => scopedLinks(selectedGuildId), [selectedGuildId]);
+
   const setupStep = useMemo(() => {
     if (pathname === "/servers") return "Step 1: Server";
-    if (pathname.startsWith("/ticket-categories")) return "Step 2: Categories";
-    if (pathname.startsWith("/ticket-forms")) return "Step 3: Forms";
+    if (pathname.startsWith("/ticket-categories") || pathname.includes("/categories")) return "Step 2: Categories";
+    if (pathname.startsWith("/ticket-forms") || pathname.includes("/forms")) return "Step 3: Forms";
     return hasSelectedServer ? "Ready" : "Server required";
   }, [pathname, hasSelectedServer]);
 
@@ -262,67 +274,60 @@ export default function Sidebar() {
         }
         .sidebar-group-links {
           display: grid;
-          gap: 8px;
+          gap: 7px;
         }
         .sidebar-link {
           display: flex;
           align-items: center;
           gap: 10px;
+          min-height: 48px;
+          border-radius: 16px;
+          padding: 9px 10px;
+          color: var(--muted, #c7ddcf);
+          text-decoration: none;
+          border: 1px solid transparent;
+          background: rgba(255,255,255,0.035);
+          transition: 140ms ease;
+        }
+        .sidebar-link:hover,
+        .sidebar-link.active {
+          color: var(--text-strong, #fff);
+          border-color: rgba(84,255,148,0.35);
+          background: linear-gradient(135deg, rgba(0,77,38,0.78), rgba(0,36,58,0.72));
+          box-shadow: 0 10px 24px rgba(0,255,135,0.10);
         }
         .sidebar-link-icon {
-          width: 22px;
-          min-width: 22px;
-          display: inline-flex;
-          justify-content: center;
-          align-items: center;
-          font-size: 15px;
-          line-height: 1;
+          width: 28px;
+          height: 28px;
+          display: grid;
+          place-items: center;
+          border-radius: 10px;
+          background: rgba(0,0,0,0.18);
+          flex: 0 0 28px;
         }
         .sidebar-link-copy {
-          display: grid;
-          gap: 3px;
           min-width: 0;
+          display: grid;
+          gap: 1px;
         }
         .sidebar-link-label {
-          display: block;
-          font-size: 14px;
           font-weight: 900;
-          line-height: 1.1;
-          overflow-wrap: anywhere;
+          font-size: 13px;
         }
         .sidebar-link-helper {
-          display: block;
-          color: var(--muted, #c7ddcf);
           font-size: 11px;
-          line-height: 1.15;
-          overflow-wrap: anywhere;
+          color: var(--muted, #c7ddcf);
+          line-height: 1.25;
         }
         .sidebar-bottom {
           margin-top: auto;
           display: grid;
-          gap: 10px;
-          padding-top: 4px;
+          gap: 8px;
         }
         .sidebar-bottom-button {
-          min-height: 44px;
+          width: 100%;
+          min-height: 42px;
           font-size: 13px;
-        }
-        @media (max-width: 1024px) {
-          .sidebar-shell-inner {
-            height: auto;
-          }
-          .sidebar-nav {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-          .sidebar-bottom {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-        }
-        @media (max-width: 720px) {
-          .sidebar-nav,
-          .sidebar-bottom {
-            grid-template-columns: 1fr;
-          }
         }
       `}</style>
     </aside>
