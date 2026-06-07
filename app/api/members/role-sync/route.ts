@@ -1,84 +1,85 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { queueSyncRoleMembers } from "@/lib/botCommands";
-import { requireStaffSessionForRoute } from "@/lib/auth-server";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-function getActorId(session: any): string | null {
-  const candidates = [
-    session?.user?.id,
-    session?.user?.user_id,
-    session?.user?.discord_id,
-    session?.discordUser?.id,
-  ];
+function clean(value: unknown): string {
+  return String(value || "").trim();
+}
 
-  for (const value of candidates) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
+function getActorId(session: DashboardAuthSession | null): string | null {
+  return clean(session?.user?.discord_id || session?.user?.id || session?.discordUser?.id) || null;
+}
 
-  if (typeof candidates[0] === "number") {
-    return String(candidates[0]);
-  }
-
-  return null;
+function json(payload: Record<string, unknown>, status = 200, session: DashboardAuthSession | null = null) {
+  return dashboardAuthJson(payload, status, session);
 }
 
 export async function POST(req: NextRequest) {
-  try {
-    const session = await requireStaffSessionForRoute();
-    const actorId = getActorId(session);
+  let session: DashboardAuthSession | null = null;
 
-    if (!actorId) {
-      return NextResponse.json(
+  try {
+    session = await requireDashboardStaffSession();
+    const actorId = getActorId(session);
+    const guildId = clean(session.selectedGuildId);
+
+    if (!guildId) {
+      return json(
         {
           ok: false,
-          error: "Unauthorized",
+          error: "Select a server before syncing role members.",
+          error_code: "selected_server_required",
+          needsServerSelection: true,
         },
-        { status: 401 }
+        428,
+        session
       );
     }
 
-    const body = await req.json();
+    if (!actorId) {
+      return json(
+        {
+          ok: false,
+          error: "Could not identify signed-in staff member.",
+          error_code: "invalid_request",
+          selectedGuildId: guildId,
+        },
+        400,
+        session
+      );
+    }
 
-    const roleId =
-      typeof body?.roleId === "string" && body.roleId.trim()
-        ? body.roleId.trim()
-        : typeof body?.role_id === "string" && body.role_id.trim()
-        ? body.role_id.trim()
-        : "";
+    const body = await req.json().catch(() => ({}));
+    const roleId = clean(body?.roleId) || clean(body?.role_id);
 
     if (!roleId) {
-      return NextResponse.json(
+      return json(
         {
           ok: false,
           error: "Missing roleId",
+          error_code: "invalid_request",
+          selectedGuildId: guildId,
         },
-        { status: 400 }
+        400,
+        session
       );
     }
 
-    const command = await queueSyncRoleMembers({
-      roleId,
-      requestedBy: actorId,
-    });
+    const command = await queueSyncRoleMembers({ roleId, requestedBy: actorId });
 
-    return NextResponse.json({
-      ok: true,
-      queued: true,
-      command,
-    });
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unexpected server error";
-
-    return NextResponse.json(
+    return json(
       {
-        ok: false,
-        error: message,
+        ok: true,
+        queued: true,
+        selectedGuildId: guildId,
+        command,
       },
-      { status: message === "Unauthorized" ? 401 : 500 }
+      200,
+      session
     );
+  } catch (error) {
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
