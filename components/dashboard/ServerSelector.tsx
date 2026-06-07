@@ -30,6 +30,10 @@ function text(value: unknown): string {
   return String(value || "").trim();
 }
 
+function dashboardHref(guildId: string): string {
+  return `/dashboard/${encodeURIComponent(text(guildId))}`;
+}
+
 function getServerInitial(name: string): string {
   return text(name).slice(0, 1).toUpperCase() || "S";
 }
@@ -106,6 +110,8 @@ export default function ServerSelector() {
     () => servers.find((row) => row.id === selectedGuildId || row.selected) || null,
     [servers, selectedGuildId]
   );
+
+  const selectedDashboardHref = selectedGuildId ? dashboardHref(selectedGuildId) : selectedServer?.id ? dashboardHref(selectedServer.id) : "/";
 
   const installedCount = useMemo(
     () => servers.filter((server) => getInstallState(server) === "installed").length,
@@ -206,7 +212,8 @@ export default function ServerSelector() {
 
       setSelectedGuildId(server.id);
       setServers((prev) => prev.map((row) => ({ ...row, selected: row.id === server.id })));
-      setMessage(`${server.name} is selected. Dashboard tools will now use this server only.`);
+      setMessage(`${server.name} is selected. Opening this server dashboard...`);
+      window.location.href = dashboardHref(server.id);
     } catch (err) {
       setError(friendlyServerError(err instanceof Error ? err.message : err, servers.length > 0));
     } finally {
@@ -244,11 +251,11 @@ export default function ServerSelector() {
 
         {selectedServer ? (
           <div className="info-banner server-next-step">
-            <div><strong>{selectedServer.name} is active.</strong><div>Next: open the dashboard or set up ticket categories/forms for this server.</div></div>
+            <div><strong>{selectedServer.name} is active.</strong><div>Next: open this server dashboard or set up ticket categories/forms for this server.</div></div>
             <div className="server-next-actions">
-              <a className="button primary" href="/">Open Dashboard</a>
-              <a className="button ghost" href="/ticket-categories">Manage Categories</a>
-              <a className="button ghost" href="/ticket-forms">Manage Forms</a>
+              <a className="button primary" href={selectedDashboardHref}>Open Dashboard</a>
+              <a className="button ghost" href={`${selectedDashboardHref}/categories`}>Manage Categories</a>
+              <a className="button ghost" href={`${selectedDashboardHref}/forms`}>Manage Forms</a>
             </div>
           </div>
         ) : null}
@@ -285,7 +292,7 @@ export default function ServerSelector() {
                   <div className={`server-pill ${installed ? "installed" : unknown ? "unknown" : "missing"}`}>{getInstallLabel(server)}</div>
                   {installed ? (
                     <button type="button" className={selected ? "button ghost" : "button primary"} disabled={savingId === server.id} onClick={() => void selectServer(server)} style={{ width: "auto", minWidth: 140 }}>
-                      {savingId === server.id ? "Selecting..." : selected ? "Selected" : "Select Server"}
+                      {savingId === server.id ? "Opening..." : selected ? "Open Server" : "Manage Server"}
                     </button>
                   ) : unknown ? (
                     <button type="button" className="button ghost" onClick={() => void loadServers()} style={{ width: "auto", minWidth: 140 }}>Recheck</button>
