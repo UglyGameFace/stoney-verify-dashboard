@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import TicketCategoriesManager from "@/components/dashboard/TicketCategoriesManager";
 import AuthStatePage from "@/components/dashboard/AuthStatePage";
 import SetupWorkspaceShell from "@/components/dashboard/SetupWorkspaceShell";
@@ -10,6 +11,10 @@ async function safeDashboardAuthSession(): Promise<DashboardAuthSession | null> 
   } catch {
     return null;
   }
+}
+
+function dashboardBaseHref(guildId: string): string {
+  return `/dashboard/${encodeURIComponent(String(guildId || "").trim())}`;
 }
 
 function StaffRequiredState() {
@@ -70,16 +75,20 @@ export default async function TicketCategoriesPage() {
   if (!session.selectedGuildId) return <ServerRequiredState />;
   if (!session.isStaff) return <StaffRequiredState />;
 
+  const base = dashboardBaseHref(session.selectedGuildId);
+  redirect(`${base}/categories`);
+
   return (
     <SetupWorkspaceShell
       activeStep="categories"
       eyebrow="Step 2 of 3"
       title="Ticket Categories"
       description="Create clear issue types, routing defaults, button labels, and safe category rules before publishing your public ticket panel."
+      dashboardBaseHref={base}
       actions={
         <>
-          <Link href="/" className="button primary">Dashboard</Link>
-          <Link href="/ticket-forms" className="button ghost">Next: Forms</Link>
+          <Link href={base} className="button primary">Dashboard</Link>
+          <Link href={`${base}/forms`} className="button ghost">Next: Forms</Link>
         </>
       }
     >
