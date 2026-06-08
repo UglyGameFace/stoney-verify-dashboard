@@ -121,13 +121,51 @@ function selectedGuildId(): string {
   return normalizeString(getSelectedGuildId());
 }
 
+function inferErrorCode(body: unknown, status: number): string | null {
+  const payload = safeObject(body);
+  const explicit = normalizeString(payload.error_code || payload.code);
+  if (explicit) return explicit;
+  if (status === 401) return "signed_out";
+  if (status === 428) return "selected_server_required";
+  if (status === 409) return "ticket_conflict";
+  if (status === 400) return "invalid_request";
+  if (status >= 500) return "server_error";
+  return null;
+}
+
+function normalizeErrorPayload(body: unknown, status: number): unknown {
+  const payload = safeObject(body);
+  if (status < 400 || !Object.keys(payload).length) return body;
+  const errorCode = inferErrorCode(payload, status);
+  return {
+    ...payload,
+    ok: payload.ok ?? false,
+    error: payload.error || (status === 401 ? "Discord login required." : "Request failed."),
+    error_code: errorCode || undefined,
+    needsServerSelection: payload.needsServerSelection ?? errorCode === "selected_server_required",
+    retryable: payload.retryable ?? false,
+  };
+}
+
 function noStoreJson(body: unknown, status = 200) {
-  return NextResponse.json(body, {
+  return NextResponse.json(normalizeErrorPayload(body, status), {
     status,
     headers: {
       "Cache-Control": "no-store, max-age=0",
     },
   });
+}
+
+function signedOutResponse() {
+  return noStoreJson(
+    {
+      ok: false,
+      error: "Discord login required.",
+      error_code: "signed_out",
+      retryable: false,
+    },
+    401
+  );
 }
 
 function deriveViewerFromSession(session: AnyRecord): ViewerInfo {
@@ -373,12 +411,10 @@ export async function POST(request: Request) {
     const rawSession = (await getSession()) as unknown;
     const session = safeObject(rawSession);
 
-    if (!Object.keys(session).length) {
-      return noStoreJson({ ok: false, error: "Unauthorized" }, 401);
-    }
+    if (!Object.keys(session).length) return signedOutResponse();
 
     const viewer = deriveViewerFromSession(session);
-    if (!viewer.discordId) return noStoreJson({ ok: false, error: "Unauthorized" }, 401);
+    if (!viewer.discordId) return signedOutResponse();
 
     const guildId = selectedGuildId();
     if (!guildId) {
@@ -386,6 +422,7 @@ export async function POST(request: Request) {
         {
           ok: false,
           error: "Select a server before creating a ticket.",
+          error_code: "selected_server_required",
           needsServerSelection: true,
         },
         428
@@ -408,6 +445,7 @@ export async function POST(request: Request) {
           ok: false,
           selectedGuildId: guildId,
           error: "You already have an open ticket.",
+          error_code: "existing_open_ticket",
           existing_ticket: {
             id: normalizeString(existingOpenTicket.id) || null,
             title: normalizeString(existingOpenTicket.title) || null,
@@ -430,6 +468,8 @@ export async function POST(request: Request) {
           ok: false,
           selectedGuildId: guildId,
           error: "A ticket request is already being processed.",
+          error_code: "ticket_request_processing",
+          retryable: true,
           existing_command: {
             id: normalizeString(existingPendingCommand.id) || null,
             status: normalizeString(existingPendingCommand.status) || null,
@@ -456,7 +496,7 @@ export async function POST(request: Request) {
       .select("*")
       .single();
 
-    if (commandError) return noStoreJson({ ok: false, selectedGuildId: guildId, error: commandError.message }, 500);
+    if (commandError) return noStoreJson({ ok: false, selectedGuildId: guildId, error: commandError.message, error_code: "server_error" }, 500);
 
     const command = safeObject(commandRow);
     return noStoreJson({
@@ -477,6 +517,6 @@ export async function POST(request: Request) {
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to queue ticket creation.";
-    return noStoreJson({ ok: false, error: message }, 400);
+    return noStoreJson({ ok: false, error: message, error_code: "invalid_request" }, 400);
   }
 }
