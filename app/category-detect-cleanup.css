@@ -1,0 +1,34 @@
+/* Clean up auto-detect cards so admins see setup decisions, not raw detector internals. */
+.detect-card .category-eyebrow::before {
+  content: "Recommended setup";
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  font-weight: 950;
+}
+
+.detect-card .category-eyebrow {
+  font-size: 0 !important;
+}
+
+.detect-card h2 {
+  font-size: clamp(24px, 3vw, 34px);
+}
+
+.detect-card .category-copy {
+  font-size: 0 !important;
+}
+
+.detect-card .category-copy::before {
+  content: "Use the recommendations below, or review one before creating it.";
+  font-size: clamp(17px, 2.4vw, 22px);
+  line-height: 1.45;
+}
+
+.detect-card .starter-template-helper {
+  font-size: 0 !important;
+}
+
+.detect-card .starter-template-helper::before {
+  content: "Recommended ticket category.";
+  font-size
