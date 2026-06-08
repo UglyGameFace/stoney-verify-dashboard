@@ -253,8 +253,26 @@ async function fetchKnownDashboardGuildIds(guildIds: string[]): Promise<Set<stri
   return found;
 }
 
+function defaultErrorCode(status: number): string {
+  if (status === 401) return "signed_out";
+  if (status === 403) return "forbidden";
+  if (status === 409) return "bot_not_installed";
+  if (status === 503) return "bot_check_unknown";
+  if (status >= 500) return "server_error";
+  return "invalid_request";
+}
+
 function buildJsonResponse(payload: JsonRecord, status = 200, session: BearerSession | null = null) {
-  const response = NextResponse.json(payload, {
+  const normalizedPayload = status >= 400
+    ? {
+        ok: false,
+        ...payload,
+        error_code: normalizeString(payload.error_code) || defaultErrorCode(status),
+        retryable: typeof payload.retryable === "boolean" ? payload.retryable : status === 503,
+      }
+    : payload;
+
+  const response = NextResponse.json(normalizedPayload, {
     status,
     headers: {
       "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
@@ -284,7 +302,7 @@ export async function GET() {
   const initialSession = await getBearerSession();
 
   if (!initialSession) {
-    return buildJsonResponse({ error: "Discord login required." }, 401);
+    return buildJsonResponse({ error: "Discord login required.", error_code: "signed_out" }, 401);
   }
 
   try {
@@ -342,7 +360,7 @@ export async function GET() {
     }, 200, session);
   } catch (error) {
     return buildJsonResponse(
-      { error: error instanceof Error ? error.message : "Failed to load Discord servers." },
+      { error: error instanceof Error ? error.message : "Failed to load Discord servers.", error_code: "server_error" },
       500,
       initialSession
     );
@@ -353,14 +371,14 @@ export async function POST(request: Request) {
   const initialSession = await getBearerSession();
 
   if (!initialSession) {
-    return buildJsonResponse({ error: "Discord login required." }, 401);
+    return buildJsonResponse({ error: "Discord login required.", error_code: "signed_out" }, 401);
   }
 
   try {
     const body = (await request.json().catch(() => ({}))) as JsonRecord;
     const requestedGuildId = normalizeString(body.guild_id || body.guildId);
     if (!requestedGuildId) {
-      return buildJsonResponse({ error: "Server id is required." }, 400, initialSession);
+      return buildJsonResponse({ error: "Server id is required.", error_code: "invalid_request" }, 400, initialSession);
     }
 
     const [{ session, guilds: userGuilds }, initialBotLookup, knownDashboardGuildIds] = await Promise.all([
@@ -373,7 +391,7 @@ export async function POST(request: Request) {
 
     if (!userGuild || !hasManageGuildPermission(userGuild)) {
       return buildJsonResponse(
-        { error: "You need Manage Server or Administrator permission for that server." },
+        { error: "You need Manage Server or Administrator permission for that server.", error_code: "forbidden" },
         403,
         session
       );
@@ -390,6 +408,8 @@ export async function POST(request: Request) {
             installState === "unknown"
               ? "The dashboard could not verify bot access for that server. No invite action was shown because this may be a temporary Discord check failure. Wait a moment, then recheck."
               : "Dank Shield is not installed in that server yet.",
+          error_code: installState === "unknown" ? "bot_check_unknown" : "bot_not_installed",
+          retryable: installState === "unknown",
           bot_install_state: installState,
           bot_invite_url: inviteUrl,
           bot_check_error: botLookup.error,
@@ -404,7 +424,7 @@ export async function POST(request: Request) {
     return response;
   } catch (error) {
     return buildJsonResponse(
-      { error: error instanceof Error ? error.message : "Failed to select server." },
+      { error: error instanceof Error ? error.message : "Failed to select server.", error_code: "server_error" },
       500,
       initialSession
     );
