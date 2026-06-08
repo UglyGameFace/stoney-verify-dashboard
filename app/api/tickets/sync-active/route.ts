@@ -1,21 +1,14 @@
 import { NextRequest } from "next/server";
 import { queueSyncActiveTickets } from "@/lib/botCommands";
-import { requireDashboardStaffSession, dashboardAuthJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
 import {
   parseRouteBody,
   readBoolean,
   readString,
-  toErrorMessage,
 } from "@/lib/ticketActionRoute";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-type ErrorWithStatus = Error & { status?: number };
-
-function errorStatus(error: unknown, fallback: number): number {
-  return typeof (error as ErrorWithStatus)?.status === "number" ? Number((error as ErrorWithStatus).status) : fallback;
-}
 
 export async function POST(req: NextRequest) {
   let session: DashboardAuthSession | null = null;
@@ -27,7 +20,13 @@ export async function POST(req: NextRequest) {
 
     if (!guildId) {
       return dashboardAuthJson(
-        { ok: false, queued: false, error: "Select a server before syncing active tickets.", needsServerSelection: true },
+        {
+          ok: false,
+          queued: false,
+          error: "Select a server before syncing active tickets.",
+          error_code: "selected_server_required",
+          needsServerSelection: true,
+        },
         428,
         session
       );
@@ -53,6 +52,7 @@ export async function POST(req: NextRequest) {
       {
         ok: true,
         queued: true,
+        selectedGuildId: guildId,
         command,
         dryRun,
         includeClosedVisibleChannels,
@@ -63,10 +63,6 @@ export async function POST(req: NextRequest) {
       session
     );
   } catch (error) {
-    return dashboardAuthJson(
-      { ok: false, queued: false, error: toErrorMessage(error) },
-      errorStatus(error, 500),
-      session
-    );
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
