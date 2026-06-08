@@ -2,10 +2,15 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/auth-server";
 import { loginRouteFor } from "@/lib/auth-return";
+import { getSelectedGuildId } from "@/lib/guild-selection";
 import { createServerSupabase } from "@/lib/supabase-server";
 import MemberTicketThreadClient from "@/components/MemberTicketThreadClient";
 
 export const dynamic = "force-dynamic";
+
+function safeText(value) {
+  return String(value ?? "").trim();
+}
 
 function normalizeMessage(row) {
   return {
@@ -36,13 +41,14 @@ function normalizeTicket(row) {
   };
 }
 
-async function getPortalTicketData(ticketId, userId) {
+async function getPortalTicketData(ticketId, userId, guildId) {
   const supabase = createServerSupabase();
 
   const { data: ticket, error: ticketError } = await supabase
     .from("tickets")
     .select("*")
     .eq("id", ticketId)
+    .eq("guild_id", guildId)
     .eq("user_id", userId)
     .limit(1)
     .maybeSingle();
@@ -73,8 +79,7 @@ async function getPortalTicketData(ticketId, userId) {
 
 export default async function PortalTicketThreadPage({ params }) {
   const session = await getSession();
-  const ticketId =
-    typeof params?.id === "string" ? params.id.trim() : "";
+  const ticketId = typeof params?.id === "string" ? params.id.trim() : "";
 
   if (!ticketId) {
     notFound();
@@ -84,7 +89,12 @@ export default async function PortalTicketThreadPage({ params }) {
     redirect(loginRouteFor(`/portal/tickets/${encodeURIComponent(ticketId)}`));
   }
 
-  const data = await getPortalTicketData(ticketId, session.user.id);
+  const guildId = safeText(getSelectedGuildId());
+  if (!guildId) {
+    redirect("/servers");
+  }
+
+  const data = await getPortalTicketData(ticketId, session.user.id, guildId);
 
   if (!data?.ticket) {
     notFound();
