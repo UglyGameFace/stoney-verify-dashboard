@@ -1,10 +1,5 @@
-import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
-import {
-  requireStaffSessionForRoute,
-  applyAuthCookies,
-} from "@/lib/auth-server";
-import { getSelectedGuildId } from "@/lib/guild-selection";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
 import { classifyTicket, suggestModerationAction } from "@/lib/moderation";
 import { derivePriority } from "@/lib/priority";
 import { enrichTicketWithMatchedCategory } from "@/lib/ticketCategoryMatching";
@@ -130,10 +125,6 @@ function parseInteger(value: string | null, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function selectedGuildId(): string {
-  return normalizeString(getSelectedGuildId());
-}
-
 function isMissingColumnError(error: unknown, column?: string): boolean {
   const text = String(
     (error as { message?: string })?.message ??
@@ -158,23 +149,16 @@ function isMissingColumnError(error: unknown, column?: string): boolean {
 function buildJsonResponse(
   payload: Record<string, unknown>,
   status = 200,
-  refreshedTokens: any = null
+  session: DashboardAuthSession | null = null
 ) {
-  const response = NextResponse.json(payload, {
-    status,
-    headers: {
-      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-    },
-  });
-  applyAuthCookies(response, refreshedTokens);
-  return response;
+  return dashboardAuthJson(payload, status, session);
 }
 
 function buildErrorResponse(
   message: string,
   status = 500,
   selectedGuildIdValue = "",
-  refreshedTokens: any = null,
+  session: DashboardAuthSession | null = null,
   extra: Record<string, unknown> = {}
 ) {
   return buildJsonResponse(
@@ -185,7 +169,7 @@ function buildErrorResponse(
       ...extra,
     },
     status,
-    refreshedTokens
+    session
   );
 }
 
@@ -371,22 +355,21 @@ async function insertTicketActivity(
 }
 
 export async function GET(request: Request) {
-  let refreshedTokens: any = null;
+  let session: DashboardAuthSession | null = null;
 
   try {
-    const auth = await requireStaffSessionForRoute();
-    refreshedTokens = auth?.refreshedTokens || null;
+    session = await requireDashboardStaffSession();
     const supabase = createServerSupabase();
     const { searchParams } = new URL(request.url);
-    const guildId = selectedGuildId();
+    const guildId = normalizeString(session.selectedGuildId);
 
     if (!guildId) {
       return buildErrorResponse(
         "Select a server before loading tickets.",
         428,
         "",
-        refreshedTokens,
-        { needsServerSelection: true }
+        session,
+        { error_code: "selected_server_required", needsServerSelection: true }
       );
     }
 
@@ -408,7 +391,7 @@ export async function GET(request: Request) {
 
     const { data, error } = await query;
     if (error) {
-      return buildErrorResponse(error.message || "Failed to load tickets.", 500, guildId, refreshedTokens);
+      return buildErrorResponse(error.message || "Failed to load tickets.", 500, guildId, session);
     }
 
     const rawRows = safeArray<TicketRow>(data);
@@ -445,31 +428,29 @@ export async function GET(request: Request) {
         count: tickets.length,
       },
       200,
-      refreshedTokens
+      session
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to load tickets.";
-    return buildErrorResponse(message, message === "Unauthorized" ? 401 : 500, "", refreshedTokens);
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
 
 export async function POST(request: Request) {
-  let refreshedTokens: any = null;
+  let session: DashboardAuthSession | null = null;
 
   try {
-    const auth = await requireStaffSessionForRoute();
-    refreshedTokens = auth?.refreshedTokens || null;
+    session = await requireDashboardStaffSession();
     const body = await parseBody(request);
     const supabase = createServerSupabase();
-    const guildId = selectedGuildId();
+    const guildId = normalizeString(session.selectedGuildId);
 
     if (!guildId) {
       return buildErrorResponse(
         "Select a server before creating a ticket.",
         428,
         "",
-        refreshedTokens,
-        { needsServerSelection: true }
+        session,
+        { error_code: "selected_server_required", needsServerSelection: true }
       );
     }
 
@@ -482,8 +463,8 @@ export async function POST(request: Request) {
     const attachments = safeArray<JsonRecord>(body.attachments);
     const flagged = normalizeBoolean(body.flagged);
 
-    if (!userId) return buildErrorResponse("user_id is required.", 400, guildId, refreshedTokens);
-    if (!message) return buildErrorResponse("message is required.", 400, guildId, refreshedTokens);
+    if (!userId) return buildErrorResponse("user_id is required.", 400, guildId, session, { error_code: "invalid_request" });
+    if (!message) return buildErrorResponse("message is required.", 400, guildId, session, { error_code: "invalid_request" });
 
     const classification = classifyTicket(message) as ClassificationResult;
     const suggestion = suggestModerationAction(message) as ModerationSuggestion;
@@ -555,7 +536,7 @@ export async function POST(request: Request) {
 
     const inserted = await insertTicketWithFallbacks(supabase, payload);
     if (inserted.error || !inserted.data) {
-      return buildErrorResponse(inserted.error?.message || "Failed to create ticket.", 500, guildId, refreshedTokens);
+      return buildErrorResponse(inserted.error?.message || "Failed to create ticket.", 500, guildId, session);
     }
 
     const createdTicket = mapTicket(inserted.data);
@@ -616,10 +597,9 @@ export async function POST(request: Request) {
         suggestion,
       },
       200,
-      refreshedTokens
+      session
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to create ticket.";
-    return buildErrorResponse(message, message === "Unauthorized" ? 401 : 500, "", refreshedTokens);
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
