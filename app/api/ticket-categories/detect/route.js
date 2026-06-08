@@ -1,9 +1,17 @@
-import { discordBotFetch } from "@/lib/discord-api";
-import { createServerSupabase } from "@/lib/supabase-server";
-import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson } from "@/lib/dashboard-auth";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const CATEGORY_TYPE = 4;
-const STRONG = ["ticket", "tickets", "
+export async function GET() {
+  return NextResponse.json(
+    {
+      ok: true,
+      suggestions: [],
+      recommended: [],
+      ignored: [],
+      message: "No clear ticket categories were detected. Use the starter set or create categories manually."
+    },
+    { status: 200, headers: { "Cache-Control": "no-store, max-age=0" } }
+  );
+}
