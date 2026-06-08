@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth-server";
+import { getSelectedGuildId } from "@/lib/guild-selection";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { queuePortalTicketReply } from "@/lib/botCommands";
 
@@ -10,11 +11,32 @@ function safeText(value) {
   return String(value ?? "").trim();
 }
 
-async function getOwnedTicket(supabase, ticketId, userId) {
+function noStoreJson(body, status = 200) {
+  const normalized = status >= 400
+    ? {
+        ok: false,
+        ...body,
+        error_code: body?.error_code || (status === 401 ? "signed_out" : status === 428 ? "selected_server_required" : status === 404 ? "not_found" : status === 400 ? "invalid_request" : "server_error"),
+        needsServerSelection: body?.needsServerSelection ?? status === 428,
+      }
+    : body;
+
+  return NextResponse.json(normalized, {
+    status,
+    headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
+  });
+}
+
+function selectedGuildId() {
+  return safeText(getSelectedGuildId());
+}
+
+async function getOwnedTicket(supabase, ticketId, userId, guildId) {
   const { data, error } = await supabase
     .from("tickets")
     .select("*")
     .eq("id", ticketId)
+    .eq("guild_id", guildId)
     .eq("user_id", userId)
     .limit(1)
     .maybeSingle();
@@ -29,32 +51,48 @@ async function getOwnedTicket(supabase, ticketId, userId) {
 export async function POST(req, { params }) {
   try {
     const session = await getSession();
-
-    const userId = safeText(session?.user?.id);
+    const userId = safeText(session?.user?.discord_id || session?.user?.id || session?.discordUser?.id);
     const username =
       safeText(session?.user?.username) ||
+      safeText(session?.discordUser?.username) ||
       safeText(session?.user?.global_name) ||
       "Member";
 
     if (!userId) {
-      return NextResponse.json(
+      return noStoreJson(
         {
           ok: false,
-          error: "Unauthorized",
+          error: "Discord login required.",
+          error_code: "signed_out",
         },
-        { status: 401 }
+        401
+      );
+    }
+
+    const guildId = selectedGuildId();
+    if (!guildId) {
+      return noStoreJson(
+        {
+          ok: false,
+          error: "Select a server before replying to a ticket.",
+          error_code: "selected_server_required",
+          needsServerSelection: true,
+        },
+        428
       );
     }
 
     const ticketId = safeText(params?.id);
 
     if (!ticketId) {
-      return NextResponse.json(
+      return noStoreJson(
         {
           ok: false,
+          selectedGuildId: guildId,
           error: "Missing ticket id",
+          error_code: "invalid_request",
         },
-        { status: 400 }
+        400
       );
     }
 
@@ -62,47 +100,55 @@ export async function POST(req, { params }) {
     const content = safeText(body?.content);
 
     if (!content) {
-      return NextResponse.json(
+      return noStoreJson(
         {
           ok: false,
+          selectedGuildId: guildId,
           error: "Reply cannot be empty",
+          error_code: "invalid_request",
         },
-        { status: 400 }
+        400
       );
     }
 
     if (content.length > 4000) {
-      return NextResponse.json(
+      return noStoreJson(
         {
           ok: false,
+          selectedGuildId: guildId,
           error: "Reply is too long",
+          error_code: "invalid_request",
         },
-        { status: 400 }
+        400
       );
     }
 
     const supabase = createServerSupabase();
-    const ticket = await getOwnedTicket(supabase, ticketId, userId);
+    const ticket = await getOwnedTicket(supabase, ticketId, userId, guildId);
 
     if (!ticket) {
-      return NextResponse.json(
+      return noStoreJson(
         {
           ok: false,
+          selectedGuildId: guildId,
           error: "Ticket not found",
+          error_code: "not_found",
         },
-        { status: 404 }
+        404
       );
     }
 
     const status = safeText(ticket?.status).toLowerCase();
 
     if (status === "deleted") {
-      return NextResponse.json(
+      return noStoreJson(
         {
           ok: false,
+          selectedGuildId: guildId,
           error: "Deleted tickets cannot be replied to",
+          error_code: "invalid_request",
         },
-        { status: 400 }
+        400
       );
     }
 
@@ -133,6 +179,7 @@ export async function POST(req, { params }) {
         reopened_at: reopening ? new Date().toISOString() : ticket.reopened_at || null,
       })
       .eq("id", ticketId)
+      .eq("guild_id", guildId)
       .eq("user_id", userId);
 
     if (ticketUpdateError) {
@@ -140,7 +187,6 @@ export async function POST(req, { params }) {
     }
 
     const channelId = safeText(ticket?.channel_id || ticket?.discord_thread_id);
-
     let botCommand = null;
 
     if (channelId) {
@@ -161,9 +207,11 @@ export async function POST(req, { params }) {
 
     try {
       await supabase.from("audit_logs").insert({
+        guild_id: guildId,
         action: "member_portal_ticket_reply",
         staff_id: null,
         meta: {
+          guild_id: guildId,
           ticket_id: ticketId,
           user_id: userId,
           message_id: insertedMessage?.id || null,
@@ -175,21 +223,22 @@ export async function POST(req, { params }) {
       // non-fatal
     }
 
-    return NextResponse.json({
+    return noStoreJson({
       ok: true,
+      selectedGuildId: guildId,
       message: insertedMessage,
       mirroredToDiscord: Boolean(botCommand),
       botCommandId: botCommand?.id || null,
       reopened: reopening,
     });
   } catch (error) {
-    return NextResponse.json(
+    return noStoreJson(
       {
         ok: false,
-        error:
-          error instanceof Error ? error.message : "Unexpected server error",
+        error: error instanceof Error ? error.message : "Unexpected server error",
+        error_code: "server_error",
       },
-      { status: 500 }
+      500
     );
   }
 }
