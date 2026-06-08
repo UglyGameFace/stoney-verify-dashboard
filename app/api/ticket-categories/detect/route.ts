@@ -19,4 +19,4 @@ type ExistingCategory = {
   slug?: string | null;
 };
 
-const TICKET_WORDS = ["ticket", "tickets", "support
+const TICKET_WORDS = ["ticket", "tickets", "support", "help", "verify", "verification", "appeal", "report", "reports", "incident", "modmail
