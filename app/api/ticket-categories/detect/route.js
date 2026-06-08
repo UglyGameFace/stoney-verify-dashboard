@@ -1,19 +1,8 @@
-import { createServerSupabase } from "@/lib/supabase-server";
-import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson } from "@/lib/dashboard-auth";
-import { discordBotFetch } from "@/lib/discord-api";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const WORDS = ["ticket", "support", "verify", "verification", "appeal", "report", "service", "modmail"];
-
-function clean(v) {
-  return String(v || "").trim();
+export async function GET() {
+  return NextResponse.json({ ok: true, suggestions: [] }, { status: 200, headers: { "Cache-Control": "no-store, max-age=0" } });
 }
-
-function norm(v) {
-  return clean(v).toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function slug(v) {
-  return clean(v).toLowerCase
