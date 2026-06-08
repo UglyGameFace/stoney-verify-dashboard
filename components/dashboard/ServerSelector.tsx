@@ -63,6 +63,23 @@ function getInstallLabel(server: ServerRow): string {
   return "Invite needed";
 }
 
+function isTransientSelectionCode(code: string): boolean {
+  return code === "bot_check_unknown" || code === "discord_rate_limited" || code === "server_error";
+}
+
+function looksTransientSelectionError(raw: unknown): boolean {
+  const lower = text(raw).toLowerCase();
+  return (
+    lower.includes("one live discord check") ||
+    lower.includes("rate limit") ||
+    lower.includes("retry_after") ||
+    lower.includes("temporarily blocked") ||
+    lower.includes("bot check") ||
+    lower.includes("final bot check") ||
+    lower.includes("current session")
+  );
+}
+
 function friendlyServerError(raw: unknown, hasVisibleServers = false): string {
   const value = text(raw);
   const lower = value.toLowerCase();
@@ -91,10 +108,10 @@ function friendlyServerError(raw: unknown, hasVisibleServers = false): string {
     return "The bot install check needs attention. Already confirmed installed servers remain selectable.";
   }
   if (lower.includes("401") || lower.includes("unauthorized") || lower.includes("session") || lower.includes("login") || lower.includes("oauth")) {
-    return "Your server list is still usable, but Discord rejected the final selection check. Tap Refresh once, then try Manage Server again. If it repeats, use Account → Reset Login.";
+    return "One live Discord check could not use the current session. Already listed servers remain usable.";
   }
   if (lower.includes("403") || lower.includes("forbidden")) {
-    return "Discord blocked one live selection check. The listed servers remain usable, but selection needs a fresh permission check.";
+    return "Discord blocked one live permission check. Already listed servers remain usable.";
   }
 
   return value.length > 180 ? `${value.slice(0, 180)}…` : value;
@@ -105,7 +122,7 @@ function friendlySelectionError(json: ServerResponse | null, status: number, ser
   const raw = text(json?.error) || `Failed to select server. Status ${status}.`;
 
   if (code === "signed_out") {
-    return `The server cards loaded, but Discord rejected the final selection check for ${serverName}. Tap Refresh once and try again. If it repeats, use Account → Reset Login.`;
+    return `Discord rejected the final selection check for ${serverName}. Use Account → Reset Login once, then sign in again.`;
   }
 
   if (code === "forbidden") {
@@ -113,7 +130,7 @@ function friendlySelectionError(json: ServerResponse | null, status: number, ser
   }
 
   if (code === "bot_check_unknown") {
-    return `Dank Shield still appears installed for ${serverName}, but Discord temporarily blocked the final bot check. Tap Refresh/Recheck and try again.`;
+    return `Dank Shield appears installed for ${serverName}, but Discord temporarily blocked the final bot check. Refresh once and try again.`;
   }
 
   if (code === "bot_not_installed") {
@@ -229,10 +246,19 @@ export default function ServerSelector() {
 
       if (!res.ok || json?.error) {
         const inviteUrl = text(json?.bot_invite_url);
+        const code = text(json?.error_code);
+        const raw = text(json?.error);
+
         if (inviteUrl) {
           window.location.href = inviteUrl;
           return;
         }
+
+        if (isTransientSelectionCode(code) || looksTransientSelectionError(raw)) {
+          setMessage(`${server.name} still appears ready, but Discord blocked one live recheck. Tap Refresh once, then Manage Server again.`);
+          return;
+        }
+
         throw new Error(friendlySelectionError(json, res.status, server.name));
       }
 
