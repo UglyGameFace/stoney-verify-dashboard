@@ -1,10 +1,5 @@
-import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
-import {
-  requireStaffSessionForRoute,
-  applyAuthCookies,
-} from "@/lib/auth-server";
-import { getSelectedGuildId } from "@/lib/guild-selection";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson, type DashboardAuthSession } from "@/lib/dashboard-auth";
 import { enrichTicketWithMatchedCategory } from "@/lib/ticketCategoryMatching";
 import {
   insertMemberEvent,
@@ -16,14 +11,6 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type JsonRecord = Record<string, unknown>;
-type RefreshedTokens = {
-  access_token: string;
-  token_type?: string;
-  expires_in?: number;
-  refresh_token?: string;
-  scope?: string;
-} | null;
-
 type RouteContext = { params: { id?: string } };
 type PatchAction = "update-category" | "clear-category-override" | "link-verification-context";
 
@@ -105,37 +92,28 @@ function newestTimestamp(...values: unknown[]): number {
 function buildJsonResponse(
   payload: Record<string, unknown>,
   status = 200,
-  refreshedTokens: RefreshedTokens = null
-): NextResponse {
-  const response = NextResponse.json(payload, {
-    status,
-    headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
-  });
-  applyAuthCookies(response, refreshedTokens);
-  return response;
+  session: DashboardAuthSession | null = null
+) {
+  return dashboardAuthJson(payload, status, session);
 }
 
 function buildErrorResponse(
   message: string,
   status = 500,
-  refreshedTokens: RefreshedTokens = null,
+  session: DashboardAuthSession | null = null,
   extra: Record<string, unknown> = {}
-): NextResponse {
-  return buildJsonResponse({ error: message, ...extra }, status, refreshedTokens);
+) {
+  return buildJsonResponse({ ok: false, error: message, ...extra }, status, session);
 }
 
-function selectedGuildId(): string {
-  return normalizeString(getSelectedGuildId());
-}
-
-function requireSelectedGuild(refreshedTokens: RefreshedTokens = null): string | NextResponse {
-  const guildId = selectedGuildId();
+function requireSelectedGuild(session: DashboardAuthSession | null) {
+  const guildId = normalizeString(session?.selectedGuildId);
   if (guildId) return guildId;
   return buildErrorResponse(
     "Select a server before opening a ticket.",
     428,
-    refreshedTokens,
-    { needsServerSelection: true }
+    session,
+    { error_code: "selected_server_required", needsServerSelection: true }
   );
 }
 
@@ -641,15 +619,17 @@ async function writeVerificationContext(args: {
 }
 
 export async function GET(_request: Request, context: RouteContext) {
+  let session: DashboardAuthSession | null = null;
+
   try {
-    const { session, refreshedTokens } = await requireStaffSessionForRoute();
+    session = await requireDashboardStaffSession();
     const typedSession = session as SessionLike;
-    const scopedGuild = requireSelectedGuild(refreshedTokens);
+    const scopedGuild = requireSelectedGuild(session);
     if (typeof scopedGuild !== "string") return scopedGuild;
     const guildId = scopedGuild;
     const supabase = createServerSupabase();
     const ticketId = normalizeString(context?.params?.id);
-    if (!ticketId) return buildErrorResponse("Missing ticket id.", 400, refreshedTokens);
+    if (!ticketId) return buildErrorResponse("Missing ticket id.", 400, session, { error_code: "invalid_request", selectedGuildId: guildId });
 
     const { data: ticketData, error: ticketError } = await supabase
       .from("tickets")
@@ -659,7 +639,7 @@ export async function GET(_request: Request, context: RouteContext) {
       .single();
 
     if (ticketError || !ticketData) {
-      return buildErrorResponse(ticketError?.message || "Ticket not found.", 404, refreshedTokens, { selectedGuildId: guildId });
+      return buildErrorResponse(ticketError?.message || "Ticket not found.", 404, session, { selectedGuildId: guildId });
     }
 
     const rawTicket = mapTicket(ticketData as TicketRow);
@@ -860,30 +840,31 @@ export async function GET(_request: Request, context: RouteContext) {
         currentStaffId: viewer.id || "",
       },
       200,
-      refreshedTokens
+      session
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to load ticket.";
-    return buildErrorResponse(message, message === "Unauthorized" ? 401 : 500);
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
+  let session: DashboardAuthSession | null = null;
+
   try {
-    const { session, refreshedTokens } = await requireStaffSessionForRoute();
+    session = await requireDashboardStaffSession();
     const typedSession = session as SessionLike;
-    const scopedGuild = requireSelectedGuild(refreshedTokens);
+    const scopedGuild = requireSelectedGuild(session);
     if (typeof scopedGuild !== "string") return scopedGuild;
     const guildId = scopedGuild;
     const supabase = createServerSupabase();
     const body = await parseRequestBody(request);
     const ticketId = normalizeString(context?.params?.id);
     const { actorId, actorName } = getActorIdentity(typedSession);
-    if (!ticketId) return buildErrorResponse("Missing ticket id.", 400, refreshedTokens);
+    if (!ticketId) return buildErrorResponse("Missing ticket id.", 400, session, { error_code: "invalid_request", selectedGuildId: guildId });
 
     const action = normalizeLower(body?.action || "update-category") as PatchAction;
     if (action !== "update-category" && action !== "clear-category-override" && action !== "link-verification-context") {
-      return buildErrorResponse("Unsupported patch action.", 400, refreshedTokens);
+      return buildErrorResponse("Unsupported patch action.", 400, session, { error_code: "invalid_request", selectedGuildId: guildId });
     }
 
     const { data: existingTicket, error: existingTicketError } = await supabase
@@ -894,12 +875,12 @@ export async function PATCH(request: Request, context: RouteContext) {
       .single();
 
     if (existingTicketError || !existingTicket) {
-      return buildErrorResponse(existingTicketError?.message || "Ticket not found.", 404, refreshedTokens, { selectedGuildId: guildId });
+      return buildErrorResponse(existingTicketError?.message || "Ticket not found.", 404, session, { selectedGuildId: guildId });
     }
 
     const typedTicket = existingTicket as TicketRow;
     const { data: categoryRows, error: categoryRowsError } = await supabase.from("ticket_categories").select("*").eq("guild_id", guildId);
-    if (categoryRowsError) return buildErrorResponse(categoryRowsError.message, 500, refreshedTokens, { selectedGuildId: guildId });
+    if (categoryRowsError) return buildErrorResponse(categoryRowsError.message, 500, session, { selectedGuildId: guildId });
     const categoryIndex = indexCategories(safeArray<TicketCategoryRow>(categoryRows || []));
 
     if (action === "clear-category-override") {
@@ -927,7 +908,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         .select("*")
         .single();
 
-      if (error) return buildErrorResponse(error.message, 500, refreshedTokens, { selectedGuildId: guildId });
+      if (error) return buildErrorResponse(error.message, 500, session, { selectedGuildId: guildId });
 
       if (normalizeString(typedTicket.user_id)) {
         await insertMemberEvent(
@@ -945,7 +926,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         );
       }
 
-      return buildJsonResponse({ ok: true, selectedGuildId: guildId, ticket }, 200, refreshedTokens);
+      return buildJsonResponse({ ok: true, selectedGuildId: guildId, ticket }, 200, session);
     }
 
     if (action === "link-verification-context") {
@@ -972,14 +953,14 @@ export async function PATCH(request: Request, context: RouteContext) {
         categorySlug: inferredCategory?.slug || typedTicket.matched_category_slug || null,
       });
 
-      return buildJsonResponse({ ok: true, selectedGuildId: guildId, message: "Verification context linked." }, 200, refreshedTokens);
+      return buildJsonResponse({ ok: true, selectedGuildId: guildId, message: "Verification context linked." }, 200, session);
     }
 
     const patch = buildCategoryPatch({ ...body, category_set_by: body?.category_set_by || actorId || "" });
     const categoryRow = findCategoryFromPatch(patch, categoryIndex);
 
     if (!categoryRow && !patch.category && !patch.category_id) {
-      return buildErrorResponse("Choose a valid category first.", 400, refreshedTokens, { selectedGuildId: guildId });
+      return buildErrorResponse("Choose a valid category first.", 400, session, { error_code: "invalid_request", selectedGuildId: guildId });
     }
 
     const selectedCategorySlug = categoryRow?.slug || patch.category || null;
@@ -1008,7 +989,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       .select("*")
       .single();
 
-    if (error) return buildErrorResponse(error.message, 500, refreshedTokens, { selectedGuildId: guildId });
+    if (error) return buildErrorResponse(error.message, 500, session, { selectedGuildId: guildId });
 
     if (normalizeString(typedTicket.user_id)) {
       await insertMemberEvent(
@@ -1061,9 +1042,8 @@ export async function PATCH(request: Request, context: RouteContext) {
       });
     }
 
-    return buildJsonResponse({ ok: true, selectedGuildId: guildId, ticket }, 200, refreshedTokens);
+    return buildJsonResponse({ ok: true, selectedGuildId: guildId, ticket }, 200, session);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unauthorized";
-    return buildErrorResponse(message, message === "Unauthorized" ? 401 : 500);
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
