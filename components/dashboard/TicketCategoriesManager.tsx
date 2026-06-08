@@ -14,6 +14,7 @@ type TicketCategory = {
   sort_order?: number | null;
   is_default?: boolean | null;
   keyword_count?: number | null;
+  form_question_count?: number | null;
   usage?: {
     total?: number;
     open?: number;
@@ -63,30 +64,69 @@ const DEFAULT_FORM: FormState = {
   is_default: false,
 };
 
-const STARTER_TEMPLATES = [
+const STARTER_TEMPLATES: Array<{ key: string; title: string; helper: string; form: FormState }> = [
   {
     key: "support",
     title: "General Support",
     helper: "Default catch-all for normal questions and help requests.",
-    form: { ...DEFAULT_FORM, name: "General Support", slug: "general-support", description: "General help, questions, and server support.", match_keywords: "support, help, general support, assistance, question", button_label: "Open Support Ticket", sort_order: "10", is_default: true },
+    form: {
+      ...DEFAULT_FORM,
+      name: "General Support",
+      slug: "general-support",
+      description: "General help, questions, and server support.",
+      match_keywords: "support, help, general support, assistance, question",
+      button_label: "Open Support Ticket",
+      sort_order: "10",
+      is_default: true,
+    },
   },
   {
     key: "verification",
     title: "Verification Issue",
     helper: "For ID/VC/role verification problems.",
-    form: { ...DEFAULT_FORM, name: "Verification Issue", slug: "verification-issue", color: "#63d5ff", description: "Verification help, role issues, ID review, or VC verification support.", intake_type: "verification", match_keywords: "verification, verify, id verification, vc verify, role issue, verified role, unverified", button_label: "Open Verification Ticket", sort_order: "20" },
+    form: {
+      ...DEFAULT_FORM,
+      name: "Verification Issue",
+      slug: "verification-issue",
+      color: "#63d5ff",
+      description: "Verification help, role issues, ID review, or VC verification support.",
+      intake_type: "verification",
+      match_keywords: "verification, verify, id verification, vc verify, role issue, verified role, unverified",
+      button_label: "Open Verification Ticket",
+      sort_order: "20",
+    },
   },
   {
     key: "appeals",
     title: "Appeals / Reports",
     helper: "Moderation reports, ban appeals, and staff review requests.",
-    form: { ...DEFAULT_FORM, name: "Appeals / Reports", slug: "appeals-reports", color: "#ffd36b", description: "Ban appeals, moderation questions, user reports, and staff review requests.", intake_type: "appeal", match_keywords: "appeal, ban appeal, report, moderation, staff review, blacklist, timeout", button_label: "Open Appeal Ticket", sort_order: "30" },
+    form: {
+      ...DEFAULT_FORM,
+      name: "Appeals / Reports",
+      slug: "appeals-reports",
+      color: "#ffd36b",
+      description: "Ban appeals, moderation questions, user reports, and staff review requests.",
+      intake_type: "appeal",
+      match_keywords: "appeal, ban appeal, report, moderation, staff review, blacklist, timeout",
+      button_label: "Open Appeal Ticket",
+      sort_order: "30",
+    },
   },
   {
     key: "cod-service",
     title: "COD / Service Support",
     helper: "For modded lobbies, older COD support, and service questions.",
-    form: { ...DEFAULT_FORM, name: "COD / Service Support", slug: "cod-service-support", color: "#b26dff", description: "Support for COD services, modded lobbies, older Call of Duty titles, and hosted service questions.", intake_type: "custom", match_keywords: "cod, call of duty, modded lobby, modded lobbies, black ops, black ops 2, black ops 3, mw2, mw3, zombies, unlock all, recovery, service", button_label: "Open COD Support Ticket", sort_order: "40" },
+    form: {
+      ...DEFAULT_FORM,
+      name: "COD / Service Support",
+      slug: "cod-service-support",
+      color: "#b26dff",
+      description: "Support for COD services, modded lobbies, older Call of Duty titles, and hosted service questions.",
+      intake_type: "custom",
+      match_keywords: "cod, call of duty, modded lobby, modded lobbies, black ops, black ops 2, black ops 3, mw2, mw3, zombies, unlock all, recovery, service",
+      button_label: "Open COD Support Ticket",
+      sort_order: "40",
+    },
   },
 ];
 
@@ -101,7 +141,12 @@ function normalizeLower(value: unknown): string {
 }
 
 function slugify(value: unknown): string {
-  return normalizeString(value).toLowerCase().replace(/['"]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+  return normalizeString(value)
+    .toLowerCase()
+    .replace(/['"]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
 }
 
 function safeArray<T = unknown>(value: unknown): T[] {
@@ -115,6 +160,10 @@ function getErrorMessage(error: unknown, fallback: string): string {
 function keywordsToString(value: unknown): string {
   if (Array.isArray(value)) return value.map((item) => normalizeString(item)).filter(Boolean).join(", ");
   return normalizeString(value);
+}
+
+function keywordsToArray(value: string): string[] {
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 function usageCount(category: TicketCategory, key: keyof NonNullable<TicketCategory["usage"]>) {
@@ -154,6 +203,25 @@ function buildFormFromSuggestion(suggestion: DetectSuggestion): FormState {
   };
 }
 
+function formToApiPayload(payload: Omit<FormState, "id"> & { id?: string }) {
+  return {
+    id: payload.id || undefined,
+    name: normalizeString(payload.name),
+    slug: slugify(payload.slug || payload.name),
+    color: normalizeString(payload.color) || "#45d483",
+    description: normalizeString(payload.description),
+    intake_type: normalizeString(payload.intake_type) || "general",
+    match_keywords: keywordsToArray(payload.match_keywords),
+    button_label: normalizeString(payload.button_label),
+    sort_order: normalizeString(payload.sort_order),
+    is_default: Boolean(payload.is_default),
+  };
+}
+
+function suggestionName(suggestion: DetectSuggestion): string {
+  return normalizeString(suggestion.form?.name) || normalizeString(suggestion.discord_channel_name) || "Detected Category";
+}
+
 export default function TicketCategoriesManager() {
   const [categories, setCategories] = useState<TicketCategory[]>([]);
   const [defaultCategoryId, setDefaultCategoryId] = useState("");
@@ -167,6 +235,8 @@ export default function TicketCategoriesManager() {
   const [deletingId, setDeletingId] = useState("");
   const [starterSavingKey, setStarterSavingKey] = useState("");
   const [detecting, setDetecting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importingKey, setImportingKey] = useState("");
   const [suggestions, setSuggestions] = useState<DetectSuggestion[]>([]);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetText, setResetText] = useState("");
@@ -176,20 +246,36 @@ export default function TicketCategoriesManager() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  const selectedCategory = useMemo(() => categories.find((row) => normalizeString(row.id) === selectedId) || null, [categories, selectedId]);
+  const selectedCategory = useMemo(
+    () => categories.find((row) => normalizeString(row.id) === selectedId) || null,
+    [categories, selectedId]
+  );
+
   const filteredCategories = useMemo(() => {
     const q = normalizeLower(search);
     if (!q) return categories;
-    return categories.filter((category) => [category.name, category.slug, category.description, category.intake_type, category.button_label, ...safeArray<string>(category.match_keywords)].map(normalizeString).join(" ").toLowerCase().includes(q));
+    return categories.filter((category) =>
+      [category.name, category.slug, category.description, category.intake_type, category.button_label, ...safeArray<string>(category.match_keywords)]
+        .map(normalizeString)
+        .join(" ")
+        .toLowerCase()
+        .includes(q)
+    );
   }, [categories, search]);
+
   const presetKeywords = useMemo(() => safeArray<string>(presets[normalizeString(form.intake_type)]), [presets, form.intake_type]);
+  const newSuggestions = useMemo(() => suggestions.filter((suggestion) => !suggestion.alreadyExists), [suggestions]);
 
   async function loadCategories(options?: { preserveSelection?: boolean }) {
     const preserveSelection = options?.preserveSelection ?? true;
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/ticket-categories", { method: "GET", cache: "no-store", headers: { "Cache-Control": "no-store, max-age=0" } });
+      const res = await fetch("/api/ticket-categories", {
+        method: "GET",
+        cache: "no-store",
+        headers: { "Cache-Control": "no-store, max-age=0" },
+      });
       const json = await res.json().catch(() => null);
       if (!res.ok || json?.error) throw new Error(json?.error || "Failed to load ticket categories.");
       const nextCategories = safeArray<TicketCategory>(json?.categories || []);
@@ -197,6 +283,7 @@ export default function TicketCategoriesManager() {
       setDefaultCategoryId(normalizeString(json?.defaultCategoryId));
       setPresets((json?.presets || {}) as Record<string, string[]>);
       setCodKeywords(safeArray<string>(json?.codServiceKeywords || []));
+
       if (!preserveSelection) {
         setSelectedId("");
         setForm({ ...DEFAULT_FORM });
@@ -211,7 +298,9 @@ export default function TicketCategoriesManager() {
     }
   }
 
-  useEffect(() => { void loadCategories({ preserveSelection: false }); }, []);
+  useEffect(() => {
+    void loadCategories({ preserveSelection: false });
+  }, []);
 
   function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => {
@@ -250,7 +339,7 @@ export default function TicketCategoriesManager() {
     setSelectedId("");
     setForm(buildFormFromSuggestion(suggestion));
     setError("");
-    setMessage(`${normalizeString(suggestion.discord_channel_name) || "Detected category"} loaded into the editor. Review it, then save.`);
+    setMessage(`${suggestionName(suggestion)} loaded into the editor. Review it, then save.`);
     window.requestAnimationFrame(() => document.querySelector(".ticket-category-editor-card")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
@@ -269,26 +358,49 @@ export default function TicketCategoriesManager() {
     const res = await fetch("/api/ticket-categories", {
       method,
       headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
-      body: JSON.stringify({
-        id: payload.id || undefined,
-        name: normalizeString(payload.name),
-        slug: slugify(payload.slug || payload.name),
-        color: normalizeString(payload.color) || "#45d483",
-        description: normalizeString(payload.description),
-        intake_type: normalizeString(payload.intake_type) || "general",
-        match_keywords: payload.match_keywords.split(",").map((item) => item.trim()).filter(Boolean),
-        button_label: normalizeString(payload.button_label),
-        sort_order: normalizeString(payload.sort_order),
-        is_default: Boolean(payload.is_default),
-      }),
+      body: JSON.stringify(formToApiPayload(payload)),
     });
     const json = await res.json().catch(() => null);
     if (!res.ok || json?.error) throw new Error(json?.error || "Failed to save category.");
     return json;
   }
 
+  async function importDetected(items: DetectSuggestion[], label: string) {
+    if (!items.length) {
+      setError("There are no new detected categories to import.");
+      return;
+    }
+
+    setImporting(true);
+    setImportingKey(label);
+    setError("");
+    setMessage("");
+
+    try {
+      const res = await fetch("/api/ticket-categories/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        body: JSON.stringify({ source: "auto_detect", suggestions: items }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || json?.error) throw new Error(json?.error || "Failed to import detected categories.");
+      const importedCount = Number(json?.importedCount || 0);
+      const skippedCount = Number(json?.skippedCount || 0);
+      setMessage(`Imported ${importedCount} detected categor${importedCount === 1 ? "y" : "ies"}${skippedCount ? ` and skipped ${skippedCount} duplicate/invalid item${skippedCount === 1 ? "" : "s"}` : ""}.`);
+      setSuggestions((prev) => prev.filter((suggestion) => items.some((item) => item === suggestion) ? Boolean(suggestion.alreadyExists) : true));
+      await loadCategories({ preserveSelection: false });
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to import detected categories."));
+    } finally {
+      setImporting(false);
+      setImportingKey("");
+    }
+  }
+
   async function handleSave() {
-    setSaving(true); setError(""); setMessage("");
+    setSaving(true);
+    setError("");
+    setMessage("");
     try {
       if (!normalizeString(form.name)) throw new Error("Category name is required.");
       const json = await savePayload(form);
@@ -296,63 +408,98 @@ export default function TicketCategoriesManager() {
       const savedCategory = json?.category || null;
       const savedId = normalizeString(savedCategory?.id);
       await loadCategories({ preserveSelection: false });
-      if (savedId) { setSelectedId(savedId); setForm(buildFormFromCategory(savedCategory)); }
+      if (savedId) {
+        setSelectedId(savedId);
+        setForm(buildFormFromCategory(savedCategory));
+      }
     } catch (err) {
       setError(getErrorMessage(err, "Failed to save category."));
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function createStarter(template: { key: string; title: string; form: FormState }) {
-    setStarterSavingKey(template.key); setError(""); setMessage("");
+    setStarterSavingKey(template.key);
+    setError("");
+    setMessage("");
     try {
       await savePayload(template.form);
       setMessage(`${template.title} category created.`);
       await loadCategories({ preserveSelection: false });
-    } catch (err) { setError(getErrorMessage(err, `Failed to create ${template.title}.`)); }
-    finally { setStarterSavingKey(""); }
+    } catch (err) {
+      setError(getErrorMessage(err, `Failed to create ${template.title}.`));
+    } finally {
+      setStarterSavingKey("");
+    }
   }
 
   async function createAllStarters() {
-    setStarterSavingKey("all"); setError(""); setMessage("");
+    setStarterSavingKey("all");
+    setError("");
+    setMessage("");
     try {
       for (const template of STARTER_TEMPLATES) await savePayload(template.form);
       setMessage("Starter ticket categories created. Next: set up ticket forms, then post your panel.");
       await loadCategories({ preserveSelection: false });
-    } catch (err) { setError(getErrorMessage(err, "Failed to create starter categories.")); }
-    finally { setStarterSavingKey(""); }
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to create starter categories."));
+    } finally {
+      setStarterSavingKey("");
+    }
   }
 
   async function detectDiscordCategories() {
-    setDetecting(true); setError(""); setMessage("");
+    setDetecting(true);
+    setError("");
+    setMessage("");
     try {
-      const res = await fetch("/api/ticket-categories/detect", { method: "GET", cache: "no-store", headers: { "Cache-Control": "no-store" } });
+      const res = await fetch("/api/ticket-categories/detect", {
+        method: "GET",
+        cache: "no-store",
+        headers: { "Cache-Control": "no-store" },
+      });
       const json = await res.json().catch(() => null);
       if (!res.ok || json?.error) throw new Error(json?.error || "Failed to detect existing Discord categories.");
       const next = safeArray<DetectSuggestion>(json?.suggestions || []);
       setSuggestions(next);
-      setMessage(next.length ? `Detected ${next.length} possible category${next.length === 1 ? "" : "ies"} from Discord.` : "No ticket-like Discord categories were detected. You can still use the starter set or create manually.");
-    } catch (err) { setError(getErrorMessage(err, "Failed to detect existing Discord categories.")); }
-    finally { setDetecting(false); }
+      const freshCount = next.filter((suggestion) => !suggestion.alreadyExists).length;
+      setMessage(next.length ? `Detected ${next.length} possible categor${next.length === 1 ? "y" : "ies"} from Discord. ${freshCount} can be imported now.` : "No ticket-like Discord categories were detected. You can still use the starter set or create manually.");
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to detect existing Discord categories."));
+    } finally {
+      setDetecting(false);
+    }
   }
 
   async function handleDelete(category: TicketCategory) {
     const id = normalizeString(category.id);
     if (!id) return;
     if (!window.confirm(`Delete "${normalizeString(category.name) || "this category"}"?`)) return;
-    setDeletingId(id); setError(""); setMessage("");
+    setDeletingId(id);
+    setError("");
+    setMessage("");
     try {
-      const res = await fetch(`/api/ticket-categories?id=${encodeURIComponent(id)}`, { method: "DELETE", headers: { "Cache-Control": "no-store" } });
+      const res = await fetch(`/api/ticket-categories?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { "Cache-Control": "no-store" },
+      });
       const json = await res.json().catch(() => null);
       if (!res.ok || json?.error) throw new Error(json?.error || "Failed to delete category.");
       if (selectedId === id) resetForm();
       setMessage("Category deleted.");
       await loadCategories({ preserveSelection: false });
-    } catch (err) { setError(getErrorMessage(err, "Failed to delete category.")); }
-    finally { setDeletingId(""); }
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to delete category."));
+    } finally {
+      setDeletingId("");
+    }
   }
 
   async function handleResetAll() {
-    setResetting(true); setError(""); setMessage("");
+    setResetting(true);
+    setError("");
+    setMessage("");
     try {
       const res = await fetch("/api/ticket-categories/reset", {
         method: "POST",
@@ -361,21 +508,33 @@ export default function TicketCategoriesManager() {
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || json?.error) throw new Error(json?.error || "Failed to reset categories.");
-      setResetText(""); setResetAck(false); setResetLinksAck(false); setResetOpen(false); setSuggestions([]); resetForm();
+      setResetText("");
+      setResetAck(false);
+      setResetLinksAck(false);
+      setResetOpen(false);
+      setSuggestions([]);
+      resetForm();
       setMessage(`Reset complete. Deleted ${Number(json?.deletedCategoryCount || 0)} category config${Number(json?.deletedCategoryCount || 0) === 1 ? "" : "s"}.`);
       await loadCategories({ preserveSelection: false });
-    } catch (err) { setError(getErrorMessage(err, "Failed to reset categories.")); }
-    finally { setResetting(false); }
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to reset categories."));
+    } finally {
+      setResetting(false);
+    }
   }
 
   return (
     <div className="space">
       <div className="card category-workflow-card">
         <div className="category-workflow-head">
-          <div><div className="muted category-eyebrow">Step 2 of 3</div><h2 style={{ margin: 0 }}>Ticket Categories</h2><div className="muted category-copy">Categories control what members pick in Discord and how tickets route to staff.</div></div>
+          <div>
+            <div className="muted category-eyebrow">Step 2 of 3</div>
+            <h2 style={{ margin: 0 }}>Ticket Categories</h2>
+            <div className="muted category-copy">Categories control what members pick in Discord and how tickets route to staff.</div>
+          </div>
           <div className="category-top-actions">
-            <button type="button" className="button ghost" onClick={() => void loadCategories()} disabled={loading || saving || !!deletingId}>{loading ? "Refreshing..." : "Refresh"}</button>
-            <button type="button" className="button ghost" onClick={() => void detectDiscordCategories()} disabled={detecting || loading}>{detecting ? "Detecting..." : "Auto-detect from Discord"}</button>
+            <button type="button" className="button ghost" onClick={() => void loadCategories()} disabled={loading || saving || Boolean(deletingId) || importing}>{loading ? "Refreshing..." : "Refresh"}</button>
+            <button type="button" className="button ghost" onClick={() => void detectDiscordCategories()} disabled={detecting || loading || importing}>{detecting ? "Detecting..." : "Auto-detect from Discord"}</button>
             <button type="button" className="button primary" onClick={resetForm}>New Category</button>
           </div>
         </div>
@@ -386,25 +545,56 @@ export default function TicketCategoriesManager() {
 
       {suggestions.length ? (
         <div className="card detect-card">
-          <div className="starter-head"><div><div className="muted category-eyebrow">Auto-detected</div><h2 style={{ margin: 0 }}>Build from existing Discord categories</h2><div className="muted category-copy">Nothing is saved automatically. Load a suggestion, edit it, then save when it looks right.</div></div><button type="button" className="button ghost" onClick={() => setSuggestions([])}>Hide Suggestions</button></div>
+          <div className="starter-head">
+            <div>
+              <div className="muted category-eyebrow">Auto-detected</div>
+              <h2 style={{ margin: 0 }}>Build from existing Discord categories</h2>
+              <div className="muted category-copy">Import all new suggestions in one click, create a single suggestion, or load one into the editor for cleanup.</div>
+            </div>
+            <div className="category-top-actions">
+              <button type="button" className="button primary" onClick={() => void importDetected(newSuggestions, "all-detected")} disabled={importing || !newSuggestions.length}>{importing && importingKey === "all-detected" ? "Importing..." : `Create All New (${newSuggestions.length})`}</button>
+              <button type="button" className="button ghost" onClick={() => setSuggestions([])} disabled={importing}>Hide Suggestions</button>
+            </div>
+          </div>
           <div className="starter-grid">
-            {suggestions.map((suggestion) => (
-              <div key={suggestion.discord_channel_id || suggestion.discord_channel_name} className={`starter-template-card ${suggestion.alreadyExists ? "muted-card" : ""}`}>
-                <div className="starter-template-title">{normalizeString(suggestion.form?.name) || suggestion.discord_channel_name}</div>
-                <div className="muted starter-template-helper">{suggestion.reason} Confidence {Number(suggestion.confidence || 0)}%.</div>
-                {suggestion.child_channel_names?.length ? <div className="ticket-category-meta">Channels: {suggestion.child_channel_names.slice(0, 4).join(", ")}</div> : null}
-                {suggestion.alreadyExists ? <div className="error-banner mini">Already has a matching dashboard slug.</div> : null}
-                <button type="button" className="button primary" onClick={() => startSuggestion(suggestion)} disabled={suggestion.alreadyExists}>Load & Customize</button>
-              </div>
-            ))}
+            {suggestions.map((suggestion) => {
+              const key = suggestion.discord_channel_id || suggestion.discord_channel_name || suggestionName(suggestion);
+              const disabled = Boolean(suggestion.alreadyExists) || importing;
+              return (
+                <div key={key} className={`starter-template-card ${suggestion.alreadyExists ? "muted-card" : ""}`}>
+                  <div className="starter-template-title">{suggestionName(suggestion)}</div>
+                  <div className="muted starter-template-helper">{suggestion.reason} Confidence {Number(suggestion.confidence || 0)}%.</div>
+                  {suggestion.child_channel_names?.length ? <div className="ticket-category-meta">Channels: {suggestion.child_channel_names.slice(0, 4).join(", ")}</div> : null}
+                  {suggestion.alreadyExists ? <div className="error-banner mini">Already has a matching dashboard slug.</div> : null}
+                  <div className="starter-template-actions">
+                    <button type="button" className="button primary" onClick={() => void importDetected([suggestion], key)} disabled={disabled}>{importing && importingKey === key ? "Creating..." : "Create This"}</button>
+                    <button type="button" className="button ghost" onClick={() => startSuggestion(suggestion)} disabled={disabled}>Load & Customize</button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       ) : null}
 
       {!loading && categories.length === 0 ? (
         <div className="card starter-card">
-          <div className="starter-head"><div><div className="muted category-eyebrow">Fast Setup</div><h2 style={{ margin: 0 }}>Start with proven ticket categories</h2><div className="muted category-copy">Use starter defaults, or auto-detect what the server already has first.</div></div><button type="button" className="button primary starter-all" onClick={() => void createAllStarters()} disabled={Boolean(starterSavingKey)}>{starterSavingKey === "all" ? "Creating..." : "Create Starter Set"}</button></div>
-          <div className="starter-grid">{STARTER_TEMPLATES.map((template) => <div key={template.key} className="starter-template-card"><div className="starter-template-title">{template.title}</div><div className="muted starter-template-helper">{template.helper}</div><div className="starter-template-actions"><button type="button" className="button ghost" onClick={() => startTemplate(template)} disabled={Boolean(starterSavingKey)}>Preview</button><button type="button" className="button primary" onClick={() => void createStarter(template)} disabled={Boolean(starterSavingKey)}>{starterSavingKey === template.key ? "Creating..." : "Create"}</button></div></div>)}</div>
+          <div className="starter-head">
+            <div><div className="muted category-eyebrow">Fast Setup</div><h2 style={{ margin: 0 }}>Start with proven ticket categories</h2><div className="muted category-copy">Use starter defaults, or auto-detect what the server already has first.</div></div>
+            <button type="button" className="button primary starter-all" onClick={() => void createAllStarters()} disabled={Boolean(starterSavingKey)}>{starterSavingKey === "all" ? "Creating..." : "Create Starter Set"}</button>
+          </div>
+          <div className="starter-grid">
+            {STARTER_TEMPLATES.map((template) => (
+              <div key={template.key} className="starter-template-card">
+                <div className="starter-template-title">{template.title}</div>
+                <div className="muted starter-template-helper">{template.helper}</div>
+                <div className="starter-template-actions">
+                  <button type="button" className="button ghost" onClick={() => startTemplate(template)} disabled={Boolean(starterSavingKey)}>Preview</button>
+                  <button type="button" className="button primary" onClick={() => void createStarter(template)} disabled={Boolean(starterSavingKey)}>{starterSavingKey === template.key ? "Creating..." : "Create"}</button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
 
@@ -417,7 +607,16 @@ export default function TicketCategoriesManager() {
               {filteredCategories.map((category) => {
                 const id = normalizeString(category.id);
                 const selected = selectedId === id;
-                return <button key={id || normalizeString(category.slug)} type="button" className={`ticket-category-row ${selected ? "active" : ""}`} onClick={() => startEdit(category)}><div className="ticket-category-row-top"><div className="ticket-category-name-wrap"><span className="ticket-category-color" style={{ background: normalizeString(category.color) || "#45d483" }} /><span className="ticket-category-name">{normalizeString(category.name) || "Unnamed"}</span></div><div className="ticket-category-chip-row">{category.is_default ? <span className="badge claimed">Default</span> : null}<span className="badge">{normalizeString(category.intake_type) || "general"}</span></div></div><div className="ticket-category-meta"><span>{normalizeString(category.slug) || "—"}</span><span>•</span><span>{Number(category.keyword_count || category.match_keywords?.length || 0)} keywords</span><span>•</span><span>{usageCount(category, "total")} tickets</span></div><div className="ticket-category-usage-row"><span>Open {usageCount(category, "open")}</span><span>Claimed {usageCount(category, "claimed")}</span><span>Closed {usageCount(category, "closed")}</span><span>Overrides {usageCount(category, "manualOverrideCount")}</span></div></button>;
+                return (
+                  <button key={id || normalizeString(category.slug)} type="button" className={`ticket-category-row ${selected ? "active" : ""}`} onClick={() => startEdit(category)}>
+                    <div className="ticket-category-row-top">
+                      <div className="ticket-category-name-wrap"><span className="ticket-category-color" style={{ background: normalizeString(category.color) || "#45d483" }} /><span className="ticket-category-name">{normalizeString(category.name) || "Unnamed"}</span></div>
+                      <div className="ticket-category-chip-row">{category.is_default ? <span className="badge claimed">Default</span> : null}<span className="badge">{normalizeString(category.intake_type) || "general"}</span></div>
+                    </div>
+                    <div className="ticket-category-meta"><span>{normalizeString(category.slug) || "—"}</span><span>•</span><span>{Number(category.keyword_count || category.match_keywords?.length || 0)} keywords</span><span>•</span><span>{usageCount(category, "total")} tickets</span></div>
+                    <div className="ticket-category-usage-row"><span>Open {usageCount(category, "open")}</span><span>Claimed {usageCount(category, "claimed")}</span><span>Closed {usageCount(category, "closed")}</span><span>Overrides {usageCount(category, "manualOverrideCount")}</span></div>
+                  </button>
+                );
               })}
             </div>
           </div>
