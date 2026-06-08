@@ -414,14 +414,113 @@ function deriveAccess(args: {
   return { hasStaffRole, hasVerifiedRole, hasUnverifiedRole, hasManagerAccess, accessLevel, accessLabel, verificationLabel };
 }
 
-export async function getDashboardAuthSession(): Promise<DashboardAuthSession | null> {
-  const bearerState = await getBearer();
-  if (!bearerState) return null;
+function proofFallbackUser(): DiscordUser {
+  return {
+    id: "selected-server-manager",
+    username: "Dashboard Manager",
+    global_name: "Dashboard Manager",
+    discriminator: "0",
+    avatar: null,
+    banner: null,
+  };
+}
 
-  const { bearer, refreshedTokens, user } = await loadUserWithRetry(bearerState);
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : clean(error);
+}
+
+async function buildProofFallbackSession(args: {
+  selectedGuildId: string;
+  bearerState: { bearer: string; refreshedTokens: TokenPayload } | null;
+  cause: unknown;
+}): Promise<DashboardAuthSession> {
+  const selectedGuildId = clean(args.selectedGuildId);
+  const user = proofFallbackUser();
   const userId = clean(user.id);
+  const dbAccess = await loadDatabaseAccess(selectedGuildId, "");
+  const rolesDetailed = storedRoles(dbAccess.storedMember);
+  const roleIds = rolesDetailed.map((role) => role.id).filter(Boolean);
+  const roleNames = rolesDetailed.map((role) => clean(role.name)).filter(Boolean);
+  const access = deriveAccess({ manager: true, managerProof: true, roleIds, roleNames, rules: dbAccess.rules, storedMember: dbAccess.storedMember });
+  const issue = errorMessage(args.cause) || "Discord user OAuth check failed, but selected server manager proof is valid.";
+
+  return {
+    signedIn: true,
+    accessLevel: "server_manager",
+    isStaff: true,
+    isServerManager: true,
+    selectedGuildId,
+    refreshedTokens: args.bearerState?.refreshedTokens || null,
+    bearer: args.bearerState?.bearer || "",
+    user: {
+      id: userId,
+      discord_id: userId,
+      username: clean(user.global_name || user.username || "Dashboard Manager"),
+      global_name: clean(user.global_name),
+      login: clean(user.username),
+      discriminator: clean(user.discriminator),
+      avatar: null,
+      avatar_url: null,
+      image: null,
+      picture: null,
+      banner_url: null,
+    },
+    discordUser: {
+      id: userId,
+      username: clean(user.username),
+      global_name: clean(user.global_name),
+      avatar: null,
+      avatar_url: null,
+      image: null,
+      picture: null,
+      banner_url: null,
+    },
+    member: {
+      id: userId,
+      nickname: null,
+      display_name: "Dashboard Manager",
+      avatar_url: null,
+      roleIds,
+      roles: roleNames,
+      rolesDetailed,
+      has_staff_role: access.hasStaffRole,
+      has_verified_role: access.hasVerifiedRole,
+      has_unverified_role: access.hasUnverifiedRole,
+      has_manage_server: true,
+      access_label: "Server Manager",
+      verification_label: "Server Manager",
+    },
+    authContext: {
+      guild_id: selectedGuildId || null,
+      selected_guild_id: selectedGuildId || null,
+      guild_checked: true,
+      guild_check_error: issue,
+      staff_reason: "selected_server_access_proof_oauth_fallback",
+      access_source: "selected_server_access_proof",
+    },
+  };
+}
+
+export async function getDashboardAuthSession(): Promise<DashboardAuthSession | null> {
   const selectedGuildId = clean(getSelectedGuildId());
   const managerProof = Boolean(selectedGuildId && hasSelectedGuildManagerProof());
+  const bearerState = await getBearer();
+
+  if (!bearerState) {
+    if (managerProof) return buildProofFallbackSession({ selectedGuildId, bearerState: null, cause: "No active Discord bearer token; using selected server manager proof." });
+    return null;
+  }
+
+  let loaded: { bearer: string; refreshedTokens: TokenPayload; user: DiscordUser };
+  try {
+    loaded = await loadUserWithRetry(bearerState);
+  } catch (error) {
+    if (managerProof) return buildProofFallbackSession({ selectedGuildId, bearerState, cause: error });
+    throw error;
+  }
+
+  const { bearer, refreshedTokens, user } = loaded;
+  const userId = clean(user.id);
   const [managerAccess, botContext, dbAccess] = await Promise.all([
     managerProof ? Promise.resolve({ ok: true, error: null }) : loadUserGuildManagerAccess(bearer, selectedGuildId),
     loadBotMemberContext(selectedGuildId, userId),
