@@ -18,12 +18,15 @@ type ServerRow = {
 };
 
 type ServerResponse = {
+  ok?: boolean;
   error?: string;
   error_code?: string;
+  retryable?: boolean;
   selectedGuildId?: string;
   servers?: ServerRow[];
   botCheckOk?: boolean;
   botCheckError?: string | null;
+  bot_invite_url?: string | null;
 };
 
 function text(value: unknown): string {
@@ -88,13 +91,36 @@ function friendlyServerError(raw: unknown, hasVisibleServers = false): string {
     return "The bot install check needs attention. Already confirmed installed servers remain selectable.";
   }
   if (lower.includes("401") || lower.includes("unauthorized") || lower.includes("session") || lower.includes("login") || lower.includes("oauth")) {
-    return "One live Discord check could not use the current session. Already listed servers remain usable.";
+    return "Your server list is still usable, but Discord rejected the final selection check. Tap Refresh once, then try Manage Server again. If it repeats, use Account → Reset Login.";
   }
   if (lower.includes("403") || lower.includes("forbidden")) {
-    return "Discord blocked one live check. Already listed servers remain usable.";
+    return "Discord blocked one live selection check. The listed servers remain usable, but selection needs a fresh permission check.";
   }
 
   return value.length > 180 ? `${value.slice(0, 180)}…` : value;
+}
+
+function friendlySelectionError(json: ServerResponse | null, status: number, serverName: string): string {
+  const code = text(json?.error_code);
+  const raw = text(json?.error) || `Failed to select server. Status ${status}.`;
+
+  if (code === "signed_out") {
+    return `The server cards loaded, but Discord rejected the final selection check for ${serverName}. Tap Refresh once and try again. If it repeats, use Account → Reset Login.`;
+  }
+
+  if (code === "forbidden") {
+    return `Discord could not confirm Manage Server permission for ${serverName}. Refresh once; if it repeats, re-authorize Discord so permissions are fresh.`;
+  }
+
+  if (code === "bot_check_unknown") {
+    return `Dank Shield still appears installed for ${serverName}, but Discord temporarily blocked the final bot check. Tap Refresh/Recheck and try again.`;
+  }
+
+  if (code === "bot_not_installed") {
+    return raw;
+  }
+
+  return friendlyServerError(raw, true);
 }
 
 export default function ServerSelector() {
@@ -199,7 +225,7 @@ export default function ServerSelector() {
         },
         body: JSON.stringify({ guild_id: server.id }),
       });
-      const json = (await res.json().catch(() => null)) as (ServerResponse & { bot_invite_url?: string | null }) | null;
+      const json = (await res.json().catch(() => null)) as ServerResponse | null;
 
       if (!res.ok || json?.error) {
         const inviteUrl = text(json?.bot_invite_url);
@@ -207,7 +233,7 @@ export default function ServerSelector() {
           window.location.href = inviteUrl;
           return;
         }
-        throw new Error(json?.error || `Failed to select server. Status ${res.status}.`);
+        throw new Error(friendlySelectionError(json, res.status, server.name));
       }
 
       setSelectedGuildId(server.id);
@@ -215,7 +241,8 @@ export default function ServerSelector() {
       setMessage(`${server.name} is selected. Opening this server dashboard...`);
       window.location.href = dashboardHref(server.id);
     } catch (err) {
-      setError(friendlyServerError(err instanceof Error ? err.message : err, servers.length > 0));
+      setBotCheckError("");
+      setError(err instanceof Error ? err.message : friendlySelectionError(null, 500, server.name));
     } finally {
       setSavingId("");
     }
@@ -310,7 +337,7 @@ export default function ServerSelector() {
         <div className="card empty-state server-empty-state">
           <strong>No manageable servers found.</strong>
           <span>The server list did not load any Discord servers for this login.</span>
-          <span>Use Account → Reset Login once, sign in again, then tap Refresh. If this repeats, the Discord server-list API is rejecting or rate-limiting the request.</span>
+          <span>Use Account → Reset Login once, sign in again, then return here.</span>
         </div>
       )}
 
