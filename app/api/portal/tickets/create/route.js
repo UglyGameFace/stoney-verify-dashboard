@@ -12,7 +12,16 @@ function safeText(value) {
 }
 
 function noStoreJson(body, status = 200) {
-  return NextResponse.json(body, {
+  const normalized = status >= 400
+    ? {
+        ok: false,
+        ...body,
+        error_code: body?.error_code || (status === 401 ? "signed_out" : status === 428 ? "selected_server_required" : status === 409 ? "conflict" : "server_error"),
+        needsServerSelection: body?.needsServerSelection ?? status === 428,
+      }
+    : body;
+
+  return NextResponse.json(normalized, {
     status,
     headers: { "Cache-Control": "no-store, max-age=0" },
   });
@@ -43,7 +52,8 @@ export async function POST(req) {
       return noStoreJson(
         {
           ok: false,
-          error: "Unauthorized",
+          error: "Discord login required.",
+          error_code: "signed_out",
         },
         401
       );
@@ -55,6 +65,7 @@ export async function POST(req) {
         {
           ok: false,
           error: "Select a server before creating a ticket.",
+          error_code: "selected_server_required",
           needsServerSelection: true,
         },
         428
@@ -135,6 +146,7 @@ export async function POST(req) {
       {
         ok: false,
         error: error instanceof Error ? error.message : "Unexpected server error",
+        error_code: "server_error",
       },
       500
     );
