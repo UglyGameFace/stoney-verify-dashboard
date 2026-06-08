@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { getSession } from "@/lib/auth-server";
 import { getSelectedGuildId } from "@/lib/guild-selection";
-import { derivePriority, sortTickets } from "@/lib/priority";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -105,6 +104,20 @@ async function single(supabase: any, table: string, build: (query: any) => any):
   }
 }
 
+function localPriority(row: AnyRecord): string {
+  const explicit = lower(row.priority);
+  if (["urgent", "high", "medium", "low"].includes(explicit)) return explicit;
+  const status = lower(row.status);
+  const category = lower(row.category || row.matched_category_slug || row.matched_intake_type);
+  if (status === "open" && (category.includes("appeal") || category.includes("verification"))) return "high";
+  if (status === "open" || status === "claimed") return "medium";
+  return "low";
+}
+
+function sortRecentTickets(tickets: AnyRecord[]) {
+  return [...tickets].sort((a, b) => dateMs(b.updated_at || b.created_at) - dateMs(a.updated_at || a.created_at));
+}
+
 function memberRow(row: AnyRecord | null, viewer: AnyRecord) {
   const member = safeObject(row);
   return {
@@ -174,7 +187,7 @@ function ticketRow(row: AnyRecord) {
     matched_category_reason: clean(row.matched_category_reason) || null,
     matched_category_score: Number(row.matched_category_score || 0),
     status: clean(row.status) || "open",
-    priority: clean(row.priority) || derivePriority(row as never) || "medium",
+    priority: localPriority(row),
     claimed_by: clean(row.claimed_by) || null,
     claimed_by_name: clean(row.claimed_by_name) || null,
     assigned_to: clean(row.assigned_to) || null,
@@ -361,64 +374,11 @@ function verificationInfo(member: AnyRecord, flags: AnyRecord[], openTicket: Any
 function recentActivity(events: AnyRecord[], tickets: AnyRecord[], flags: AnyRecord[], joins: AnyRecord[], memberEvents: AnyRecord[]) {
   const rowsOut: AnyRecord[] = [
     ...events.map(activityRow),
-    ...tickets.map((ticket) => ({
-      id: `ticket-${ticket.id || ticket.created_at}`,
-      title: ticket.status === "closed" ? "Ticket Closed" : "Ticket Opened",
-      description: ticket.title || "Ticket activity",
-      reason: ticket.initial_message || ticket.closed_reason || "",
-      event_type: ticket.status === "closed" ? "ticket_closed" : "ticket_created",
-      created_at: ticket.closed_at || ticket.created_at || ticket.updated_at || null,
-      updated_at: ticket.updated_at || ticket.created_at || null,
-      actor_id: ticket.closed_by || null,
-      actor_name: ticket.closed_by_name || "System",
-      ticket_id: ticket.id || null,
-      metadata: { status: ticket.status, category: ticket.category || ticket.matched_category_slug || null },
-      _source: "tickets",
-    })),
-    ...flags.map((flag) => ({
-      id: `flag-${flag.id || flag.created_at}`,
-      title: flag.flagged ? "Verification Flag Raised" : "Verification Reviewed",
-      description: flag.flagged ? "Your verification was flagged for manual review." : "Verification review activity detected.",
-      reason: safeArray(flag.reasons).join(" • "),
-      event_type: "verification_flag",
-      created_at: flag.created_at || null,
-      updated_at: flag.created_at || null,
-      actor_id: null,
-      actor_name: "System",
-      ticket_id: null,
-      metadata: { score: flag.score, reasons: safeArray(flag.reasons) },
-      _source: "verification_flags",
-    })),
-    ...joins.map((join) => ({
-      id: `join-${join.id || join.joined_at}`,
-      title: "Joined Server",
-      description: "Your member profile was recorded in the server.",
-      reason: join.join_note || join.join_source || join.entry_method || join.verification_source || "",
-      event_type: "member_join",
-      created_at: join.joined_at || null,
-      updated_at: join.joined_at || null,
-      actor_id: null,
-      actor_name: "System",
-      ticket_id: null,
-      metadata: { invite_code: join.invite_code || null, inviter_id: join.inviter_id || null, inviter_name: join.inviter_name || null },
-      _source: "member_joins",
-    })),
-    ...memberEvents.map((event) => ({
-      id: `member-event-${event.id || event.created_at}`,
-      title: event.title || "Member Event",
-      description: event.reason || "",
-      reason: event.reason || "",
-      event_type: event.event_type || "member_event",
-      created_at: event.created_at || null,
-      updated_at: event.created_at || null,
-      actor_id: event.actor_id || null,
-      actor_name: event.actor_name || "System",
-      ticket_id: null,
-      metadata: event.metadata || {},
-      _source: "member_events",
-    })),
+    ...tickets.map((ticket) => ({ id: `ticket-${ticket.id || ticket.created_at}`, title: ticket.status === "closed" ? "Ticket Closed" : "Ticket Opened", description: ticket.title || "Ticket activity", reason: ticket.initial_message || ticket.closed_reason || "", event_type: ticket.status === "closed" ? "ticket_closed" : "ticket_created", created_at: ticket.closed_at || ticket.created_at || ticket.updated_at || null, updated_at: ticket.updated_at || ticket.created_at || null, actor_id: ticket.closed_by || null, actor_name: ticket.closed_by_name || "System", ticket_id: ticket.id || null, metadata: { status: ticket.status, category: ticket.category || ticket.matched_category_slug || null }, _source: "tickets" })),
+    ...flags.map((flag) => ({ id: `flag-${flag.id || flag.created_at}`, title: flag.flagged ? "Verification Flag Raised" : "Verification Reviewed", description: flag.flagged ? "Your verification was flagged for manual review." : "Verification review activity detected.", reason: safeArray(flag.reasons).join(" • "), event_type: "verification_flag", created_at: flag.created_at || null, updated_at: flag.created_at || null, actor_id: null, actor_name: "System", ticket_id: null, metadata: { score: flag.score, reasons: safeArray(flag.reasons) }, _source: "verification_flags" })),
+    ...joins.map((join) => ({ id: `join-${join.id || join.joined_at}`, title: "Joined Server", description: "Your member profile was recorded in the server.", reason: join.join_note || join.join_source || join.entry_method || join.verification_source || "", event_type: "member_join", created_at: join.joined_at || null, updated_at: join.joined_at || null, actor_id: null, actor_name: "System", ticket_id: null, metadata: { invite_code: join.invite_code || null, inviter_id: join.inviter_id || null, inviter_name: join.inviter_name || null }, _source: "member_joins" })),
+    ...memberEvents.map((event) => ({ id: `member-event-${event.id || event.created_at}`, title: event.title || "Member Event", description: event.reason || "", reason: event.reason || "", event_type: event.event_type || "member_event", created_at: event.created_at || null, updated_at: event.created_at || null, actor_id: event.actor_id || null, actor_name: event.actor_name || "System", ticket_id: null, metadata: event.metadata || {}, _source: "member_events" })),
   ];
-
   return rowsOut.filter((item) => item.created_at).sort((a, b) => dateMs(b.created_at) - dateMs(a.created_at)).slice(0, 25);
 }
 
@@ -431,7 +391,6 @@ function usernameHistory(member: AnyRecord, viewer: AnyRecord, joins: AnyRecord[
     if (!cleanUser && !cleanDisplay && !cleanNick) return;
     rowsOut.push({ id: `${source}:${created_at || cleanUser || cleanDisplay || cleanNick}`, created_at, username: cleanUser || null, display_name: cleanDisplay || null, nickname: cleanNick || null, source });
   };
-
   push("current_member", member.joined_at || null, member.username, member.display_name, member.nickname);
   push("viewer_session", null, viewer.username, viewer.global_name, null);
   for (const value of safeArray(member.previous_usernames)) push("guild_members_previous_username", null, value, null, null);
@@ -439,25 +398,14 @@ function usernameHistory(member: AnyRecord, viewer: AnyRecord, joins: AnyRecord[
   for (const value of safeArray(member.previous_nicknames)) push("guild_members_previous_nickname", null, null, null, value);
   for (const row of joins) push("member_joins", row.joined_at, row.username, row.display_name, null);
   for (const ticket of tickets) push("tickets", ticket.created_at, ticket.username, null, null);
-
   const seen = new Set<string>();
-  return rowsOut.sort((a, b) => dateMs(b.created_at) - dateMs(a.created_at)).filter((row) => {
-    const key = `${lower(row.username)}|${lower(row.display_name)}|${lower(row.nickname)}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).slice(0, 30);
+  return rowsOut.sort((a, b) => dateMs(b.created_at) - dateMs(a.created_at)).filter((row) => { const key = `${lower(row.username)}|${lower(row.display_name)}|${lower(row.nickname)}`; if (seen.has(key)) return false; seen.add(key); return true; }).slice(0, 30);
 }
 
 function vouchRows(member: AnyRecord, joins: AnyRecord[]) {
   const out: AnyRecord[] = [];
-  if (member.vouched_by || member.vouched_by_name) {
-    out.push({ id: `member-vouch-${member.vouched_by || member.vouched_by_name}`, created_at: member.joined_at || null, actor_id: member.vouched_by || null, actor_name: member.vouched_by_name || member.vouched_by || null, target_user_id: member.user_id || null, reason: member.entry_reason || "Member was vouched into the server.", raw: null });
-  }
-  for (const row of joins) {
-    if (!row.vouched_by && !row.vouched_by_name) continue;
-    out.push({ id: `join-vouch-${row.id || row.joined_at || row.vouched_by || row.vouched_by_name}`, created_at: row.joined_at || null, actor_id: row.vouched_by || null, actor_name: row.vouched_by_name || row.vouched_by || null, target_user_id: member.user_id || null, reason: row.join_note || "Member was vouched into the server.", raw: row.raw || row });
-  }
+  if (member.vouched_by || member.vouched_by_name) out.push({ id: `member-vouch-${member.vouched_by || member.vouched_by_name}`, created_at: member.joined_at || null, actor_id: member.vouched_by || null, actor_name: member.vouched_by_name || member.vouched_by || null, target_user_id: member.user_id || null, reason: member.entry_reason || "Member was vouched into the server.", raw: null });
+  for (const row of joins) if (row.vouched_by || row.vouched_by_name) out.push({ id: `join-vouch-${row.id || row.joined_at || row.vouched_by || row.vouched_by_name}`, created_at: row.joined_at || null, actor_id: row.vouched_by || null, actor_name: row.vouched_by_name || row.vouched_by || null, target_user_id: member.user_id || null, reason: row.join_note || "Member was vouched into the server.", raw: row.raw || row });
   return out.sort((a, b) => dateMs(b.created_at) - dateMs(a.created_at)).slice(0, 15);
 }
 
@@ -489,7 +437,7 @@ export async function GET(): Promise<NextResponse> {
     const joinHistory = joinsRaw.map(joinRow);
     const memberEvents = memberEventsRaw.map(memberEventRow);
     const visibleTickets = ticketsRaw.map(ticketRow);
-    const recentTickets = sortTickets(visibleTickets as never, "updated_desc") as AnyRecord[];
+    const recentTickets = sortRecentTickets(visibleTickets);
     const openTicket = recentTickets.find((ticket) => ["open", "claimed"].includes(lower(ticket.status))) || null;
     const ticketIds = recentTickets.map((ticket) => ticket.id).filter(Boolean);
     const feedRows = await rows(supabase, "activity_feed_events", (q) => q.eq("guild_id", guildId).or(`target_user_id.eq.${viewer.discord_id},actor_user_id.eq.${viewer.discord_id}`).order("created_at", { ascending: false }).limit(40));
@@ -501,27 +449,7 @@ export async function GET(): Promise<NextResponse> {
     const vouches = vouchRows(member, joinHistory);
     const verification = verificationInfo(member, verificationFlags, openTicket);
     const recent = recentActivity([...feedRows, ...ticketFeedRows], recentTickets, verificationFlags, joinHistory, memberEvents);
-    const relationships = {
-      entry_method: entry.entry_method || member.entry_method || null,
-      verification_source: entry.verification_source || member.verification_source || entry.join_source || null,
-      join_source: entry.join_source || member.join_source || null,
-      entry_reason: member.entry_reason || entry.join_note || null,
-      approval_reason: member.approval_reason || null,
-      invite_code: entry.invite_code || member.invite_code || null,
-      inviter_id: entry.inviter_id || member.invited_by || null,
-      inviter_name: entry.inviter_name || member.invited_by_name || null,
-      vanity_used: Boolean(entry.vanity_used),
-      vouched_by: entry.vouched_by || member.vouched_by || null,
-      vouched_by_name: entry.vouched_by_name || member.vouched_by_name || null,
-      approved_by: entry.approved_by || member.approved_by || null,
-      approved_by_name: entry.approved_by_name || member.approved_by_name || null,
-      verification_ticket_id: member.verification_ticket_id || null,
-      source_ticket_id: entry.source_ticket_id || member.source_ticket_id || recentTickets[0]?.id || null,
-      source_confidence: entry.source_confidence || "unknown",
-      source_truth_reason: entry.source_truth_reason || null,
-      vouch_count: vouches.length,
-      latest_vouch_at: vouches.map((item) => item.created_at).sort((a, b) => dateMs(b) - dateMs(a))[0] || null,
-    };
+    const relationships = { entry_method: entry.entry_method || member.entry_method || null, verification_source: entry.verification_source || member.verification_source || entry.join_source || null, join_source: entry.join_source || member.join_source || null, entry_reason: member.entry_reason || entry.join_note || null, approval_reason: member.approval_reason || null, invite_code: entry.invite_code || member.invite_code || null, inviter_id: entry.inviter_id || member.invited_by || null, inviter_name: entry.inviter_name || member.invited_by_name || null, vanity_used: Boolean(entry.vanity_used), vouched_by: entry.vouched_by || member.vouched_by || null, vouched_by_name: entry.vouched_by_name || member.vouched_by_name || null, approved_by: entry.approved_by || member.approved_by || null, approved_by_name: entry.approved_by_name || member.approved_by_name || null, verification_ticket_id: member.verification_ticket_id || null, source_ticket_id: entry.source_ticket_id || member.source_ticket_id || recentTickets[0]?.id || null, source_confidence: entry.source_confidence || "unknown", source_truth_reason: entry.source_truth_reason || null, vouch_count: vouches.length, latest_vouch_at: vouches.map((item) => item.created_at).sort((a, b) => dateMs(b) - dateMs(a))[0] || null };
     const stats = { ticket_count: recentTickets.length, activity_count: recent.length, verification_flag_count: verificationFlags.length, verification_token_count: 0, vc_session_count: 0, last_activity_at: recent.map((item) => item.created_at).sort((a, b) => dateMs(b) - dateMs(a))[0] || null };
 
     return json({ ok: true, selectedGuildId: guildId, viewer, member, profile: member, entry, categories, verificationFlags, verificationTokens: [], verification, vcSessions: [], joinHistory, memberEvents, usernameHistory: history, historicalUsernames, vouches, relationships, openTicket, recentTickets, ticketSummary: ticketSummary(recentTickets), recentActivity: recent, stats });
