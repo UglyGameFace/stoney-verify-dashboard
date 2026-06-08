@@ -1,22 +1,10 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase-server";
-import {
-  requireStaffSessionForRoute,
-  applyAuthCookies,
-} from "@/lib/auth-server";
-import { getSelectedGuildId } from "@/lib/guild-selection";
+import { requireDashboardStaffSession, dashboardAuthJson, dashboardAuthErrorJson, applyDashboardAuthCookies, type DashboardAuthSession } from "@/lib/dashboard-auth";
 import { enrichTicketWithMatchedCategory } from "@/lib/ticketCategoryMatching";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-type RefreshedTokens = {
-  access_token: string;
-  token_type?: string;
-  expires_in?: number;
-  refresh_token?: string;
-  scope?: string;
-} | null;
 
 type RouteContext = { params: { id?: string } };
 type Row = Record<string, any>;
@@ -77,28 +65,19 @@ function safeFileBase(value: string): string {
     .toLowerCase();
 }
 
-function selectedGuildId(): string {
-  return normalizeString(getSelectedGuildId());
-}
-
 function buildJsonResponse(
   payload: Record<string, unknown>,
   status = 200,
-  refreshedTokens: RefreshedTokens = null
+  session: DashboardAuthSession | null = null
 ) {
-  const response = NextResponse.json(payload, {
-    status,
-    headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
-  });
-  applyAuthCookies(response, refreshedTokens);
-  return response;
+  return dashboardAuthJson(payload, status, session);
 }
 
 function buildAttachmentResponse(
   content: string,
   contentType: string,
   filename: string,
-  refreshedTokens: RefreshedTokens = null
+  session: DashboardAuthSession | null = null
 ) {
   const response = new NextResponse(content, {
     status: 200,
@@ -108,7 +87,7 @@ function buildAttachmentResponse(
       "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     },
   });
-  applyAuthCookies(response, refreshedTokens);
+  applyDashboardAuthCookies(response, session);
   return response;
 }
 
@@ -400,25 +379,27 @@ function buildHtmlTranscript(payload: Row): string {
 }
 
 export async function GET(request: Request, context: RouteContext) {
+  let session: DashboardAuthSession | null = null;
+
   try {
-    const { session, refreshedTokens } = await requireStaffSessionForRoute();
+    session = await requireDashboardStaffSession();
     const typedSession = session as SessionLike;
     const supabase = createServerSupabase();
     const ticketId = normalizeString(context?.params?.id);
-    const guildId = selectedGuildId();
+    const guildId = normalizeString(session.selectedGuildId);
     const url = new URL(request.url);
     const format = normalizeLower(url.searchParams.get("format") || "html");
 
     if (!guildId) {
       return buildJsonResponse(
-        { error: "Select a server before exporting a transcript.", needsServerSelection: true },
+        { ok: false, error: "Select a server before exporting a transcript.", error_code: "selected_server_required", needsServerSelection: true },
         428,
-        refreshedTokens
+        session
       );
     }
 
     if (!ticketId) {
-      return buildJsonResponse({ error: "Missing ticket id.", selectedGuildId: guildId }, 400, refreshedTokens);
+      return buildJsonResponse({ ok: false, error: "Missing ticket id.", error_code: "invalid_request", selectedGuildId: guildId }, 400, session);
     }
 
     const { data: ticketData, error: ticketError } = await supabase
@@ -430,9 +411,9 @@ export async function GET(request: Request, context: RouteContext) {
 
     if (ticketError || !ticketData) {
       return buildJsonResponse(
-        { error: ticketError?.message || "Ticket not found.", selectedGuildId: guildId },
+        { ok: false, error: ticketError?.message || "Ticket not found.", selectedGuildId: guildId },
         404,
-        refreshedTokens
+        session
       );
     }
 
@@ -535,7 +516,7 @@ export async function GET(request: Request, context: RouteContext) {
         JSON.stringify(transcriptPayload, null, 2),
         "application/json; charset=utf-8",
         `${fileBase}.json`,
-        refreshedTokens
+        session
       );
     }
 
@@ -544,7 +525,7 @@ export async function GET(request: Request, context: RouteContext) {
         buildTextTranscript(transcriptPayload),
         "text/plain; charset=utf-8",
         `${fileBase}.txt`,
-        refreshedTokens
+        session
       );
     }
 
@@ -552,13 +533,9 @@ export async function GET(request: Request, context: RouteContext) {
       buildHtmlTranscript(transcriptPayload),
       "text/html; charset=utf-8",
       `${fileBase}.html`,
-      refreshedTokens
+      session
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to export transcript.";
-    return buildJsonResponse(
-      { error: message },
-      message === "Unauthorized" ? 401 : 500
-    );
+    return dashboardAuthErrorJson(error, session, 500);
   }
 }
