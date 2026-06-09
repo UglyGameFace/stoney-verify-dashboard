@@ -16,4 +16,16 @@ import { env } from "@/lib/env"
 export const metadata = { title: env.appName, description: "Discord moderation and ticketing dashboard" }
 
 export default function RootLayout({ children }) {
-  return
+  return React.createElement(
+    "html",
+    { lang: "en", suppressHydrationWarning: true },
+    React.createElement(
+      "body",
+      null,
+      React.createElement(AppearanceHydrator, null),
+      children,
+      React.createElement(GlobalDashboardNav, null),
+      React.createElement(QuickAppearanceDock, null)
+    )
+  )
+}
