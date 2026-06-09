@@ -54,6 +54,7 @@ export const config = {
     "/",
     "/servers",
     "/auth-status",
+    "/dashboard/:path*",
     "/ticket-categories/:path*",
     "/ticket-forms/:path*",
     "/tickets/:path*",
