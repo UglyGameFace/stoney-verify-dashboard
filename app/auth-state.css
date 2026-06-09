@@ -83,6 +83,17 @@
   min-width: 150px;
 }
 
+@media (max-width: 1023px) {
+  .content,
+  main.content {
+    padding-bottom: calc(148px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .drawer {
+    padding-bottom: calc(156px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
 @media (max-width: 720px) {
   .auth-state-page {
     align-items: end;
@@ -102,6 +113,15 @@
 
   .auth-state-actions .button {
     width: 100% !important;
+  }
+
+  .content,
+  main.content {
+    padding-bottom: calc(154px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .quick-appearance-dock {
+    bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important;
   }
 }
 
