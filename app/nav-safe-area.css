@@ -1,0 +1,36 @@
+/*
+  Bottom nav safe area overrides
+  ------------------------------
+  The floating dashboard nav is visible up to 1023px. Keep content and drawers
+  clear of it on tablets, foldables, and mobile browsers.
+*/
+
+@media (max-width: 1023px) {
+  .content,
+  main.content {
+    padding-bottom: calc(148px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .drawer {
+    padding-bottom: calc(156px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .server-selector-space,
+  .server-grid,
+  .setup-workspace-body,
+  .dashboard-page-shell,
+  .ticket-shell {
+    scroll-padding-bottom: calc(148px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (max-width: 720px) {
+  .content,
+  main.content {
+    padding-bottom: calc(154px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .quick-appearance-dock {
+    bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
