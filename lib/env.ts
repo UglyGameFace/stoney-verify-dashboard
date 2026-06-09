@@ -81,7 +81,7 @@ export type AppEnv = {
 const isProduction = process.env.NODE_ENV === "production";
 
 export const env: AppEnv = {
-  appName: process.env.NEXT_PUBLIC_APP_NAME || "Stoney Verify Dashboard V3.8",
+  appName: process.env.NEXT_PUBLIC_APP_NAME || "Dank Shield Dashboard",
 
   supabaseUrl:
     process.env.NEXT_PUBLIC_SUPABASE_URL ||
@@ -257,15 +257,6 @@ export function assertOAuthEnv(): true {
   required(
     "APP_URL or NEXT_PUBLIC_SITE_URL or SITE_URL",
     env.appUrl || env.siteUrl || env.baseUrl || env.publicUrl
-  );
-
-  return true;
-}
-
-export function assertBrowserEnv(): true {
-  required(
-    "NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL",
-    env.supabaseUrl
   );
 
   return true;
