@@ -4,6 +4,7 @@ import TicketFormsManager from "@/components/dashboard/TicketFormsManager";
 import AuthStatePage from "@/components/dashboard/AuthStatePage";
 import SetupWorkspaceShell from "@/components/dashboard/SetupWorkspaceShell";
 import { getDashboardAuthSession, type DashboardAuthSession } from "@/lib/dashboard-auth";
+import { refreshPageSessionIfNeeded } from "@/lib/page-session-refresh";
 
 async function safeDashboardAuthSession(): Promise<DashboardAuthSession | null> {
   try {
@@ -59,15 +60,18 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function TicketFormsPage() {
+  refreshPageSessionIfNeeded("/ticket-forms");
+
   const session = await safeDashboardAuthSession();
 
   if (!session) {
     return (
       <AuthStatePage
         variant="login"
-        message="The dashboard could not validate your Discord session for ticket forms. Use Account → Reset Login once if this keeps happening, then sign in again."
+        message="The dashboard could not validate your Discord session for ticket forms. Sign in again and you will return to forms."
         showReset={true}
         showBack={false}
+        returnTo="/ticket-forms"
       />
     );
   }
