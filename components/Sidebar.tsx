@@ -34,12 +34,19 @@ type ServersPayload = {
   botCheckError?: string | null;
 };
 
+const SERVER_CONTEXT_EVENT = "dank:selected-server-updated";
+
 function normalizeString(value: unknown): string {
   return String(value || "").trim();
 }
 
 function dashboardHref(guildId: string): string {
   return `/dashboard/${encodeURIComponent(normalizeString(guildId))}`;
+}
+
+function routeGuildId(pathname: string): string {
+  const match = normalizeString(pathname).match(/^\/dashboard\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1] || "") : "";
 }
 
 function scopedLinks(selectedGuildId: string): LinkGroup[] {
@@ -82,10 +89,11 @@ function isSetupPath(pathname: string): boolean {
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const [selectedGuildId, setSelectedGuildId] = useState("");
+  const inferredGuildId = routeGuildId(pathname || "");
+  const [selectedGuildId, setSelectedGuildId] = useState(inferredGuildId);
   const [selectedServerName, setSelectedServerName] = useState("");
   const [installedCount, setInstalledCount] = useState<number | null>(null);
-  const [hasSelectedServer, setHasSelectedServer] = useState(false);
+  const [hasSelectedServer, setHasSelectedServer] = useState(Boolean(inferredGuildId));
   const [botCheckError, setBotCheckError] = useState("");
   const appName = normalizeString(env.appName) || "Dank Shield Dashboard";
 
@@ -93,6 +101,12 @@ export default function Sidebar() {
     let active = true;
 
     async function loadSelectedServer() {
+      const routeId = routeGuildId(pathname || "");
+      if (routeId) {
+        setSelectedGuildId((current) => current || routeId);
+        setHasSelectedServer(true);
+      }
+
       try {
         const res = await fetch("/api/servers", {
           method: "GET",
@@ -103,23 +117,32 @@ export default function Sidebar() {
         const json = (await res.json().catch(() => null)) as ServersPayload | null;
         if (!active || !res.ok || !json) return;
         const rows = Array.isArray(json.servers) ? json.servers : [];
-        const selectedId = normalizeString(json.selectedGuildId);
+        const selectedId = normalizeString(json.selectedGuildId) || routeId;
         const selected = rows.find((row) => row.selected || row.id === selectedId) || null;
         setSelectedGuildId(selectedId);
-        setSelectedServerName(normalizeString(selected?.name));
+        setSelectedServerName(normalizeString(selected?.name) || (selectedId ? "Selected server" : ""));
         setHasSelectedServer(Boolean(selectedId || selected));
         setInstalledCount(Number(json.installedCount ?? rows.filter((row) => row.bot_installed).length));
         setBotCheckError(normalizeString(json.botCheckError));
       } catch {
         if (!active) return;
+        const routeId = routeGuildId(pathname || "");
+        if (routeId) {
+          setSelectedGuildId(routeId);
+          setHasSelectedServer(true);
+          setSelectedServerName("Selected server");
+        }
       }
     }
 
     void loadSelectedServer();
+    const onServerContext = () => void loadSelectedServer();
+    window.addEventListener(SERVER_CONTEXT_EVENT, onServerContext);
     return () => {
       active = false;
+      window.removeEventListener(SERVER_CONTEXT_EVENT, onServerContext);
     };
-  }, []);
+  }, [pathname]);
 
   const groups = useMemo(() => scopedLinks(selectedGuildId), [selectedGuildId]);
 
@@ -147,7 +170,7 @@ export default function Sidebar() {
           <div className="sidebar-context-meta">
             {installedCount === null ? "Checking bot access…" : `${installedCount} ready server${installedCount === 1 ? "" : "s"} available`}
           </div>
-          {botCheckError ? <div className="sidebar-context-warning">Bot check warning. Open Servers and refresh.</div> : null}
+          {botCheckError ? <div className="sidebar-context-warning">Background bot check warning. Ready servers still open.</div> : null}
           <Link href="/servers" className="button ghost sidebar-mini-button">
             {hasSelectedServer ? "Change Server" : "Choose Server"}
           </Link>
