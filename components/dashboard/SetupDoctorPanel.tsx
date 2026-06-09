@@ -28,6 +28,11 @@ type SetupHealth = {
   error?: string;
 };
 
+type SetupDoctorPanelProps = {
+  initialHealth?: SetupHealth | null;
+  compact?: boolean;
+};
+
 function safeArray<T = unknown>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
@@ -61,7 +66,7 @@ async function copyText(value: string) {
   }
 }
 
-export default function SetupDoctorPanel({ initialHealth = null }: { initialHealth?: SetupHealth | null }) {
+export default function SetupDoctorPanel({ initialHealth = null, compact = false }: SetupDoctorPanelProps) {
   const [health, setHealth] = useState<SetupHealth | null>(initialHealth);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -97,7 +102,7 @@ export default function SetupDoctorPanel({ initialHealth = null }: { initialHeal
   }
 
   return (
-    <section className="card setup-doctor-card">
+    <section className={`setup-doctor-card ${compact ? "compact" : "card"}`}>
       <div className="setup-doctor-head">
         <div>
           <div className="muted setup-doctor-eyebrow">Setup Doctor</div>
@@ -163,6 +168,7 @@ export default function SetupDoctorPanel({ initialHealth = null }: { initialHeal
 
       <style jsx>{`
         .setup-doctor-card { display: grid; gap: 14px; }
+        .setup-doctor-card.compact { padding: 14px 0 0; }
         .setup-doctor-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
         .setup-doctor-head h2 { margin: 0; }
         .setup-doctor-head p { max-width: 780px; line-height: 1.55; margin: 8px 0 0; }
