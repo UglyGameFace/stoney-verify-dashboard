@@ -29,12 +29,19 @@ type ServerResponse = {
   bot_invite_url?: string | null;
 };
 
+const SERVER_CONTEXT_EVENT = "dank:selected-server-updated";
+
 function text(value: unknown): string {
   return String(value || "").trim();
 }
 
 function dashboardHref(guildId: string): string {
   return `/dashboard/${encodeURIComponent(text(guildId))}`;
+}
+
+function emitServerContextUpdated() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(SERVER_CONTEXT_EVENT));
 }
 
 function getServerInitial(name: string): string {
@@ -195,6 +202,7 @@ export default function ServerSelector() {
       setServers(nextServers);
       setSelectedGuildId(nextSelectedGuildId);
       setBotCheckError(nextUnresolvedServers.length > 0 ? nextUnresolvedError : "");
+      emitServerContextUpdated();
     } catch (err) {
       setError(friendlyServerError(err instanceof Error ? err.message : err, servers.length > 0));
       setBotCheckError("");
@@ -270,6 +278,7 @@ export default function ServerSelector() {
 
       setSelectedGuildId(server.id);
       setServers((prev) => prev.map((row) => ({ ...row, selected: row.id === server.id })));
+      emitServerContextUpdated();
       setMessage(`${server.name} is selected. Opening this server dashboard...`);
       window.location.href = dashboardHref(server.id);
     } catch (err) {
