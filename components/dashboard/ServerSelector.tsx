@@ -102,16 +102,16 @@ function friendlyServerError(raw: unknown, hasVisibleServers = false): string {
   }
 
   if (lower.includes("429") || lower.includes("rate limit") || lower.includes("retry_after")) {
-    return "Discord is rate limiting one live check. Already listed servers remain usable.";
+    return "Discord rate-limited one background check. Ready servers can still be opened.";
   }
   if (lower.includes("bot token") || lower.includes("bot credential")) {
-    return "The bot install check needs attention. Already confirmed installed servers remain selectable.";
+    return "Bot install proof is using cached/dashboard data. Ready servers can still be opened.";
   }
   if (lower.includes("401") || lower.includes("unauthorized") || lower.includes("session") || lower.includes("login") || lower.includes("oauth")) {
-    return "One live Discord check could not use the current session. Already listed servers remain usable.";
+    return "One background Discord check could not use the current session. Ready servers can still be opened.";
   }
   if (lower.includes("403") || lower.includes("forbidden")) {
-    return "Discord blocked one live permission check. Already listed servers remain usable.";
+    return "Discord blocked one background permission check. Ready servers can still be opened.";
   }
 
   return value.length > 180 ? `${value.slice(0, 180)}…` : value;
@@ -209,6 +209,12 @@ export default function ServerSelector() {
 
   async function selectServer(server: ServerRow) {
     const installState = getInstallState(server);
+    const alreadySelected = selectedGuildId === server.id || Boolean(server.selected);
+
+    if (alreadySelected && installState === "installed") {
+      window.location.href = dashboardHref(server.id);
+      return;
+    }
 
     if (installState !== "installed") {
       if (installState === "unknown") {
@@ -255,7 +261,7 @@ export default function ServerSelector() {
         }
 
         if (isTransientSelectionCode(code) || looksTransientSelectionError(raw)) {
-          setMessage(`${server.name} still appears ready, but Discord blocked one live recheck. Tap Refresh once, then Manage Server again.`);
+          setMessage(`${server.name} still appears ready, but Discord blocked the server switch recheck. Tap Refresh once, then Manage Server again.`);
           return;
         }
 
@@ -275,14 +281,14 @@ export default function ServerSelector() {
   }
 
   return (
-    <div className="space">
+    <div className="space server-selector-space">
       <div className="card server-flow-card">
         <div className="server-flow-head">
           <div>
             <div className="muted server-eyebrow">Server Context</div>
             <h2 style={{ margin: 0 }}>Available servers</h2>
             <div className="muted server-copy">
-              Select the server Dank Shield should manage. Servers with confirmed bot access become selectable; temporary Discord check failures show a recheck action instead of a false install warning.
+              Select the server Dank Shield should manage. Ready servers are safe to open; temporary Discord checks only matter when switching to a new server.
             </div>
           </div>
           <button type="button" className="button ghost server-refresh" onClick={() => void loadServers()} disabled={loading || Boolean(savingId)}>
@@ -298,7 +304,7 @@ export default function ServerSelector() {
 
         {showBotCheckWarning ? (
           <div className="info-banner server-warning" style={{ marginTop: 12 }}>
-            Bot install check warning: {friendlyServerError(unresolvedError, servers.length > 0)}
+            {friendlyServerError(unresolvedError, servers.length > 0)}
           </div>
         ) : null}
 
@@ -314,7 +320,7 @@ export default function ServerSelector() {
         ) : null}
 
         {error ? <div className="error-banner server-error" style={{ marginTop: 12 }}>{error}</div> : null}
-        {message ? <div className="info-banner" style={{ marginTop: 12 }}>{message}</div> : null}
+        {message ? <div className="info-banner server-note" style={{ marginTop: 12 }}>{message}</div> : null}
       </div>
 
       {loading ? (
@@ -327,6 +333,7 @@ export default function ServerSelector() {
             const unknown = installState === "unknown";
             const selected = selectedGuildId === server.id || Boolean(server.selected);
             const inviteUrl = text(server.bot_invite_url);
+            const href = dashboardHref(server.id);
 
             return (
               <div key={server.id} className={`server-card ${selected ? "selected" : ""} ${installed ? "" : "needs-install"}`}>
@@ -343,9 +350,11 @@ export default function ServerSelector() {
 
                 <div className="server-card-footer">
                   <div className={`server-pill ${installed ? "installed" : unknown ? "unknown" : "missing"}`}>{getInstallLabel(server)}</div>
-                  {installed ? (
-                    <button type="button" className={selected ? "button ghost" : "button primary"} disabled={savingId === server.id} onClick={() => void selectServer(server)} style={{ width: "auto", minWidth: 140 }}>
-                      {savingId === server.id ? "Opening..." : selected ? "Open Server" : "Manage Server"}
+                  {installed && selected ? (
+                    <a className="button ghost" href={href} style={{ width: "auto", minWidth: 140 }}>Open Server</a>
+                  ) : installed ? (
+                    <button type="button" className="button primary" disabled={savingId === server.id} onClick={() => void selectServer(server)} style={{ width: "auto", minWidth: 140 }}>
+                      {savingId === server.id ? "Opening..." : "Manage Server"}
                     </button>
                   ) : unknown ? (
                     <button type="button" className="button ghost" onClick={() => void loadServers()} style={{ width: "auto", minWidth: 140 }}>Recheck</button>
@@ -368,6 +377,7 @@ export default function ServerSelector() {
       )}
 
       <style jsx>{`
+        .server-selector-space { padding-bottom: 120px; }
         .server-flow-card { display: grid; gap: 14px; }
         .server-flow-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
         .server-eyebrow { margin-bottom: 8px; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 900; }
@@ -377,10 +387,11 @@ export default function ServerSelector() {
         .server-status-strip > div { border: 1px solid rgba(255,255,255,0.14); border-radius: 16px; padding: 12px; background: rgba(255,255,255,0.055); min-width: 0; }
         .server-status-label { display: block; color: var(--muted, #c7ddcf); font-size: 12px; margin-bottom: 4px; }
         .server-status-strip strong { display: block; color: var(--text-strong, #fff); overflow-wrap: anywhere; }
-        .server-error, .server-warning { overflow-wrap: anywhere; line-height: 1.45; }
+        .server-error, .server-warning, .server-note { overflow-wrap: anywhere; line-height: 1.45; }
+        .server-warning, .server-note { opacity: 0.9; }
         .server-next-step { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; }
         .server-next-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-        .server-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+        .server-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; padding-bottom: 40px; }
         .server-card { border: 1px solid rgba(255,255,255,0.14); border-radius: 22px; padding: 18px; background: rgba(2, 8, 18, 0.78); display: grid; gap: 16px; box-shadow: 0 16px 36px rgba(0,0,0,0.22); }
         .server-card.selected { border-color: rgba(74, 222, 128, 0.75); box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.25), 0 16px 42px rgba(34,197,94,0.16); }
         .server-main { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
@@ -395,6 +406,10 @@ export default function ServerSelector() {
         .server-pill.unknown { color: #ffd6a3; }
         .server-pill.missing { color: #ffd2d2; }
         .empty-state { display: grid; gap: 6px; text-align: center; }
+        @media (max-width: 900px) {
+          .server-selector-space { padding-bottom: 160px; }
+          .server-grid { padding-bottom: 80px; }
+        }
         @media (max-width: 720px) {
           .server-status-strip { grid-template-columns: 1fr; }
           .server-next-actions, .server-next-actions .button { width: 100%; }
