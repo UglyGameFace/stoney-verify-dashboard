@@ -92,6 +92,15 @@
   .drawer {
     padding-bottom: calc(156px + env(safe-area-inset-bottom, 0px)) !important;
   }
+
+  .server-status-strip {
+    grid-template-columns: 1fr !important;
+  }
+
+  .server-next-actions,
+  .server-next-actions .button {
+    width: 100% !important;
+  }
 }
 
 @media (max-width: 720px) {
