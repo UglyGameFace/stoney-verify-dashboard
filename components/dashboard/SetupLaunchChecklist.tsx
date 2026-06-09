@@ -142,13 +142,13 @@ function fallbackChecks(data: DashboardData, selectedGuildId?: string | null): S
     },
     {
       key: "forms_configured",
-      label: "Forms / Smart Templates",
-      description: "Use smart defaults or add custom questions per category.",
+      label: "Forms / Direct Flow",
+      description: "Use smart defaults, custom questions, or intentionally open tickets directly.",
       ok: categoryCount > 0,
       severity: "recommended",
       action_label: "Configure Forms",
       action_href: "/ticket-forms",
-      detail: categoryCount ? "Smart defaults available" : "Create categories first",
+      detail: categoryCount ? "Direct flow or smart defaults available" : "Create categories first",
     },
     {
       key: "test_ticket",
@@ -190,9 +190,14 @@ function getPanelReadiness(checks: SetupCheck[]): boolean {
 function getSetupStage(hasSelectedGuild: boolean, nextFix: SetupCheck | null): string {
   if (!hasSelectedGuild) return "Step 1 of 3";
   const href = normalizeString(nextFix?.action_href);
-  if (href.startsWith("/ticket-categories")) return "Step 2 of 3";
-  if (href.startsWith("/ticket-forms")) return "Step 3 of 3";
+  if (href.startsWith("/ticket-categories") || href.includes("/categories")) return "Step 2 of 3";
+  if (href.startsWith("/ticket-forms") || href.includes("/forms")) return "Step 3 of 3";
   return "Setup Health";
+}
+
+function getDoctorSummary(ready: boolean, score: number, passed: number, total: number): string {
+  if (ready) return `Launch checks passed • ${score}% • ${passed}/${total}`;
+  return `Open full doctor report • ${score}% • ${passed}/${total}`;
 }
 
 export default async function SetupLaunchChecklist({ data, selectedGuildId }: SetupLaunchChecklistProps) {
@@ -209,6 +214,7 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
   const nextFixHref = normalizeString(nextFix?.action_href) || (hasSelectedGuild ? "/ticket-categories" : "/servers");
   const nextFixLabel = normalizeString(nextFix?.action_label) || (hasSelectedGuild ? "Fix Next" : "Choose Server");
   const canShowPanelCommands = hasSelectedGuild && getPanelReadiness(checks);
+  const showNextFix = Boolean(nextFix && (!ready || normalizeString(nextFix.severity).toLowerCase() !== "optional"));
 
   return (
     <div className="setup-launch-stack">
@@ -221,7 +227,7 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
             </h2>
             <p className="muted launch-copy">
               {hasSelectedGuild
-                ? "Dank Shield checks categories, forms, ticket flow, command queue, and activity data for the selected server."
+                ? "Dank Shield checks the selected server for categories, routing, ticket flow, and command health. Forms are optional when direct ticket flow is intentional."
                 : "Staff tools stay locked until one Discord server is selected. That prevents tickets, forms, activity, and member data from mixing across servers."}
             </p>
           </div>
@@ -242,18 +248,20 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
           </div>
         </div>
 
-        <div className="setup-next-fix">
-          <div>
-            <div className="muted launch-eyebrow">Next Fix</div>
-            <strong>{normalizeString(nextFix?.label) || (hasSelectedGuild ? "Review setup" : "Choose Server")}</strong>
-            <p>{normalizeString(nextFix?.description) || normalizeString(nextFix?.detail) || "Open the setup tools and review this server."}</p>
+        {showNextFix ? (
+          <div className="setup-next-fix">
+            <div>
+              <div className="muted launch-eyebrow">Next Fix</div>
+              <strong>{normalizeString(nextFix?.label) || (hasSelectedGuild ? "Review setup" : "Choose Server")}</strong>
+              <p>{normalizeString(nextFix?.description) || normalizeString(nextFix?.detail) || "Open the setup tools and review this server."}</p>
+            </div>
+            <Link href={nextFixHref} className="button primary">
+              {nextFixLabel}
+            </Link>
           </div>
-          <Link href={nextFixHref} className="button primary">
-            {nextFixLabel}
-          </Link>
-        </div>
+        ) : null}
 
-        <details className="setup-check-details" open={hasSelectedGuild}>
+        <details className="setup-check-details">
           <summary>{hasSelectedGuild ? "View setup checks" : "Why this is required"}</summary>
           <div className="launch-grid">
             {visibleChecks.map((check, index) => {
@@ -277,23 +285,31 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
         </details>
 
         {canShowPanelCommands ? (
-          <div id="panel-command" className="panel-command-box">
-            <div>
-              <div className="muted launch-eyebrow">Discord Panel</div>
-              <h3 className="panel-command-title">Publish the member-facing ticket panel</h3>
-              <p className="muted launch-copy">
-                Go to the Discord channel where members should open tickets, then run the panel command. Use the doctor command after posting to verify setup health.
-              </p>
+          <details id="panel-command" className="panel-command-details">
+            <summary>Discord panel commands</summary>
+            <div className="panel-command-box">
+              <div>
+                <div className="muted launch-eyebrow">Discord Panel</div>
+                <h3 className="panel-command-title">Publish the member-facing ticket panel</h3>
+                <p className="muted launch-copy">
+                  Run these inside the Discord channel where members should open tickets. Use the doctor command after posting to verify setup health.
+                </p>
+              </div>
+              <div className="command-stack">
+                <code>/ticket-panel post</code>
+                <code>/ticket-panel doctor</code>
+              </div>
             </div>
-            <div className="command-stack">
-              <code>/ticket-panel post</code>
-              <code>/ticket-panel doctor</code>
-            </div>
-          </div>
+          </details>
         ) : null}
       </section>
 
-      {hasSelectedGuild ? <SetupDoctorPanel initialHealth={health as any} /> : null}
+      {hasSelectedGuild ? (
+        <details className="setup-doctor-collapse">
+          <summary>{getDoctorSummary(ready, score, passed, total)}</summary>
+          <SetupDoctorPanel initialHealth={health as any} compact />
+        </details>
+      ) : null}
     </div>
   );
 }
