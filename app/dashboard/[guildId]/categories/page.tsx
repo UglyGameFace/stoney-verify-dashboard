@@ -3,6 +3,7 @@ import TicketCategoriesManager from "@/components/dashboard/TicketCategoriesMana
 import AuthStatePage from "@/components/dashboard/AuthStatePage";
 import SetupWorkspaceShell from "@/components/dashboard/SetupWorkspaceShell";
 import { getDashboardAuthSession, type DashboardAuthSession } from "@/lib/dashboard-auth";
+import { refreshPageSessionIfNeeded } from "@/lib/page-session-refresh";
 
 type PageProps = {
   params: { guildId: string };
@@ -66,14 +67,17 @@ export const revalidate = 0;
 
 export default async function GuildCategoriesPage({ params }: PageProps) {
   const routeGuildId = clean(params.guildId);
+  refreshPageSessionIfNeeded(routeGuildId ? `${dashboardBaseHref(routeGuildId)}/categories` : "/servers");
+
   const session = await safeDashboardAuthSession();
   if (!session) {
     return (
       <AuthStatePage
         variant="login"
-        message="The dashboard could not validate your Discord session for ticket categories. Use Account → Reset Login once if this keeps happening, then sign in again."
+        message="The dashboard could not validate your Discord session for ticket categories. Sign in again and you will return to this categories page."
         showReset={true}
         showBack={false}
+        returnTo={routeGuildId ? `${dashboardBaseHref(routeGuildId)}/categories` : "/servers"}
       />
     );
   }
