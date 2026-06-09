@@ -14,13 +14,11 @@ type ServersPayload = {
   servers?: ServerRow[] | null;
 };
 
-const SERVER_CONTEXT_EVENT = "dank:selected-server-updated";
-
 const BASE_NAV_ITEMS = [
-  { key: "home", label: "Home", href: "/", icon: "⌂", requiresServer: false, match: (path: string) => path === "/" || path.startsWith("/dashboard/") },
+  { key: "home", label: "Home", href: "/", icon: "⌂", requiresServer: false, match: (path: string) => path === "/" },
   { key: "servers", label: "Servers", href: "/servers", icon: "◈", requiresServer: false, match: (path: string) => path === "/servers" },
-  { key: "categories", label: "Categories", href: "/ticket-categories", icon: "▣", requiresServer: true, match: (path: string) => path.startsWith("/ticket-categories") || path.includes("/categories") },
-  { key: "forms", label: "Forms", href: "/ticket-forms", icon: "✎", requiresServer: true, match: (path: string) => path.startsWith("/ticket-forms") || path.includes("/forms") },
+  { key: "categories", label: "Categories", href: "/ticket-categories", icon: "▣", requiresServer: true, match: (path: string) => path.startsWith("/ticket-categories") },
+  { key: "forms", label: "Forms", href: "/ticket-forms", icon: "✎", requiresServer: true, match: (path: string) => path.startsWith("/ticket-forms") },
   { key: "account", label: "Account", href: "/auth-status", icon: "♙", requiresServer: false, match: (path: string) => path.startsWith("/auth-status") },
 ];
 
@@ -33,10 +31,6 @@ function isDashboardPath(pathname: string): boolean {
   if (pathname.startsWith("/api")) return false;
   if (pathname.startsWith("/auth/")) return false;
   return true;
-}
-
-function pathImpliesSelectedServer(pathname: string): boolean {
-  return pathname.startsWith("/dashboard/") || pathname.startsWith("/ticket-categories") || pathname.startsWith("/ticket-forms");
 }
 
 function hasAuthRequiredState(): boolean {
@@ -61,11 +55,9 @@ export default function GlobalDashboardNav() {
     check();
     const timer = window.setTimeout(check, 250);
     window.addEventListener("resize", check);
-    window.addEventListener(SERVER_CONTEXT_EVENT, check);
     return () => {
       window.clearTimeout(timer);
       window.removeEventListener("resize", check);
-      window.removeEventListener(SERVER_CONTEXT_EVENT, check);
     };
   }, [pathname]);
 
@@ -73,10 +65,6 @@ export default function GlobalDashboardNav() {
     let active = true;
 
     async function loadServerContext() {
-      if (pathImpliesSelectedServer(pathname)) {
-        setHasSelectedServer(true);
-      }
-
       try {
         const res = await fetch("/api/servers", {
           method: "GET",
@@ -87,21 +75,18 @@ export default function GlobalDashboardNav() {
         if (!active || !res.ok || !json) return;
         const selectedId = normalizeString(json.selectedGuildId);
         const rows = Array.isArray(json.servers) ? json.servers : [];
-        setHasSelectedServer(Boolean(selectedId || rows.some((row) => Boolean(row?.selected)) || pathImpliesSelectedServer(pathname)));
+        setHasSelectedServer(Boolean(selectedId || rows.some((row) => Boolean(row?.selected))));
       } catch {
         if (!active) return;
-        setHasSelectedServer(pathImpliesSelectedServer(pathname));
+        setHasSelectedServer(false);
       }
     }
 
     void loadServerContext();
-    const onServerContext = () => void loadServerContext();
-    window.addEventListener(SERVER_CONTEXT_EVENT, onServerContext);
     return () => {
       active = false;
-      window.removeEventListener(SERVER_CONTEXT_EVENT, onServerContext);
     };
-  }, [pathname]);
+  }, []);
 
   const navItems = useMemo(
     () => BASE_NAV_ITEMS.filter((item) => !item.requiresServer || hasSelectedServer),
