@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type AnyRecord = Record<string, unknown>;
+type FormCoverageState = "custom" | "smart" | "direct" | "missing";
 
 type HealthCheck = {
   key: string;
@@ -57,12 +58,14 @@ function hasText(value: unknown): boolean {
   return Boolean(normalizeString(value));
 }
 
-function categoryHasForm(category: AnyRecord): boolean {
-  if (category?.form_enabled === false) return false;
+function categoryFormCoverage(category: AnyRecord): FormCoverageState {
   const questions = safeArray(category?.form_questions);
   const config = safeObject(category?.form_config);
-  if (questions.length > 0) return true;
-  return config.disable_default_template !== true && config.forms_disabled !== true;
+
+  if (questions.length > 0) return "custom";
+  if (category?.form_enabled === false || config.forms_disabled === true || config.disable_default_template === true) return "direct";
+  if (category?.form_enabled === true || config.disable_default_template !== true) return "smart";
+  return "missing";
 }
 
 function buildCheck(check: HealthCheck): HealthCheck {
@@ -146,7 +149,11 @@ export async function GET() {
     const defaultCategory = categories.find((category) => Boolean(category?.is_default)) || null;
     const namedCategories = categories.filter((category) => hasText(category?.name) && hasText(category?.slug));
     const categoriesWithButtons = categories.filter((category) => hasText(category?.button_label));
-    const categoriesWithForms = categories.filter(categoryHasForm);
+    const formCoverageStates = categories.map(categoryFormCoverage);
+    const categoriesWithFormCoverage = formCoverageStates.filter((state) => state !== "missing").length;
+    const customFormCount = formCoverageStates.filter((state) => state === "custom").length;
+    const smartTemplateCount = formCoverageStates.filter((state) => state === "smart").length;
+    const directFlowCount = formCoverageStates.filter((state) => state === "direct").length;
     const panelCommands = botCommands.filter((row) => normalizeString(row?.action).toLowerCase().includes("panel"));
     const doctorCommands = botCommands.filter((row) => normalizeString(row?.action).toLowerCase().includes("doctor"));
     const pendingCommands = botCommands.filter((row) => ["pending", "processing"].includes(normalizeString(row?.status).toLowerCase()));
@@ -214,13 +221,13 @@ export async function GET() {
       }),
       buildCheck({
         key: "forms_configured",
-        label: "Forms / Smart Templates",
-        description: "Each category should either use smart defaults or custom questions so staff get useful context.",
-        ok: categories.length > 0 && categoriesWithForms.length === categories.length,
+        label: "Forms / Direct Flow",
+        description: "Each category should either use custom questions, smart defaults, or intentionally open directly without a form.",
+        ok: categories.length > 0 && categoriesWithFormCoverage === categories.length,
         severity: "recommended",
         action_label: "Configure Forms",
         action_href: `${baseHref}/forms`,
-        detail: `${categoriesWithForms.length}/${categories.length} covered`,
+        detail: `${categoriesWithFormCoverage}/${categories.length} covered • ${customFormCount} custom, ${smartTemplateCount} smart, ${directFlowCount} direct`,
       }),
       buildCheck({
         key: "panel_activity",
@@ -294,7 +301,10 @@ export async function GET() {
         next_fix: nextFix,
         summary: {
           categories: categories.length,
-          forms_covered: categoriesWithForms.length,
+          forms_covered: categoriesWithFormCoverage,
+          forms_custom: customFormCount,
+          forms_smart: smartTemplateCount,
+          forms_direct: directFlowCount,
           tickets: ticketsCount,
           active_tickets: activeTicketsCount,
           activity_events: activityCount,
