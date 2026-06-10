@@ -1,7 +1,7 @@
 {
-  "name": "stoney-verify-dashboard-v3-8",
+  "name": "dank-shield-dashboard",
   "private": true,
-  "version": "3.8.0",
+  "version": "1.0.0",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
