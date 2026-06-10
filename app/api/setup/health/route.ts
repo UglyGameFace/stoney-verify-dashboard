@@ -265,9 +265,9 @@ export async function GET() {
         description: "Activity events should be flowing so staff can audit ticket, moderation, verification, and system actions.",
         ok: activityCount > 0,
         severity: "recommended",
-        action_label: "View Activity",
-        action_href: `${baseHref}#activity`,
-        detail: `${activityCount} event${activityCount === 1 ? "" : "s"}`,
+        action_label: "Review Actions",
+        action_href: `${baseHref}#actions`,
+        detail: `${activityCount} event${activityCount === 1 ? "" : "s"} recorded; live activity viewer not yet exposed on this dashboard page`,
       }),
       buildCheck({
         key: "command_queue_clear",
