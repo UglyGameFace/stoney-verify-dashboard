@@ -44,6 +44,14 @@ function normalizeString(value: unknown): string {
   return String(value || "").trim();
 }
 
+function normalizeSeverity(check: SetupCheck | null | undefined): string {
+  return normalizeString(check?.severity).toLowerCase();
+}
+
+function isOptionalCheck(check: SetupCheck | null | undefined): boolean {
+  return normalizeSeverity(check) === "optional";
+}
+
 function countRows(data: DashboardData, key: string): number {
   if (!data || typeof data !== "object") return 0;
   return safeArray((data as Record<string, unknown>)[key]).length;
@@ -185,7 +193,7 @@ function getHiddenIncompleteChecks(checks: SetupCheck[], visibleChecks: SetupChe
   const visibleKeys = new Set(visibleChecks.map((check) => normalizeString(check.key) || normalizeString(check.label)));
   return checks.filter((check) => {
     const key = normalizeString(check.key) || normalizeString(check.label);
-    return !Boolean(check.ok) && !visibleKeys.has(key);
+    return !Boolean(check.ok) && !isOptionalCheck(check) && !visibleKeys.has(key);
   });
 }
 
@@ -210,8 +218,9 @@ function getSetupStage(hasSelectedGuild: boolean, nextFix: SetupCheck | null): s
   return "Setup Health";
 }
 
-function getDoctorSummary(ready: boolean, score: number, passed: number, total: number): string {
-  if (ready) return `Launch checks passed • ${score}% • ${passed}/${total}`;
+function getDoctorSummary(ready: boolean, score: number, passed: number, total: number, optionalLeft: number): string {
+  if (ready && optionalLeft > 0) return `Full doctor report • ${passed}/${total} total • ${optionalLeft} optional left`;
+  if (ready) return `Full doctor report • all ${total} checks passed`;
   return `Open full doctor report • ${score}% • ${passed}/${total}`;
 }
 
@@ -225,16 +234,21 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
   const passed = Number(health?.passed ?? checks.filter((check) => Boolean(check.ok)).length);
   const total = Number(health?.total ?? checks.length);
   const score = Number(health?.score ?? (total ? Math.round((passed / total) * 100) : 0));
+  const requiredChecks = checks.filter((check) => normalizeSeverity(check) === "required");
+  const requiredTotal = Number(health?.required_total ?? requiredChecks.length);
+  const requiredPassed = Number(health?.required_passed ?? requiredChecks.filter((check) => Boolean(check.ok)).length);
+  const launchScore = requiredTotal ? Math.round((requiredPassed / requiredTotal) * 100) : score;
+  const optionalIncompleteCount = checks.filter((check) => !Boolean(check.ok) && isOptionalCheck(check)).length;
   const ready = Boolean(health?.ready_for_launch);
-  const nextFix = health?.next_fix || checks.find((check) => !check.ok && check.severity === "required") || checks.find((check) => !check.ok) || null;
+  const nextFix = health?.next_fix || checks.find((check) => !check.ok && normalizeSeverity(check) === "required") || checks.find((check) => !check.ok && !isOptionalCheck(check)) || null;
   const nextFixHref = normalizeString(nextFix?.action_href) || (hasSelectedGuild ? "/ticket-categories" : "/servers");
   const nextFixLabel = normalizeString(nextFix?.action_label) || (hasSelectedGuild ? "Fix Next" : "Choose Server");
   const canShowPanelCommands = hasSelectedGuild && getPanelReadiness(checks);
-  const showNextFix = Boolean(nextFix && (!ready || normalizeString(nextFix.severity).toLowerCase() !== "optional"));
+  const showNextFix = Boolean(nextFix && (!ready || !isOptionalCheck(nextFix)));
   const checksSummary = hiddenIncompleteChecks.length
-    ? `View setup checks (${visibleChecks.length} shown, ${hiddenIncompleteChecks.length} hidden left)`
+    ? `View launch checks (${visibleChecks.length} shown, ${hiddenIncompleteChecks.length} hidden left)`
     : hasSelectedGuild
-      ? "View setup checks"
+      ? "View launch checks"
       : "Why this is required";
 
   return (
@@ -248,7 +262,7 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
             </h2>
             <p className="muted launch-copy">
               {hasSelectedGuild
-                ? "Dank Shield checks the selected server for categories, routing, ticket flow, and command health. Forms are optional when direct ticket flow is intentional."
+                ? "Dank Shield checks required launch blockers first. Optional doctor history stays in the full report and does not reduce launch readiness."
                 : "Staff tools stay locked until one Discord server is selected. That prevents tickets, forms, activity, and member data from mixing across servers."}
             </p>
           </div>
@@ -256,12 +270,12 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
 
         <div className="setup-health-summary">
           <div>
-            <span>Setup Score</span>
-            <strong>{score}%</strong>
+            <span>Launch Score</span>
+            <strong>{launchScore}%</strong>
           </div>
           <div>
-            <span>Checks Passing</span>
-            <strong>{passed}/{total}</strong>
+            <span>Required Checks</span>
+            <strong>{requiredPassed}/{requiredTotal || total}</strong>
           </div>
           <div>
             <span>Launch Status</span>
@@ -305,7 +319,7 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
           </div>
           {hiddenIncompleteChecks.length ? (
             <div className="info-banner" style={{ margin: "0 12px 12px", lineHeight: 1.45 }}>
-              <strong>{hiddenIncompleteChecks.length} more check{hiddenIncompleteChecks.length === 1 ? "" : "s"} not shown above.</strong>
+              <strong>{hiddenIncompleteChecks.length} more non-optional check{hiddenIncompleteChecks.length === 1 ? "" : "s"} not shown above.</strong>
               <div>{hiddenIncompleteChecks.map(describeHiddenCheck).join(" • ")}</div>
               <div>Open the full doctor report below to see all {total} checks.</div>
             </div>
@@ -334,7 +348,7 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
 
       {hasSelectedGuild ? (
         <details className="setup-doctor-collapse">
-          <summary>{getDoctorSummary(ready, score, passed, total)}</summary>
+          <summary>{getDoctorSummary(ready, score, passed, total, optionalIncompleteCount)}</summary>
           <SetupDoctorPanel initialHealth={health as any} compact />
         </details>
       ) : null}
