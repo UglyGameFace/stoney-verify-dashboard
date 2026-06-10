@@ -181,6 +181,21 @@ function compactChecks(checks: SetupCheck[], hasSelectedGuild: boolean): SetupCh
   return checks.slice(0, 6);
 }
 
+function getHiddenIncompleteChecks(checks: SetupCheck[], visibleChecks: SetupCheck[]): SetupCheck[] {
+  const visibleKeys = new Set(visibleChecks.map((check) => normalizeString(check.key) || normalizeString(check.label)));
+  return checks.filter((check) => {
+    const key = normalizeString(check.key) || normalizeString(check.label);
+    return !Boolean(check.ok) && !visibleKeys.has(key);
+  });
+}
+
+function describeHiddenCheck(check: SetupCheck): string {
+  const label = normalizeString(check.label) || "Setup check";
+  const severity = normalizeString(check.severity) || "check";
+  const detail = normalizeString(check.detail);
+  return `${label} (${severity})${detail ? ` — ${detail}` : ""}`;
+}
+
 function getPanelReadiness(checks: SetupCheck[]): boolean {
   const categoryCheck = checks.find((check) => normalizeString(check.key) === "categories_created");
   const formCheck = checks.find((check) => normalizeString(check.key) === "forms_configured");
@@ -206,6 +221,7 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
   const hasSelectedGuild = Boolean(guildId);
   const checks = safeArray<SetupCheck>(health?.checks).length ? safeArray<SetupCheck>(health?.checks) : fallbackChecks(data, selectedGuildId);
   const visibleChecks = compactChecks(checks, hasSelectedGuild);
+  const hiddenIncompleteChecks = getHiddenIncompleteChecks(checks, visibleChecks);
   const passed = Number(health?.passed ?? checks.filter((check) => Boolean(check.ok)).length);
   const total = Number(health?.total ?? checks.length);
   const score = Number(health?.score ?? (total ? Math.round((passed / total) * 100) : 0));
@@ -215,6 +231,11 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
   const nextFixLabel = normalizeString(nextFix?.action_label) || (hasSelectedGuild ? "Fix Next" : "Choose Server");
   const canShowPanelCommands = hasSelectedGuild && getPanelReadiness(checks);
   const showNextFix = Boolean(nextFix && (!ready || normalizeString(nextFix.severity).toLowerCase() !== "optional"));
+  const checksSummary = hiddenIncompleteChecks.length
+    ? `View setup checks (${visibleChecks.length} shown, ${hiddenIncompleteChecks.length} hidden left)`
+    : hasSelectedGuild
+      ? "View setup checks"
+      : "Why this is required";
 
   return (
     <div className="setup-launch-stack">
@@ -262,7 +283,7 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
         ) : null}
 
         <details className="setup-check-details">
-          <summary>{hasSelectedGuild ? "View setup checks" : "Why this is required"}</summary>
+          <summary>{checksSummary}</summary>
           <div className="launch-grid">
             {visibleChecks.map((check, index) => {
               const done = Boolean(check.ok);
@@ -282,6 +303,13 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
               );
             })}
           </div>
+          {hiddenIncompleteChecks.length ? (
+            <div className="info-banner" style={{ margin: "0 12px 12px", lineHeight: 1.45 }}>
+              <strong>{hiddenIncompleteChecks.length} more check{hiddenIncompleteChecks.length === 1 ? "" : "s"} not shown above.</strong>
+              <div>{hiddenIncompleteChecks.map(describeHiddenCheck).join(" • ")}</div>
+              <div>Open the full doctor report below to see all {total} checks.</div>
+            </div>
+          ) : null}
         </details>
 
         {canShowPanelCommands ? (
