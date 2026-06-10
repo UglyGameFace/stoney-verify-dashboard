@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import QuickActions from "@/components/QuickActions";
 import MobileBottomNav from "@/components/MobileBottomNav";
+
+const DASHBOARD_TABS = ["home", "tickets", "members", "categories"];
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
@@ -11,6 +13,16 @@ function safeArray(value) {
 function safeText(value, fallback = "—") {
   const text = String(value ?? "").trim();
   return text || fallback;
+}
+
+function normalizeTab(value) {
+  const text = String(value || "").replace(/^#/, "").trim().toLowerCase();
+  return DASHBOARD_TABS.includes(text) ? text : "home";
+}
+
+function getHashTab() {
+  if (typeof window === "undefined") return "home";
+  return normalizeTab(window.location.hash);
 }
 
 function getStaffId(data, initialStaffId) {
@@ -71,6 +83,28 @@ export default function DashboardClient({ initialData, staffName, initialStaffId
   const categories = safeArray(data?.categories);
   const counts = data?.counts || {};
 
+  useEffect(() => {
+    const syncTabFromHash = () => {
+      const nextTab = getHashTab();
+      if (nextTab !== "home") setTab(nextTab);
+    };
+
+    syncTabFromHash();
+    window.addEventListener("hashchange", syncTabFromHash);
+    return () => window.removeEventListener("hashchange", syncTabFromHash);
+  }, []);
+
+  function selectTab(nextTab) {
+    const normalized = normalizeTab(nextTab);
+    setTab(normalized);
+    if (typeof window !== "undefined") {
+      const nextHash = normalized === "home" ? "" : `#${normalized}`;
+      if (window.location.hash !== nextHash) {
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${nextHash}`);
+      }
+    }
+  }
+
   async function refresh() {
     setBusy(true);
     setError("");
@@ -103,16 +137,16 @@ export default function DashboardClient({ initialData, staffName, initialStaffId
 
       {error ? <div className="error-banner">{error}</div> : null}
 
-      <div className="card lite-tabs">
-        {["home", "tickets", "members", "categories"].map((item) => (
-          <button key={item} type="button" className={`button ${tab === item ? "primary" : "ghost"}`} onClick={() => setTab(item)}>
+      <div className="card lite-tabs" id="dashboard-tabs">
+        {DASHBOARD_TABS.map((item) => (
+          <button key={item} type="button" className={`button ${tab === item ? "primary" : "ghost"}`} onClick={() => selectTab(item)}>
             {item.charAt(0).toUpperCase() + item.slice(1)}
           </button>
         ))}
       </div>
 
       {tab === "home" ? (
-        <div className="space">
+        <div className="space" id="home">
           <div className="lite-grid">
             <Row title="Open Tickets" subtitle="Current dashboard count" tag={String(Number(counts?.openTickets || tickets.length || 0))} />
             <Row title="Warnings Today" subtitle="Current dashboard count" tag={String(Number(counts?.warnsToday || 0))} />
@@ -122,20 +156,20 @@ export default function DashboardClient({ initialData, staffName, initialStaffId
           <QuickActions onRefresh={refresh} currentStaffId={staffId} />
         </div>
       ) : tab === "tickets" ? (
-        <List rows={tickets} type="tickets" />
+        <div id="tickets"><List rows={tickets} type="tickets" /></div>
       ) : tab === "members" ? (
-        <List rows={members} type="members" />
+        <div id="members"><List rows={members} type="members" /></div>
       ) : (
-        <List rows={categories} type="categories" />
+        <div id="categories"><List rows={categories} type="categories" /></div>
       )}
 
-      <MobileBottomNav activeTab={tab} onChange={setTab} />
+      <MobileBottomNav activeTab={tab} onChange={selectTab} />
 
       <style jsx>{`
         .lite-shell { display: grid; gap: 16px; padding-bottom: 110px; }
         .lite-hero { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
         .lite-hero h1 { margin: 0; font-size: clamp(30px, 5vw, 48px); line-height: 1; }
-        .lite-tabs { display: flex; gap: 10px; flex-wrap: wrap; }
+        .lite-tabs { display: flex; gap: 10px; flex-wrap: wrap; scroll-margin-top: 18px; }
         .lite-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
         .lite-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px; }
         @media (max-width: 720px) { .lite-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } }
