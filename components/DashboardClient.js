@@ -5,6 +5,10 @@ import QuickActions from "@/components/QuickActions";
 import MobileBottomNav from "@/components/MobileBottomNav";
 
 const DASHBOARD_TABS = ["home", "tickets", "members", "categories"];
+const HOME_HASH_TARGETS = ["home", "actions", "activity"];
+const SCROLL_TARGET_ALIASES = {
+  activity: "actions",
+};
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
@@ -15,14 +19,30 @@ function safeText(value, fallback = "—") {
   return text || fallback;
 }
 
+function getHashTarget(value) {
+  return String(value || "").replace(/^#/, "").trim().toLowerCase();
+}
+
 function normalizeTab(value) {
-  const text = String(value || "").replace(/^#/, "").trim().toLowerCase();
-  return DASHBOARD_TABS.includes(text) ? text : "home";
+  const text = getHashTarget(value);
+  if (DASHBOARD_TABS.includes(text)) return text;
+  if (HOME_HASH_TARGETS.includes(text)) return "home";
+  return "home";
 }
 
 function getHashTab() {
   if (typeof window === "undefined") return "home";
   return normalizeTab(window.location.hash);
+}
+
+function scrollToHashTarget(hashValue) {
+  if (typeof document === "undefined") return;
+  const rawTarget = getHashTarget(hashValue);
+  if (!rawTarget) return;
+  const target = SCROLL_TARGET_ALIASES[rawTarget] || rawTarget;
+  window.setTimeout(() => {
+    document.getElementById(target)?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, 0);
 }
 
 function getStaffId(data, initialStaffId) {
@@ -86,7 +106,8 @@ export default function DashboardClient({ initialData, staffName, initialStaffId
   useEffect(() => {
     const syncTabFromHash = () => {
       const nextTab = getHashTab();
-      if (nextTab !== "home") setTab(nextTab);
+      setTab(nextTab);
+      scrollToHashTarget(window.location.hash);
     };
 
     syncTabFromHash();
@@ -153,7 +174,9 @@ export default function DashboardClient({ initialData, staffName, initialStaffId
             <Row title="Ready Categories" subtitle="Configured ticket routes" tag={String(categories.length)} />
             <Row title="Tracked Members" subtitle="Loaded member rows" tag={String(members.length)} />
           </div>
-          <QuickActions onRefresh={refresh} currentStaffId={staffId} />
+          <div id="actions" className="dashboard-anchor-target">
+            <QuickActions onRefresh={refresh} currentStaffId={staffId} />
+          </div>
         </div>
       ) : tab === "tickets" ? (
         <div id="tickets"><List rows={tickets} type="tickets" /></div>
@@ -172,6 +195,7 @@ export default function DashboardClient({ initialData, staffName, initialStaffId
         .lite-tabs { display: flex; gap: 10px; flex-wrap: wrap; scroll-margin-top: 18px; }
         .lite-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
         .lite-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px; }
+        .dashboard-anchor-target { scroll-margin-top: 18px; }
         @media (max-width: 720px) { .lite-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } }
       `}</style>
     </div>
