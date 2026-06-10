@@ -19,6 +19,19 @@ function safeText(value, fallback = "—") {
   return text || fallback;
 }
 
+function countOrNull(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function modSignalsTag(counts) {
+  const warns = countOrNull(counts?.warnsToday);
+  const raids = countOrNull(counts?.raidAlerts);
+  const fraud = countOrNull(counts?.fraudFlags);
+  const total = Number(warns || 0) + Number(raids || 0) + Number(fraud || 0);
+  return total > 0 ? String(total) : "Review";
+}
+
 function getHashTarget(value) {
   return String(value || "").replace(/^#/, "").trim().toLowerCase();
 }
@@ -170,7 +183,7 @@ export default function DashboardClient({ initialData, staffName, initialStaffId
         <div className="space" id="home">
           <div className="lite-grid">
             <Row title="Open Tickets" subtitle="Current dashboard count" tag={String(Number(counts?.openTickets || tickets.length || 0))} />
-            <Row title="Warnings Today" subtitle="Current dashboard count" tag={String(Number(counts?.warnsToday || 0))} />
+            <Row title="Mod Signals" subtitle="Warnings, raids, and fraud flags need source review before trusting zero." tag={modSignalsTag(counts)} />
             <Row title="Ready Categories" subtitle="Configured ticket routes" tag={String(categories.length)} />
             <Row title="Tracked Members" subtitle="Loaded member rows" tag={String(members.length)} />
           </div>
