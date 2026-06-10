@@ -14,16 +14,77 @@ type ServersPayload = {
   servers?: ServerRow[] | null;
 };
 
-const BASE_NAV_ITEMS = [
-  { key: "home", label: "Home", href: "/", icon: "⌂", requiresServer: false, match: (path: string) => path === "/" },
-  { key: "servers", label: "Servers", href: "/servers", icon: "◈", requiresServer: false, match: (path: string) => path === "/servers" },
-  { key: "categories", label: "Categories", href: "/ticket-categories", icon: "▣", requiresServer: true, match: (path: string) => path.startsWith("/ticket-categories") },
-  { key: "forms", label: "Forms", href: "/ticket-forms", icon: "✎", requiresServer: true, match: (path: string) => path.startsWith("/ticket-forms") },
-  { key: "account", label: "Account", href: "/auth-status", icon: "♙", requiresServer: false, match: (path: string) => path.startsWith("/auth-status") },
-];
+type NavItem = {
+  key: string;
+  label: string;
+  href: string;
+  icon: string;
+  requiresServer: boolean;
+  match: (path: string) => boolean;
+};
 
 function normalizeString(value: unknown): string {
   return String(value || "").trim();
+}
+
+function routeGuildId(pathname: string): string {
+  const match = normalizeString(pathname).match(/^\/dashboard\/([^/?#]+)/);
+  if (!match?.[1]) return "";
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
+function dashboardHref(guildId: string): string {
+  return `/dashboard/${encodeURIComponent(normalizeString(guildId))}`;
+}
+
+function buildNavItems(selectedGuildId: string): NavItem[] {
+  const scopedBase = selectedGuildId ? dashboardHref(selectedGuildId) : "";
+  return [
+    {
+      key: "home",
+      label: "Home",
+      href: scopedBase || "/",
+      icon: "⌂",
+      requiresServer: false,
+      match: (path: string) => path === "/" || (Boolean(scopedBase) && path === scopedBase),
+    },
+    {
+      key: "servers",
+      label: "Servers",
+      href: "/servers",
+      icon: "◈",
+      requiresServer: false,
+      match: (path: string) => path === "/servers",
+    },
+    {
+      key: "categories",
+      label: "Categories",
+      href: scopedBase ? `${scopedBase}/categories` : "/ticket-categories",
+      icon: "▣",
+      requiresServer: true,
+      match: (path: string) => path.startsWith("/ticket-categories") || /^\/dashboard\/[^/]+\/categories/.test(path),
+    },
+    {
+      key: "forms",
+      label: "Forms",
+      href: scopedBase ? `${scopedBase}/forms` : "/ticket-forms",
+      icon: "✎",
+      requiresServer: true,
+      match: (path: string) => path.startsWith("/ticket-forms") || /^\/dashboard\/[^/]+\/forms/.test(path),
+    },
+    {
+      key: "account",
+      label: "Account",
+      href: "/auth-status",
+      icon: "♙",
+      requiresServer: false,
+      match: (path: string) => path.startsWith("/auth-status"),
+    },
+  ];
 }
 
 function isDashboardPath(pathname: string): boolean {
@@ -40,10 +101,12 @@ function hasAuthRequiredState(): boolean {
 
 export default function GlobalDashboardNav() {
   const pathname = usePathname() || "/";
+  const routeSelectedGuildId = routeGuildId(pathname);
   const [localNavPresent, setLocalNavPresent] = useState(true);
   const [authRequired, setAuthRequired] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [hasSelectedServer, setHasSelectedServer] = useState(false);
+  const [selectedGuildId, setSelectedGuildId] = useState(routeSelectedGuildId);
+  const [hasSelectedServer, setHasSelectedServer] = useState(Boolean(routeSelectedGuildId));
 
   useEffect(() => {
     setMounted(true);
@@ -62,6 +125,12 @@ export default function GlobalDashboardNav() {
   }, [pathname]);
 
   useEffect(() => {
+    const pathGuildId = routeGuildId(pathname);
+    if (pathGuildId) {
+      setSelectedGuildId(pathGuildId);
+      setHasSelectedServer(true);
+    }
+
     let active = true;
 
     async function loadServerContext() {
@@ -73,12 +142,15 @@ export default function GlobalDashboardNav() {
         });
         const json = (await res.json().catch(() => null)) as ServersPayload | null;
         if (!active || !res.ok || !json) return;
-        const selectedId = normalizeString(json.selectedGuildId);
         const rows = Array.isArray(json.servers) ? json.servers : [];
-        setHasSelectedServer(Boolean(selectedId || rows.some((row) => Boolean(row?.selected))));
+        const selectedRow = rows.find((row) => Boolean(row?.selected));
+        const selectedId = normalizeString(json.selectedGuildId) || normalizeString(selectedRow?.id) || pathGuildId;
+        setSelectedGuildId(selectedId);
+        setHasSelectedServer(Boolean(selectedId));
       } catch {
         if (!active) return;
-        setHasSelectedServer(false);
+        setSelectedGuildId(pathGuildId);
+        setHasSelectedServer(Boolean(pathGuildId));
       }
     }
 
@@ -86,11 +158,11 @@ export default function GlobalDashboardNav() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [pathname]);
 
   const navItems = useMemo(
-    () => BASE_NAV_ITEMS.filter((item) => !item.requiresServer || hasSelectedServer),
-    [hasSelectedServer]
+    () => buildNavItems(selectedGuildId).filter((item) => !item.requiresServer || hasSelectedServer),
+    [hasSelectedServer, selectedGuildId]
   );
 
   const shouldShow = useMemo(
