@@ -38,6 +38,16 @@ function normalizeString(value: unknown): string {
   return String(value || "").trim();
 }
 
+function routeGuildId(pathname: string): string {
+  const match = normalizeString(pathname).match(/^\/dashboard\/([^/?#]+)/);
+  if (!match?.[1]) return "";
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
 function dashboardHref(guildId: string): string {
   return `/dashboard/${encodeURIComponent(normalizeString(guildId))}`;
 }
@@ -57,22 +67,22 @@ function scopedLinks(selectedGuildId: string): LinkGroup[] {
       title: "Setup Flow",
       links: [
         { href: "/servers", label: "Servers", helper: "Select or invite bot", icon: "🛰️", match: "startsWith" },
-        { href: base ? `${base}/categories` : "/ticket-categories", label: "Categories", helper: "Ticket routing", icon: "🧩", match: "startsWith", requiresServer: true },
-        { href: base ? `${base}/forms` : "/ticket-forms", label: "Forms", helper: "Questions + intake", icon: "📝", match: "startsWith", requiresServer: true },
+        { href: base ? `${base}/categories` : "/servers", label: "Categories", helper: "Ticket routing", icon: "🧩", match: "startsWith", requiresServer: true },
+        { href: base ? `${base}/forms` : "/servers", label: "Forms", helper: "Questions + intake", icon: "📝", match: "startsWith", requiresServer: true },
       ],
     },
   ];
 }
 
 function isTicketDetailPath(pathname: string): boolean {
-  return pathname === "/tickets" || pathname.startsWith("/tickets/") || pathname.includes("#tickets");
+  return pathname === "/tickets" || pathname.startsWith("/tickets/");
 }
 
 function isLinkActive(pathname: string, link: SidebarLink): boolean {
   if (link.match === "exact") return pathname === link.href || (link.href.startsWith("/dashboard/") && pathname === link.href);
   if (link.match === "startsWith") return pathname === link.href || pathname.startsWith(`${link.href}/`);
-  if (link.match === "home-section") return pathname === "/" || pathname.startsWith("/dashboard/");
-  if (link.match === "ticket-detail") return pathname === "/" || pathname.startsWith("/dashboard/") || isTicketDetailPath(pathname);
+  if (link.match === "home-section") return false;
+  if (link.match === "ticket-detail") return isTicketDetailPath(pathname);
   return false;
 }
 
@@ -81,15 +91,22 @@ function isSetupPath(pathname: string): boolean {
 }
 
 export default function Sidebar() {
-  const pathname = usePathname();
-  const [selectedGuildId, setSelectedGuildId] = useState("");
+  const pathname = usePathname() || "/";
+  const pathGuildId = routeGuildId(pathname);
+  const [selectedGuildId, setSelectedGuildId] = useState(pathGuildId);
   const [selectedServerName, setSelectedServerName] = useState("");
   const [installedCount, setInstalledCount] = useState<number | null>(null);
-  const [hasSelectedServer, setHasSelectedServer] = useState(false);
+  const [hasSelectedServer, setHasSelectedServer] = useState(Boolean(pathGuildId));
   const [botCheckError, setBotCheckError] = useState("");
   const appName = normalizeString(env.appName) || "Dank Shield Dashboard";
 
   useEffect(() => {
+    const nextPathGuildId = routeGuildId(pathname);
+    if (nextPathGuildId) {
+      setSelectedGuildId(nextPathGuildId);
+      setHasSelectedServer(true);
+    }
+
     let active = true;
 
     async function loadSelectedServer() {
@@ -103,7 +120,7 @@ export default function Sidebar() {
         const json = (await res.json().catch(() => null)) as ServersPayload | null;
         if (!active || !res.ok || !json) return;
         const rows = Array.isArray(json.servers) ? json.servers : [];
-        const selectedId = normalizeString(json.selectedGuildId);
+        const selectedId = normalizeString(json.selectedGuildId) || nextPathGuildId;
         const selected = rows.find((row) => row.selected || row.id === selectedId) || null;
         setSelectedGuildId(selectedId);
         setSelectedServerName(normalizeString(selected?.name));
@@ -112,6 +129,8 @@ export default function Sidebar() {
         setBotCheckError(normalizeString(json.botCheckError));
       } catch {
         if (!active) return;
+        setSelectedGuildId(nextPathGuildId);
+        setHasSelectedServer(Boolean(nextPathGuildId));
       }
     }
 
@@ -119,7 +138,7 @@ export default function Sidebar() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [pathname]);
 
   const groups = useMemo(() => scopedLinks(selectedGuildId), [selectedGuildId]);
 
@@ -143,7 +162,7 @@ export default function Sidebar() {
 
         <div className="sidebar-context-card">
           <div className="sidebar-context-label">Selected Server</div>
-          <div className="sidebar-context-name">{selectedServerName || "None selected"}</div>
+          <div className="sidebar-context-name">{selectedServerName || (hasSelectedServer ? "Selected server" : "None selected")}</div>
           <div className="sidebar-context-meta">
             {installedCount === null ? "Checking bot access…" : `${installedCount} ready server${installedCount === 1 ? "" : "s"} available`}
           </div>
