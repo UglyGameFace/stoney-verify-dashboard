@@ -1,0 +1,125 @@
+from __future__ import annotations
+
+"""Audit the Dank Shield dashboard command-center UX contract.
+
+This is a static guard. It does not replace browser testing, but it catches the
+most common regressions that made the dashboard feel worse than Ticket Tool:
+confusing setup flow, forms acting required, weak mobile accessibility, and no
+clear bot/server truth model.
+"""
+
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+PACKAGE = ROOT / "package.json"
+LAYOUT = ROOT / "app" / "layout.js"
+READABILITY = ROOT / "app" / "readability.css"
+SIDEBAR = ROOT / "components" / "Sidebar.tsx"
+SETUP_SHELL = ROOT / "components" / "dashboard" / "SetupWorkspaceShell.tsx"
+SETUP_CHECKLIST = ROOT / "components" / "dashboard" / "SetupLaunchChecklist.tsx"
+STANDARD = ROOT / "docs" / "DASHBOARD_COMMAND_CENTER_V2.md"
+
+REQUIRED_STANDARD_MARKERS = [
+    "Is the bot connected?",
+    "Is this server ready?",
+    "What do I press next?",
+    "Forms are optional",
+    "Basic ticket panels must work without forms",
+    "phone landscape",
+    "tablet landscape",
+    "visually impaired",
+    "Ticket Tool comparison target",
+]
+
+REQUIRED_READABILITY_MARKERS = [
+    "Dank Shield readability layer",
+    "min-height: 56px",
+    "@media (max-width: 1024px)",
+    "@media (max-width: 720px)",
+]
+
+REQUIRED_SIDEBAR_MARKERS = [
+    "Command Center",
+    "Setup Flow",
+    "Change Server",
+    "Choose Server",
+    "min-height: 48px",
+]
+
+REQUIRED_SETUP_MARKERS = [
+    "Forms / Direct Flow",
+    "severity: \"recommended\"",
+    "Direct flow or smart defaults available",
+]
+
+FORBIDDEN_SETUP_PATTERNS = [
+    "Forms are required",
+    "forms are required",
+    "Finish forms before tickets work",
+]
+
+
+def read(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+
+
+def require(label: str, text: str, marker: str, failures: list[str]) -> None:
+    if marker not in text:
+        failures.append(f"{label} missing marker: {marker}")
+
+
+def forbid(label: str, text: str, marker: str, failures: list[str]) -> None:
+    if marker in text:
+        failures.append(f"{label} contains forbidden marker: {marker}")
+
+
+def main() -> int:
+    failures: list[str] = []
+
+    package = read(PACKAGE)
+    layout = read(LAYOUT)
+    readability = read(READABILITY)
+    sidebar = read(SIDEBAR)
+    setup_shell = read(SETUP_SHELL)
+    setup_checklist = read(SETUP_CHECKLIST)
+    standard = read(STANDARD)
+
+    for path in (PACKAGE, LAYOUT, READABILITY, SIDEBAR, SETUP_SHELL, SETUP_CHECKLIST, STANDARD):
+        if not path.exists():
+            failures.append(f"missing required file: {path.relative_to(ROOT)}")
+
+    require("package.json", package, '"typecheck": "tsc --noEmit --pretty false"', failures)
+    require("layout", layout, 'import "@/app/readability.css"', failures)
+
+    for marker in REQUIRED_STANDARD_MARKERS:
+        require("dashboard command-center standard", standard, marker, failures)
+
+    for marker in REQUIRED_READABILITY_MARKERS:
+        require("readability.css", readability, marker, failures)
+
+    for marker in REQUIRED_SIDEBAR_MARKERS:
+        require("Sidebar", sidebar, marker, failures)
+
+    setup_text = setup_shell + "\n" + setup_checklist
+    for marker in REQUIRED_SETUP_MARKERS:
+        require("setup flow", setup_text, marker, failures)
+
+    for marker in FORBIDDEN_SETUP_PATTERNS:
+        forbid("setup flow", setup_text, marker, failures)
+
+    if "Boolean(categoryCheck?.ok) && Boolean(formCheck?.ok)" in setup_checklist:
+        failures.append("SetupLaunchChecklist still makes panel commands depend on forms_configured; forms must be optional")
+
+    if failures:
+        print("Dashboard command-center audit failed:")
+        for failure in failures:
+            print(" -", failure)
+        return 1
+
+    print("Dashboard command-center audit passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
