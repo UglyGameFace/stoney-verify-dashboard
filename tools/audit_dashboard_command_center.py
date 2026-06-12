@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "package.json"
 LAYOUT = ROOT / "app" / "layout.js"
 READABILITY = ROOT / "app" / "readability.css"
+COMMAND_CENTER_CSS = ROOT / "app" / "command-center-v2.css"
 SIDEBAR = ROOT / "components" / "Sidebar.tsx"
 SETUP_SHELL = ROOT / "components" / "dashboard" / "SetupWorkspaceShell.tsx"
 SETUP_CHECKLIST = ROOT / "components" / "dashboard" / "SetupLaunchChecklist.tsx"
@@ -39,6 +40,14 @@ REQUIRED_READABILITY_MARKERS = [
     "@media (max-width: 720px)",
 ]
 
+REQUIRED_COMMAND_CENTER_CSS_MARKERS = [
+    "Dank Shield Command Center V2",
+    "--ccv2-tap: 56px",
+    "@media (orientation: landscape)",
+    "prefers-reduced-motion",
+    "prefers-contrast",
+]
+
 REQUIRED_SIDEBAR_MARKERS = [
     "Command Center",
     "Setup Flow",
@@ -51,6 +60,7 @@ REQUIRED_SETUP_MARKERS = [
     "Forms / Direct Flow",
     "severity: \"recommended\"",
     "Direct flow or smart defaults available",
+    "Forms are optional",
 ]
 
 FORBIDDEN_SETUP_PATTERNS = [
@@ -80,23 +90,28 @@ def main() -> int:
     package = read(PACKAGE)
     layout = read(LAYOUT)
     readability = read(READABILITY)
+    command_center_css = read(COMMAND_CENTER_CSS)
     sidebar = read(SIDEBAR)
     setup_shell = read(SETUP_SHELL)
     setup_checklist = read(SETUP_CHECKLIST)
     standard = read(STANDARD)
 
-    for path in (PACKAGE, LAYOUT, READABILITY, SIDEBAR, SETUP_SHELL, SETUP_CHECKLIST, STANDARD):
+    for path in (PACKAGE, LAYOUT, READABILITY, COMMAND_CENTER_CSS, SIDEBAR, SETUP_SHELL, SETUP_CHECKLIST, STANDARD):
         if not path.exists():
             failures.append(f"missing required file: {path.relative_to(ROOT)}")
 
     require("package.json", package, '"typecheck": "tsc --noEmit --pretty false"', failures)
     require("layout", layout, 'import "@/app/readability.css"', failures)
+    require("layout", layout, 'import "@/app/command-center-v2.css"', failures)
 
     for marker in REQUIRED_STANDARD_MARKERS:
         require("dashboard command-center standard", standard, marker, failures)
 
     for marker in REQUIRED_READABILITY_MARKERS:
         require("readability.css", readability, marker, failures)
+
+    for marker in REQUIRED_COMMAND_CENTER_CSS_MARKERS:
+        require("command-center-v2.css", command_center_css, marker, failures)
 
     for marker in REQUIRED_SIDEBAR_MARKERS:
         require("Sidebar", sidebar, marker, failures)
