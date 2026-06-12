@@ -4,8 +4,8 @@ from __future__ import annotations
 
 This is a static guard. It does not replace browser testing, but it catches the
 most common regressions that made the dashboard feel worse than Ticket Tool:
-confusing setup flow, forms acting required, weak mobile accessibility, and no
-clear bot/server truth model.
+confusing setup flow, forms acting required, weak mobile accessibility, tablet
+landscape bloat, and no clear bot/server truth model.
 """
 
 from pathlib import Path
@@ -16,6 +16,7 @@ PACKAGE = ROOT / "package.json"
 LAYOUT = ROOT / "app" / "layout.js"
 READABILITY = ROOT / "app" / "readability.css"
 COMMAND_CENTER_CSS = ROOT / "app" / "command-center-v2.css"
+TABLET_LANDSCAPE_CSS = ROOT / "app" / "tablet-landscape-fix.css"
 SIDEBAR = ROOT / "components" / "Sidebar.tsx"
 SETUP_SHELL = ROOT / "components" / "dashboard" / "SetupWorkspaceShell.tsx"
 SETUP_CHECKLIST = ROOT / "components" / "dashboard" / "SetupLaunchChecklist.tsx"
@@ -46,6 +47,14 @@ REQUIRED_COMMAND_CENTER_CSS_MARKERS = [
     "@media (orientation: landscape)",
     "prefers-reduced-motion",
     "prefers-contrast",
+]
+
+REQUIRED_TABLET_LANDSCAPE_MARKERS = [
+    "Dank Shield tablet landscape fix",
+    "--tablet-rail",
+    "grid-template-columns: repeat(3, minmax(0, 1fr))",
+    "-webkit-line-clamp: 2",
+    "body > .quick-appearance-dock",
 ]
 
 REQUIRED_SIDEBAR_MARKERS = [
@@ -91,18 +100,20 @@ def main() -> int:
     layout = read(LAYOUT)
     readability = read(READABILITY)
     command_center_css = read(COMMAND_CENTER_CSS)
+    tablet_landscape_css = read(TABLET_LANDSCAPE_CSS)
     sidebar = read(SIDEBAR)
     setup_shell = read(SETUP_SHELL)
     setup_checklist = read(SETUP_CHECKLIST)
     standard = read(STANDARD)
 
-    for path in (PACKAGE, LAYOUT, READABILITY, COMMAND_CENTER_CSS, SIDEBAR, SETUP_SHELL, SETUP_CHECKLIST, STANDARD):
+    for path in (PACKAGE, LAYOUT, READABILITY, COMMAND_CENTER_CSS, TABLET_LANDSCAPE_CSS, SIDEBAR, SETUP_SHELL, SETUP_CHECKLIST, STANDARD):
         if not path.exists():
             failures.append(f"missing required file: {path.relative_to(ROOT)}")
 
     require("package.json", package, '"typecheck": "tsc --noEmit --pretty false"', failures)
     require("layout", layout, 'import "@/app/readability.css"', failures)
     require("layout", layout, 'import "@/app/command-center-v2.css"', failures)
+    require("layout", layout, 'import "@/app/tablet-landscape-fix.css"', failures)
 
     for marker in REQUIRED_STANDARD_MARKERS:
         require("dashboard command-center standard", standard, marker, failures)
@@ -112,6 +123,9 @@ def main() -> int:
 
     for marker in REQUIRED_COMMAND_CENTER_CSS_MARKERS:
         require("command-center-v2.css", command_center_css, marker, failures)
+
+    for marker in REQUIRED_TABLET_LANDSCAPE_MARKERS:
+        require("tablet-landscape-fix.css", tablet_landscape_css, marker, failures)
 
     for marker in REQUIRED_SIDEBAR_MARKERS:
         require("Sidebar", sidebar, marker, failures)
