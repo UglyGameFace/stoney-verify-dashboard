@@ -69,7 +69,6 @@ async function fetchDashboardJson(pathname: string, fallbackData: DashboardPaylo
         accept: "application/json",
         "x-dashboard-internal": "1",
       },
-      next: { revalidate: 0 },
     });
 
     if (!response.ok) return fallbackData;
