@@ -206,8 +206,8 @@ function describeHiddenCheck(check: SetupCheck): string {
 
 function getPanelReadiness(checks: SetupCheck[]): boolean {
   const categoryCheck = checks.find((check) => normalizeString(check.key) === "categories_created");
-  const formCheck = checks.find((check) => normalizeString(check.key) === "forms_configured");
-  return Boolean(categoryCheck?.ok) && Boolean(formCheck?.ok);
+  const defaultCategoryCheck = checks.find((check) => normalizeString(check.key) === "default_category");
+  return Boolean(categoryCheck?.ok || defaultCategoryCheck?.ok);
 }
 
 function getSetupStage(hasSelectedGuild: boolean, nextFix: SetupCheck | null): string {
@@ -262,7 +262,7 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
             </h2>
             <p className="muted launch-copy">
               {hasSelectedGuild
-                ? "Dank Shield checks required launch blockers first. Optional doctor history stays in the full report and does not reduce launch readiness."
+                ? "Dank Shield checks required launch blockers first. Forms are optional; basic ticket panels work once ticket categories are ready."
                 : "Staff tools stay locked until one Discord server is selected. That prevents tickets, forms, activity, and member data from mixing across servers."}
             </p>
           </div>
@@ -334,7 +334,7 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
                 <div className="muted launch-eyebrow">Discord Panel</div>
                 <h3 className="panel-command-title">Publish the member-facing ticket panel</h3>
                 <p className="muted launch-copy">
-                  Run these inside the Discord channel where members should open tickets. Use the doctor command after posting to verify setup health.
+                  Run these inside the Discord channel where members should open tickets. Forms are optional; add them later when you want custom intake questions.
                 </p>
               </div>
               <div className="command-stack">
