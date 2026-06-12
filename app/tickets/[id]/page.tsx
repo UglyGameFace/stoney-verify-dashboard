@@ -273,7 +273,6 @@ async function fetchTicketData(
           accept: "application/json",
           "x-dashboard-internal": "1",
         },
-        next: { revalidate: 0 },
       }
     );
 
@@ -427,15 +426,12 @@ export default async function TicketPage({ params }: TicketPageProps) {
   return (
     <div className="shell">
       <Sidebar />
-
       <main className="content">
-        <div className="content-inner">
-          {data?.ticket ? (
-            <TicketDetailClient initialData={data} ticketId={ticketId} />
-          ) : (
-            <TicketUnavailableState error={data?.error} ticketId={ticketId} />
-          )}
-        </div>
+        {data?.ok ? (
+          <TicketDetailClient initialData={data} />
+        ) : (
+          <TicketUnavailableState error={data?.error} ticketId={ticketId} />
+        )}
       </main>
     </div>
   );
