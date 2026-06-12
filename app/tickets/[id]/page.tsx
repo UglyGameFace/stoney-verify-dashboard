@@ -428,7 +428,7 @@ export default async function TicketPage({ params }: TicketPageProps) {
       <Sidebar />
       <main className="content">
         {data?.ok ? (
-          <TicketDetailClient initialData={data} />
+          <TicketDetailClient initialData={data} ticketId={ticketId} />
         ) : (
           <TicketUnavailableState error={data?.error} ticketId={ticketId} />
         )}
