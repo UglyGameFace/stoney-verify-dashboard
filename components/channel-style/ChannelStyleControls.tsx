@@ -13,6 +13,7 @@ import {
 } from "@/lib/channel-style";
 import ChannelNamePreview from "./ChannelNamePreview";
 import EmojiPickerButton from "./EmojiPickerButton";
+import FontPreviewGallery from "./FontPreviewGallery";
 import SeparatorPicker from "./SeparatorPicker";
 import UnicodeStylePicker from "./UnicodeStylePicker";
 
@@ -146,13 +147,6 @@ export default function ChannelStyleControls({
         </span>
       </label>
 
-      <UnicodeStylePicker
-        value={unicodeStyle}
-        onChange={setUnicodeStyle}
-        safetyLevel={safetyLevel}
-        allowUnicodeEverywhere={allowUnicodeEverywhere}
-      />
-
       <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
         <div className="text-sm font-semibold text-white">Font apply mode</div>
         <p className="mt-1 text-xs leading-5 text-zinc-400">
@@ -175,6 +169,21 @@ export default function ChannelStyleControls({
           </button>
         </div>
       </div>
+
+      <FontPreviewGallery
+        value={unicodeStyle}
+        scope={unicodeStyleScope}
+        safetyLevel={safetyLevel}
+        allowUnicodeEverywhere={allowUnicodeEverywhere}
+        onChange={setUnicodeStyle}
+      />
+
+      <UnicodeStylePicker
+        value={unicodeStyle}
+        onChange={setUnicodeStyle}
+        safetyLevel={safetyLevel}
+        allowUnicodeEverywhere={allowUnicodeEverywhere}
+      />
 
       <SeparatorPicker
         separator={separator}
