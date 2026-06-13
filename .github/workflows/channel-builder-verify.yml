@@ -1,0 +1,39 @@
+name: Channel Builder Dashboard Verify
+
+on:
+  pull_request:
+    paths:
+      - 'app/api/channel-builder/**'
+      - 'app/dashboard/**/channel-builder/**'
+      - 'components/channel-style/**'
+      - 'lib/channel-style/**'
+      - 'lib/bot-api.ts'
+      - 'tools/audit_channel_builder.py'
+      - 'package.json'
+      - 'tsconfig.json'
+  push:
+    branches: [main]
+    paths:
+      - 'app/api/channel-builder/**'
+      - 'app/dashboard/**/channel-builder/**'
+      - 'components/channel-style/**'
+      - 'lib/channel-style/**'
+      - 'lib/bot-api.ts'
+      - 'tools/audit_channel_builder.py'
+      - 'package.json'
+      - 'tsconfig.json'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: npm install
+      - run: npm run typecheck
+      - run: npm run channel-builder:audit
