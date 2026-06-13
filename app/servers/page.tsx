@@ -3,7 +3,6 @@ import ServerSelector from "@/components/dashboard/ServerSelector";
 import AuthStatePage from "@/components/dashboard/AuthStatePage";
 import SetupWorkspaceShell from "@/components/dashboard/SetupWorkspaceShell";
 import { getDashboardAuthSession } from "@/lib/dashboard-auth";
-import { refreshPageSessionIfNeeded } from "@/lib/page-session-refresh";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -17,8 +16,6 @@ async function hasUsableDashboardSession(): Promise<boolean> {
 }
 
 export default async function ServersPage() {
-  refreshPageSessionIfNeeded("/servers");
-
   const signedIn = await hasUsableDashboardSession();
 
   if (!signedIn) {
