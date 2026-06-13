@@ -67,6 +67,7 @@ function scopedLinks(selectedGuildId: string): LinkGroup[] {
       title: "Setup Flow",
       links: [
         { href: "/servers", label: "Servers", helper: "Select or invite bot", icon: "🛰️", match: "startsWith" },
+        { href: base ? `${base}/channel-builder` : "/servers", label: "Channel Builder", helper: "Emoji + channel styles", icon: "🎨", match: "startsWith", requiresServer: true },
         { href: base ? `${base}/categories` : "/servers", label: "Categories", helper: "Ticket routing", icon: "🧩", match: "startsWith", requiresServer: true },
         { href: base ? `${base}/forms` : "/servers", label: "Forms", helper: "Questions + intake", icon: "📝", match: "startsWith", requiresServer: true },
       ],
@@ -87,7 +88,7 @@ function isLinkActive(pathname: string, link: SidebarLink): boolean {
 }
 
 function isSetupPath(pathname: string): boolean {
-  return pathname === "/servers" || pathname.startsWith("/ticket-categories") || pathname.startsWith("/ticket-forms") || pathname.includes("/categories") || pathname.includes("/forms");
+  return pathname === "/servers" || pathname.startsWith("/ticket-categories") || pathname.startsWith("/ticket-forms") || pathname.includes("/channel-builder") || pathname.includes("/categories") || pathname.includes("/forms");
 }
 
 export default function Sidebar() {
@@ -144,8 +145,9 @@ export default function Sidebar() {
 
   const setupStep = useMemo(() => {
     if (pathname === "/servers") return "Step 1: Server";
-    if (pathname.startsWith("/ticket-categories") || pathname.includes("/categories")) return "Step 2: Categories";
-    if (pathname.startsWith("/ticket-forms") || pathname.includes("/forms")) return "Step 3: Forms";
+    if (pathname.includes("/channel-builder")) return "Step 2: Channel Builder";
+    if (pathname.startsWith("/ticket-categories") || pathname.includes("/categories")) return "Step 3: Categories";
+    if (pathname.startsWith("/ticket-forms") || pathname.includes("/forms")) return "Step 4: Forms";
     return hasSelectedServer ? "Ready" : "Server required";
   }, [pathname, hasSelectedServer]);
 
@@ -204,7 +206,7 @@ export default function Sidebar() {
           <div className="sidebar-flow-card">
             <div className="sidebar-flow-title">Setup Progress</div>
             <div className="sidebar-flow-current">{setupStep}</div>
-            <div className="sidebar-flow-copy">Servers unlock dashboard data. Categories and forms unlock after a server is selected.</div>
+            <div className="sidebar-flow-copy">Servers unlock dashboard data. Channel Builder, categories, and forms unlock after a server is selected.</div>
           </div>
         ) : null}
 
@@ -259,94 +261,99 @@ export default function Sidebar() {
         }
         .sidebar-context-name,
         .sidebar-flow-current {
-          margin-top: 6px;
-          color: var(--text-strong, #fff);
-          font-size: 15px;
+          margin-top: 5px;
+          color: var(--text-strong, #ffffff);
+          font-size: 14px;
           font-weight: 950;
-          overflow-wrap: anywhere;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
         .sidebar-context-meta,
         .sidebar-flow-copy,
         .sidebar-context-warning {
-          margin-top: 4px;
+          margin-top: 5px;
           color: var(--muted, #c7ddcf);
           font-size: 12px;
           line-height: 1.35;
         }
         .sidebar-context-warning {
-          color: #fde68a;
+          color: #fed7aa;
         }
-        .sidebar-mini-button {
+        .sidebar-mini-button,
+        .sidebar-bottom-button {
           margin-top: 10px;
           width: 100%;
-          min-height: 42px;
-          font-size: 13px;
+          min-height: 38px;
         }
         .sidebar-nav {
-          display: grid;
-          gap: 16px;
-          align-content: start;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+          min-height: 0;
+          overflow-y: auto;
+          padding-right: 2px;
         }
-        .sidebar-group {
-          display: grid;
-          gap: 8px;
+        .sidebar-group-title {
+          margin-bottom: 7px;
         }
         .sidebar-group-links {
-          display: grid;
+          display: flex;
+          flex-direction: column;
           gap: 7px;
         }
         .sidebar-link {
           display: flex;
           align-items: center;
           gap: 10px;
-          min-height: 48px;
+          min-height: 46px;
           border-radius: 16px;
           padding: 9px 10px;
-          color: var(--muted, #c7ddcf);
+          border: 1px solid rgba(255,255,255,0.10);
+          color: var(--text, #edf8ef);
           text-decoration: none;
-          border: 1px solid transparent;
-          background: rgba(255,255,255,0.035);
-          transition: 140ms ease;
+          background: rgba(255,255,255,0.045);
+          transition: 160ms ease;
         }
         .sidebar-link:hover,
         .sidebar-link.active {
-          color: var(--text-strong, #fff);
-          border-color: rgba(84,255,148,0.35);
-          background: linear-gradient(135deg, rgba(0,77,38,0.78), rgba(0,36,58,0.72));
-          box-shadow: 0 10px 24px rgba(0,255,135,0.10);
+          border-color: rgba(109,255,157,0.42);
+          background: rgba(109,255,157,0.12);
+          transform: translateY(-1px);
         }
         .sidebar-link-icon {
-          width: 28px;
-          height: 28px;
+          width: 30px;
+          height: 30px;
           display: grid;
           place-items: center;
-          border-radius: 10px;
+          border-radius: 12px;
           background: rgba(0,0,0,0.18);
-          flex: 0 0 28px;
+          flex: 0 0 auto;
         }
         .sidebar-link-copy {
           min-width: 0;
-          display: grid;
-          gap: 1px;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
         }
         .sidebar-link-label {
-          font-weight: 900;
           font-size: 13px;
+          font-weight: 950;
+          color: var(--text-strong, #ffffff);
+          line-height: 1.1;
         }
         .sidebar-link-helper {
-          font-size: 11px;
           color: var(--muted, #c7ddcf);
-          line-height: 1.25;
+          font-size: 11px;
+          line-height: 1.2;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
         .sidebar-bottom {
           margin-top: auto;
           display: grid;
           gap: 8px;
-        }
-        .sidebar-bottom-button {
-          width: 100%;
-          min-height: 42px;
-          font-size: 13px;
         }
       `}</style>
     </aside>
