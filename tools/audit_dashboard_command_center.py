@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "package.json"
 LAYOUT = ROOT / "app" / "layout.js"
 SERVERS_PAGE = ROOT / "app" / "servers" / "page.tsx"
+SERVERS_API = ROOT / "app" / "api" / "servers" / "route.ts"
 READABILITY = ROOT / "app" / "readability.css"
 COMMAND_CENTER_CSS = ROOT / "app" / "command-center-v2.css"
 TABLET_LANDSCAPE_CSS = ROOT / "app" / "tablet-landscape-fix.css"
@@ -68,6 +69,13 @@ REQUIRED_LANDSCAPE_AUTH_RESCUE_MARKERS = [
     "body > .quick-appearance-dock",
 ]
 
+REQUIRED_SERVERS_API_MARKERS = [
+    "dank_manageable_servers_cache",
+    "buildCachedServerResponse",
+    "recent_verified_server_cache",
+    "Discord temporarily rejected the live server list",
+]
+
 REQUIRED_SIDEBAR_MARKERS = [
     "Command Center",
     "Setup Flow",
@@ -91,6 +99,7 @@ FORBIDDEN_SETUP_PATTERNS = [
 
 FORBIDDEN_SERVERS_PAGE_PATTERNS = [
     "refreshPageSessionIfNeeded(\"/servers\")",
+    "getDashboardAuthSession",
 ]
 
 
@@ -114,6 +123,7 @@ def main() -> int:
     package = read(PACKAGE)
     layout = read(LAYOUT)
     servers_page = read(SERVERS_PAGE)
+    servers_api = read(SERVERS_API)
     readability = read(READABILITY)
     command_center_css = read(COMMAND_CENTER_CSS)
     tablet_landscape_css = read(TABLET_LANDSCAPE_CSS)
@@ -127,6 +137,7 @@ def main() -> int:
         PACKAGE,
         LAYOUT,
         SERVERS_PAGE,
+        SERVERS_API,
         READABILITY,
         COMMAND_CENTER_CSS,
         TABLET_LANDSCAPE_CSS,
@@ -159,6 +170,9 @@ def main() -> int:
 
     for marker in REQUIRED_LANDSCAPE_AUTH_RESCUE_MARKERS:
         require("landscape-auth-rescue.css", landscape_auth_rescue_css, marker, failures)
+
+    for marker in REQUIRED_SERVERS_API_MARKERS:
+        require("servers API", servers_api, marker, failures)
 
     for marker in REQUIRED_SIDEBAR_MARKERS:
         require("Sidebar", sidebar, marker, failures)
