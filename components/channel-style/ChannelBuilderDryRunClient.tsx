@@ -100,6 +100,13 @@ function discordTypeToBuilderType(type: string): ChannelBuilderChannelType {
   return "text";
 }
 
+function rollbackAvailable(job: QueuedJob | null): boolean {
+  const result = job?.result;
+  if (!job?.id || job.operation_type !== "channel_builder_apply_plan") return false;
+  if (!result || typeof result !== "object") return false;
+  return Boolean((result as { rollback_available?: unknown }).rollback_available);
+}
+
 export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDryRunClientProps) {
   const [selectedBlocks, setSelectedBlocks] = useState<ChannelBuilderTemplateBlockId[]>(DEFAULT_BLOCKS);
   const [items, setItems] = useState<BuilderRow[]>(() => toBuilderRows(templateBlocksToItems(DEFAULT_BLOCKS)));
@@ -113,6 +120,7 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
   const [scanBusy, setScanBusy] = useState(false);
   const [queueBusy, setQueueBusy] = useState(false);
   const [pollBusy, setPollBusy] = useState(false);
+  const [undoBusy, setUndoBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [queuedJob, setQueuedJob] = useState<QueuedJob | null>(null);
@@ -120,6 +128,7 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
   const localDryRun = useMemo(() => buildChannelBuilderDryRun(items, stylePayload.options), [items, stylePayload.options]);
   const dryRun = apiDryRun || localDryRun;
   const canQueue = dryRun.ok && dryRun.summary.conflict === 0 && (dryRun.summary.create > 0 || dryRun.summary.rename > 0 || dryRun.summary.keep > 0);
+  const canUndo = rollbackAvailable(queuedJob);
 
   function toggleBlock(blockId: ChannelBuilderTemplateBlockId) {
     const next = selectedBlocks.includes(blockId)
@@ -250,6 +259,31 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
     }
   }
 
+  async function submitUndoJob() {
+    const sourceJobId = queuedJob?.id;
+    if (!sourceJobId) return;
+    setUndoBusy(true);
+    setMessage("");
+    setError("");
+    try {
+      const response = await fetch("/api/channel-builder/undo", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ guildId, sourceJobId }),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok || !json?.ok) {
+        throw new Error(json?.error || "Failed to queue Channel Builder undo.");
+      }
+      setQueuedJob(json.job || null);
+      setMessage("Queued Channel Builder undo. Poll status to confirm rollback completed.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to queue Channel Builder undo.");
+    } finally {
+      setUndoBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <section className="rounded-3xl border border-emerald-500/20 bg-gradient-to-br from-emerald-950/30 to-zinc-950 p-5">
@@ -287,12 +321,27 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${jobStatusClass(queuedJob.status)}`}>{queuedJob.status || "queued"}</span>
-                <button type="button" disabled={pollBusy} onClick={pollQueuedJob} className={buttonClass("secondary", pollBusy)}>
+                <button type="button" disabled={pollBusy || undoBusy} onClick={pollQueuedJob} className={buttonClass("secondary", pollBusy || undoBusy)}>
                   {pollBusy ? "Refreshing..." : "Poll status"}
                 </button>
               </div>
             </div>
             {queuedJob.error_message ? <div className="mt-3 text-sm text-red-200">{queuedJob.error_message}</div> : null}
+            {canUndo ? (
+              <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-950/20 p-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-amber-100">Rollback available</div>
+                    <p className="mt-1 text-xs leading-5 text-amber-100/80">
+                      This queues a source-job based undo using the bot's stored rollback plan. It does not trust client-side rollback data.
+                    </p>
+                  </div>
+                  <button type="button" disabled={undoBusy || pollBusy} onClick={submitUndoJob} className={buttonClass("danger", undoBusy || pollBusy)}>
+                    {undoBusy ? "Queueing undo..." : "Undo this Channel Builder job"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
             {queuedJob.result ? (
               <pre className="mt-3 max-h-56 overflow-auto rounded-2xl border border-zinc-800 bg-zinc-900 p-3 text-xs text-zinc-200">
                 {JSON.stringify(queuedJob.result, null, 2)}
