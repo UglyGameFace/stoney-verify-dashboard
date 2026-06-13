@@ -18,6 +18,18 @@ type ChannelBuilderDryRunClientProps = {
   guildId: string;
 };
 
+type BuilderRow = ChannelBuilderInputItem & {
+  currentChannelId?: string;
+};
+
+type ExistingChannel = {
+  id: string;
+  name: string;
+  type: string;
+  category_name?: string | null;
+  category_id?: string | null;
+};
+
 type QueuedJob = {
   id?: string;
   status?: string;
@@ -59,7 +71,7 @@ function actionBadge(action: string) {
   return <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${cls}`}>{action}</span>;
 }
 
-function makeRow(name = "new-channel"): ChannelBuilderInputItem {
+function makeRow(name = "new-channel"): BuilderRow {
   return {
     id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name,
@@ -76,15 +88,29 @@ function jobStatusClass(status?: string) {
   return "border-zinc-700 bg-zinc-900 text-zinc-200";
 }
 
+function toBuilderRows(rows: ChannelBuilderInputItem[]): BuilderRow[] {
+  return rows.map((row) => ({ ...row }));
+}
+
+function discordTypeToBuilderType(type: string): ChannelBuilderChannelType {
+  if (type === "voice") return "voice";
+  if (type === "forum") return "forum";
+  if (type === "news") return "announcement";
+  if (type === "category") return "category";
+  return "text";
+}
+
 export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDryRunClientProps) {
   const [selectedBlocks, setSelectedBlocks] = useState<ChannelBuilderTemplateBlockId[]>(DEFAULT_BLOCKS);
-  const [items, setItems] = useState<ChannelBuilderInputItem[]>(() => templateBlocksToItems(DEFAULT_BLOCKS));
+  const [items, setItems] = useState<BuilderRow[]>(() => toBuilderRows(templateBlocksToItems(DEFAULT_BLOCKS)));
   const [stylePayload, setStylePayload] = useState<{ name: string; options: ChannelStyleOptions }>({
     name: "gaming-clips",
     options: { emoji: "🎮", separator: "・", unicodeStyle: "normal", safetyLevel: "recommended_readability" },
   });
+  const [existingChannels, setExistingChannels] = useState<ExistingChannel[]>([]);
   const [apiDryRun, setApiDryRun] = useState<ChannelBuilderDryRunResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [scanBusy, setScanBusy] = useState(false);
   const [queueBusy, setQueueBusy] = useState(false);
   const [pollBusy, setPollBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -100,12 +126,12 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
       ? selectedBlocks.filter((id) => id !== blockId)
       : [...selectedBlocks, blockId];
     setSelectedBlocks(next);
-    setItems(templateBlocksToItems(next));
+    setItems(toBuilderRows(templateBlocksToItems(next)));
     setApiDryRun(null);
     setQueuedJob(null);
   }
 
-  function updateItem(index: number, patch: Partial<ChannelBuilderInputItem>) {
+  function updateItem(index: number, patch: Partial<BuilderRow>) {
     setItems((rows) => rows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)));
     setApiDryRun(null);
     setQueuedJob(null);
@@ -115,6 +141,43 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
     setItems((rows) => rows.filter((_, rowIndex) => rowIndex !== index));
     setApiDryRun(null);
     setQueuedJob(null);
+  }
+
+  function selectExistingChannel(index: number, channelId: string) {
+    const channel = existingChannels.find((row) => row.id === channelId);
+    if (!channel) {
+      updateItem(index, { currentChannelId: undefined, currentName: undefined });
+      return;
+    }
+    updateItem(index, {
+      currentChannelId: channel.id,
+      currentName: channel.name,
+      type: discordTypeToBuilderType(channel.type),
+      category: channel.category_name || undefined,
+    });
+  }
+
+  async function loadExistingChannels() {
+    setScanBusy(true);
+    setMessage("");
+    setError("");
+    try {
+      const response = await fetch("/api/channel-builder/channels", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ guildId }),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok || !json?.ok) {
+        throw new Error(json?.error || "Failed to scan existing channels.");
+      }
+      setExistingChannels(Array.isArray(json.channels) ? json.channels : []);
+      setMessage(`Loaded ${Number(json.total || 0)} existing channels. Use the dropdowns for safe restyles by channel ID.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to scan existing channels.");
+    } finally {
+      setScanBusy(false);
+    }
   }
 
   async function runServerDryRun() {
@@ -145,7 +208,7 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
     setMessage("");
     setError("");
     try {
-      const response = await fetch("/api/channel-builder/submit", {
+      const response = await fetch("/api/channel-builder/queue", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ guildId, items, options: stylePayload.options, mode: "apply_plan", dryRunOnly }),
@@ -195,10 +258,13 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
             <div className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200/80">Channel Builder</div>
             <h1 className="mt-2 text-2xl font-black tracking-tight text-white sm:text-3xl">Preview channel creation and restyles safely</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-              Pick reusable blocks, style names with emojis/Unicode, dry-run the plan, then submit approved changes through the bot operation queue.
+              Pick reusable blocks, scan live channels by ID, dry-run the plan, then submit approved changes through the bot operation queue.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={scanBusy || queueBusy} onClick={loadExistingChannels} className={buttonClass("secondary", scanBusy || queueBusy)}>
+              {scanBusy ? "Scanning..." : "Scan existing channels"}
+            </button>
             <button type="button" disabled={busy || queueBusy} onClick={runServerDryRun} className={buttonClass("secondary", busy || queueBusy)}>
               {busy ? "Running dry-run..." : "Run server dry-run"}
             </button>
@@ -270,7 +336,7 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <div className="text-sm font-semibold text-white">Selected rows</div>
-            <p className="mt-1 text-xs leading-5 text-zinc-400">Add current names to simulate existing-channel restyles. Blank current names become create actions.</p>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">Pick a live channel for safe restyles by ID. Blank existing channels become create actions.</p>
           </div>
           <div className="grid grid-cols-3 gap-2 text-center text-xs font-semibold text-zinc-300 sm:min-w-[360px]">
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-2">Create<br /><span className="text-emerald-200">{dryRun.summary.create}</span></div>
@@ -282,7 +348,7 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
         <div className="mt-4 space-y-3">
           {items.map((item, index) => (
             <div key={item.id || index} className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-3">
-              <div className="grid gap-3 lg:grid-cols-[42px_1fr_1fr_150px_90px] lg:items-end">
+              <div className="grid gap-3 xl:grid-cols-[42px_1fr_1fr_1fr_140px_90px] xl:items-end">
                 <label className="flex items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-950 p-3">
                   <input
                     type="checkbox"
@@ -297,8 +363,17 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
                   <input className={inputClass()} value={item.name} onChange={(event) => updateItem(index, { name: event.target.value })} />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Current existing name</label>
-                  <input className={inputClass()} value={item.currentName || ""} onChange={(event) => updateItem(index, { currentName: event.target.value })} placeholder="optional existing name" />
+                  <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Live existing channel</label>
+                  <select className={inputClass()} value={item.currentChannelId || ""} onChange={(event) => selectExistingChannel(index, event.target.value)}>
+                    <option value="">Create new / typed fallback</option>
+                    {existingChannels.map((channel) => (
+                      <option key={channel.id} value={channel.id}>{channel.category_name ? `${channel.category_name} / ` : ""}#{channel.name} · {channel.type}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Current name fallback</label>
+                  <input className={inputClass()} value={item.currentName || ""} onChange={(event) => updateItem(index, { currentName: event.target.value, currentChannelId: undefined })} placeholder="optional existing name" />
                 </div>
                 <div>
                   <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Type</label>
@@ -312,6 +387,7 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
                 </div>
                 <button type="button" onClick={() => removeItem(index)} className={buttonClass("danger")}>Remove</button>
               </div>
+              {item.currentChannelId ? <div className="mt-2 text-xs text-emerald-200">Using live channel ID {item.currentChannelId} for this restyle.</div> : null}
             </div>
           ))}
         </div>
