@@ -1,0 +1,27 @@
+name: User Ticket Create Route
+
+on:
+  pull_request:
+    paths:
+      - "app/api/user/tickets/create/route.js"
+      - "components/UserDashboardClient.js"
+      - "tools/audit_user_ticket_create_route.py"
+      - ".github/workflows/user-ticket-create-route.yml"
+  push:
+    paths:
+      - "app/api/user/tickets/create/route.js"
+      - "components/UserDashboardClient.js"
+      - "tools/audit_user_ticket_create_route.py"
+      - ".github/workflows/user-ticket-create-route.yml"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Audit user ticket create route
+        run: python tools/audit_user_ticket_create_route.py
