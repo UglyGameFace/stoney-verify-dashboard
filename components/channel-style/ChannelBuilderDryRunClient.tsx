@@ -102,7 +102,9 @@ function discordTypeToBuilderType(type: string): ChannelBuilderChannelType {
 
 function rollbackAvailable(job: QueuedJob | null): boolean {
   const result = job?.result;
+  const status = String(job?.status || "").toLowerCase();
   if (!job?.id || job.operation_type !== "channel_builder_apply_plan") return false;
+  if (!["succeeded", "partial"].includes(status)) return false;
   if (!result || typeof result !== "object") return false;
   return Boolean((result as { rollback_available?: unknown }).rollback_available);
 }
