@@ -6,12 +6,14 @@ export type EmojiPosition = "first" | "last" | "bracket" | "none";
 export type ChannelCaseMode = "lower" | "title" | "preserve" | "compact";
 export type ChannelSeparator = "-" | "・" | "┃" | "︱" | "｜" | "»" | "›" | "•" | "none";
 export type ChannelBracket = "「」" | "【】" | "〔〕" | "[]" | "()";
+export type UnicodeStyleScope = "whole_name" | "text_only";
 
 export type ChannelStyleOptions = {
   emoji?: string | null;
   autoEmoji?: boolean;
   emojiPosition?: EmojiPosition;
   unicodeStyle?: UnicodeStyleId;
+  unicodeStyleScope?: UnicodeStyleScope;
   separator?: ChannelSeparator | string;
   bracket?: ChannelBracket;
   caseMode?: ChannelCaseMode;
@@ -28,6 +30,7 @@ export type FormattedChannelName = {
   emoji: string | null;
   separator: string;
   unicodeStyle: UnicodeStyleId;
+  unicodeStyleScope: UnicodeStyleScope;
   warnings: StyleWarning[];
   unsupportedCharacters: string[];
   truncated: boolean;
@@ -38,6 +41,7 @@ const DEFAULT_OPTIONS: Required<Omit<ChannelStyleOptions, "emoji">> & { emoji: s
   autoEmoji: false,
   emojiPosition: "first",
   unicodeStyle: "normal",
+  unicodeStyleScope: "whole_name",
   separator: "・",
   bracket: "「」",
   caseMode: "lower",
@@ -99,13 +103,71 @@ function truncateFinalName(value: string, maxLength: number): { value: string; t
   return { value: chars.slice(0, safeMax).join("").replace(/[-・┃︱｜»›•]+$/g, ""), truncated: true };
 }
 
+function hasTextCharacter(value: string): boolean {
+  return /[\p{L}\p{N}]/u.test(value);
+}
+
+function splitTextDecoration(value: string): { prefix: string; text: string; suffix: string } {
+  const chars = [...stripUnsafeInvisibleCharacters(String(value || "")).normalize("NFKC")];
+  let firstText = -1;
+  let lastText = -1;
+  chars.forEach((char, index) => {
+    if (hasTextCharacter(char)) {
+      if (firstText < 0) firstText = index;
+      lastText = index;
+    }
+  });
+  if (firstText < 0 || lastText < 0) {
+    return { prefix: "", text: chars.join(""), suffix: "" };
+  }
+  return {
+    prefix: chars.slice(0, firstText).join(""),
+    text: chars.slice(firstText, lastText + 1).join(""),
+    suffix: chars.slice(lastText + 1).join(""),
+  };
+}
+
+function formatTextOnlyName(input: string, options: Required<Omit<ChannelStyleOptions, "emoji">> & { emoji: string | null }) {
+  const parts = splitTextDecoration(input);
+  const baseName = normalizeBaseChannelName(parts.text || input, options.caseMode);
+  const transformed = transformUnicodeStyle(baseName, options.unicodeStyle);
+  const finalCore = `${parts.prefix}${transformed.value}${parts.suffix}`;
+  return {
+    baseName,
+    styledCore: transformed.value,
+    finalCore,
+    transformed,
+  };
+}
+
 export function formatChannelName(input: string, rawOptions: ChannelStyleOptions = {}): FormattedChannelName {
   const options = { ...DEFAULT_OPTIONS, ...rawOptions };
-  const baseName = normalizeBaseChannelName(input, options.caseMode);
-  const suggestion = options.autoEmoji ? suggestEmojiForName(baseName) : null;
-  const emoji = options.emoji ?? suggestion?.emoji ?? null;
-  const transformed = transformUnicodeStyle(baseName, options.unicodeStyle);
-  const joined = joinName(transformed.value, emoji, options);
+  const textOnlyMode = options.unicodeStyleScope === "text_only";
+  const suggestion = options.autoEmoji ? suggestEmojiForName(normalizeBaseChannelName(input, options.caseMode)) : null;
+
+  let baseName = "";
+  let styledCore = "";
+  let joined = "";
+  let transformed: ReturnType<typeof transformUnicodeStyle>;
+  let emoji: string | null = null;
+
+  if (textOnlyMode) {
+    const textOnly = formatTextOnlyName(input, options);
+    baseName = textOnly.baseName;
+    styledCore = textOnly.styledCore;
+    transformed = textOnly.transformed;
+    // Text-only mode preserves emoji/decorative prefix/suffix already present in the input.
+    // A manually selected emoji still applies when the user explicitly chooses one.
+    emoji = options.emoji ?? null;
+    joined = emoji ? joinName(textOnly.finalCore, emoji, options) : textOnly.finalCore;
+  } else {
+    baseName = normalizeBaseChannelName(input, options.caseMode);
+    emoji = options.emoji ?? suggestion?.emoji ?? null;
+    transformed = transformUnicodeStyle(baseName, options.unicodeStyle);
+    styledCore = transformed.value;
+    joined = joinName(transformed.value, emoji, options);
+  }
+
   const cleanJoined = stripUnsafeInvisibleCharacters(joined);
   const truncated = truncateFinalName(cleanJoined, options.maxLength);
   const warnings = buildStyleWarnings({
@@ -129,11 +191,12 @@ export function formatChannelName(input: string, rawOptions: ChannelStyleOptions
   return {
     baseName,
     canonicalName: canonicalPlainName(baseName),
-    styledCore: transformed.value,
+    styledCore,
     finalName: truncated.value,
     emoji,
     separator: normalizeSeparator(options.separator),
     unicodeStyle: transformed.style.id,
+    unicodeStyleScope: options.unicodeStyleScope,
     warnings,
     unsupportedCharacters: transformed.unsupportedCharacters,
     truncated: truncated.truncated,
