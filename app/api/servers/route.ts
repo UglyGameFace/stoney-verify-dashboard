@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { discordBotFetch, discordUserFetch } from "@/lib/discord-api";
 import {
+  getGuildCookieOptions,
   getSelectedGuildId,
   setSelectedGuildCookie,
 } from "@/lib/guild-selection";
@@ -19,6 +20,9 @@ const MAX_DIRECT_BOT_GUILD_CHECKS = 25;
 const ACCESS_COOKIE = "discord_access_token";
 const REFRESH_COOKIE = "discord_refresh_token";
 const EXPIRES_COOKIE = "discord_expires_at";
+const SERVER_CACHE_COOKIE = "dank_manageable_servers_cache";
+const SERVER_CACHE_MAX_AGE_SEC = 10 * 60;
+const SERVER_CACHE_MAX_AGE_MS = SERVER_CACHE_MAX_AGE_SEC * 1000;
 
 type DiscordUserGuild = {
   id?: string | null;
@@ -56,6 +60,32 @@ type BearerSession = {
 
 type JsonRecord = Record<string, unknown>;
 type InstallState = "installed" | "missing" | "unknown";
+
+type ServerPayloadRow = JsonRecord & {
+  id: string;
+  name: string;
+  bot_installed?: boolean;
+  bot_install_state?: InstallState | string | null;
+  selected?: boolean;
+};
+
+type ServerListPayload = JsonRecord & {
+  ok: true;
+  selectedGuildId: string;
+  servers: ServerPayloadRow[];
+  installedCount: number;
+  manageableCount: number;
+  botCheckOk: boolean;
+  botCheckError: string | null;
+};
+
+type CachedServerListPayload = {
+  savedAt: number;
+  selectedGuildId: string;
+  servers: ServerPayloadRow[];
+  installedCount: number;
+  manageableCount: number;
+};
 
 function normalizeString(value: unknown): string {
   return String(value || "").trim();
@@ -282,6 +312,104 @@ function buildJsonResponse(payload: JsonRecord, status = 200, session: BearerSes
   return response;
 }
 
+function safeDecodeCookieJson(value: string): unknown {
+  const raw = normalizeString(value);
+  if (!raw) return null;
+  try {
+    return JSON.parse(decodeURIComponent(raw));
+  } catch {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+}
+
+function normalizeCachedServers(value: unknown): CachedServerListPayload | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as JsonRecord;
+  const savedAt = Number(record.savedAt || 0);
+  if (!savedAt || Date.now() - savedAt > SERVER_CACHE_MAX_AGE_MS) return null;
+  const rows = Array.isArray(record.servers) ? record.servers : [];
+  const servers = rows
+    .map((row) => (row && typeof row === "object" && !Array.isArray(row) ? (row as ServerPayloadRow) : null))
+    .filter((row): row is ServerPayloadRow => Boolean(row && normalizeString(row.id) && normalizeString(row.name)))
+    .map((row) => ({
+      ...row,
+      id: normalizeString(row.id),
+      name: normalizeString(row.name),
+      selected: Boolean(row.selected),
+    }));
+
+  if (!servers.length) return null;
+
+  return {
+    savedAt,
+    selectedGuildId: normalizeString(record.selectedGuildId),
+    servers,
+    installedCount: Number(record.installedCount ?? servers.filter((server) => server.bot_installed || normalizeString(server.bot_install_state) === "installed").length),
+    manageableCount: Number(record.manageableCount ?? servers.length),
+  };
+}
+
+function readServerCache(): CachedServerListPayload | null {
+  return normalizeCachedServers(safeDecodeCookieJson(cookies().get(SERVER_CACHE_COOKIE)?.value || ""));
+}
+
+function buildCachePayload(payload: ServerListPayload): CachedServerListPayload {
+  return {
+    savedAt: Date.now(),
+    selectedGuildId: normalizeString(payload.selectedGuildId),
+    servers: payload.servers,
+    installedCount: Number(payload.installedCount || 0),
+    manageableCount: Number(payload.manageableCount || payload.servers.length),
+  };
+}
+
+function writeServerCache(response: NextResponse, payload: ServerListPayload): NextResponse {
+  const cachePayload = buildCachePayload(payload);
+  try {
+    response.cookies.set(
+      SERVER_CACHE_COOKIE,
+      encodeURIComponent(JSON.stringify(cachePayload)),
+      getGuildCookieOptions(SERVER_CACHE_MAX_AGE_SEC)
+    );
+  } catch {
+    // A failed cache write must never block the live server list.
+  }
+  return response;
+}
+
+function buildCachedServerResponse(reason: string, statusSession: BearerSession | null = null): NextResponse | null {
+  const cached = readServerCache();
+  if (!cached) return null;
+  return buildJsonResponse(
+    {
+      ok: true,
+      cached: true,
+      selectedGuildId: cached.selectedGuildId,
+      servers: cached.servers,
+      installedCount: cached.installedCount,
+      manageableCount: cached.manageableCount,
+      botCheckOk: false,
+      botCheckError: reason,
+    },
+    200,
+    statusSession
+  );
+}
+
+function findCachedInstalledServer(guildId: string): ServerPayloadRow | null {
+  const id = normalizeString(guildId);
+  const cached = readServerCache();
+  if (!id || !cached) return null;
+  const server = cached.servers.find((row) => normalizeString(row.id) === id) || null;
+  if (!server) return null;
+  const state = normalizeString(server.bot_install_state).toLowerCase();
+  return server.bot_installed || state === "installed" ? server : null;
+}
+
 function resolveInstallState(guildId: string, botLookup: BotGuildLookup, knownDashboardGuildIds: Set<string>): InstallState {
   const defaultGuildId = normalizeString(env.guildId || env.discordGuildId);
 
@@ -302,6 +430,8 @@ export async function GET() {
   const initialSession = await getBearerSession();
 
   if (!initialSession) {
+    const cachedResponse = buildCachedServerResponse("Using a recently verified server list while the Discord login finishes. If this stays stale, reset login once.");
+    if (cachedResponse) return cachedResponse;
     return buildJsonResponse({ error: "Discord login required.", error_code: "signed_out" }, 401);
   }
 
@@ -340,7 +470,7 @@ export async function GET() {
           bot_invite_url: inviteUrlForState(id, installState),
           selected: selectedGuildId === id,
           is_default_env_guild: normalizeString(env.guildId || env.discordGuildId) === id,
-        };
+        } as ServerPayloadRow;
       })
       .filter((guild) => guild.id)
       .sort((a, b) => {
@@ -349,7 +479,7 @@ export async function GET() {
         return a.name.localeCompare(b.name);
       });
 
-    return buildJsonResponse({
+    const payload: ServerListPayload = {
       ok: true,
       selectedGuildId,
       servers: manageable,
@@ -357,8 +487,20 @@ export async function GET() {
       manageableCount: manageable.length,
       botCheckOk: botLookup.ok,
       botCheckError: botLookup.error,
-    }, 200, session);
+    };
+
+    const response = buildJsonResponse(payload, 200, session);
+    writeServerCache(response, payload);
+    return response;
   } catch (error) {
+    const cachedResponse = buildCachedServerResponse(
+      error instanceof Error
+        ? `Discord temporarily rejected the live server list, so the dashboard is showing your recently verified servers instead. ${error.message}`
+        : "Discord temporarily rejected the live server list, so the dashboard is showing your recently verified servers instead.",
+      initialSession
+    );
+    if (cachedResponse) return cachedResponse;
+
     return buildJsonResponse(
       { error: error instanceof Error ? error.message : "Failed to load Discord servers.", error_code: "server_error" },
       500,
@@ -370,17 +512,29 @@ export async function GET() {
 export async function POST(request: Request) {
   const initialSession = await getBearerSession();
 
+  let requestedGuildId = "";
+  try {
+    const body = (await request.json().catch(() => ({}))) as JsonRecord;
+    requestedGuildId = normalizeString(body.guild_id || body.guildId);
+  } catch {
+    requestedGuildId = "";
+  }
+
+  if (!requestedGuildId) {
+    return buildJsonResponse({ error: "Server id is required.", error_code: "invalid_request" }, 400, initialSession);
+  }
+
   if (!initialSession) {
+    const cachedInstalledServer = findCachedInstalledServer(requestedGuildId);
+    if (cachedInstalledServer) {
+      const response = buildJsonResponse({ ok: true, selectedGuildId: requestedGuildId, selection_source: "recent_verified_server_cache" }, 200, null);
+      setSelectedGuildCookie(response, requestedGuildId);
+      return response;
+    }
     return buildJsonResponse({ error: "Discord login required.", error_code: "signed_out" }, 401);
   }
 
   try {
-    const body = (await request.json().catch(() => ({}))) as JsonRecord;
-    const requestedGuildId = normalizeString(body.guild_id || body.guildId);
-    if (!requestedGuildId) {
-      return buildJsonResponse({ error: "Server id is required.", error_code: "invalid_request" }, 400, initialSession);
-    }
-
     const [{ session, guilds: userGuilds }, initialBotLookup, knownDashboardGuildIds] = await Promise.all([
       fetchUserGuildsWithRefresh(initialSession),
       fetchBotGuilds(),
@@ -390,6 +544,13 @@ export async function POST(request: Request) {
     const userGuild = userGuilds.find((guild) => normalizeString(guild.id) === requestedGuildId);
 
     if (!userGuild || !hasManageGuildPermission(userGuild)) {
+      const cachedInstalledServer = findCachedInstalledServer(requestedGuildId);
+      if (cachedInstalledServer) {
+        const response = buildJsonResponse({ ok: true, selectedGuildId: requestedGuildId, selection_source: "recent_verified_server_cache" }, 200, session);
+        setSelectedGuildCookie(response, requestedGuildId);
+        return response;
+      }
+
       return buildJsonResponse(
         { error: "You need Manage Server or Administrator permission for that server.", error_code: "forbidden" },
         403,
@@ -401,6 +562,13 @@ export async function POST(request: Request) {
     const installState = resolveInstallState(requestedGuildId, botLookup, knownDashboardGuildIds);
 
     if (installState !== "installed") {
+      const cachedInstalledServer = findCachedInstalledServer(requestedGuildId);
+      if (installState === "unknown" && cachedInstalledServer) {
+        const response = buildJsonResponse({ ok: true, selectedGuildId: requestedGuildId, selection_source: "recent_verified_server_cache" }, 200, session);
+        setSelectedGuildCookie(response, requestedGuildId);
+        return response;
+      }
+
       const inviteUrl = inviteUrlForState(requestedGuildId, installState);
       return buildJsonResponse(
         {
@@ -423,6 +591,22 @@ export async function POST(request: Request) {
     setSelectedGuildCookie(response, requestedGuildId);
     return response;
   } catch (error) {
+    const cachedInstalledServer = findCachedInstalledServer(requestedGuildId);
+    if (cachedInstalledServer) {
+      const response = buildJsonResponse(
+        {
+          ok: true,
+          selectedGuildId: requestedGuildId,
+          selection_source: "recent_verified_server_cache",
+          warning: error instanceof Error ? error.message : "Discord temporarily rejected the live selection check.",
+        },
+        200,
+        initialSession
+      );
+      setSelectedGuildCookie(response, requestedGuildId);
+      return response;
+    }
+
     return buildJsonResponse(
       { error: error instanceof Error ? error.message : "Failed to select server.", error_code: "server_error" },
       500,
