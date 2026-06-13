@@ -1,0 +1,29 @@
+name: Dashboard Link Check
+
+on:
+  pull_request:
+    paths:
+      - "components/dashboard/DashboardDeepLinkBridge.tsx"
+      - "components/dashboard/SetupLaunchChecklist.tsx"
+      - "app/layout.js"
+      - "tools/audit_dashboard_deep_links.py"
+      - ".github/workflows/dashboard-link-check.yml"
+  push:
+    paths:
+      - "components/dashboard/DashboardDeepLinkBridge.tsx"
+      - "components/dashboard/SetupLaunchChecklist.tsx"
+      - "app/layout.js"
+      - "tools/audit_dashboard_deep_links.py"
+      - ".github/workflows/dashboard-link-check.yml"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run dashboard link audit
+        run: python tools/audit_dashboard_deep_links.py
