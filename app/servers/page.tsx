@@ -1,24 +1,29 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import ServerSelector from "@/components/dashboard/ServerSelector";
 import AuthStatePage from "@/components/dashboard/AuthStatePage";
 import SetupWorkspaceShell from "@/components/dashboard/SetupWorkspaceShell";
-import { getDashboardAuthSession } from "@/lib/dashboard-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-async function hasUsableDashboardSession(): Promise<boolean> {
-  try {
-    return Boolean(await getDashboardAuthSession());
-  } catch {
-    return false;
-  }
+const ACCESS_COOKIE = "discord_access_token";
+const REFRESH_COOKIE = "discord_refresh_token";
+const SERVER_CACHE_COOKIE = "dank_manageable_servers_cache";
+
+function hasDashboardEntryProof(): boolean {
+  const store = cookies();
+  return Boolean(
+    store.get(ACCESS_COOKIE)?.value ||
+    store.get(REFRESH_COOKIE)?.value ||
+    store.get(SERVER_CACHE_COOKIE)?.value
+  );
 }
 
 export default async function ServersPage() {
-  const signedIn = await hasUsableDashboardSession();
+  const signedInOrRecentlyVerified = hasDashboardEntryProof();
 
-  if (!signedIn) {
+  if (!signedInOrRecentlyVerified) {
     return (
       <AuthStatePage
         variant="login"
