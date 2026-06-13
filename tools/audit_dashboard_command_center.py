@@ -5,7 +5,8 @@ from __future__ import annotations
 This is a static guard. It does not replace browser testing, but it catches the
 most common regressions that made the dashboard feel worse than Ticket Tool:
 confusing setup flow, forms acting required, weak mobile accessibility, tablet
-landscape bloat, and no clear bot/server truth model.
+landscape bloat, muddy light mode, auth-refresh reload loops, and no clear
+bot/server truth model.
 """
 
 from pathlib import Path
@@ -14,9 +15,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 PACKAGE = ROOT / "package.json"
 LAYOUT = ROOT / "app" / "layout.js"
+SERVERS_PAGE = ROOT / "app" / "servers" / "page.tsx"
 READABILITY = ROOT / "app" / "readability.css"
 COMMAND_CENTER_CSS = ROOT / "app" / "command-center-v2.css"
 TABLET_LANDSCAPE_CSS = ROOT / "app" / "tablet-landscape-fix.css"
+LANDSCAPE_AUTH_RESCUE_CSS = ROOT / "app" / "landscape-auth-rescue.css"
 SIDEBAR = ROOT / "components" / "Sidebar.tsx"
 SETUP_SHELL = ROOT / "components" / "dashboard" / "SetupWorkspaceShell.tsx"
 SETUP_CHECKLIST = ROOT / "components" / "dashboard" / "SetupLaunchChecklist.tsx"
@@ -57,6 +60,14 @@ REQUIRED_TABLET_LANDSCAPE_MARKERS = [
     "body > .quick-appearance-dock",
 ]
 
+REQUIRED_LANDSCAPE_AUTH_RESCUE_MARKERS = [
+    "Emergency landscape/auth UX rescue",
+    ".quick-appearance-card",
+    "100dvh",
+    "html[data-dashboard-appearance=\"light\"]",
+    "body > .quick-appearance-dock",
+]
+
 REQUIRED_SIDEBAR_MARKERS = [
     "Command Center",
     "Setup Flow",
@@ -76,6 +87,10 @@ FORBIDDEN_SETUP_PATTERNS = [
     "Forms are required",
     "forms are required",
     "Finish forms before tickets work",
+]
+
+FORBIDDEN_SERVERS_PAGE_PATTERNS = [
+    "refreshPageSessionIfNeeded(\"/servers\")",
 ]
 
 
@@ -98,15 +113,29 @@ def main() -> int:
 
     package = read(PACKAGE)
     layout = read(LAYOUT)
+    servers_page = read(SERVERS_PAGE)
     readability = read(READABILITY)
     command_center_css = read(COMMAND_CENTER_CSS)
     tablet_landscape_css = read(TABLET_LANDSCAPE_CSS)
+    landscape_auth_rescue_css = read(LANDSCAPE_AUTH_RESCUE_CSS)
     sidebar = read(SIDEBAR)
     setup_shell = read(SETUP_SHELL)
     setup_checklist = read(SETUP_CHECKLIST)
     standard = read(STANDARD)
 
-    for path in (PACKAGE, LAYOUT, READABILITY, COMMAND_CENTER_CSS, TABLET_LANDSCAPE_CSS, SIDEBAR, SETUP_SHELL, SETUP_CHECKLIST, STANDARD):
+    for path in (
+        PACKAGE,
+        LAYOUT,
+        SERVERS_PAGE,
+        READABILITY,
+        COMMAND_CENTER_CSS,
+        TABLET_LANDSCAPE_CSS,
+        LANDSCAPE_AUTH_RESCUE_CSS,
+        SIDEBAR,
+        SETUP_SHELL,
+        SETUP_CHECKLIST,
+        STANDARD,
+    ):
         if not path.exists():
             failures.append(f"missing required file: {path.relative_to(ROOT)}")
 
@@ -114,6 +143,7 @@ def main() -> int:
     require("layout", layout, 'import "@/app/readability.css"', failures)
     require("layout", layout, 'import "@/app/command-center-v2.css"', failures)
     require("layout", layout, 'import "@/app/tablet-landscape-fix.css"', failures)
+    require("layout", layout, 'import "@/app/landscape-auth-rescue.css"', failures)
 
     for marker in REQUIRED_STANDARD_MARKERS:
         require("dashboard command-center standard", standard, marker, failures)
@@ -127,6 +157,9 @@ def main() -> int:
     for marker in REQUIRED_TABLET_LANDSCAPE_MARKERS:
         require("tablet-landscape-fix.css", tablet_landscape_css, marker, failures)
 
+    for marker in REQUIRED_LANDSCAPE_AUTH_RESCUE_MARKERS:
+        require("landscape-auth-rescue.css", landscape_auth_rescue_css, marker, failures)
+
     for marker in REQUIRED_SIDEBAR_MARKERS:
         require("Sidebar", sidebar, marker, failures)
 
@@ -136,6 +169,9 @@ def main() -> int:
 
     for marker in FORBIDDEN_SETUP_PATTERNS:
         forbid("setup flow", setup_text, marker, failures)
+
+    for marker in FORBIDDEN_SERVERS_PAGE_PATTERNS:
+        forbid("servers page", servers_page, marker, failures)
 
     if "Boolean(categoryCheck?.ok) && Boolean(formCheck?.ok)" in setup_checklist:
         failures.append("SetupLaunchChecklist still makes panel commands depend on forms_configured; forms must be optional")
