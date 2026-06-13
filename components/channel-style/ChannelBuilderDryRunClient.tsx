@@ -1,0 +1,266 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import {
+  buildChannelBuilderDryRun,
+  CHANNEL_TEMPLATE_BLOCKS,
+  templateBlocksToItems,
+  type ChannelBuilderDryRunResult,
+  type ChannelBuilderInputItem,
+  type ChannelBuilderTemplateBlockId,
+  type ChannelBuilderChannelType,
+  type ChannelStyleOptions,
+} from "@/lib/channel-style";
+import ChannelStyleControls from "./ChannelStyleControls";
+import StyleWarningBanner from "./StyleWarningBanner";
+
+type ChannelBuilderDryRunClientProps = {
+  guildId: string;
+};
+
+const DEFAULT_BLOCKS: ChannelBuilderTemplateBlockId[] = ["community_core", "support_core", "safety_staff"];
+
+function buttonClass(kind: "primary" | "secondary" | "danger" = "secondary", disabled = false) {
+  const base = "inline-flex min-h-[42px] items-center justify-center rounded-2xl border px-4 py-2 text-sm font-semibold transition";
+  const palette =
+    kind === "primary"
+      ? "border-emerald-500 bg-emerald-600 text-white hover:bg-emerald-700"
+      : kind === "danger"
+        ? "border-red-500/40 bg-red-950/40 text-red-100 hover:border-red-400"
+        : "border-zinc-700 bg-zinc-900 text-zinc-100 hover:border-zinc-500";
+  return `${base} ${palette} ${disabled ? "cursor-not-allowed opacity-50" : ""}`;
+}
+
+function inputClass() {
+  return "w-full rounded-2xl border border-zinc-700 bg-zinc-900 px-3 py-2.5 text-sm text-white outline-none focus:border-emerald-500";
+}
+
+function actionBadge(action: string) {
+  const cls =
+    action === "create"
+      ? "border-emerald-500/40 bg-emerald-950/40 text-emerald-100"
+      : action === "rename"
+        ? "border-amber-500/40 bg-amber-950/40 text-amber-100"
+        : action === "conflict"
+          ? "border-red-500/40 bg-red-950/40 text-red-100"
+          : action === "keep"
+            ? "border-sky-500/30 bg-sky-950/30 text-sky-100"
+            : "border-zinc-700 bg-zinc-900 text-zinc-300";
+  return <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${cls}`}>{action}</span>;
+}
+
+function makeRow(name = "new-channel"): ChannelBuilderInputItem {
+  return {
+    id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    type: "text",
+    selected: true,
+  };
+}
+
+export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDryRunClientProps) {
+  const [selectedBlocks, setSelectedBlocks] = useState<ChannelBuilderTemplateBlockId[]>(DEFAULT_BLOCKS);
+  const [items, setItems] = useState<ChannelBuilderInputItem[]>(() => templateBlocksToItems(DEFAULT_BLOCKS));
+  const [stylePayload, setStylePayload] = useState<{ name: string; options: ChannelStyleOptions }>({
+    name: "gaming-clips",
+    options: { emoji: "🎮", separator: "・", unicodeStyle: "normal", safetyLevel: "recommended_readability" },
+  });
+  const [apiDryRun, setApiDryRun] = useState<ChannelBuilderDryRunResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const localDryRun = useMemo(() => buildChannelBuilderDryRun(items, stylePayload.options), [items, stylePayload.options]);
+  const dryRun = apiDryRun || localDryRun;
+
+  function toggleBlock(blockId: ChannelBuilderTemplateBlockId) {
+    const next = selectedBlocks.includes(blockId)
+      ? selectedBlocks.filter((id) => id !== blockId)
+      : [...selectedBlocks, blockId];
+    setSelectedBlocks(next);
+    setItems(templateBlocksToItems(next));
+    setApiDryRun(null);
+  }
+
+  function updateItem(index: number, patch: Partial<ChannelBuilderInputItem>) {
+    setItems((rows) => rows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)));
+    setApiDryRun(null);
+  }
+
+  function removeItem(index: number) {
+    setItems((rows) => rows.filter((_, rowIndex) => rowIndex !== index));
+    setApiDryRun(null);
+  }
+
+  async function runServerDryRun() {
+    setBusy(true);
+    setMessage("");
+    setError("");
+    try {
+      const response = await fetch("/api/channel-builder/dry-run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ guildId, items, options: stylePayload.options }),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok || !json?.ok) {
+        throw new Error(json?.error || "Channel Builder dry-run failed.");
+      }
+      setApiDryRun(json.dryRun);
+      setMessage("Server dry-run refreshed. No Discord changes were made.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Channel Builder dry-run failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <section className="rounded-3xl border border-emerald-500/20 bg-gradient-to-br from-emerald-950/30 to-zinc-950 p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200/80">Channel Builder</div>
+            <h1 className="mt-2 text-2xl font-black tracking-tight text-white sm:text-3xl">Preview channel creation and restyles safely</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
+              Pick reusable blocks, style names with emojis/Unicode, and review every create/rename/keep/conflict before anything can be queued to the bot.
+            </p>
+          </div>
+          <button type="button" disabled={busy} onClick={runServerDryRun} className={buttonClass("primary", busy)}>
+            {busy ? "Running dry-run..." : "Run server dry-run"}
+          </button>
+        </div>
+        {message && <div className="mt-4 rounded-2xl border border-emerald-500/30 bg-emerald-950/30 p-3 text-sm text-emerald-100">{message}</div>}
+        {error && <div className="mt-4 rounded-2xl border border-red-500/40 bg-red-950/40 p-3 text-sm text-red-100">{error}</div>}
+      </section>
+
+      <section className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-white">Interchangeable channel blocks</div>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">Use some, all, or none. Every row remains editable before the real queued job exists.</p>
+          </div>
+          <button type="button" onClick={() => setItems((rows) => [...rows, makeRow()])} className={buttonClass("secondary")}>Add custom row</button>
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {CHANNEL_TEMPLATE_BLOCKS.map((block) => {
+            const active = selectedBlocks.includes(block.id);
+            return (
+              <button
+                key={block.id}
+                type="button"
+                onClick={() => toggleBlock(block.id)}
+                className={`rounded-2xl border p-3 text-left transition ${active ? "border-emerald-400 bg-emerald-950/40" : "border-zinc-800 bg-zinc-900/70 hover:border-zinc-600"}`}
+                aria-pressed={active}
+              >
+                <div className="text-sm font-semibold text-white">{block.label}</div>
+                <div className="mt-1 text-xs leading-5 text-zinc-400">{block.description}</div>
+                <div className="mt-2 text-[11px] font-semibold text-zinc-500">{block.items.length} rows</div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <ChannelStyleControls initialName={stylePayload.name} initialOptions={stylePayload.options} onChange={setStylePayload} />
+
+      <section className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-white">Selected rows</div>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">Add current names to simulate existing-channel restyles. Blank current names become create actions.</p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center text-xs font-semibold text-zinc-300 sm:min-w-[360px]">
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-2">Create<br /><span className="text-emerald-200">{dryRun.summary.create}</span></div>
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-2">Rename<br /><span className="text-amber-200">{dryRun.summary.rename}</span></div>
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-2">Conflicts<br /><span className="text-red-200">{dryRun.summary.conflict}</span></div>
+          </div>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          {items.map((item, index) => (
+            <div key={item.id || index} className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-3">
+              <div className="grid gap-3 lg:grid-cols-[42px_1fr_1fr_150px_90px] lg:items-end">
+                <label className="flex items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-950 p-3">
+                  <input
+                    type="checkbox"
+                    checked={item.selected !== false}
+                    onChange={(event) => updateItem(index, { selected: event.target.checked })}
+                    className="h-4 w-4 accent-emerald-500"
+                    aria-label="Select row"
+                  />
+                </label>
+                <div>
+                  <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Plain name</label>
+                  <input className={inputClass()} value={item.name} onChange={(event) => updateItem(index, { name: event.target.value })} />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Current existing name</label>
+                  <input className={inputClass()} value={item.currentName || ""} onChange={(event) => updateItem(index, { currentName: event.target.value })} placeholder="optional existing name" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Type</label>
+                  <select className={inputClass()} value={item.type || "text"} onChange={(event) => updateItem(index, { type: event.target.value as ChannelBuilderChannelType })}>
+                    <option value="text">Text</option>
+                    <option value="announcement">Announcement</option>
+                    <option value="voice">Voice</option>
+                    <option value="forum">Forum</option>
+                    <option value="category">Category</option>
+                  </select>
+                </div>
+                <button type="button" onClick={() => removeItem(index)} className={buttonClass("danger")}>Remove</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-white">Dry-run result</div>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">This is still preview-only. The next implementation will submit approved plans to the bot operation queue.</p>
+          </div>
+          <div className="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1 text-xs font-semibold text-zinc-200">
+            {dryRun.ok ? "Ready for queued approval" : "Needs fixes before queue"}
+          </div>
+        </div>
+
+        <StyleWarningBanner warnings={dryRun.warnings} className="mt-3" title="Plan warnings" />
+
+        <div className="mt-4 overflow-hidden rounded-2xl border border-zinc-800">
+          <div className="hidden grid-cols-[110px_1fr_1fr_1fr] gap-3 border-b border-zinc-800 bg-zinc-900/90 p-3 text-xs font-semibold uppercase tracking-wide text-zinc-500 lg:grid">
+            <div>Action</div>
+            <div>Current</div>
+            <div>Final</div>
+            <div>Notes</div>
+          </div>
+          <div className="divide-y divide-zinc-800">
+            {dryRun.items.map((row) => (
+              <div key={`${row.id}:${row.index}`} className="grid gap-3 p-3 text-sm lg:grid-cols-[110px_1fr_1fr_1fr] lg:items-start">
+                <div>{actionBadge(row.action)}</div>
+                <div className="min-w-0 text-zinc-300">
+                  <div className="truncate font-semibold text-white">{row.currentName ? `#${row.currentName}` : "—"}</div>
+                  <div className="mt-1 text-xs text-zinc-500">{row.type || "text"}{row.category ? ` • ${row.category}` : ""}</div>
+                </div>
+                <div className="min-w-0">
+                  <code className="block truncate rounded-xl border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-zinc-100">#{row.finalName || "empty"}</code>
+                  <div className="mt-1 truncate text-xs text-zinc-500">canonical: {row.canonicalName || "—"}</div>
+                </div>
+                <div className="space-y-1 text-xs leading-5 text-zinc-400">
+                  <div>{row.reason}</div>
+                  {row.warnings.slice(0, 2).map((warning) => (
+                    <div key={`${row.id}:${warning.code}:${warning.message}`} className={warning.severity === "danger" ? "text-red-200" : warning.severity === "warning" ? "text-amber-200" : "text-zinc-500"}>
+                      {warning.message}
+                    </div>
+                  ))}
+                  {row.warnings.length > 2 && <div className="text-zinc-500">+{row.warnings.length - 2} more warnings</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
