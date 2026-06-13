@@ -40,6 +40,14 @@ type QueuedJob = {
   error_message?: string | null;
 };
 
+type BotPreflight = {
+  queueable?: boolean;
+  validation_errors?: unknown[];
+  preflight?: unknown;
+  item_count?: number;
+  dryRun?: ChannelBuilderDryRunResult;
+};
+
 const DEFAULT_BLOCKS: ChannelBuilderTemplateBlockId[] = ["community_core", "support_core", "safety_staff"];
 
 function buttonClass(kind: "primary" | "secondary" | "danger" = "secondary", disabled = false) {
@@ -88,6 +96,13 @@ function jobStatusClass(status?: string) {
   return "border-zinc-700 bg-zinc-900 text-zinc-200";
 }
 
+function preflightStatusClass(preflight: BotPreflight | null) {
+  if (!preflight) return "border-zinc-700 bg-zinc-900 text-zinc-200";
+  return preflight.queueable
+    ? "border-emerald-500/40 bg-emerald-950/40 text-emerald-100"
+    : "border-red-500/40 bg-red-950/40 text-red-100";
+}
+
 function toBuilderRows(rows: ChannelBuilderInputItem[]): BuilderRow[] {
   return rows.map((row) => ({ ...row }));
 }
@@ -118,8 +133,10 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
   });
   const [existingChannels, setExistingChannels] = useState<ExistingChannel[]>([]);
   const [apiDryRun, setApiDryRun] = useState<ChannelBuilderDryRunResult | null>(null);
+  const [botPreflight, setBotPreflight] = useState<BotPreflight | null>(null);
   const [busy, setBusy] = useState(false);
   const [scanBusy, setScanBusy] = useState(false);
+  const [preflightBusy, setPreflightBusy] = useState(false);
   const [queueBusy, setQueueBusy] = useState(false);
   const [pollBusy, setPollBusy] = useState(false);
   const [undoBusy, setUndoBusy] = useState(false);
@@ -130,7 +147,14 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
   const localDryRun = useMemo(() => buildChannelBuilderDryRun(items, stylePayload.options), [items, stylePayload.options]);
   const dryRun = apiDryRun || localDryRun;
   const canQueue = dryRun.ok && dryRun.summary.conflict === 0 && (dryRun.summary.create > 0 || dryRun.summary.rename > 0 || dryRun.summary.keep > 0);
+  const canSubmitApproved = canQueue && Boolean(botPreflight?.queueable);
   const canUndo = rollbackAvailable(queuedJob);
+
+  function invalidatePlan() {
+    setApiDryRun(null);
+    setBotPreflight(null);
+    setQueuedJob(null);
+  }
 
   function toggleBlock(blockId: ChannelBuilderTemplateBlockId) {
     const next = selectedBlocks.includes(blockId)
@@ -138,20 +162,17 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
       : [...selectedBlocks, blockId];
     setSelectedBlocks(next);
     setItems(toBuilderRows(templateBlocksToItems(next)));
-    setApiDryRun(null);
-    setQueuedJob(null);
+    invalidatePlan();
   }
 
   function updateItem(index: number, patch: Partial<BuilderRow>) {
     setItems((rows) => rows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)));
-    setApiDryRun(null);
-    setQueuedJob(null);
+    invalidatePlan();
   }
 
   function removeItem(index: number) {
     setItems((rows) => rows.filter((_, rowIndex) => rowIndex !== index));
-    setApiDryRun(null);
-    setQueuedJob(null);
+    invalidatePlan();
   }
 
   function selectExistingChannel(index: number, channelId: string) {
@@ -195,6 +216,7 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
     setBusy(true);
     setMessage("");
     setError("");
+    setBotPreflight(null);
     try {
       const response = await fetch("/api/channel-builder/dry-run", {
         method: "POST",
@@ -206,11 +228,43 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
         throw new Error(json?.error || "Channel Builder dry-run failed.");
       }
       setApiDryRun(json.dryRun);
-      setMessage("Server dry-run refreshed. No Discord changes were made.");
+      setMessage("Server dry-run refreshed. No Discord changes were made. Run bot preflight before queueing the approved job.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Channel Builder dry-run failed.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function runBotPreflight() {
+    setPreflightBusy(true);
+    setMessage("");
+    setError("");
+    try {
+      const response = await fetch("/api/channel-builder/preflight", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ guildId, items, options: stylePayload.options }),
+      });
+      const json = await response.json().catch(() => null);
+      if (json?.dryRun) setApiDryRun(json.dryRun);
+      if (json) {
+        setBotPreflight({
+          queueable: Boolean(json.queueable),
+          validation_errors: Array.isArray(json.validation_errors) ? json.validation_errors : [],
+          preflight: json.preflight || null,
+          item_count: Number(json.item_count || 0),
+          dryRun: json.dryRun,
+        });
+      }
+      if (!response.ok || !json?.ok) {
+        throw new Error(json?.error || "Bot preflight failed.");
+      }
+      setMessage(json.queueable ? "Bot preflight passed. Queue approved job is now unlocked." : "Bot preflight returned issues. Fix them before queueing.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Bot preflight failed.");
+    } finally {
+      setPreflightBusy(false);
     }
   }
 
@@ -225,6 +279,9 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
         body: JSON.stringify({ guildId, items, options: stylePayload.options, mode: "apply_plan", dryRunOnly }),
       });
       const json = await response.json().catch(() => null);
+      if (json?.preflight) {
+        setBotPreflight({ queueable: Boolean(json.ok), preflight: json.preflight, dryRun: json.dryRun });
+      }
       if (!response.ok || !json?.ok) {
         throw new Error(json?.error || "Failed to queue Channel Builder job.");
       }
@@ -294,7 +351,7 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
             <div className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200/80">Channel Builder</div>
             <h1 className="mt-2 text-2xl font-black tracking-tight text-white sm:text-3xl">Preview channel creation and restyles safely</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-              Pick reusable blocks, scan live channels by ID, dry-run the plan, then submit approved changes through the bot operation queue.
+              Pick reusable blocks, scan live channels by ID, dry-run the plan, bot-preflight live Discord permissions, then submit approved changes through the bot operation queue.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -304,16 +361,42 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
             <button type="button" disabled={busy || queueBusy} onClick={runServerDryRun} className={buttonClass("secondary", busy || queueBusy)}>
               {busy ? "Running dry-run..." : "Run server dry-run"}
             </button>
+            <button type="button" disabled={preflightBusy || queueBusy || !canQueue} onClick={runBotPreflight} className={buttonClass("secondary", preflightBusy || queueBusy || !canQueue)}>
+              {preflightBusy ? "Checking bot..." : "Run bot preflight"}
+            </button>
             <button type="button" disabled={queueBusy || !canQueue} onClick={() => submitQueuedJob(true)} className={buttonClass("secondary", queueBusy || !canQueue)}>
               Queue bot dry-run
             </button>
-            <button type="button" disabled={queueBusy || !canQueue} onClick={() => submitQueuedJob(false)} className={buttonClass("primary", queueBusy || !canQueue)}>
+            <button type="button" disabled={queueBusy || !canSubmitApproved} onClick={() => submitQueuedJob(false)} className={buttonClass("primary", queueBusy || !canSubmitApproved)}>
               {queueBusy ? "Queueing..." : "Queue approved job"}
             </button>
           </div>
         </div>
         {message && <div className="mt-4 rounded-2xl border border-emerald-500/30 bg-emerald-950/30 p-3 text-sm text-emerald-100">{message}</div>}
         {error && <div className="mt-4 rounded-2xl border border-red-500/40 bg-red-950/40 p-3 text-sm text-red-100">{error}</div>}
+        {botPreflight && (
+          <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-sm font-semibold text-white">Bot preflight</div>
+                <p className="mt-1 text-xs leading-5 text-zinc-400">Live Discord permission and limit check from the bot before queueing.</p>
+              </div>
+              <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${preflightStatusClass(botPreflight)}`}>
+                {botPreflight.queueable ? "Queueable" : "Blocked"}
+              </span>
+            </div>
+            {Array.isArray(botPreflight.validation_errors) && botPreflight.validation_errors.length > 0 ? (
+              <div className="mt-3 rounded-2xl border border-red-500/30 bg-red-950/20 p-3 text-xs text-red-100">
+                {botPreflight.validation_errors.map((item, index) => <div key={index}>{String(item)}</div>)}
+              </div>
+            ) : null}
+            {botPreflight.preflight ? (
+              <pre className="mt-3 max-h-44 overflow-auto rounded-2xl border border-zinc-800 bg-zinc-900 p-3 text-xs text-zinc-200">
+                {JSON.stringify(botPreflight.preflight, null, 2)}
+              </pre>
+            ) : null}
+          </div>
+        )}
         {queuedJob && (
           <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -448,10 +531,10 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="text-sm font-semibold text-white">Dry-run result</div>
-            <p className="mt-1 text-xs leading-5 text-zinc-400">Approved plans now submit through the bot operation queue. No direct-fire Discord changes from the dashboard.</p>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">Approved plans now require a live bot preflight before the final queue button unlocks. No direct-fire Discord changes from the dashboard.</p>
           </div>
           <div className="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1 text-xs font-semibold text-zinc-200">
-            {dryRun.ok ? "Ready for queued approval" : "Needs fixes before queue"}
+            {dryRun.ok ? (botPreflight?.queueable ? "Bot preflight passed" : "Needs bot preflight") : "Needs fixes before queue"}
           </div>
         </div>
 
