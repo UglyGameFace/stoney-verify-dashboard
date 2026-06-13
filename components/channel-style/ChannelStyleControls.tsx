@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   type ChannelBracket,
   type ChannelCaseMode,
@@ -61,13 +61,12 @@ export default function ChannelStyleControls({
     allowUnicodeEverywhere,
   }), [allowUnicodeEverywhere, autoEmoji, bracket, caseMode, emoji, emojiPosition, safetyLevel, separator, unicodeStyle]);
 
-  function emit(nextName = name, nextOptions = options) {
-    onChange?.({ name: nextName, options: nextOptions });
-  }
+  useEffect(() => {
+    onChange?.({ name, options });
+  }, [name, onChange, options]);
 
   function updateName(value: string) {
     setName(value);
-    emit(value, options);
   }
 
   return (
