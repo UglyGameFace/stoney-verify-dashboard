@@ -63,6 +63,25 @@ function getSelectedGuild(data: DashboardData, selectedGuildId?: string | null):
   return normalizeString((data as Record<string, unknown>).selectedGuildId);
 }
 
+function isTicketTabCheck(check: SetupCheck | null | undefined): boolean {
+  const key = normalizeString(check?.key).toLowerCase();
+  const label = normalizeString(check?.label).toLowerCase();
+  const href = normalizeString(check?.action_href).toLowerCase();
+  return (
+    key === "test_ticket" ||
+    key === "tickets" ||
+    label.includes("test ticket") ||
+    label.includes("ticket flow") ||
+    href === "#tickets" ||
+    href === "/#tickets"
+  );
+}
+
+function normalizeActionHref(check: SetupCheck | null | undefined, fallbackHref: string): string {
+  if (isTicketTabCheck(check)) return "/?tab=tickets#tickets";
+  return normalizeString(check?.action_href) || fallbackHref;
+}
+
 function StepBadge({ done }: { done: boolean }) {
   return <span className={`launch-step-badge ${done ? "done" : "todo"}`}>{done ? "✓" : "•"}</span>;
 }
@@ -161,11 +180,11 @@ function fallbackChecks(data: DashboardData, selectedGuildId?: string | null): S
     {
       key: "test_ticket",
       label: "Test Ticket Flow",
-      description: "Open a test ticket, confirm category routing, then close/reopen/delete from the dashboard.",
+      description: "Open the ticket tab, create a real test ticket, confirm routing, then close/reopen/delete it.",
       ok: ticketCount > 0,
       severity: "required",
-      action_label: "Test Ticket Flow",
-      action_href: "/#tickets",
+      action_label: "Open Ticket Tab",
+      action_href: "/?tab=tickets#tickets",
       detail: `${ticketCount} tickets`,
     },
   ];
@@ -241,8 +260,8 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
   const optionalIncompleteCount = checks.filter((check) => !Boolean(check.ok) && isOptionalCheck(check)).length;
   const ready = Boolean(health?.ready_for_launch);
   const nextFix = health?.next_fix || checks.find((check) => !check.ok && normalizeSeverity(check) === "required") || checks.find((check) => !check.ok && !isOptionalCheck(check)) || null;
-  const nextFixHref = normalizeString(nextFix?.action_href) || (hasSelectedGuild ? "/ticket-categories" : "/servers");
-  const nextFixLabel = normalizeString(nextFix?.action_label) || (hasSelectedGuild ? "Fix Next" : "Choose Server");
+  const nextFixHref = normalizeActionHref(nextFix, hasSelectedGuild ? "/ticket-categories" : "/servers");
+  const nextFixLabel = isTicketTabCheck(nextFix) ? "Open Ticket Tab" : normalizeString(nextFix?.action_label) || (hasSelectedGuild ? "Fix Next" : "Choose Server");
   const canShowPanelCommands = hasSelectedGuild && getPanelReadiness(checks);
   const showNextFix = Boolean(nextFix && (!ready || !isOptionalCheck(nextFix)));
   const checksSummary = hiddenIncompleteChecks.length
@@ -302,7 +321,7 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
             {visibleChecks.map((check, index) => {
               const done = Boolean(check.ok);
               const label = normalizeString(check.label) || `Check ${index + 1}`;
-              const href = normalizeString(check.action_href) || "/";
+              const href = normalizeActionHref(check, "/");
               return (
                 <Link key={normalizeString(check.key) || label} href={href} className={`launch-step ${done ? "done" : "todo"}`}>
                   <div className="launch-step-top">
@@ -312,7 +331,7 @@ export default async function SetupLaunchChecklist({ data, selectedGuildId }: Se
                   <strong>{label}</strong>
                   <span className="launch-step-helper">{normalizeString(check.description) || normalizeString(check.detail) || "Review this setup item."}</span>
                   {check.detail ? <span className="launch-step-helper detail">{normalizeString(check.detail)}</span> : null}
-                  <span className="launch-step-cta">{normalizeString(check.action_label) || "Open"} →</span>
+                  <span className="launch-step-cta">{isTicketTabCheck(check) ? "Open Ticket Tab" : normalizeString(check.action_label) || "Open"} →</span>
                 </Link>
               );
             })}
