@@ -76,6 +76,14 @@ export default async function ChannelBuilderPage({ params }: PageProps) {
         <Link href={`${dashboardBaseHref(routeGuildId)}/categories`} className="button ghost" style={{ width: "auto" }}>Categories</Link>
         <Link href={`${dashboardBaseHref(routeGuildId)}/forms`} className="button ghost" style={{ width: "auto" }}>Forms</Link>
       </div>
+      <section className="mb-4 rounded-3xl border border-emerald-500/30 bg-emerald-950/20 p-4 text-sm text-emerald-50">
+        <div className="text-xs font-black uppercase tracking-[0.22em] text-emerald-200">Channel Name Fonts</div>
+        <h2 className="mt-1 text-xl font-black text-white">Font apply mode is at the top of Channel Builder</h2>
+        <p className="mt-2 max-w-3xl text-emerald-100/90">
+          Use <strong>Text only — keep emoji</strong> when a channel already has emoji/decorations and only the words should change font.
+          The same default is also available in Discord at <strong>/dank setup → More Options → Channel Name Fonts</strong>.
+        </p>
+      </section>
       <ChannelBuilderDryRunClient guildId={routeGuildId} />
     </StaffShell>
   );
