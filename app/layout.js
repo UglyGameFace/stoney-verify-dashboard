@@ -13,6 +13,7 @@ import "@/app/tablet-landscape-fix.css"
 import "@/app/landscape-auth-rescue.css"
 import AppearanceHydrator from "@/components/dashboard/AppearanceHydrator"
 import QuickAppearanceDock from "@/components/dashboard/QuickAppearanceDock"
+import DashboardDeepLinkBridge from "@/components/dashboard/DashboardDeepLinkBridge"
 import GlobalDashboardNav from "@/components/GlobalDashboardNav"
 import { env } from "@/lib/env"
 
@@ -26,6 +27,7 @@ export default function RootLayout({ children }) {
       "body",
       null,
       React.createElement(AppearanceHydrator, null),
+      React.createElement(DashboardDeepLinkBridge, null),
       children,
       React.createElement(GlobalDashboardNav, null),
       React.createElement(QuickAppearanceDock, null)
