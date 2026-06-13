@@ -49,6 +49,7 @@ function options(value: unknown): ChannelStyleOptions {
     autoEmoji: Boolean(input.autoEmoji),
     emojiPosition: clean(input.emojiPosition) as ChannelStyleOptions["emojiPosition"],
     unicodeStyle: clean(input.unicodeStyle) as ChannelStyleOptions["unicodeStyle"],
+    unicodeStyleScope: clean(input.unicodeStyleScope) as ChannelStyleOptions["unicodeStyleScope"],
     separator: clean(input.separator) || undefined,
     bracket: clean(input.bracket) as ChannelStyleOptions["bracket"],
     caseMode: clean(input.caseMode) as ChannelStyleOptions["caseMode"],
@@ -110,6 +111,7 @@ export async function POST(request: Request) {
       guild_id: guildId,
       actor_id: session.user.discord_id,
       items: queueRows,
+      options: styleOptions,
       dry_run_summary: dryRun.summary,
     });
 
@@ -130,6 +132,7 @@ export async function POST(request: Request) {
       mode: clean(body?.mode) || "apply_plan",
       dry_run: Boolean(body?.dryRunOnly),
       items: queueRows,
+      options: styleOptions,
       dry_run_summary: dryRun.summary,
       preflight: botPreflight.preflight || null,
     });
