@@ -157,9 +157,9 @@ export function formatChannelName(input: string, rawOptions: ChannelStyleOptions
     styledCore = textOnly.styledCore;
     transformed = textOnly.transformed;
     // Text-only mode preserves emoji/decorative prefix/suffix already present in the input.
-    // A manually selected emoji still applies when the user explicitly chooses one.
-    emoji = options.emoji ?? null;
-    joined = emoji ? joinName(textOnly.finalCore, emoji, options) : textOnly.finalCore;
+    // It intentionally does not inject the global emoji picker, which prevents duplicates.
+    emoji = null;
+    joined = textOnly.finalCore;
   } else {
     baseName = normalizeBaseChannelName(input, options.caseMode);
     emoji = options.emoji ?? suggestion?.emoji ?? null;
