@@ -9,6 +9,7 @@ import {
   type EmojiPosition,
   type UnicodeSafetyLevel,
   type UnicodeStyleId,
+  type UnicodeStyleScope,
 } from "@/lib/channel-style";
 import ChannelNamePreview from "./ChannelNamePreview";
 import EmojiPickerButton from "./EmojiPickerButton";
@@ -42,6 +43,7 @@ export default function ChannelStyleControls({
   const [emoji, setEmoji] = useState<string | null>(initialOptions.emoji ?? "🎮");
   const [autoEmoji, setAutoEmoji] = useState(Boolean(initialOptions.autoEmoji));
   const [unicodeStyle, setUnicodeStyle] = useState<UnicodeStyleId>(initialOptions.unicodeStyle ?? "normal");
+  const [unicodeStyleScope, setUnicodeStyleScope] = useState<UnicodeStyleScope>(initialOptions.unicodeStyleScope ?? "whole_name");
   const [separator, setSeparator] = useState<ChannelSeparator | string>(initialOptions.separator ?? "・");
   const [emojiPosition, setEmojiPosition] = useState<EmojiPosition>(initialOptions.emojiPosition ?? "first");
   const [bracket, setBracket] = useState<ChannelBracket>(initialOptions.bracket ?? "「」");
@@ -53,13 +55,14 @@ export default function ChannelStyleControls({
     emoji,
     autoEmoji,
     unicodeStyle,
+    unicodeStyleScope,
     separator,
     emojiPosition,
     bracket,
     caseMode,
     safetyLevel,
     allowUnicodeEverywhere,
-  }), [allowUnicodeEverywhere, autoEmoji, bracket, caseMode, emoji, emojiPosition, safetyLevel, separator, unicodeStyle]);
+  }), [allowUnicodeEverywhere, autoEmoji, bracket, caseMode, emoji, emojiPosition, safetyLevel, separator, unicodeStyle, unicodeStyleScope]);
 
   useEffect(() => {
     onChange?.({ name, options });
@@ -149,6 +152,29 @@ export default function ChannelStyleControls({
         safetyLevel={safetyLevel}
         allowUnicodeEverywhere={allowUnicodeEverywhere}
       />
+
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+        <div className="text-sm font-semibold text-white">Font apply mode</div>
+        <p className="mt-1 text-xs leading-5 text-zinc-400">
+          Use text-only when the channel name already has emoji/decorations and you only want the words changed.
+        </p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            className={toggleClass(unicodeStyleScope === "whole_name")}
+            onClick={() => setUnicodeStyleScope("whole_name")}
+          >
+            Style generated name
+          </button>
+          <button
+            type="button"
+            className={toggleClass(unicodeStyleScope === "text_only")}
+            onClick={() => setUnicodeStyleScope("text_only")}
+          >
+            Text only — keep emoji
+          </button>
+        </div>
+      </div>
 
       <SeparatorPicker
         separator={separator}
