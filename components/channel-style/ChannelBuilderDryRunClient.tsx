@@ -10,6 +10,7 @@ import {
   type ChannelBuilderTemplateBlockId,
   type ChannelBuilderChannelType,
   type ChannelStyleOptions,
+  type UnicodeStyleScope,
 } from "@/lib/channel-style";
 import ChannelStyleControls from "./ChannelStyleControls";
 import StyleWarningBanner from "./StyleWarningBanner";
@@ -103,6 +104,12 @@ function preflightStatusClass(preflight: BotPreflight | null) {
     : "border-red-500/40 bg-red-950/40 text-red-100";
 }
 
+function toggleClass(active: boolean) {
+  return `rounded-2xl border px-3 py-2 text-xs font-semibold transition ${
+    active ? "border-emerald-400 bg-emerald-950/50 text-emerald-100" : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-zinc-500"
+  }`;
+}
+
 function toBuilderRows(rows: ChannelBuilderInputItem[]): BuilderRow[] {
   return rows.map((row) => ({ ...row }));
 }
@@ -129,7 +136,7 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
   const [items, setItems] = useState<BuilderRow[]>(() => toBuilderRows(templateBlocksToItems(DEFAULT_BLOCKS)));
   const [stylePayload, setStylePayload] = useState<{ name: string; options: ChannelStyleOptions }>({
     name: "gaming-clips",
-    options: { emoji: "🎮", separator: "・", unicodeStyle: "normal", safetyLevel: "recommended_readability" },
+    options: { emoji: "🎮", separator: "・", unicodeStyle: "normal", unicodeStyleScope: "whole_name", safetyLevel: "recommended_readability" },
   });
   const [existingChannels, setExistingChannels] = useState<ExistingChannel[]>([]);
   const [apiDryRun, setApiDryRun] = useState<ChannelBuilderDryRunResult | null>(null);
@@ -149,6 +156,15 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
   const canQueue = dryRun.ok && dryRun.summary.conflict === 0 && (dryRun.summary.create > 0 || dryRun.summary.rename > 0 || dryRun.summary.keep > 0);
   const canSubmitApproved = canQueue && Boolean(botPreflight?.queueable);
   const canUndo = rollbackAvailable(queuedJob);
+  const fontScope = stylePayload.options.unicodeStyleScope ?? "whole_name";
+
+  function setFontScope(scope: UnicodeStyleScope) {
+    setStylePayload((current) => ({
+      ...current,
+      options: { ...current.options, unicodeStyleScope: scope },
+    }));
+    invalidatePlan();
+  }
 
   function invalidatePlan() {
     setApiDryRun(null);
@@ -372,6 +388,24 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
             </button>
           </div>
         </div>
+        <div className="mt-4 rounded-2xl border border-emerald-500/25 bg-zinc-950/80 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="text-sm font-bold text-white">Font apply mode</div>
+              <p className="mt-1 text-xs leading-5 text-zinc-400">
+                Use <strong>Text only — keep emoji</strong> when existing channel names already have emojis and only the words should change font.
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 lg:min-w-[420px]">
+              <button type="button" className={toggleClass(fontScope === "whole_name")} onClick={() => setFontScope("whole_name")}>
+                Style generated name
+              </button>
+              <button type="button" className={toggleClass(fontScope === "text_only")} onClick={() => setFontScope("text_only")}>
+                Text only — keep emoji
+              </button>
+            </div>
+          </div>
+        </div>
         {message && <div className="mt-4 rounded-2xl border border-emerald-500/30 bg-emerald-950/30 p-3 text-sm text-emerald-100">{message}</div>}
         {error && <div className="mt-4 rounded-2xl border border-red-500/40 bg-red-950/40 p-3 text-sm text-red-100">{error}</div>}
         {botPreflight && (
@@ -538,40 +572,6 @@ export default function ChannelBuilderDryRunClient({ guildId }: ChannelBuilderDr
           </div>
         </div>
 
-        <StyleWarningBanner warnings={dryRun.warnings} className="mt-3" title="Plan warnings" />
-
-        <div className="mt-4 overflow-hidden rounded-2xl border border-zinc-800">
-          <div className="hidden grid-cols-[110px_1fr_1fr_1fr] gap-3 border-b border-zinc-800 bg-zinc-900/90 p-3 text-xs font-semibold uppercase tracking-wide text-zinc-500 lg:grid">
-            <div>Action</div>
-            <div>Current</div>
-            <div>Final</div>
-            <div>Notes</div>
-          </div>
-          <div className="divide-y divide-zinc-800">
-            {dryRun.items.map((row) => (
-              <div key={`${row.id}:${row.index}`} className="grid gap-3 p-3 text-sm lg:grid-cols-[110px_1fr_1fr_1fr] lg:items-start">
-                <div>{actionBadge(row.action)}</div>
-                <div className="min-w-0 text-zinc-300">
-                  <div className="truncate font-semibold text-white">{row.currentName ? `#${row.currentName}` : "—"}</div>
-                  <div className="mt-1 text-xs text-zinc-500">{row.type || "text"}{row.category ? ` • ${row.category}` : ""}</div>
-                </div>
-                <div className="min-w-0">
-                  <code className="block truncate rounded-xl border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-zinc-100">#{row.finalName || "empty"}</code>
-                  <div className="mt-1 truncate text-xs text-zinc-500">canonical: {row.canonicalName || "—"}</div>
-                </div>
-                <div className="space-y-1 text-xs leading-5 text-zinc-400">
-                  <div>{row.reason}</div>
-                  {row.warnings.slice(0, 2).map((warning) => (
-                    <div key={`${row.id}:${warning.code}:${warning.message}`} className={warning.severity === "danger" ? "text-red-200" : warning.severity === "warning" ? "text-amber-200" : "text-zinc-500"}>
-                      {warning.message}
-                    </div>
-                  ))}
-                  {row.warnings.length > 2 && <div className="text-zinc-500">+{row.warnings.length - 2} more warnings</div>}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
       </section>
     </div>
   );
