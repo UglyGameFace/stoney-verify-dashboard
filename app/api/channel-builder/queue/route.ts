@@ -106,6 +106,24 @@ export async function POST(request: Request) {
       return dashboardAuthJson({ ok: false, error: "There are no queueable rows.", error_code: "empty_channel_builder_plan", dryRun }, 400, session);
     }
 
+    const botPreflight = await callBotApi("/channel-builder/preflight", {
+      guild_id: guildId,
+      actor_id: session.user.discord_id,
+      items: queueRows,
+      dry_run_summary: dryRun.summary,
+    });
+
+    if (!botPreflight.queueable) {
+      return dashboardAuthJson({
+        ok: false,
+        error: "Bot preflight failed. Fix the listed live Discord issues before queueing.",
+        error_code: "bot_preflight_failed",
+        dryRun,
+        preflight: botPreflight.preflight || null,
+        validation_errors: Array.isArray(botPreflight.validation_errors) ? botPreflight.validation_errors : [],
+      }, 409, session);
+    }
+
     const botResponse = await callBotApi("/channel-builder/jobs", {
       guild_id: guildId,
       actor_id: session.user.discord_id,
@@ -113,9 +131,10 @@ export async function POST(request: Request) {
       dry_run: Boolean(body?.dryRunOnly),
       items: queueRows,
       dry_run_summary: dryRun.summary,
+      preflight: botPreflight.preflight || null,
     });
 
-    return dashboardAuthJson({ ok: true, selectedGuildId, queued: Boolean(botResponse.queued), job: botResponse.job, dryRun }, 200, session);
+    return dashboardAuthJson({ ok: true, selectedGuildId, queued: Boolean(botResponse.queued), job: botResponse.job, dryRun, preflight: botResponse.preflight || botPreflight.preflight || null }, 200, session);
   } catch (error) {
     return dashboardAuthErrorJson(error, session, 500);
   }
