@@ -51,14 +51,23 @@ Important safety fields:
 
 ## Dashboard API
 
-Route:
+Routes:
 
 - `GET /api/profile-customizer/defaults`
 - `POST /api/profile-customizer/defaults`
+- `POST /api/profile-customizer/post-panel`
+- `POST /api/profile-customizer/sync`
+- `POST /api/profile-customizer/reset-member`
 
-`GET` returns current stored settings/panels/options plus the central defaults.
+`GET /defaults` returns current stored settings/panels/options plus the central defaults.
 
-`POST` seeds the default optional panels/options for the selected guild. It does not make pronouns required and does not block member access.
+`POST /defaults` seeds the default optional panels/options for the selected guild. It does not make pronouns required and does not block member access.
+
+`POST /post-panel` queues the production bot to post the Profile Customizer panel into a selected channel.
+
+`POST /sync` queues the production bot to reconcile profile role choices against live Discord roles. It supports `dryRun` / `dry_run`.
+
+`POST /reset-member` queues the production bot to clear one member's optional profile roles, either all panels or one supplied `panelKey` / `panel_key`.
 
 ## Bot command bridge
 
