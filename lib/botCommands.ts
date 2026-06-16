@@ -21,7 +21,10 @@ export type BotCommandAction =
   | "sync_single_ticket"
   | "portal_ticket_reply"
   | "post_ticket_panel"
-  | "run_ticket_panel_doctor";
+  | "run_ticket_panel_doctor"
+  | "post_profile_customizer_panel"
+  | "sync_profile_roles"
+  | "reset_member_profile_roles";
 
 export type BotCommandRow = {
   id: string;
@@ -418,6 +421,65 @@ export async function queueRunTicketPanelDoctor(input?: {
     },
     input?.requestedBy,
     input?.guildId
+  );
+}
+
+export async function queuePostProfileCustomizerPanel(input: {
+  guildId?: string | null;
+  channelId: string;
+  panelKey?: string | null;
+  requestedBy?: string | null;
+}) {
+  const channelId = normalizeString(input.channelId);
+  if (!channelId) throw new Error("Missing channelId");
+
+  return insertCommand(
+    "post_profile_customizer_panel",
+    {
+      channel_id: channelId,
+      panel_key: normalizeString(input.panelKey) || "profile_customizer",
+      mode: "post",
+      requested_from: "dashboard_profile_customizer",
+    },
+    input.requestedBy,
+    input.guildId
+  );
+}
+
+export async function queueSyncProfileRoles(input?: {
+  guildId?: string | null;
+  requestedBy?: string | null;
+  dryRun?: boolean;
+}) {
+  return insertCommand(
+    "sync_profile_roles",
+    {
+      dry_run: normalizeBoolean(input?.dryRun, false),
+      requested_from: "dashboard_profile_customizer",
+    },
+    input?.requestedBy,
+    input?.guildId
+  );
+}
+
+export async function queueResetMemberProfileRoles(input: {
+  guildId?: string | null;
+  userId: string;
+  panelKey?: string | null;
+  requestedBy?: string | null;
+}) {
+  const userId = normalizeString(input.userId);
+  if (!userId) throw new Error("Missing userId");
+
+  return insertCommand(
+    "reset_member_profile_roles",
+    {
+      user_id: userId,
+      panel_key: normalizeNullable(input.panelKey),
+      requested_from: "dashboard_profile_customizer",
+    },
+    input.requestedBy,
+    input.guildId
   );
 }
 
