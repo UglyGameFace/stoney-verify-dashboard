@@ -5,6 +5,10 @@ import {
   type DashboardAuthSession,
 } from "@/lib/dashboard-auth";
 import { queueSyncProfileRoles } from "@/lib/botCommands";
+import {
+  profileCustomizerBotCommandsEnabled,
+  profileCustomizerBotCommandsUnavailablePayload,
+} from "@/lib/profileCustomizerCapability";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -42,6 +46,14 @@ export async function POST(request: Request) {
           needsServerSelection: true,
         },
         428,
+        session
+      );
+    }
+
+    if (!profileCustomizerBotCommandsEnabled()) {
+      return dashboardAuthJson(
+        profileCustomizerBotCommandsUnavailablePayload(),
+        409,
         session
       );
     }
