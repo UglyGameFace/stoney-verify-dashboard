@@ -69,6 +69,28 @@ Routes:
 
 `POST /reset-member` queues the production bot to clear one member's optional profile roles, either all panels or one supplied `panelKey` / `panel_key`.
 
+## Bot command queue safety gate
+
+The dashboard must not enqueue Profile Customizer bot actions until the live production bot worker can process them.
+
+Queueing is gated by:
+
+```text
+PROFILE_CUSTOMIZER_BOT_COMMANDS_ENABLED=true
+```
+
+When this flag is absent or false, these routes return a clear `409` response instead of creating bot-command rows that would fail later:
+
+- `POST /api/profile-customizer/post-panel`
+- `POST /api/profile-customizer/sync`
+- `POST /api/profile-customizer/reset-member`
+
+Expected disabled response fields:
+
+- `error_code: profile_customizer_bot_actions_disabled`
+- `needsBotWorkerUpgrade: true`
+- `how_to_fix` with the exact production bot worker actions required
+
 ## Bot command bridge
 
 The dashboard command queue now supports:
@@ -119,7 +141,8 @@ Recommended panel copy:
 - Run `npm run migrate` with `SUPABASE_DB_URL` set.
 - Seed default panels with `POST /api/profile-customizer/defaults` from a signed-in dashboard staff session.
 - Add a dashboard control that selects the post-verification profile channel.
-- Queue `post_profile_customizer_panel` for that selected channel.
-- Implement the command in the production bot worker.
+- Implement the production bot worker commands.
+- Enable `PROFILE_CUSTOMIZER_BOT_COMMANDS_ENABLED=true` only after the worker supports those commands.
+- Queue `post_profile_customizer_panel` for the selected channel.
 - Run a role hierarchy check before role creation/assignment.
 - Test with at least two guilds to confirm no cross-server leakage.
